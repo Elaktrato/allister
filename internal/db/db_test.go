@@ -1,8 +1,11 @@
 package db
 
 import (
+	"database/sql"
 	"path/filepath"
 	"testing"
+
+	"github.com/pressly/goose/v3"
 )
 
 func tempPath(t *testing.T) string {
@@ -89,5 +92,71 @@ func TestForeignKeyCascade(t *testing.T) {
 		if err := d.QueryRow(`SELECT count(*) FROM ` + tbl).Scan(&n); err != nil || n != 0 {
 			t.Errorf("%s rows=%d err=%v", tbl, n, err)
 		}
+	}
+}
+
+var genericTables = []string{"items", "item_titles", "item_fields", "external_ids", "people_g", "credits", "relations_g", "item_terms"}
+
+func tableCount(t *testing.T, d *sql.DB, tbl string) int {
+	t.Helper()
+	var n int
+	if err := d.QueryRow(`SELECT count(*) FROM sqlite_master WHERE type='table' AND name=?`, tbl).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	return n
+}
+
+func TestGenericCoreOnFreshDB(t *testing.T) {
+	d, err := Open(tempPath(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	for _, tbl := range append(genericTables, "anime", "people") {
+		if tableCount(t, d, tbl) != 1 {
+			t.Errorf("table %s missing", tbl)
+		}
+	}
+	if _, err := d.Exec(`INSERT INTO items(plugin_id, kind, source, source_id) VALUES('p','k','s','1')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.Exec(`INSERT INTO item_terms(item_id, kind, term, term_key) VALUES(1,'bogus','a','a')`); err == nil {
+		t.Fatal("kind CHECK not enforced")
+	}
+}
+
+func TestGenericCoreMigratesDBAtVersion4AndDownWorks(t *testing.T) {
+	path := tempPath(t)
+	d, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	// legacy data survives a down/up cycle of 00005 (it never touches legacy tables)
+	if _, err := d.Exec(`INSERT INTO anime(id, source, source_id, type) VALUES(1,'anilist','1','tv')`); err != nil {
+		t.Fatal(err)
+	}
+	if err := goose.Down(d, "migrations"); err != nil {
+		t.Fatal(err)
+	}
+	for _, tbl := range genericTables {
+		if tableCount(t, d, tbl) != 0 {
+			t.Errorf("table %s still exists after down", tbl)
+		}
+	}
+	if v, err := goose.GetDBVersion(d); err != nil || v != 4 {
+		t.Fatalf("version = %d, %v, want 4", v, err)
+	}
+	if err := goose.Up(d, "migrations"); err != nil {
+		t.Fatal(err)
+	}
+	for _, tbl := range genericTables {
+		if tableCount(t, d, tbl) != 1 {
+			t.Errorf("table %s missing after up", tbl)
+		}
+	}
+	var n int
+	if err := d.QueryRow(`SELECT count(*) FROM anime`).Scan(&n); err != nil || n != 1 {
+		t.Fatalf("legacy anime rows = %d, %v", n, err)
 	}
 }
