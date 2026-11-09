@@ -1,8 +1,6 @@
 package web
 
 import (
-	"crypto/rand"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"log"
@@ -15,6 +13,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/allister/allister/internal/covers"
+	"github.com/allister/allister/internal/ids"
 	"github.com/allister/allister/internal/provider"
 	"github.com/allister/allister/internal/store"
 )
@@ -35,18 +34,6 @@ const (
 var manualTypes = []langOption{
 	{"TV", "TV"}, {"TV_SHORT", "TV short"}, {"MOVIE", "Movie"}, {"SPECIAL", "Special"},
 	{"OVA", "OVA"}, {"ONA", "ONA"}, {"MUSIC", "Music"},
-}
-
-// newManualID returns a random UUIDv4 string.
-func newManualID() (string, error) {
-	var b [16]byte
-	if _, err := rand.Read(b[:]); err != nil {
-		return "", fmt.Errorf("manual id: %w", err)
-	}
-	b[6] = b[6]&0x0f | 0x40
-	b[8] = b[8]&0x3f | 0x80
-	h := hex.EncodeToString(b[:])
-	return h[:8] + "-" + h[8:12] + "-" + h[12:16] + "-" + h[16:20] + "-" + h[20:], nil
 }
 
 // manualForm is the form page's data; string fields echo the user's input.
@@ -235,7 +222,7 @@ func (s *server) postManualNew(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	id, err := newManualID()
+	id, err := ids.NewManualID()
 	if err != nil {
 		s.cleanupCover(r, cover)
 		s.fail(w, r, err, "")

@@ -140,6 +140,29 @@ func TestSyncAnimeManualIsDoneWithoutProvider(t *testing.T) {
 	}
 }
 
+func TestSyncAnimeManualDownloadsRemoteCoverWithoutCast(t *testing.T) {
+	e := newSyncEnv(t)
+	e.deps.Providers = nil // a manual entry never asks a provider
+	id := e.save(t, provider.Manual, e.srv.URL+"/ok/cover")
+	if err := e.run(id); err != nil {
+		t.Fatal(err)
+	}
+	if s := e.saved(t, id); s.SyncState != "done" || !isLocal(s.CoverPath) {
+		t.Fatalf("state=%q cover=%q", s.SyncState, s.CoverPath)
+	}
+}
+
+func TestSyncAnimeManualCoverFailureIsPartialAndKeepsURL(t *testing.T) {
+	e := newSyncEnv(t)
+	id := e.save(t, provider.Manual, e.srv.URL+"/missing")
+	if err := e.run(id); !errors.Is(err, ErrRetryLater) {
+		t.Fatalf("err = %v", err)
+	}
+	if s := e.saved(t, id); s.SyncState != "partial" || s.CoverPath != e.srv.URL+"/missing" {
+		t.Fatalf("%+v", s)
+	}
+}
+
 func TestSyncAnimeCoverFailureIsPartial(t *testing.T) {
 	e := newSyncEnv(t)
 	id := e.save(t, provider.AniList, e.srv.URL+"/missing")

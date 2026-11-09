@@ -1,0 +1,196 @@
+// Package yamtrack imports a Yamtrack CSV export: Parse reads the file, the
+// Importer stores the parsed rows and a background job resolves each row on
+// AniList and saves it to the list.
+package yamtrack
+
+import (
+	"bufio"
+	"bytes"
+	"encoding/csv"
+	"errors"
+	"fmt"
+	"io"
+	"math"
+	"strconv"
+	"strings"
+	"time"
+	"unicode/utf8"
+
+	"github.com/allister/allister/internal/store"
+)
+
+const (
+	maxTitleRunes   = 300
+	maxCommentRunes = 2000
+	dateLayout      = "2006-01-02 15:04:05-07:00"
+)
+
+// ErrBadFormat means the input is not a usable Yamtrack export (unreadable
+// CSV or a required column is missing).
+var ErrBadFormat = errors.New("not a Yamtrack CSV export")
+
+// Row is one anime row of the export, already mapped.
+type Row struct {
+	// MALID is the Yamtrack media_id, the MyAnimeList id.
+	MALID, Title, ImageURL string
+	Status                 store.Status
+	// Rating is nil for unrated rows; otherwise 0 to 10.
+	Rating     *int
+	Progress   int
+	StartedOn  *time.Time // calendar days, UTC midnight
+	FinishedOn *time.Time
+	Comment    string
+}
+
+// SkippedRow is a CSV row that is not imported. Ignored rows are of another
+// media type (games, manga, episodes, ...) and not worth reporting; the other
+// skipped rows are anime rows the user should know about.
+type SkippedRow struct {
+	Line          int
+	Reason, Title string
+	Ignored       bool
+}
+
+var requiredColumns = []string{"media_id", "media_type", "status", "title"}
+
+var statusMap = map[string]store.Status{
+	"completed":   store.Completed,
+	"planning":    store.PlanToWatch,
+	"dropped":     store.Dropped,
+	"paused":      store.Paused,
+	"in progress": store.Watching,
+}
+
+// Parse reads a Yamtrack export. Only rows with media_type anime and source mal
+// become Rows; every other row is reported in skipped. It tolerates a UTF-8
+// BOM, CRLF line ends, quoted newlines and extra columns. Of rows sharing a
+// media_id the first is kept. A missing required column is ErrBadFormat.
+func Parse(r io.Reader) (rows []Row, skipped []SkippedRow, err error) {
+	br := bufio.NewReader(r)
+	if b, _ := br.Peek(3); bytes.Equal(b, []byte{0xEF, 0xBB, 0xBF}) {
+		br.Discard(3)
+	}
+	cr := csv.NewReader(br)
+	cr.FieldsPerRecord = -1
+	cr.LazyQuotes = true
+	hdr, err := cr.Read()
+	if errors.Is(err, io.EOF) {
+		return nil, nil, fmt.Errorf("%w: the file is empty", ErrBadFormat)
+	}
+	if err != nil {
+		return nil, nil, fmt.Errorf("%w: %v", ErrBadFormat, err)
+	}
+	col := map[string]int{}
+	for i, h := range hdr {
+		h = strings.ToLower(strings.TrimSpace(strings.TrimPrefix(h, "\xEF\xBB\xBF")))
+		if _, dup := col[h]; !dup {
+			col[h] = i
+		}
+	}
+	var missing []string
+	for _, c := range requiredColumns {
+		if _, ok := col[c]; !ok {
+			missing = append(missing, c)
+		}
+	}
+	if len(missing) > 0 {
+		return nil, nil, fmt.Errorf("%w: missing column(s) %s", ErrBadFormat, strings.Join(missing, ", "))
+	}
+
+	seen := map[string]bool{}
+	for {
+		rec, err := cr.Read()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			return nil, nil, fmt.Errorf("%w: %v", ErrBadFormat, err)
+		}
+		line, _ := cr.FieldPos(0)
+		get := func(name string) string {
+			i, ok := col[name]
+			if !ok || i >= len(rec) {
+				return ""
+			}
+			return strings.TrimSpace(rec[i])
+		}
+		title := truncate(get("title"), maxTitleRunes)
+		skip := func(reason string, ignored bool) {
+			skipped = append(skipped, SkippedRow{Line: line, Reason: reason, Title: title, Ignored: ignored})
+		}
+
+		if mt := get("media_type"); !strings.EqualFold(mt, "anime") {
+			skip(fmt.Sprintf("not an anime row (media_type %q)", mt), true)
+			continue
+		}
+		if src := get("source"); src != "" && !strings.EqualFold(src, "mal") {
+			skip(fmt.Sprintf("source is %q, only mal ids can be matched", src), false)
+			continue
+		}
+		malID := get("media_id")
+		if n, err := strconv.ParseUint(malID, 10, 31); err != nil || n == 0 {
+			skip(fmt.Sprintf("invalid media_id %q", malID), false)
+			continue
+		}
+		status, ok := statusMap[strings.ToLower(get("status"))]
+		if !ok {
+			skip(fmt.Sprintf("unknown status %q", get("status")), false)
+			continue
+		}
+		if seen[malID] {
+			skip("duplicate media_id "+malID, false)
+			continue
+		}
+		row := Row{MALID: malID, Title: title, ImageURL: get("image"), Status: status,
+			Comment: truncate(get("notes"), maxCommentRunes)}
+		if row.Title == "" {
+			row.Title = "MAL #" + malID
+		}
+		if p := get("progress"); p != "" {
+			n, err := strconv.Atoi(p)
+			if err != nil || n < 0 {
+				skip(fmt.Sprintf("invalid progress %q", p), false)
+				continue
+			}
+			row.Progress = n
+		}
+		if sc := get("score"); sc != "" {
+			f, err := strconv.ParseFloat(sc, 64)
+			if err != nil || math.IsNaN(f) || math.IsInf(f, 0) {
+				skip(fmt.Sprintf("invalid score %q", sc), false)
+				continue
+			}
+			if f > 0 {
+				n := min(10, int(math.Round(f)))
+				row.Rating = &n
+			}
+		}
+		row.StartedOn = parseDay(get("start_date"))
+		row.FinishedOn = parseDay(get("end_date"))
+		seen[malID] = true
+		rows = append(rows, row)
+	}
+	return rows, skipped, nil
+}
+
+// parseDay returns the calendar day written in a Yamtrack timestamp as UTC
+// midnight, or nil when empty or unparseable. The day is read from the
+// timestamp's own zone (never converted to UTC first).
+func parseDay(s string) *time.Time {
+	if s == "" {
+		return nil
+	}
+	t, err := time.Parse(dateLayout, s)
+	if err != nil {
+		return nil
+	}
+	d := time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, time.UTC)
+	return &d
+}
+
+func truncate(s string, max int) string {
+	if utf8.RuneCountInString(s) <= max {
+		return s
+	}
+	return string([]rune(s)[:max])
+}

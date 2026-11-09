@@ -53,7 +53,7 @@ func SyncAnime(deps SyncDeps) Handler {
 			return nil // deleted meanwhile
 		}
 		if saved.Source == provider.Manual {
-			return setState(ctx, st, saved.ID, "done")
+			return syncManual(ctx, deps, saved)
 		}
 		prov, ok := deps.Providers[saved.Source]
 		if !ok {
@@ -118,6 +118,28 @@ func SyncAnime(deps SyncDeps) Handler {
 		first := failures[0]
 		return fmt.Errorf("sync anime %d: %d image(s) failed (first: %s): %w", saved.ID, len(failures), first, ErrRetryLater)
 	}
+}
+
+// syncManual finishes a manual entry: there is no cast to fetch, but a remote
+// cover URL (an imported entry) is downloaded. A failed download leaves the
+// URL in place, marks the entry partial and asks for a later retry.
+func syncManual(ctx context.Context, deps SyncDeps, saved *store.Saved) error {
+	if isRemote(saved.CoverPath) {
+		name, err := covers.Download(ctx, deps.HTTP, deps.CoversDir, saved.CoverPath)
+		if err != nil {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			if serr := setState(ctx, deps.Store, saved.ID, "partial"); serr != nil {
+				return serr
+			}
+			return fmt.Errorf("sync anime %d: cover: %v: %w", saved.ID, err, ErrRetryLater)
+		}
+		if err := deps.Store.SetAnimeCoverPath(ctx, saved.ID, name); err != nil {
+			return fmt.Errorf("sync anime %d: %w", saved.ID, err)
+		}
+	}
+	return setState(ctx, deps.Store, saved.ID, "done")
 }
 
 func setState(ctx context.Context, st *store.Store, id int64, state string) error {
