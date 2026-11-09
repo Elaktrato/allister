@@ -78,23 +78,32 @@ func saveAnimeTx(ctx context.Context, tx *sql.Tx, a provider.Anime, o saveOpts) 
 	if err != nil {
 		return 0, fmt.Errorf("save anime: %w", err)
 	}
+	if err := insertTitlesAndRelations(ctx, tx, id, a); err != nil {
+		return 0, err
+	}
+	return id, nil
+}
+
+// insertTitlesAndRelations writes the (de-duplicated) titles and relations of a
+// for the given anime row; shared by SaveAnime and ConvertToSource.
+func insertTitlesAndRelations(ctx context.Context, tx *sql.Tx, id int64, a provider.Anime) error {
 	for _, t := range a.Titles {
 		if _, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO anime_titles(anime_id, lang, text) VALUES (?,?,?)`, id, t.Lang, t.Text); err != nil {
-			return 0, fmt.Errorf("save titles: %w", err)
+			return fmt.Errorf("save titles: %w", err)
 		}
 	}
 	for _, r := range a.Relations {
 		tj, err := json.Marshal(r.Titles)
 		if err != nil {
-			return 0, fmt.Errorf("save relations: %w", err)
+			return fmt.Errorf("save relations: %w", err)
 		}
 		if _, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO anime_relations
 			(anime_id, kind, rel_source, rel_source_id, titles_json, type) VALUES (?,?,?,?,?,?)`,
 			id, r.Kind, string(r.Source), r.ID, string(tj), r.Type); err != nil {
-			return 0, fmt.Errorf("save relations: %w", err)
+			return fmt.Errorf("save relations: %w", err)
 		}
 	}
-	return id, nil
+	return nil
 }
 
 // FindBySource returns the saved anime with titles and relations, or nil, nil.
