@@ -3,6 +3,7 @@ package plugin_test
 import (
 	"encoding/json"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -75,6 +76,7 @@ func TestRuntimeDataJSONRoundTrip(t *testing.T) {
 	roundTrip(t, "person", voice)
 	roundTrip(t, "credit without counterpart", plugin.Credit{Role: "author", Person: plugin.PersonRef{ID: "1", Name: "A"}})
 	roundTrip(t, "credit with counterpart", plugin.Credit{Role: "main", Person: plugin.PersonRef{ID: "1", Name: "Char"}, With: &voice, WithRole: "Japanese"})
+	roundTrip(t, "credit with detail", plugin.Credit{Role: "character", Detail: "MAIN", Person: plugin.PersonRef{ID: "1", Name: "Char"}})
 	roundTrip(t, "summary", summary)
 	roundTrip(t, "relation", plugin.Relation{Kind: "SEQUEL", Item: summary})
 	roundTrip(t, "tag", plugin.Tag{Name: "Time Travel", Rank: iptr(0), Spoiler: true})
@@ -110,5 +112,20 @@ func TestJSONIgnoresUnknownFields(t *testing.T) {
 	var c plugin.Credit
 	if err := json.Unmarshal([]byte(`{"role":"r","person":{"id":"1","name":"n","extra":1},"zzz":2}`), &c); err != nil || c.Person.Name != "n" {
 		t.Fatalf("credit: %v %+v", err, c)
+	}
+}
+
+func TestCreditDetailJSON(t *testing.T) {
+	b, err := json.Marshal(plugin.Credit{Role: "character", Person: plugin.PersonRef{ID: "1", Name: "n"}})
+	if err != nil || strings.Contains(string(b), "detail") {
+		t.Fatalf("empty detail must be omitted: %s %v", b, err)
+	}
+	b, err = json.Marshal(plugin.Credit{Role: "character", Detail: "MAIN", Person: plugin.PersonRef{ID: "1", Name: "n"}})
+	if err != nil || !strings.Contains(string(b), `"detail":"MAIN"`) {
+		t.Fatalf("detail missing: %s %v", b, err)
+	}
+	var c plugin.Credit
+	if err := json.Unmarshal(b, &c); err != nil || c.Detail != "MAIN" {
+		t.Fatalf("round trip: %+v %v", c, err)
 	}
 }

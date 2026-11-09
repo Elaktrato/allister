@@ -240,3 +240,26 @@ func TestConvertClampsProgressToNewTotal(t *testing.T) {
 		})
 	}
 }
+
+// The trigger aborts the last write (the entry's updated_at bump after the
+// progress clamp): the clamp and the conversion roll back together.
+func TestConvertRollsBackClampOnLateFailure(t *testing.T) {
+	s := newStore(t)
+	ctx := context.Background()
+	id, want := manualEntry(t, s)
+	before, _ := s.GetByID(ctx, id)
+	if _, err := s.db.Exec(`CREATE TRIGGER boom BEFORE UPDATE ON entries BEGIN SELECT RAISE(ABORT, 'forced failure'); END`); err != nil {
+		t.Fatal(err)
+	}
+	a := matched("700")
+	a.Episodes = intp(2) // below the entry's progress of 3: clamps
+	if err := s.ConvertToSource(ctx, id, a); err == nil {
+		t.Fatal("want error")
+	}
+	if after, _ := s.GetByID(ctx, id); !reflect.DeepEqual(before, after) {
+		t.Fatalf("anime not rolled back:\n%+v\n%+v", before, after)
+	}
+	if got, _ := s.GetListEntry(ctx, id); got == nil || !reflect.DeepEqual(*got, want) {
+		t.Fatalf("entry not rolled back: %+v, want %+v", got, want)
+	}
+}

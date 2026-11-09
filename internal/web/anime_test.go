@@ -2,6 +2,7 @@ package web
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -71,6 +72,8 @@ type env struct {
 	now  *time.Time
 	// covers is the temp covers dir configured as Deps.CoversDir.
 	covers string
+	// d is the database, for tests that must seed values the store refuses.
+	d *sql.DB
 }
 
 func newEnv(t *testing.T) *env {
@@ -81,7 +84,7 @@ func newEnv(t *testing.T) *env {
 	}
 	t.Cleanup(func() { d.Close() })
 	e := &env{fp: sampleAnimeProvider(), jobs: &fakeJobs{}, st: store.New(d), set: settings.New(d),
-		covers: filepath.Join(t.TempDir(), "covers")}
+		covers: filepath.Join(t.TempDir(), "covers"), d: d}
 	now := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
 	e.now = &now
 	_, e.h = newServer(Deps{

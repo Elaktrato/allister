@@ -149,6 +149,11 @@ func TestPersonPageNonHTTPSExternalURLNoLink(t *testing.T) {
 		a := e.addEntry(t, provider.AniList, "1", nil, store.Watching, 0, titleEn("Show")...)
 		va := pperson("v1", "Voice One", "", u)
 		e.withCast(t, a, provider.CastMember{Character: pperson("c1", "Hero", "", ""), Actor: &va})
+		// the store cleans or drops such URLs before storing them; put the
+		// hostile value in the row anyway, the page must still not link it
+		if _, err := e.d.Exec(`UPDATE people SET external_url = ? WHERE source_id = 'v1'`, u); err != nil {
+			t.Fatal(err)
+		}
 		body := e.get(e.personPath(t, "v1")).Body.String()
 		mustNotContain(t, body, "View on AniList", "javascript:", "evil.example", "data:text")
 		if strings.Contains(body, `href="http://`) {

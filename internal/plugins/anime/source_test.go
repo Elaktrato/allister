@@ -542,3 +542,19 @@ func TestSourceSearchSummariesSurviveAsRelationItems(t *testing.T) {
 		t.Errorf("res = %+v", res[0])
 	}
 }
+
+func TestSourcePeopleCarriesCastRoleAsDetail(t *testing.T) {
+	body := `{"data":{"Media":{"characters":{"edges":[
+	  {"role":"MAIN","node":{"id":1,"name":{"full":"X"}},"voiceActors":[]},
+	  {"role":"SUPPORTING","node":{"id":2,"name":{"full":"Y"}},"voiceActors":[]},
+	  {"role":"BACK\tGROUND","node":{"id":3,"name":{"full":"Z"}},"voiceActors":[]}]}}}}`
+	cr, err := newSource(t, []byte(body), 0, nil).People(ctx(), "anime", "1")
+	if err != nil || len(cr) != 3 {
+		t.Fatalf("cr=%+v err=%v", cr, err)
+	}
+	for i, want := range []string{"MAIN", "SUPPORTING", "BACK GROUND"} {
+		if cr[i].Detail != want || cr[i].Role != "character" {
+			t.Errorf("credit %d: role %q detail %q, want detail %q", i, cr[i].Role, cr[i].Detail, want)
+		}
+	}
+}

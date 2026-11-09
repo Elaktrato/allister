@@ -11,6 +11,7 @@ import (
 	"github.com/allister/allister/internal/library"
 	"github.com/allister/allister/internal/plugin"
 	"github.com/allister/allister/internal/plugins/anime/animedef"
+	"github.com/allister/allister/internal/plugins/anime/animemap"
 	"github.com/allister/allister/internal/provider"
 )
 
@@ -27,6 +28,11 @@ import (
 //	cast member          -> credit: role "character", Detail = cast role
 //	                        (MAIN ...), the voice actor as the counterpart
 //	                        with role "Voice actor"
+//
+// Writing (anime and cast to plugin data) goes through animemap, the same
+// sanitising mapping the anime plugin's source uses; this file keeps only
+// what is specific to the adapter: reading back, statuses, the numeric MAL
+// id, local cover names and the legacy error wording.
 //	list entry Progress  -> progress key "episode"
 //	Status watching,
 //	plan_to_watch        -> core classes active, planned (paused, completed,
@@ -53,8 +59,7 @@ const (
 
 	extMAL          = "mal"
 	progressEpisode = "episode"
-	roleCharacter   = "character"
-	roleVoiceActor  = "Voice actor"
+	roleCharacter   = animemap.RoleCharacter
 )
 
 // manifestPlugin is a plugin.Plugin that only supplies a manifest.
@@ -145,14 +150,6 @@ func ignoreMissing(err error) error {
 
 // --- anime <-> item ---
 
-func pluginTitles(ts []provider.Title) []plugin.Title {
-	var out []plugin.Title
-	for _, t := range ts {
-		out = append(out, plugin.Title{Lang: t.Lang, Text: t.Text})
-	}
-	return out
-}
-
 func providerTitles(ts []plugin.Title) []provider.Title {
 	var out []provider.Title
 	for _, t := range ts {
@@ -169,14 +166,6 @@ func numValue(p *int) (plugin.FieldValue, bool) {
 	return plugin.FieldValue{Num: &f}, true
 }
 
-func dateValue(t *time.Time) (plugin.FieldValue, bool) {
-	if t == nil {
-		return plugin.FieldValue{}, false
-	}
-	d := *t
-	return plugin.FieldValue{Date: &d}, true
-}
-
 // canonicalMAL returns the decimal form of a MAL id (the legacy schema stored
 // an integer), or ok=false when id is not a number.
 func canonicalMAL(id string) (string, bool) {
@@ -187,26 +176,17 @@ func canonicalMAL(id string) (string, bool) {
 	return strconv.FormatInt(n, 10), true
 }
 
-// relatedKind is the kind of a related item: "source" relations point at the
-// source material (a manga), everything else at an anime (the anime plugin's
-// convention).
-func relatedKind(relation string) string {
-	if relation == "source" {
-		return "manga"
-	}
-	return animeKind
-}
-
-// itemData maps a legacy anime onto the plugin data the library stores. A
-// non-numeric MAL id is rejected, as the legacy schema did.
+// itemData maps a legacy anime onto the plugin data through the anime
+// plugin's mapping (animemap): sanitising for source data, the non-rewriting
+// user mode for manual entries (typed in the manual form, or the title of an
+// unmatched import row). Adapter-specific on top: the MAL id
+// must be a number (the legacy schema stored an integer) and is stored in its
+// canonical decimal form, and a local cover file name (a manual upload, which
+// only the legacy path stores through SaveAnime) is kept.
 func itemData(a provider.Anime) (plugin.ItemData, error) {
-	d := plugin.ItemData{
-		ItemSummary: plugin.ItemSummary{
-			Source: string(a.Source), ID: a.ID, Kind: animeKind,
-			Titles: pluginTitles(a.Titles), Fields: map[string]plugin.FieldValue{}, CoverURL: a.CoverURL,
-		},
-		ExternalURL: a.ExternalURL,
-		Genres:      a.Genres,
+	d := animemap.ItemData(a)
+	if a.Source == provider.Manual {
+		d = animemap.UserItemData(a) // typed by the user: validated, never rewritten
 	}
 	if a.MALID != "" {
 		mal, ok := canonicalMAL(a.MALID)
@@ -215,30 +195,8 @@ func itemData(a provider.Anime) (plugin.ItemData, error) {
 		}
 		d.ExternalIDs = map[string]string{extMAL: mal}
 	}
-	for k, v := range map[string]string{fieldType: a.Type, fieldStudio: a.Studio, fieldSynopsis: a.Synopsis, fieldSourceMaterial: a.SourceMaterial} {
-		if v != "" {
-			d.Fields[k] = plugin.FieldValue{Text: v}
-		}
-	}
-	for k, p := range map[string]*int{fieldEpisodes: a.Episodes, fieldYear: a.Year} {
-		if v, ok := numValue(p); ok {
-			d.Fields[k] = v
-		}
-	}
-	for k, t := range map[string]*time.Time{fieldStartedOn: a.StartDate, fieldEndedOn: a.EndDate} {
-		if v, ok := dateValue(t); ok {
-			d.Fields[k] = v
-		}
-	}
-	for _, r := range a.Relations {
-		item := plugin.ItemSummary{Source: string(r.Source), ID: r.ID, Kind: relatedKind(r.Kind), Titles: pluginTitles(r.Titles)}
-		if r.Type != "" {
-			item.Fields = map[string]plugin.FieldValue{fieldType: {Text: r.Type}}
-		}
-		d.Relations = append(d.Relations, plugin.Relation{Kind: r.Kind, Item: item})
-	}
-	for _, t := range a.Tags {
-		d.Tags = append(d.Tags, plugin.Tag{Name: t.Name, Rank: t.Rank, Spoiler: t.Spoiler})
+	if d.CoverURL == "" && !strings.Contains(a.CoverURL, "://") && library.AcceptsImageRef(a.CoverURL) {
+		d.CoverURL = a.CoverURL
 	}
 	return d, nil
 }
@@ -352,34 +310,6 @@ func legacyEntryError(e ListEntry, episodes *int, libErr error) error {
 
 func person(p library.Person) Person {
 	return Person{ID: p.ID, Source: provider.Source(p.Source), SourceID: p.SourceID, Name: p.Name, ImagePath: p.ImagePath, ExternalURL: p.ExternalURL}
-}
-
-// personRef maps a provider person. The legacy store kept any URL and the web
-// layer refused to link or load a bad one; the library refuses to store it,
-// so a URL or image the library would reject is dropped here instead of
-// failing the whole cast.
-func personRef(p provider.Person) plugin.PersonRef {
-	r := plugin.PersonRef{ID: p.ID, Name: p.Name, ImageURL: p.ImageURL, URL: p.URL}
-	if !library.AcceptsURL(r.URL) {
-		r.URL = ""
-	}
-	if !library.AcceptsImageRef(r.ImageURL) {
-		r.ImageURL = ""
-	}
-	return r
-}
-
-func credits(cast []provider.CastMember) []plugin.Credit {
-	out := make([]plugin.Credit, 0, len(cast))
-	for _, m := range cast {
-		c := plugin.Credit{Role: roleCharacter, Detail: m.Role, Person: personRef(m.Character)}
-		if m.Actor != nil {
-			a := personRef(*m.Actor)
-			c.With, c.WithRole = &a, roleVoiceActor
-		}
-		out = append(out, c)
-	}
-	return out
 }
 
 func animeQuery(status *library.Status) library.Query {

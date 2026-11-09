@@ -3,6 +3,7 @@ package library
 import (
 	"fmt"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/allister/allister/internal/plugin"
@@ -188,15 +189,17 @@ func TestCreditDetailRoundTrips(t *testing.T) {
 	}
 	bad := []plugin.Credit{{Role: "actor", Detail: "a\x00b", Person: plugin.PersonRef{ID: "p1", Name: "A"}}}
 	wantInvalid(t, e.lib.SaveCredits(bg, id, bad), "detail")
+	bad[0].Detail = "MA\tIN"
+	wantInvalid(t, e.lib.SaveCredits(bg, id, bad), "detail")
+	bad[0].Detail = strings.Repeat("x", 101)
+	wantInvalid(t, e.lib.SaveCredits(bg, id, bad), "detail")
+	ok := []plugin.Credit{{Role: "actor", Detail: strings.Repeat("ü", 100), Person: plugin.PersonRef{ID: "p1", Name: "A"}}}
+	if err := e.lib.SaveCredits(bg, id, ok); err != nil {
+		t.Fatalf("100 runes rejected: %v", err)
+	}
 }
 
-func TestAcceptsURLAndImageRef(t *testing.T) {
-	for s, want := range map[string]bool{"": true, "https://a.example/x": true, "http://a.example": true,
-		"javascript:alert(1)": false, "//evil.example/x": false, "data:text/html,x": false, "a.png": false, "https://a.example/\x00": false} {
-		if got := AcceptsURL(s); got != want {
-			t.Errorf("AcceptsURL(%q) = %v, want %v", s, got, want)
-		}
-	}
+func TestAcceptsImageRef(t *testing.T) {
 	for s, want := range map[string]bool{"": true, "https://a.example/x.jpg": true, "a.png": true,
 		"dir/a.png": false, "../a.png": false, "javascript:x": false, "data:image/png;base64,x": false} {
 		if got := AcceptsImageRef(s); got != want {

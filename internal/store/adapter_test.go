@@ -3,7 +3,9 @@ package store
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/allister/allister/internal/provider"
 )
@@ -231,5 +233,56 @@ func TestAdapterProgressIsEpisodeKey(t *testing.T) {
 	}
 	if n := countRows(t, s, "entry_progress"); n != 0 {
 		t.Fatalf("progress rows after remove %d", n)
+	}
+}
+
+// Legacy provider data goes through the anime plugin's sanitising mapping:
+// quirks are cleaned or dropped, they never fail the save.
+func TestAdapterSanitisesOddProviderData(t *testing.T) {
+	s := newStore(t)
+	ctx := context.Background()
+	long := strings.Repeat("あ", 400)
+	a := sample(provider.AniList, "1", intp(12))
+	a.Titles = []provider.Title{{Lang: "ja", Text: long}, {Lang: "en", Text: "Ti\ttle"}}
+	a.Synopsis = "line one\x07\nline two"
+	a.CoverURL = "//cdn.example/x.jpg"
+	a.Genres = []string{"Ac\ttion", "  "}
+	a.Tags = []provider.Tag{{Name: "Ranked", Rank: intp(500)}}
+	id, err := s.SaveAnime(ctx, a)
+	if err != nil {
+		t.Fatalf("odd provider data rejected: %v", err)
+	}
+	got, _ := s.GetByID(ctx, id)
+	if len(got.Titles) != 2 || utf8.RuneCountInString(got.Titles[0].Text) != 300 || got.Titles[1].Text != "Ti tle" {
+		t.Fatalf("titles %+v", got.Titles)
+	}
+	if got.Synopsis != "line one\nline two" || got.CoverPath != "https://cdn.example/x.jpg" {
+		t.Fatalf("synopsis %q cover %q", got.Synopsis, got.CoverPath)
+	}
+	if len(got.Genres) != 1 || got.Genres[0] != "Ac tion" || len(got.Tags) != 1 || got.Tags[0].Rank != nil {
+		t.Fatalf("genres %q tags %+v", got.Genres, got.Tags)
+	}
+}
+
+func TestAdapterSkipsUnusableCastMembers(t *testing.T) {
+	s := newStore(t)
+	ctx := context.Background()
+	id := mustSave(t, s, sample(provider.AniList, "1", nil))
+	nameless := provider.CastMember{Character: provider.Person{Source: provider.AniList, ID: "c0", Name: ""}, Role: "MAIN"}
+	silentActor := provider.CastMember{
+		Character: provider.Person{Source: provider.AniList, ID: "c2", Name: "Two"},
+		Actor:     &provider.Person{Source: provider.AniList, ID: "v2", Name: ""}, Role: "SUPPORTING"}
+	if err := s.SaveCast(ctx, id, []provider.CastMember{nameless, cast("1", "1"), silentActor}); err != nil {
+		t.Fatalf("cast rejected: %v", err)
+	}
+	c, err := s.Cast(ctx, id)
+	if err != nil || len(c) != 2 {
+		t.Fatalf("cast %+v %v", c, err)
+	}
+	if c[0].Character.Name != "Char 1" || c[0].Actor == nil || c[0].Role != "MAIN" {
+		t.Fatalf("first %+v", c[0])
+	}
+	if c[1].Character.Name != "Two" || c[1].Actor != nil || c[1].Role != "SUPPORTING" {
+		t.Fatalf("second %+v", c[1])
 	}
 }

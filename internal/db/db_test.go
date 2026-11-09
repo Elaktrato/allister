@@ -177,6 +177,11 @@ func seedLegacy(t *testing.T, d *sql.DB) {
 	mustExec(t, d, `INSERT INTO import_rows(import_id, seq, mal_id, title, outcome, anime_id, message, data) VALUES(1,1,'5','T','imported',1,'m','{}')`)
 	mustExec(t, d, `INSERT INTO settings(key, value) VALUES('k','v')`)
 	mustExec(t, d, `INSERT INTO jobs(kind, payload_json) VALUES('sync_anime','{"anime_id":1}')`)
+	// generic rows written at 00006 must survive the renames
+	mustExec(t, d, `INSERT INTO items(id, plugin_id, kind, source, source_id) VALUES(10,'anime','anime','anilist','10')`)
+	mustExec(t, d, `INSERT INTO people_g(id, plugin_id, source, source_id, name) VALUES(20,'anime','anilist','c','C'),(21,'anime','anilist','v','V')`)
+	mustExec(t, d, `INSERT INTO credits(item_id, seq, role, person_id, counterpart_person_id, counterpart_role) VALUES(10,0,'character',20,21,'Voice actor')`)
+	mustExec(t, d, `INSERT INTO relations_g(item_id, seq, kind, source, source_id) VALUES(10,0,'sequel','anilist','11')`)
 }
 
 func TestMigrationsApplyOnEmptyAndExistingVolume(t *testing.T) {
@@ -205,8 +210,8 @@ func TestMigrationsApplyOnEmptyAndExistingVolume(t *testing.T) {
 			t.Errorf("legacy table %s survived", tbl)
 		}
 	}
-	if n := rowCount(t, d, `SELECT count(*) FROM people`); n != 0 {
-		t.Errorf("generic people has %d rows (legacy rows must not be copied)", n)
+	if n := rowCount(t, d, `SELECT count(*) FROM people WHERE id IN (1, 2)`); n != 0 {
+		t.Errorf("legacy people copied into the generic table: %d", n)
 	}
 	// the tables that stay keep their rows; import_rows loses its legacy link
 	if n := rowCount(t, d, `SELECT count(*) FROM settings`); n != 1 {
@@ -222,6 +227,34 @@ func TestMigrationsApplyOnEmptyAndExistingVolume(t *testing.T) {
 	}
 	if n := rowCount(t, d, `SELECT count(*) FROM sqlite_master WHERE type='index' AND name='idx_import_rows_outcome'`); n != 1 {
 		t.Error("idx_import_rows_outcome missing")
+	}
+	// the generic rows survived with working foreign keys
+	if n := rowCount(t, d, `SELECT count(*) FROM credits c JOIN people p ON p.id = c.person_id JOIN people w ON w.id = c.counterpart_person_id WHERE c.item_id = 10`); n != 1 {
+		t.Fatalf("credit with counterpart lost: %d", n)
+	}
+	if n := rowCount(t, d, `SELECT count(*) FROM relations WHERE item_id = 10`); n != 1 {
+		t.Fatalf("relation lost: %d", n)
+	}
+	if rows, err := d.Query(`PRAGMA foreign_key_check`); err != nil {
+		t.Fatal(err)
+	} else {
+		bad := rows.Next()
+		rows.Close()
+		if bad {
+			t.Fatal("foreign_key_check reports violations after the upgrade")
+		}
+	}
+	if _, err := d.Exec(`INSERT INTO credits(item_id, seq, person_id) VALUES(10,1,999)`); err == nil {
+		t.Fatal("credits accepted a missing person after the upgrade")
+	}
+	mustExec(t, d, `DELETE FROM items WHERE id = 10`)
+	for _, tbl := range []string{"credits", "relations"} {
+		if n := rowCount(t, d, `SELECT count(*) FROM `+tbl); n != 0 {
+			t.Errorf("%s rows %d after deleting the item", tbl, n)
+		}
+	}
+	if n := rowCount(t, d, `SELECT count(*) FROM people`); n != 2 {
+		t.Errorf("people rows %d, want the 2 generic people", n)
 	}
 	// reopening is a no-op
 	d2, err := Open(path)

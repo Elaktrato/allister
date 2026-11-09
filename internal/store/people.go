@@ -8,16 +8,19 @@ import (
 	"slices"
 
 	"github.com/allister/allister/internal/library"
+	"github.com/allister/allister/internal/plugins/anime/animemap"
 	"github.com/allister/allister/internal/provider"
 )
 
 // SaveCast replaces the cast of animeID in one transaction (existing cast
-// rows are deleted first, so a re-sync is idempotent). People are upserted by
+// rows are deleted first, so a re-sync is idempotent). The cast is mapped and
+// sanitised by animemap: a character without an id or name is skipped, a
+// voice actor without one only loses the link, bad URLs are dropped. People are upserted by
 // (source, source_id): name and URL are updated; the remote ImageURL is
 // stored in image_path unless a local path (not starting with "http") is
 // already known.
 func (s *Store) SaveCast(ctx context.Context, animeID int64, cast []provider.CastMember) error {
-	err := s.lib.SaveCredits(ctx, animeID, credits(cast))
+	err := s.lib.SaveCredits(ctx, animeID, animemap.Credits(cast))
 	if errors.Is(err, library.ErrNoEntry) {
 		return fmt.Errorf("save cast: anime %d does not exist", animeID)
 	}

@@ -78,12 +78,7 @@ func checkSyncState(s string) error {
 	return invalid("sync state %q must be pending, partial or done", s)
 }
 
-// AcceptsURL reports whether the library stores s as a URL: empty, or an
-// absolute http(s) URL with a host and no control characters. Adapters over
-// sources that are not sanitised use it to drop a value instead of failing the
-// whole save.
-func AcceptsURL(s string) bool { return checkHTTPURL("url", s) == nil }
-
 // AcceptsImageRef reports whether the library stores s as an image reference:
-// empty, an http(s) URL or a plain local file name.
+// empty, an http(s) URL or a plain local file name. Adapters use it to keep a
+// value only when it can be stored.
 func AcceptsImageRef(s string) bool { return checkImageRef("image", s) == nil }

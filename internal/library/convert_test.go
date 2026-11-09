@@ -191,3 +191,27 @@ func TestConvertToSourceIsAtomic(t *testing.T) {
 		t.Fatalf("progress clamp not rolled back: %v", after.Progress)
 	}
 }
+
+// The trigger aborts the LAST write of the conversion (the entry's updated_at
+// bump after a clamp), so the clamp and every earlier change must roll back.
+func TestConvertToSourceRollsBackClampOnLateFailure(t *testing.T) {
+	e := newEnv(t)
+	id := manualBook(t, e)
+	before := mustItem(t, e.lib, id)
+	beforeEntry := mustEntry(t, e.lib, id)
+	if _, err := e.db.Exec(`CREATE TRIGGER boom BEFORE UPDATE ON entries BEGIN SELECT RAISE(ABORT, 'boom'); END`); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.lib.ConvertToSource(bg, id, sourced("b1", fp(200))); err == nil || errors.Is(err, ErrInvalid) {
+		t.Fatalf("want a database error, got %v", err)
+	}
+	if after := mustItem(t, e.lib, id); !reflect.DeepEqual(before, after) {
+		t.Fatalf("item not rolled back:\n%+v\n%+v", before, after)
+	}
+	if after := mustEntry(t, e.lib, id); !reflect.DeepEqual(after, beforeEntry) {
+		t.Fatalf("entry not rolled back: %+v -> %+v", beforeEntry, after)
+	}
+	if n := count(t, e.db, `SELECT count(*) FROM entry_progress WHERE item_id = ? AND value = 250`, id); n != 1 {
+		t.Fatal("clamp not rolled back")
+	}
+}
