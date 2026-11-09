@@ -133,7 +133,10 @@ func TestEditFixtureDialogPrefill(t *testing.T) {
 	mustContain(t, b, `action="/list/`+idStr(id)+`/edit"`, `<option value="active" selected>Reading</option>`, ">Want to read<",
 		`name="progress.pages"`, `value="12"`, `max="300"`, "/ 300", `name="rating" value=""`, `value="2024-01-02"`,
 		`name="return" value="/book"`, "Edit list entry")
-	mustNotContain(t, b, "<html", `name="progress.percent"`)
+	mustNotContain(t, b, "<html")
+	// two allowed combinations: the other track's input is shown muted
+	mustContain(t, b, `name="progress.percent"`, "used when tracking Percent")
+	mustNotContain(t, b, "used when tracking Page")
 	// two allowed combinations: a selector with the active one selected
 	mustContain(t, b, `name="progress_keys"`, `<option value="pages" selected>Page</option>`, `<option value="percent">Percent</option>`)
 
@@ -234,7 +237,9 @@ func TestEditChangesActiveCombinationOnlyWithinAllowed(t *testing.T) {
 	if en := e.entryOf(t, id); en.Progress["episode"] != 5 || len(en.Progress) != 1 {
 		t.Fatalf("%v", en.Progress)
 	}
-	mustNotContain(t, e.do("GET", "/list/"+idStr(id)+"/edit", nil, true).Body.String(), `name="progress.position"`)
+	// the retained value is shown in the muted input of the inactive track
+	mustContain(t, e.do("GET", "/list/"+idStr(id)+"/edit", nil, true).Body.String(), `name="progress.position" value="0:10:00"`,
+		"used when tracking Episode &#43; Position")
 	// and reactivated it reappears
 	form = url.Values{"status": {"active"}, "progress.episode": {"5"}, "progress_keys": {"position,episode"}}
 	if rec := e.do("POST", "/list/"+idStr(id)+"/edit", form, true); rec.Code != 204 {
@@ -266,7 +271,7 @@ func TestEditFixtureValidationAndReturn(t *testing.T) {
 		msg  string
 	}{
 		{url.Values{"status": {"active"}, "progress.percent": {"101"}}, "Percent must be a whole number from 0 to 100."},
-		{url.Values{"status": {"active"}, "progress.pages": {"3"}}, "“Page” is not a progress of this item."},
+		{url.Values{"status": {"active"}, "progress.bogus": {"3"}}, "“bogus” is not a progress of this item."},
 		{url.Values{"status": {"reading"}}, "Please choose a status."},
 		{url.Values{"status": {"active"}, "progress": {"3"}}, "is not a progress of this item"}, // shorthand: pages is not active
 	} {
@@ -462,4 +467,145 @@ func TestOverviewEditLinkOpensEntryDialog(t *testing.T) {
 		t.Fatal(full.Code)
 	}
 	mustContain(t, full.Body.String(), "<html", "Linked", `name="return" value="/tv"`)
+}
+
+// dialogInputs counts the progress inputs of a dialog per track key.
+func dialogInputs(b string) map[string]int {
+	out := map[string]int{}
+	for _, part := range strings.Split(b, `name="progress.`)[1:] {
+		out[part[:strings.Index(part, `"`)]]++
+	}
+	return out
+}
+
+func TestEditDialogShowsEveryAllowedTrackOnce(t *testing.T) {
+	e := newFixtureEnv(t)
+	id := e.addFixture(t, "tv", "show", tvWithEpisodes("1", "Tracks", 10), library.Entry{Status: library.Active, Progress: map[string]float64{"episode": 2}})
+	b := e.do("GET", "/list/"+idStr(id)+"/edit", nil, true).Body.String()
+	if got := dialogInputs(b); !reflect.DeepEqual(got, map[string]int{"season": 1, "episode": 1, "position": 1}) {
+		t.Fatalf("inputs %v", got)
+	}
+	// manifest order; the inactive tracks name a combination that uses them
+	si, ei, pi := strings.Index(b, `name="progress.season"`), strings.Index(b, `name="progress.episode"`), strings.Index(b, `name="progress.position"`)
+	if !(si < ei && ei < pi) {
+		t.Fatalf("order %d %d %d", si, ei, pi)
+	}
+	mustContain(t, b, "used when tracking Season &#43; Episode", "used when tracking Episode &#43; Position", `max="10"`, "/ 10", "data-inactive")
+	if n := strings.Count(b, "data-inactive"); n != 2 {
+		t.Fatalf("%d muted inputs", n)
+	}
+	// a single-combination kind is unchanged: only its own input, nothing muted
+	e.addEntry(t, "anilist", "5", ip(12), "watching", 3)
+	aid := e.savedItems(t, "anime", "anilist", "5")[0].ID
+	ab := e.do("GET", "/list/"+idStr(aid)+"/edit", nil, true).Body.String()
+	if got := dialogInputs(ab); !reflect.DeepEqual(got, map[string]int{"episode": 1}) {
+		t.Fatalf("anime inputs %v", got)
+	}
+	mustNotContain(t, ab, "used when tracking", "data-inactive")
+}
+
+func TestEditSwitchAndFillNewTrackInOneSave(t *testing.T) {
+	e := newFixtureEnv(t)
+	id := e.addFixture(t, "tv", "show", tvWithEpisodes("1", "One Save", 10), library.Entry{Status: library.Active, Progress: map[string]float64{"episode": 2}})
+	// what the no-JS dialog posts: every shown input, the season one typed
+	// although the chosen combination does not use it (even invalid text)
+	form := url.Values{"status": {"active"}, "progress_keys": {"episode,position"},
+		"progress.season": {"abc"}, "progress.episode": {"4"}, "progress.position": {"0:10:00"}}
+	if rec := e.do("POST", "/list/"+idStr(id)+"/edit", form, false); rec.Code != 303 {
+		t.Fatal(rec.Code, rec.Body.String())
+	}
+	if en := e.entryOf(t, id); en.Progress["episode"] != 4 || en.Progress["position"] != 600 || len(en.Progress) != 2 {
+		t.Fatalf("%v", en.Progress)
+	}
+	if _, ok := e.storedProgress(t, id, "season"); ok {
+		t.Fatal("typed value of a track outside the combination was stored")
+	}
+	// back to episode: the position input is ignored, its value retained
+	form = url.Values{"status": {"active"}, "progress_keys": {"episode"},
+		"progress.season": {"3"}, "progress.episode": {"5"}, "progress.position": {"0:20:00"}}
+	if rec := e.do("POST", "/list/"+idStr(id)+"/edit", form, true); rec.Code != 204 {
+		t.Fatal(rec.Code, rec.Body.String())
+	}
+	if v, ok := e.storedProgress(t, id, "position"); !ok || v != 600 {
+		t.Fatalf("position %v %v", v, ok)
+	}
+	if _, ok := e.storedProgress(t, id, "season"); ok {
+		t.Fatal("season stored")
+	}
+	if k := e.itemOf(t, id).ProgressKeys; !reflect.DeepEqual(k, []string{"episode"}) {
+		t.Fatalf("keys %v", k)
+	}
+}
+
+func TestEditBlankProgressClears(t *testing.T) {
+	e := newFixtureEnv(t)
+	id := e.addFixture(t, "tv", "show", tvShow("1", "Cleared"), library.Entry{Status: library.Active, Progress: map[string]float64{"season": 2, "episode": 7}},
+		library.WithProgressKeys([]string{"season", "episode"}))
+	// make position a retained (inactive) value
+	if err := e.lib.UpdateEntry(context.Background(), library.Entry{ItemID: id, Status: library.Active, Progress: map[string]float64{"position": 600}},
+		[]string{"episode", "position"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.lib.SetActiveProgress(context.Background(), id, []string{"season", "episode"}); err != nil {
+		t.Fatal(err)
+	}
+	// blank active inputs clear to 0; a blank inactive input leaves the retained value
+	form := url.Values{"status": {"active"}, "progress.season": {""}, "progress.episode": {""}, "progress.position": {""}}
+	if rec := e.do("POST", "/list/"+idStr(id)+"/edit", form, true); rec.Code != 204 {
+		t.Fatal(rec.Code, rec.Body.String())
+	}
+	for key, want := range map[string]float64{"season": 0, "episode": 0, "position": 600} {
+		if v, ok := e.storedProgress(t, id, key); !ok || v != want {
+			t.Fatalf("%s = %v %v, want %v", key, v, ok, want)
+		}
+	}
+	row := rowOf(t, e.get("/tv").Body.String(), "Cleared")
+	mustContain(t, row, ">0<", "0 / ?")
+	mustContain(t, e.do("GET", "/list/"+idStr(id)+"/edit", nil, true).Body.String(), `name="progress.episode" value="0"`)
+	// an absent field (not posted at all) keeps its value
+	e.do("POST", "/list/"+idStr(id)+"/edit", url.Values{"status": {"active"}, "progress.episode": {"4"}}, true)
+	e.do("POST", "/list/"+idStr(id)+"/edit", url.Values{"status": {"paused"}}, true)
+	if en := e.entryOf(t, id); en.Progress["episode"] != 4 || en.Status != library.Paused {
+		t.Fatalf("%+v", en)
+	}
+	// blank percent and duration clear too
+	pct := e.addFixture(t, "book", "book", bookItem("1", "Pct"), library.Entry{Status: library.Active, Progress: map[string]float64{"percent": 40}},
+		library.WithProgressKeys([]string{"percent"}))
+	if rec := e.do("POST", "/list/"+idStr(pct)+"/edit", url.Values{"status": {"active"}, "progress.percent": {""}}, true); rec.Code != 204 {
+		t.Fatal(rec.Code)
+	}
+	if v, ok := e.storedProgress(t, pct, "percent"); !ok || v != 0 {
+		t.Fatalf("percent %v %v", v, ok)
+	}
+	dur := e.addFixture(t, "tv", "show", tvShow("2", "Dur"), library.Entry{Status: library.Active, Progress: map[string]float64{"episode": 1, "position": 99}},
+		library.WithProgressKeys([]string{"episode", "position"}))
+	if rec := e.do("POST", "/list/"+idStr(dur)+"/edit", url.Values{"status": {"active"}, "progress.position": {""}}, true); rec.Code != 204 {
+		t.Fatal(rec.Code)
+	}
+	if en := e.entryOf(t, dur); en.Progress["position"] != 0 || en.Progress["episode"] != 1 {
+		t.Fatalf("%v", en.Progress)
+	}
+	mustContain(t, rowOf(t, e.get("/tv").Body.String(), "Dur"), "0:00:00")
+}
+
+func TestEditDurationBoundaries(t *testing.T) {
+	e := newFixtureEnv(t)
+	id := e.addFixture(t, "tv", "show", tvShow("1", "Bounds"), library.Entry{Status: library.Active},
+		library.WithProgressKeys([]string{"episode", "position"}))
+	for secs, text := range map[float64]string{
+		0: "0:00:00", 59: "0:00:59", 60: "0:01:00", 3599: "0:59:59", 3600: "1:00:00", 86399: "23:59:59",
+		3599999: "999:59:59", 3600000: "3600000",
+	} {
+		if err := e.lib.UpsertEntry(context.Background(), library.Entry{ItemID: id, Status: library.Active, Progress: map[string]float64{"position": secs}}); err != nil {
+			t.Fatal(err)
+		}
+		b := e.do("GET", "/list/"+idStr(id)+"/edit", nil, true).Body.String()
+		mustContain(t, b, `name="progress.position" value="`+text+`"`)
+		if rec := e.do("POST", "/list/"+idStr(id)+"/edit", url.Values{"status": {"active"}, "progress.position": {text}}, true); rec.Code != 204 {
+			t.Fatalf("%v: %d %s", secs, rec.Code, rec.Body.String())
+		}
+		if v, _ := e.storedProgress(t, id, "position"); v != secs {
+			t.Fatalf("%q parsed back as %v, want %v", text, v, secs)
+		}
+	}
 }

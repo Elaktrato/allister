@@ -14,7 +14,7 @@
   {{end}}
 </nav>
 {{if not .AnyEntries}}
-<p class="rounded border border-slate-800 bg-slate-900 p-4 text-slate-300">Your list is empty. <a href="{{.SearchURL}}" class="text-indigo-300 underline">Search for {{.EmptyNoun}} to add</a>{{if .ManualURL}} or <a href="{{.ManualURL}}" class="text-indigo-300 underline">add one manually</a>{{end}}.</p>
+<p class="rounded border border-slate-800 bg-slate-900 p-4 text-slate-300"><strong class="font-medium text-slate-100">No {{.EmptyNoun}} in your list yet.</strong> Your list is empty: <a href="{{.SearchURL}}" class="text-indigo-300 underline">search for {{.EmptyNoun}} to add</a>{{if .ManualURL}} or <a href="{{.ManualURL}}" class="text-indigo-300 underline">add one manually</a>{{end}}.</p>
 {{else if not .Rows}}
 <p class="rounded border border-slate-800 bg-slate-900 p-4 text-slate-300">Nothing here yet.</p>
 {{else}}

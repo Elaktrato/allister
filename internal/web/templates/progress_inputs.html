@@ -1,6 +1,6 @@
 {{define "progress_inputs"}}
 {{range .}}
-<label class="block text-sm">{{.Label}}
+<label class="block text-sm{{if .Inactive}} text-slate-500{{end}}"{{if .Inactive}} data-inactive{{end}}>{{.Label}}{{if .Hint}} <span class="text-xs text-slate-500">({{.Hint}})</span>{{end}}
   <span class="mt-1 flex items-center gap-2">
     {{if .Duration}}
     <input type="text" name="{{.Name}}" value="{{.Value}}" placeholder="h:mm:ss" inputmode="numeric" maxlength="20" autocomplete="off"

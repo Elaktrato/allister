@@ -45,6 +45,10 @@ type entryValues struct {
 type progressInput struct {
 	Name, Label, Value, Max, Total string
 	Duration, Percent              bool
+	// Inactive marks a track outside the selected combination (edit
+	// dialog), shown muted with Hint naming a combination that uses it.
+	Inactive bool
+	Hint     string
 }
 
 // entryForm is the data of add_dialog.html.

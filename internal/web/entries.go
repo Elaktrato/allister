@@ -110,25 +110,6 @@ func (s *server) postIncrement(w http.ResponseWriter, r *http.Request) {
 // comboValue encodes a progress combination for the form.
 func comboValue(keys []string) string { return strings.Join(keys, ",") }
 
-// allowedCombo finds the kind's allowed combination posted as raw (the keys
-// in any order, each once); ok is false when raw names none.
-func allowedCombo(k plugin.KindDef, raw string) ([]string, bool) {
-	keys := strings.Split(raw, ",")
-	sorted := slices.Clone(keys)
-	slices.Sort(sorted)
-	if len(slices.Compact(slices.Clone(sorted))) != len(sorted) {
-		return nil, false
-	}
-	for _, c := range k.Progress.Combinations {
-		cs := slices.Clone(c)
-		slices.Sort(cs)
-		if slices.Equal(cs, sorted) {
-			return slices.Clone(c), true
-		}
-	}
-	return nil, false
-}
-
 // comboLabel names a combination by its tracks' labels: "Season + Episode".
 func comboLabel(k plugin.KindDef, keys []string) string {
 	labels := make([]string, 0, len(keys))
@@ -142,52 +123,94 @@ func comboLabel(k plugin.KindDef, keys []string) string {
 	return strings.Join(labels, " + ")
 }
 
-// entryFormValues prefills the edit form from a stored entry: progress as
-// typed back by the parser (durations h:mm:ss, the rest and durations above
-// 999:59:59 whole numbers), rating blank when unrated.
-func entryFormValues(k plugin.KindDef, e library.Entry) entryValues {
+// progressText formats a stored progress value as the parser reads it
+// back: durations h:mm:ss (plain seconds above the 999:59:59 display cap,
+// so they round-trip exactly), everything else a whole number.
+func progressText(def plugin.ProgressDef, val float64) string {
+	if def.Type == plugin.Duration && val <= maxShownSeconds {
+		return fmtDuration(val)
+	}
+	return fmtNum(max(val, 0))
+}
+
+// entryFormValues prefills the edit form from a stored entry and the item's
+// stored progress values (active and retained), rating blank when unrated.
+func entryFormValues(k plugin.KindDef, e library.Entry, stored map[string]float64) entryValues {
 	v := entryValues{Status: string(e.Status), StartedOn: fmtDay(e.StartedOn), FinishedOn: fmtDay(e.FinishedOn),
 		Comment: e.Comment, Progress: map[string]string{}}
 	if e.Rating != nil {
 		v.Rating = strconv.Itoa(*e.Rating)
 	}
-	for key, val := range e.Progress {
-		def, ok := progressDefOf(k, key)
-		if !ok {
-			continue
-		}
-		if def.Type == plugin.Duration && val <= maxShownSeconds {
-			v.Progress[key] = fmtDuration(val)
-		} else { // beyond the h:mm:ss display cap: plain seconds round-trip exactly
-			v.Progress[key] = fmtNum(max(val, 0))
+	for key, val := range stored {
+		if def, ok := progressDefOf(k, key); ok {
+			v.Progress[key] = progressText(def, val)
 		}
 	}
 	return v
 }
 
-// dialog builds the edit dialog of t from the values v, showing the inputs
-// of the combination keys (the active one, or the one just posted).
-func (t *entryTarget) dialog(v entryValues, keys []string, ret string) entryDialog {
+// combinationTracks are the keys of every track used by one of the kind's
+// allowed combinations, in manifest order, each once.
+func combinationTracks(k plugin.KindDef) []string {
+	var out []string
+	for _, def := range k.Progress.Eligible {
+		for _, c := range k.Progress.Combinations {
+			if slices.Contains(c, def.Key) {
+				out = append(out, def.Key)
+				break
+			}
+		}
+	}
+	return out
+}
+
+// dialog builds the edit dialog of t from the values v for the combination
+// keys (the active one, or the one just posted). A kind with several allowed
+// combinations gets an input for EVERY track of its combinations, so a
+// switch and the new track's value fit in one save: tracks outside keys are
+// muted, name a combination that uses them and show their stored (retained)
+// value, never a typed one (those are ignored on save).
+func (t *entryTarget) dialog(v entryValues, keys []string, ret string, stored map[string]float64) entryDialog {
 	k := t.kind
 	d := entryDialog{entryValues: v, Action: "/list/" + strconv.FormatInt(t.row.Item.ID, 10) + "/edit",
 		CancelURL: ret, Return: ret, Heading: "Edit list entry", Submit: "Save"}
 	for _, st := range library.Statuses() {
 		d.Statuses = append(d.Statuses, statusOpt{Value: string(st), Label: statusLabel(k, st), Selected: string(st) == v.Status})
 	}
-	d.Progress = progressInputs(k, progressContext{Keys: keys, Fields: t.row.Item.Fields}, v.Progress)
+	shown := keys
 	if len(k.Progress.Combinations) > 1 {
+		shown = combinationTracks(k)
+	}
+	values := map[string]string{}
+	for _, key := range shown {
+		if slices.Contains(keys, key) {
+			values[key] = v.Progress[key]
+		} else if val, ok := stored[key]; ok {
+			def, _ := progressDefOf(k, key)
+			values[key] = progressText(def, val)
+		}
+	}
+	d.Progress = progressInputs(k, progressContext{Keys: shown, Fields: t.row.Item.Fields}, values)
+	for i := range d.Progress {
+		key := strings.TrimPrefix(d.Progress[i].Name, progressField)
+		if slices.Contains(keys, key) {
+			continue
+		}
+		d.Progress[i].Inactive = true
 		for _, c := range k.Progress.Combinations {
-			d.Combos = append(d.Combos, statusOpt{Value: comboValue(c), Label: comboLabel(k, c), Selected: sameSet(c, keys)})
+			if slices.Contains(c, key) {
+				d.Progress[i].Hint = "used when tracking " + comboLabel(k, c)
+				break
+			}
+		}
+	}
+	if len(k.Progress.Combinations) > 1 {
+		cur := library.CombinationIndex(k, keys)
+		for i, c := range k.Progress.Combinations {
+			d.Combos = append(d.Combos, statusOpt{Value: comboValue(c), Label: comboLabel(k, c), Selected: i == cur})
 		}
 	}
 	return d
-}
-
-func sameSet(a, b []string) bool {
-	as, bs := slices.Clone(a), slices.Clone(b)
-	slices.Sort(as)
-	slices.Sort(bs)
-	return slices.Equal(as, bs)
 }
 
 // editResponse writes the edit dialog (htmx) or the full list page of the
@@ -211,18 +234,29 @@ func (s *server) getEdit(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	stored, err := s.deps.Library.StoredProgress(r.Context(), t.row.Item.ID)
+	if err != nil {
+		s.internalError(w, r, err)
+		return
+	}
 	ret := safeReturn(r.URL.Query().Get("return"), t.man.ID)
-	d := t.dialog(entryFormValues(t.kind, t.row.Entry), t.row.Item.ProgressKeys, ret)
+	d := t.dialog(entryFormValues(t.kind, t.row.Entry, stored), t.row.Item.ProgressKeys, ret, stored)
 	s.editResponse(w, r, t, d, http.StatusOK)
 }
 
-// postEdit validates the whole form before anything is written: the
-// combination must be one of the kind's allowed ones (absent keeps the
-// active one); the values are parsed against the active and the new keys
-// (so a dialog showing the old inputs can post a switch), only the new
-// combination's values are written (values of keys becoming inactive are
-// retained as they were), and library.UpdateEntry switches the combination
-// and writes the entry in one transaction, validated against the new keys.
+// postEdit validates the whole form before anything is written:
+//   - progress_keys must name one of the kind's allowed combinations (absent
+//     keeps the active one); that is the TARGET combination;
+//   - inputs of the kind's tracks outside the target are ignored (not even
+//     parsed): their stored values stay as they are;
+//   - an input of a target track that is posted BLANK clears it to 0 (a
+//     field that is not posted at all keeps its value), in the same write;
+//   - the target values are checked against the item's totals and
+//     library.UpdateEntry switches the combination and writes the entry in
+//     one transaction.
+//
+// The save is last-write-wins: the dialog posts the values it loaded, so a
+// +1 made meanwhile (another tab) is overwritten by the posted value.
 func (s *server) postEdit(w http.ResponseWriter, r *http.Request) {
 	if !parseForm(w, r) {
 		return
@@ -231,38 +265,49 @@ func (s *server) postEdit(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	ctx := r.Context()
+	stored, err := s.deps.Library.StoredProgress(ctx, t.row.Item.ID)
+	if err != nil {
+		s.internalError(w, r, err)
+		return
+	}
 	ret := safeReturn(r.PostFormValue("return"), t.man.ID)
-	active := t.row.Item.ProgressKeys
-	keys, change := active, []string(nil)
+	keys, change := t.row.Item.ProgressKeys, []string(nil)
 	var msg string
 	if raw := strings.TrimSpace(r.PostFormValue(progressKeysField)); raw != "" {
-		if c, ok := allowedCombo(t.kind, raw); !ok {
+		if i := library.CombinationIndex(t.kind, strings.Split(raw, ",")); i < 0 {
 			msg = "Please choose one of the offered progress combinations."
-		} else if !sameSet(c, active) {
-			keys, change = c, c
+		} else {
+			keys = slices.Clone(t.kind.Progress.Combinations[i])
+			change = keys // UpdateEntry leaves an unchanged combination alone
 		}
 	}
-	union := slices.Clone(active)
-	for _, k := range keys {
-		if !slices.Contains(union, k) {
-			union = append(union, k)
+	var clear []string
+	for _, def := range t.kind.Progress.Eligible {
+		name := progressField + def.Key
+		vals, posted := r.PostForm[name]
+		switch {
+		case !slices.Contains(keys, def.Key):
+			delete(r.PostForm, name) // ignored: not part of the target combination
+		case posted && len(vals) > 0 && strings.TrimSpace(vals[0]) == "":
+			clear = append(clear, def.Key)
 		}
 	}
-	v, entry, perr := s.parseEntryForm(t.kind, union, r)
+	v, entry, perr := s.parseEntryForm(t.kind, keys, r)
 	if msg == "" {
 		msg = perr
 	}
 	if msg == "" {
-		for k := range entry.Progress {
-			if !slices.Contains(keys, k) {
-				delete(entry.Progress, k)
+		for _, key := range clear {
+			if _, typed := entry.Progress[key]; !typed {
+				entry.Progress[key] = 0
 			}
 		}
 		msg = s.validateAgainstItem(t.kind, progressContext{Keys: keys, Fields: t.row.Item.Fields}, entry)
 	}
 	if msg == "" {
 		entry.ItemID = t.row.Item.ID
-		err := s.deps.Library.UpdateEntry(r.Context(), entry, change)
+		err := s.deps.Library.UpdateEntry(ctx, entry, change)
 		switch {
 		case err == nil:
 			s.done(w, r, ret)
@@ -277,7 +322,7 @@ func (s *server) postEdit(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	d := t.dialog(v, keys, ret)
+	d := t.dialog(v, keys, ret, stored)
 	d.Error = msg
 	s.editResponse(w, r, t, d, http.StatusUnprocessableEntity)
 }

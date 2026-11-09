@@ -17,7 +17,7 @@
       <select name="progress_keys" class="mt-1 w-full rounded border border-slate-700 bg-slate-950 px-3 py-2">
         {{range .Combos}}<option value="{{.Value}}"{{if .Selected}} selected{{end}}>{{.Label}}</option>{{end}}
       </select>
-      <span class="mt-1 block text-xs text-slate-400">Values of tracks you switch off are kept and come back when you switch them on again.</span>
+      <span class="mt-1 block text-xs text-slate-400">Only the chosen tracks are saved. Values of tracks you switch off are kept and come back when you switch them on again.</span>
     </label>
     {{end}}
     <div class="grid grid-cols-2 gap-3">

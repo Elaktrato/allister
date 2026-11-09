@@ -788,7 +788,7 @@ func TestListGenericWording(t *testing.T) {
 	e := newFixtureEnv(t)
 	main := func(b string) string { return strings.ToLower(b[strings.Index(b, "</header>"):]) }
 	empty := main(e.get("/book").Body.String())
-	mustContain(t, empty, "your list is empty", `href="/book/search"`, "search for books")
+	mustContain(t, empty, "no books in your list yet", "your list is empty", `href="/book/search"`, "search for books")
 	mustNotContain(t, empty, "anime", "episode", "watch")
 	e.addFixture(t, "book", "book", bookItem("1", "Earthsea"), library.Entry{Status: library.Active})
 	id := e.savedItems(t, "book", "books", "1")[0].ID
@@ -818,7 +818,7 @@ func TestListGetIsFullPageWithVary(t *testing.T) {
 func TestEmptyListHintLinksManualOnlyWhenMounted(t *testing.T) {
 	e := newFixtureEnv(t)
 	b := e.get("/tv").Body.String()
-	mustContain(t, b, "Your list is empty", `href="/tv/search"`)
+	mustContain(t, b, "No shows in your list yet.", "Your list is empty", `href="/tv/search"`)
 	mustNotContain(t, b, `href="/tv/manual/new"`) // no manual route for this plugin yet
 	mustContain(t, e.get("/anime").Body.String(), `href="/anime/manual/new"`, `href="/anime/search"`)
 	e.addFixture(t, "tv", "show", tvShow("1", "Dark"), library.Entry{Status: library.Active})

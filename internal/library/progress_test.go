@@ -542,3 +542,52 @@ func TestItemPluginID(t *testing.T) {
 }
 
 func tp(t time.Time) *time.Time { return &t }
+
+func TestUpdateEntryZeroClearsOnlyGivenKeys(t *testing.T) {
+	e := newEnv(t)
+	l := e.lib
+	id := addShow(t, l, "uz", nil, Entry{Status: Active, Progress: map[string]float64{"episode": 7, "position": 600}}, WithProgressKeys([]string{"episode", "position"}))
+	if err := l.SetActiveProgress(bg, id, []string{"season", "episode"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := l.UpdateEntry(bg, Entry{ItemID: id, Status: Active, Progress: map[string]float64{"season": 3, "episode": 0}}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := progressOf(t, l, id); got["episode"] != 0 || got["season"] != 3 || len(got) != 2 {
+		t.Fatalf("progress %v", got)
+	}
+	if n := count(t, e.db, `SELECT count(*) FROM entry_progress WHERE item_id = ? AND key = 'position' AND value = 600`, id); n != 1 {
+		t.Fatal("retained position touched")
+	}
+}
+
+func TestStoredProgressIncludesRetained(t *testing.T) {
+	e := newEnv(t)
+	id := addShow(t, e.lib, "sp", nil, Entry{Status: Active, Progress: map[string]float64{"episode": 7, "position": 600}}, WithProgressKeys([]string{"episode", "position"}))
+	if err := e.lib.SetActiveProgress(bg, id, []string{"episode"}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := e.lib.StoredProgress(bg, id)
+	if err != nil || got["episode"] != 7 || got["position"] != 600 || len(got) != 2 {
+		t.Fatalf("%v %v", got, err)
+	}
+	if got, err := e.lib.StoredProgress(bg, 9999); err != nil || len(got) != 0 {
+		t.Fatalf("unknown: %v %v", got, err)
+	}
+}
+
+func TestCombinationIndex(t *testing.T) {
+	e := newEnv(t)
+	k := kindOf(t, e.lib, "tv", "show")
+	for _, c := range []struct {
+		keys []string
+		want int
+	}{
+		{[]string{"episode"}, 0}, {[]string{"episode", "season"}, 1}, {[]string{"position", "episode"}, 2},
+		{[]string{"episode", "episode"}, -1}, {[]string{"season"}, -1}, {nil, -1}, {[]string{}, -1}, {[]string{"season", "episode", "position"}, -1},
+	} {
+		if got := CombinationIndex(k, c.keys); got != c.want {
+			t.Errorf("%v: %d, want %d", c.keys, got, c.want)
+		}
+	}
+}

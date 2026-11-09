@@ -322,7 +322,7 @@ func (l *Library) UpdateEntry(ctx context.Context, e Entry, activeKeys []string)
 		if err != nil {
 			return err
 		}
-		if !sameKeys(norm, active) {
+		if CombinationIndex(def, norm) != CombinationIndex(def, active) {
 			pk, err := json.Marshal(norm)
 			if err != nil {
 				return fmt.Errorf("update entry: %w", err)
@@ -348,14 +348,6 @@ func (l *Library) UpdateEntry(ctx context.Context, e Entry, activeKeys []string)
 	return nil
 }
 
-// sameKeys reports whether a and b hold the same keys (as sets of unique keys).
-func sameKeys(a, b []string) bool {
-	as, bs := slices.Clone(a), slices.Clone(b)
-	slices.Sort(as)
-	slices.Sort(bs)
-	return slices.Equal(as, bs)
-}
-
 // ItemPluginID returns the plugin id of item id (with or without an entry),
 // or ErrNoEntry when there is no such item. The web layer uses it to guard
 // the entry routes by the item's plugin before anything else happens.
@@ -369,4 +361,29 @@ func (l *Library) ItemPluginID(ctx context.Context, id int64) (string, error) {
 		return "", fmt.Errorf("item plugin: %w", err)
 	}
 	return p, nil
+}
+
+// StoredProgress returns every stored progress value of the item: the
+// active ones and those retained for keys that are not active (see
+// SetActiveProgress). An unknown item or one without values yields an empty
+// map. The edit dialog shows retained values next to their inactive tracks.
+func (l *Library) StoredProgress(ctx context.Context, itemID int64) (map[string]float64, error) {
+	rows, err := l.db.QueryContext(ctx, `SELECT key, value FROM `+tableEntryProgress+` WHERE item_id = ?`, itemID)
+	if err != nil {
+		return nil, fmt.Errorf("stored progress: %w", err)
+	}
+	out := map[string]float64{}
+	for rows.Next() {
+		var k string
+		var v float64
+		if err := rows.Scan(&k, &v); err != nil {
+			rows.Close()
+			return nil, fmt.Errorf("stored progress: %w", err)
+		}
+		out[k] = v
+	}
+	if err := closeRows(rows); err != nil {
+		return nil, fmt.Errorf("stored progress: %w", err)
+	}
+	return out, nil
 }

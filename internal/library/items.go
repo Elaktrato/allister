@@ -99,22 +99,32 @@ func normalizeTitles(ts []plugin.Title) ([]plugin.Title, error) {
 	return out, nil
 }
 
+// CombinationIndex returns the index of the kind's allowed progress
+// combination that keys equal as a set (each key once, any order), or -1
+// when keys match none. It is the one combination check of the core.
+func CombinationIndex(def plugin.KindDef, keys []string) int {
+	sorted := slices.Clone(keys)
+	sort.Strings(sorted)
+	for i, c := range def.Progress.Combinations {
+		cs := slices.Clone(c)
+		sort.Strings(cs)
+		if slices.Equal(cs, sorted) {
+			return i
+		}
+	}
+	return -1
+}
+
 func normalizeProgress(def plugin.KindDef, keys []string) ([]string, error) {
 	if keys == nil {
 		keys = def.Progress.Defaults
 	}
 	out := append([]string{}, keys...)
-	sorted := slices.Clone(out)
-	sort.Strings(sorted)
 	if len(out) == 0 && len(def.Progress.Combinations) == 0 {
 		return out, nil
 	}
-	for _, c := range def.Progress.Combinations {
-		cs := slices.Clone(c)
-		sort.Strings(cs)
-		if slices.Equal(cs, sorted) {
-			return out, nil
-		}
+	if CombinationIndex(def, out) >= 0 {
+		return out, nil
 	}
 	return nil, invalid("progress keys %v are not an allowed combination for kind %q", keys, def.Key)
 }
