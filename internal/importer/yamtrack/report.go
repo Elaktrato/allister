@@ -30,7 +30,9 @@ type Report struct {
 	Imported, Skipped    int
 	Unmatched, Failed    int
 	// Active is true while the import is pending or running.
-	Active bool
+	Active    bool
+	Note      string
+	CanResume bool
 	// ETA roughly estimates the time to process the remaining rows.
 	ETA time.Duration
 	// Row lists are capped at 200; More* count the rows not listed.
@@ -48,9 +50,15 @@ func (r *Report) Percent() int {
 
 // Latest returns the report of the most recent import, or nil, nil.
 func (im *Importer) Latest(ctx context.Context) (*Report, error) {
+	im.opMu.Lock()
+	err := reconcile(ctx, im.db)
+	im.opMu.Unlock()
+	if err != nil {
+		return nil, err
+	}
 	var r Report
-	err := im.db.QueryRowContext(ctx, `SELECT id, filename, state, total, ignored FROM imports ORDER BY id DESC LIMIT 1`).
-		Scan(&r.ID, &r.Filename, &r.State, &r.Total, &r.Ignored)
+	err = im.db.QueryRowContext(ctx, `SELECT id, filename, state, total, ignored, COALESCE(note, '') FROM imports ORDER BY id DESC LIMIT 1`).
+		Scan(&r.ID, &r.Filename, &r.State, &r.Total, &r.Ignored, &r.Note)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -87,6 +95,7 @@ func (im *Importer) Latest(ctx context.Context) (*Report, error) {
 		return nil, fmt.Errorf("latest import: %w", err)
 	}
 	r.Processed = r.Imported + r.Skipped + r.Unmatched + r.Failed
+	r.CanResume = (r.State == stateFailed || r.State == stateCancelled) && r.Remaining > 0
 	r.ETA = time.Duration(r.Remaining) * time.Minute / anilistRequestsPerMinute
 
 	if r.UnmatchedRows, err = im.items(ctx, r.ID, outcomeUnmatched); err != nil {

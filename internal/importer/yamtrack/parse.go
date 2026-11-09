@@ -22,6 +22,7 @@ import (
 const (
 	maxTitleRunes   = 300
 	maxCommentRunes = 2000
+	maxProgress     = 100000
 	dateLayout      = "2006-01-02 15:04:05-07:00"
 )
 
@@ -40,6 +41,7 @@ type Row struct {
 	StartedOn  *time.Time // calendar days, UTC midnight
 	FinishedOn *time.Time
 	Comment    string
+	Notes      []string
 }
 
 // SkippedRow is a CSV row that is not imported. Ignored rows are of another
@@ -62,7 +64,9 @@ var statusMap = map[string]store.Status{
 }
 
 // Parse reads a Yamtrack export. Only rows with media_type anime and source mal
-// become Rows; every other row is reported in skipped. It tolerates a UTF-8
+// become Rows; every other row is reported in skipped. Only non-anime rows,
+// other sources, unknown statuses and bad or duplicate media_ids are skipped:
+// a bad score, progress, date or an empty title keeps the row and adds to Notes. It tolerates a UTF-8
 // BOM, CRLF line ends, quoted newlines and extra columns. Of rows sharing a
 // media_id the first is kept. A missing required column is ErrBadFormat.
 func Parse(r io.Reader) (rows []Row, skipped []SkippedRow, err error) {
@@ -145,43 +149,59 @@ func Parse(r io.Reader) (rows []Row, skipped []SkippedRow, err error) {
 			Comment: truncate(get("notes"), maxCommentRunes)}
 		if row.Title == "" {
 			row.Title = "MAL #" + malID
+			row.Notes = append(row.Notes, "no title in the export, using "+row.Title)
 		}
+		// Bad optional fields never drop the row: they are neutralised and noted.
 		if p := get("progress"); p != "" {
 			n, err := strconv.Atoi(p)
-			if err != nil || n < 0 {
-				skip(fmt.Sprintf("invalid progress %q", p), false)
-				continue
-			}
-			row.Progress = n
-		}
-		if sc := get("score"); sc != "" {
-			f, err := strconv.ParseFloat(sc, 64)
-			if err != nil || math.IsNaN(f) || math.IsInf(f, 0) {
-				skip(fmt.Sprintf("invalid score %q", sc), false)
-				continue
-			}
-			if f > 0 {
-				n := min(10, int(math.Round(f)))
-				row.Rating = &n
+			if err != nil || n < 0 || n > maxProgress {
+				row.Notes = append(row.Notes, fmt.Sprintf("invalid progress %q, using 0", p))
+			} else {
+				row.Progress = n
 			}
 		}
-		row.StartedOn = parseDay(get("start_date"))
-		row.FinishedOn = parseDay(get("end_date"))
+		row.Rating = parseScore(get("score"), &row.Notes)
+		row.StartedOn = parseDay(get("start_date"), "start date", &row.Notes)
+		row.FinishedOn = parseDay(get("end_date"), "end date", &row.Notes)
 		seen[malID] = true
 		rows = append(rows, row)
 	}
 	return rows, skipped, nil
 }
 
-// parseDay returns the calendar day written in a Yamtrack timestamp as UTC
-// midnight, or nil when empty or unparseable. The day is read from the
-// timestamp's own zone (never converted to UTC first).
-func parseDay(s string) *time.Time {
+// parseScore maps a Yamtrack score. Empty or exactly zero is unrated; a
+// negative or non-numeric score is unrated with a note; anything else is
+// rounded half up and clamped to 0..10 (so 0.4 is an explicit 0).
+func parseScore(sc string, notes *[]string) *int {
+	if sc == "" {
+		return nil
+	}
+	f, err := strconv.ParseFloat(sc, 64)
+	if err != nil || math.IsNaN(f) || math.IsInf(f, 0) || f < 0 {
+		*notes = append(*notes, fmt.Sprintf("invalid score %q, left unrated", sc))
+		return nil
+	}
+	if f == 0 {
+		return nil
+	}
+	n := min(10, int(math.Floor(f+0.5)))
+	return &n
+}
+
+// parseDay returns the calendar day written in a Yamtrack timestamp (or a
+// plain 2006-01-02 date) as UTC midnight. Empty gives nil; unparseable gives
+// nil and a note. The day is read from the timestamp's own zone (never
+// converted to UTC first).
+func parseDay(s, label string, notes *[]string) *time.Time {
 	if s == "" {
 		return nil
 	}
 	t, err := time.Parse(dateLayout, s)
 	if err != nil {
+		t, err = time.Parse("2006-01-02", s)
+	}
+	if err != nil {
+		*notes = append(*notes, fmt.Sprintf("invalid %s %q, left empty", label, s))
 		return nil
 	}
 	d := time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, time.UTC)

@@ -188,3 +188,30 @@ func (s *server) postImportCancel(w http.ResponseWriter, r *http.Request) {
 	}
 	http.Redirect(w, r, "/settings/import", http.StatusSeeOther)
 }
+
+func (s *server) postImportResume(w http.ResponseWriter, r *http.Request) {
+	if s.deps.Imports == nil {
+		http.NotFound(w, r)
+		return
+	}
+	_, err := s.deps.Imports.Resume(r.Context())
+	var active *yamtrack.ActiveError
+	reject := func(status int, p importPage) {
+		p, lerr := s.loadImport(r, p)
+		if lerr != nil {
+			s.fail(w, r, lerr, "")
+			return
+		}
+		s.renderStatus(w, status, "import", p)
+	}
+	switch {
+	case err == nil:
+		http.Redirect(w, r, "/settings/import", http.StatusSeeOther)
+	case errors.As(err, &active):
+		reject(http.StatusConflict, importPage{Conflict: true, Error: "An import is already running. Wait for it to finish or cancel it first."})
+	case errors.Is(err, yamtrack.ErrNothingToResume):
+		reject(http.StatusUnprocessableEntity, importPage{Error: "There is nothing to resume."})
+	default:
+		s.fail(w, r, err, "")
+	}
+}

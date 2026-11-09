@@ -2,6 +2,7 @@ package web
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -15,6 +16,7 @@ import (
 
 	"github.com/allister/allister/internal/db"
 	"github.com/allister/allister/internal/importer/yamtrack"
+	"github.com/allister/allister/internal/jobs"
 	"github.com/allister/allister/internal/provider"
 	"github.com/allister/allister/internal/settings"
 	"github.com/allister/allister/internal/store"
@@ -26,7 +28,22 @@ func (f fnResolver) AnimeByMALID(_ context.Context, malID string) (provider.Anim
 	return f(malID)
 }
 
+// dbJobs records jobs in the fake and also writes them to the jobs table: the
+// importer reconciles imports against that table.
+type dbJobs struct {
+	*fakeJobs
+	q *jobs.Queue
+}
+
+func (d dbJobs) Enqueue(ctx context.Context, kind string, payload any) error {
+	if err := d.fakeJobs.Enqueue(ctx, kind, payload); err != nil {
+		return err
+	}
+	return d.q.Enqueue(ctx, kind, payload)
+}
+
 type impEnv struct {
+	d    *sql.DB
 	h    http.Handler
 	jobs *fakeJobs
 	im   *yamtrack.Importer
@@ -41,10 +58,10 @@ func newImpEnv(t *testing.T, res fnResolver) *impEnv {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { d.Close() })
-	e := &impEnv{jobs: &fakeJobs{}, st: store.New(d)}
+	e := &impEnv{d: d, jobs: &fakeJobs{}, st: store.New(d)}
 	// A fake clock whose sleep returns at once keeps the pacing out of the tests.
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	e.im = yamtrack.New(d, e.st, res, e.jobs, yamtrack.WithClock(
+	e.im = yamtrack.New(d, e.st, res, dbJobs{e.jobs, jobs.NewQueue(d)}, yamtrack.WithClock(
 		func() time.Time { now = now.Add(time.Hour); return now },
 		func(ctx context.Context, _ time.Duration) error { return ctx.Err() }))
 	e.h = NewServer(Deps{Settings: settings.New(d), Store: e.st, Jobs: e.jobs, Imports: e.im})
@@ -280,7 +297,7 @@ func TestImportListsAreCappedAt200(t *testing.T) {
 
 func TestImportRoutesNeedAnImporter(t *testing.T) {
 	h, _, _ := newTestServer(t)
-	for _, c := range [][2]string{{"GET", "/settings/import"}, {"POST", "/settings/import"}, {"POST", "/settings/import/cancel"}} {
+	for _, c := range [][2]string{{"GET", "/settings/import"}, {"POST", "/settings/import"}, {"POST", "/settings/import/cancel"}, {"POST", "/settings/import/resume"}} {
 		rec := httptest.NewRecorder()
 		h.ServeHTTP(rec, httptest.NewRequest(c[0], c[1], nil))
 		if rec.Code != http.StatusNotFound {
@@ -290,4 +307,55 @@ func TestImportRoutesNeedAnImporter(t *testing.T) {
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, httptest.NewRequest("GET", "/settings", nil))
 	mustNotContain(t, rec.Body.String(), "Import from Yamtrack")
+}
+
+func TestImportStalledShowsNoteAndResumeButton(t *testing.T) {
+	e := newImpEnv(t, notFoundExcept("1", "2"))
+	e.upload(t, "file", "a.csv", []byte(impHeader+impRow(1, "One", "Planning")+impRow(2, "Two", "Planning")))
+	// the queue gave up on the job
+	if _, err := e.d.Exec(`UPDATE jobs SET state='failed', last_error='gave up after 10 partial runs'`); err != nil {
+		t.Fatal(err)
+	}
+	body := e.get("/settings/import", false).Body.String()
+	mustContain(t, body, "Failed", "gave up after 10 partial runs", `action="/settings/import/resume"`, "Resume import")
+	mustNotContain(t, body, "hx-trigger", "Cancel import")
+
+	rec := e.postPath("/settings/import/resume")
+	if rec.Code != 303 || rec.Header().Get("Location") != "/settings/import" {
+		t.Fatalf("resume: %d %q", rec.Code, rec.Header().Get("Location"))
+	}
+	jobsN := 0
+	for _, j := range e.jobs.got {
+		if j.Kind == yamtrack.KindImport {
+			jobsN++
+		}
+	}
+	if jobsN != 2 {
+		t.Errorf("import jobs = %d, want 2", jobsN)
+	}
+	body = e.get("/settings/import", false).Body.String()
+	mustContain(t, body, `hx-trigger="every 3s"`, "Cancel import")
+	mustNotContain(t, body, "Resume import")
+}
+
+func TestImportResumeRefusals(t *testing.T) {
+	e := newImpEnv(t, notFoundExcept())
+	if rec := e.postPath("/settings/import/resume"); rec.Code != http.StatusUnprocessableEntity {
+		t.Errorf("nothing to resume: %d", rec.Code)
+	}
+	e.upload(t, "file", "a.csv", []byte(impHeader+impRow(1, "One", "Planning")))
+	rec := e.postPath("/settings/import/resume")
+	if rec.Code != http.StatusConflict {
+		t.Errorf("active: %d", rec.Code)
+	}
+	mustContain(t, rec.Body.String(), `href="/settings/import"`)
+}
+
+func TestImportPageShowsRetryNote(t *testing.T) {
+	e := newImpEnv(t, notFoundExcept())
+	e.upload(t, "file", "a.csv", []byte(impHeader+impRow(1, "One", "Planning")))
+	if _, err := e.d.Exec(`UPDATE imports SET state='running', note='Waiting for AniList (retry 2/5)'`); err != nil {
+		t.Fatal(err)
+	}
+	mustContain(t, e.get("/settings/import", true).Body.String(), "Waiting for AniList (retry 2/5)", `hx-trigger="every 3s"`)
 }

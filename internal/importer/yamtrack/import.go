@@ -61,6 +61,11 @@ var (
 	ErrNoAnimeRows = errors.New("the file contains no importable anime rows")
 	// ErrActive is wrapped by *ActiveError: another import is pending or running.
 	ErrActive = errors.New("another import is still active")
+	// ErrNothingToResume: the latest import is not failed or cancelled, or has no pending rows.
+	ErrNothingToResume = errors.New("there is nothing to resume")
+
+	// errStopped: the import was cancelled while a row was being retried.
+	errStopped = errors.New("import stopped")
 )
 
 // ActiveError carries the id of the import that blocks a new upload.
@@ -103,6 +108,11 @@ type Importer struct {
 
 	mu   sync.Mutex
 	last time.Time // time of the last AniList request, for pacing
+
+	// opMu serialises Submit, Resume and reconcile: between committing an
+	// import and enqueuing its job the import has no job, and reconcile must
+	// not mistake that for a stalled import.
+	opMu sync.Mutex
 }
 
 // New returns an Importer. res may be nil when only uploads and reports are used.
@@ -141,18 +151,15 @@ func (im *Importer) Submit(ctx context.Context, filename string, r io.Reader) (i
 	}
 	filename = truncate(filepath.Base(strings.ReplaceAll(filename, `\`, "/")), maxFilenameRunes)
 
+	im.opMu.Lock()
+	defer im.opMu.Unlock()
 	tx, err := im.db.BeginTx(ctx, nil)
 	if err != nil {
 		return 0, fmt.Errorf("import: %w", err)
 	}
 	defer tx.Rollback()
-	var activeID int64
-	err = tx.QueryRowContext(ctx, `SELECT id FROM imports WHERE state IN ('pending','running') ORDER BY id DESC LIMIT 1`).Scan(&activeID)
-	if err == nil {
-		return 0, &ActiveError{ID: activeID}
-	}
-	if !errors.Is(err, sql.ErrNoRows) {
-		return 0, fmt.Errorf("import: %w", err)
+	if err := im.activeCheck(ctx, tx); err != nil {
+		return 0, err
 	}
 	ignored, stored := 0, 0
 	for _, s := range skipped {
@@ -209,10 +216,107 @@ func (im *Importer) Submit(ctx context.Context, filename string, r io.Reader) (i
 	return id, nil
 }
 
+type queryer interface {
+	execer
+	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
+}
+
+type execer interface {
+	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+}
+
+// reconcile marks pending or running imports that have no live
+// import_yamtrack job (pending or running, matched by payload import_id) as
+// failed: the queue gave up on the job (or it is gone) and nothing else will
+// ever finish the import. The job's last_error becomes the import's note.
+// Callers hold opMu.
+func reconcile(ctx context.Context, x execer) error {
+	_, err := x.ExecContext(ctx, `UPDATE imports SET state=?, finished_at=`+nowSQL+`,
+		note = 'Stopped: ' || COALESCE((SELECT NULLIF(j.last_error, '') FROM jobs j
+			WHERE j.kind = ? AND json_extract(j.payload_json, '$.import_id') = imports.id
+			ORDER BY j.id DESC LIMIT 1), 'the import job is no longer queued')
+		WHERE state IN ('pending','running') AND NOT EXISTS (SELECT 1 FROM jobs j
+			WHERE j.kind = ? AND j.state IN ('pending','running')
+			AND json_extract(j.payload_json, '$.import_id') = imports.id)`, stateFailed, KindImport, KindImport)
+	if err != nil {
+		return fmt.Errorf("reconcile imports: %w", err)
+	}
+	return nil
+}
+
+// activeCheck reconciles, then returns *ActiveError when an import is still
+// pending or running. Callers hold opMu and pass their transaction.
+func (im *Importer) activeCheck(ctx context.Context, tx queryer) error {
+	if err := reconcile(ctx, tx); err != nil {
+		return err
+	}
+	var activeID int64
+	err := tx.QueryRowContext(ctx, `SELECT id FROM imports WHERE state IN ('pending','running') ORDER BY id DESC LIMIT 1`).Scan(&activeID)
+	if err == nil {
+		return &ActiveError{ID: activeID}
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return fmt.Errorf("import: %w", err)
+	}
+	return nil
+}
+
+// Resume puts the latest import back to pending when it is failed or
+// cancelled and still has pending rows, and enqueues a new job for it. It
+// returns *ActiveError while another import is active and ErrNothingToResume
+// when there is nothing to continue.
+func (im *Importer) Resume(ctx context.Context) (int64, error) {
+	im.opMu.Lock()
+	defer im.opMu.Unlock()
+	tx, err := im.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, fmt.Errorf("resume import: %w", err)
+	}
+	defer tx.Rollback()
+	if err := im.activeCheck(ctx, tx); err != nil {
+		return 0, err
+	}
+	var id int64
+	var state string
+	var pending int
+	err = tx.QueryRowContext(ctx, `SELECT i.id, i.state, (SELECT COUNT(*) FROM import_rows r WHERE r.import_id = i.id AND r.outcome = ?)
+		FROM imports i ORDER BY i.id DESC LIMIT 1`, outcomePending).Scan(&id, &state, &pending)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, ErrNothingToResume
+	}
+	if err != nil {
+		return 0, fmt.Errorf("resume import: %w", err)
+	}
+	if (state != stateFailed && state != stateCancelled) || pending == 0 {
+		return 0, ErrNothingToResume
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE imports SET state=?, finished_at=NULL, note='' WHERE id=?`, statePending, id); err != nil {
+		return 0, fmt.Errorf("resume import: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, fmt.Errorf("resume import: %w", err)
+	}
+	if err := im.queue.Enqueue(ctx, KindImport, Payload{ImportID: id}); err != nil {
+		if _, uerr := im.db.ExecContext(context.WithoutCancel(ctx),
+			`UPDATE imports SET state=?, finished_at=`+nowSQL+`, note=? WHERE id=?`, stateFailed, "Stopped: could not queue the job: "+err.Error(), id); uerr != nil {
+			log.Printf("import %d: mark failed: %v", id, uerr)
+		}
+		return 0, fmt.Errorf("resume import: enqueue: %w", err)
+	}
+	return id, nil
+}
+
+// setNote sets (or with "" clears) the status line of a running import.
+func (im *Importer) setNote(ctx context.Context, id int64, note string) {
+	if _, err := im.db.ExecContext(context.WithoutCancel(ctx), `UPDATE imports SET note=? WHERE id=? AND state=?`, note, id, stateRunning); err != nil {
+		log.Printf("import %d: set note: %v", id, err)
+	}
+}
+
 // Cancel marks the active import cancelled; the job stops at the next row.
 // It does nothing when no import is active.
 func (im *Importer) Cancel(ctx context.Context) error {
-	_, err := im.db.ExecContext(ctx, `UPDATE imports SET state=?, finished_at=`+nowSQL+` WHERE state IN ('pending','running')`, stateCancelled)
+	_, err := im.db.ExecContext(ctx, `UPDATE imports SET state=?, finished_at=`+nowSQL+`, note='' WHERE state IN ('pending','running')`, stateCancelled)
 	if err != nil {
 		return fmt.Errorf("cancel import: %w", err)
 	}
@@ -237,7 +341,7 @@ func (im *Importer) Handler() jobs.Handler {
 		if state == "" || state == stateDone || state == stateFailed || state == stateCancelled {
 			return nil // unknown (deleted) or already finished
 		}
-		if _, err := im.db.ExecContext(ctx, `UPDATE imports SET state=? WHERE id=? AND state=?`, stateRunning, p.ImportID, statePending); err != nil {
+		if _, err := im.db.ExecContext(ctx, `UPDATE imports SET state=?, note='' WHERE id=? AND state=?`, stateRunning, p.ImportID, statePending); err != nil {
 			return fmt.Errorf("import %d: %w", p.ImportID, err)
 		}
 		for {
@@ -256,12 +360,14 @@ func (im *Importer) Handler() jobs.Handler {
 			if !ok {
 				break
 			}
-			if err := im.process(ctx, p.ImportID, row); err != nil {
+			if err := im.process(ctx, p.ImportID, row); errors.Is(err, errStopped) {
+				return nil // cancelled while retrying
+			} else if err != nil {
 				return err
 			}
 		}
 		_, err = im.db.ExecContext(context.WithoutCancel(ctx),
-			`UPDATE imports SET state=?, finished_at=`+nowSQL+` WHERE id=? AND state IN ('pending','running')`, stateDone, p.ImportID)
+			`UPDATE imports SET state=?, finished_at=`+nowSQL+`, note='' WHERE id=? AND state IN ('pending','running')`, stateDone, p.ImportID)
 		if err != nil {
 			return fmt.Errorf("import %d: %w", p.ImportID, err)
 		}
@@ -344,12 +450,19 @@ func (im *Importer) process(ctx context.Context, importID int64, pr pendingRow) 
 	if saved, err := im.store.FindByMALID(ctx, row.MALID); err != nil {
 		return fmt.Errorf("import %d: %w", importID, err)
 	} else if saved != nil {
-		return rec(outcomeSkipped, saved.ID, "already in your list")
+		return im.handleSaved(ctx, importID, pr.seq, row, saved)
 	}
 
 	var anime provider.Anime
 	notFound := false
 	for attempt := 0; ; attempt++ {
+		if attempt > 0 { // a Cancel during the wait must stop the retries
+			if state, err := im.state(ctx, importID); err != nil {
+				return err
+			} else if state != stateRunning {
+				return errStopped
+			}
+		}
 		if err := im.pace(ctx); err != nil {
 			return fmt.Errorf("import %d: %w", importID, err)
 		}
@@ -367,8 +480,10 @@ func (im *Importer) process(ctx context.Context, importID int64, pr pendingRow) 
 		}
 		if errors.Is(err, provider.ErrRateLimited) || errors.Is(err, provider.ErrUnavailable) {
 			if attempt >= maxRetries {
+				im.setNote(ctx, importID, "AniList is not answering, the import will be retried later")
 				return fmt.Errorf("import %d: MAL id %s: AniList is not answering: %w: %w", importID, row.MALID, jobs.ErrRetryLater, err)
 			}
+			im.setNote(ctx, importID, fmt.Sprintf("Waiting for AniList (retry %d/%d)", attempt+1, maxRetries))
 			if err := im.sleep(ctx, rateLimitWait); err != nil {
 				return fmt.Errorf("import %d: %w", importID, err)
 			}
@@ -379,6 +494,7 @@ func (im *Importer) process(ctx context.Context, importID int64, pr pendingRow) 
 
 	// The lookup is paid for: save and record even when shutdown has begun.
 	dctx := context.WithoutCancel(ctx)
+	im.setNote(dctx, importID, "")
 	if notFound {
 		return im.saveUnmatched(dctx, importID, pr.seq, row)
 	}
@@ -389,14 +505,57 @@ func (im *Importer) process(ctx context.Context, importID int64, pr pendingRow) 
 	id, err := im.store.AddToList(dctx, anime, entry)
 	switch {
 	case errors.Is(err, store.ErrAlreadySaved):
-		if saved, ferr := im.store.FindBySource(dctx, anime.Source, anime.ID); ferr == nil && saved != nil {
-			id = saved.ID
+		saved, ferr := im.store.FindBySource(dctx, anime.Source, anime.ID)
+		if ferr != nil {
+			return fmt.Errorf("import %d: %w", importID, ferr)
 		}
-		return rec(outcomeSkipped, id, "already in your list")
+		if saved == nil {
+			return rec(outcomeSkipped, 0, "already in your list")
+		}
+		return im.handleSaved(dctx, importID, pr.seq, row, saved)
 	case err != nil:
 		return rec(outcomeFailed, 0, err.Error())
 	}
 	return im.finishSaved(dctx, importID, pr.seq, id, outcomeImported, strings.Join(notes, "; "))
+}
+
+// handleSaved deals with a row whose anime is already stored. When the anime
+// has a list entry the row is skipped; when it has none (removed, or never
+// created) the entry is created from the row. Either way an anime whose sync
+// never started (state pending, e.g. a crash before its job was enqueued)
+// gets a sync job.
+func (im *Importer) handleSaved(ctx context.Context, importID int64, seq int, row Row, saved *store.Saved) error {
+	dctx := context.WithoutCancel(ctx)
+	le, err := im.store.GetListEntry(dctx, saved.ID)
+	if err != nil {
+		return fmt.Errorf("import %d: %w", importID, err)
+	}
+	syncNote := ""
+	if saved.SyncState == "pending" {
+		if err := im.queue.Enqueue(dctx, jobs.KindSyncAnime, jobs.SyncPayload{AnimeID: saved.ID}); err != nil {
+			syncNote = "sync not queued: " + err.Error()
+		}
+	}
+	if le != nil {
+		return im.record(dctx, importID, seq, outcomeSkipped, saved.ID, joinNotes("already in your list", syncNote))
+	}
+	entry, notes := buildEntry(row, saved.Episodes)
+	entry.AnimeID = saved.ID
+	if err := im.store.UpsertListEntry(dctx, entry); err != nil {
+		return im.record(dctx, importID, seq, outcomeFailed, saved.ID, err.Error())
+	}
+	return im.record(dctx, importID, seq, outcomeImported, saved.ID,
+		joinNotes(append([]string{"added to your list (anime was already saved)"}, append(notes, syncNote)...)...))
+}
+
+func joinNotes(notes ...string) string {
+	var out []string
+	for _, n := range notes {
+		if n != "" {
+			out = append(out, n)
+		}
+	}
+	return strings.Join(out, "; ")
 }
 
 func (im *Importer) saveUnmatched(ctx context.Context, importID int64, seq int, row Row) error {
@@ -447,7 +606,7 @@ func buildEntry(row Row, episodes *int) (store.ListEntry, []string) {
 		Status: row.Status, Rating: row.Rating, Progress: row.Progress,
 		StartedOn: row.StartedOn, FinishedOn: row.FinishedOn, Comment: row.Comment,
 	}
-	var notes []string
+	notes := append([]string(nil), row.Notes...)
 	if episodes != nil && e.Progress > *episodes {
 		e.Progress = *episodes
 		notes = append(notes, fmt.Sprintf("progress clamped to %d", *episodes))

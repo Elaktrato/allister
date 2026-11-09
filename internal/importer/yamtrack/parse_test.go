@@ -175,18 +175,24 @@ func parseOne(t *testing.T, fields string) (Row, []SkippedRow) {
 	return rows[0], skipped
 }
 
+// Score rule: "" or exactly zero is unrated; a negative or non-numeric score is
+// unrated with a note; anything else is rounded half up and clamped to 0..10
+// (so 0.4 is an explicit 0).
 func TestParseScoreMapping(t *testing.T) {
 	cases := []struct {
 		score string
 		want  int // -1 = nil
+		note  bool
 	}{
-		{"", -1}, {"0.0", -1}, {"0", -1}, {"8.0", 8}, {"7.5", 8}, {"7.4", 7}, {"10.0", 10},
-		{"11", 10}, {"1", 1}, {" 9.0 ", 9},
+		{"", -1, false}, {"0.0", -1, false}, {"0", -1, false}, {"0.4", 0, false}, {"0.5", 1, false},
+		{"8.0", 8, false}, {"7.5", 8, false}, {"7.4", 7, false}, {"10.0", 10, false},
+		{"11", 10, false}, {"1", 1, false}, {" 9.0 ", 9, false},
+		{"-1", -1, true}, {"abc", -1, true}, {"NaN", -1, true},
 	}
 	for _, c := range cases {
 		r, sk := parseOne(t, `1,mal,anime,T,,"`+c.score+`",Completed,,,,1`)
 		if len(sk) != 0 {
-			t.Errorf("score %q skipped: %+v", c.score, sk)
+			t.Errorf("score %q skipped the row: %+v", c.score, sk)
 			continue
 		}
 		switch {
@@ -195,10 +201,19 @@ func TestParseScoreMapping(t *testing.T) {
 		case c.want >= 0 && (r.Rating == nil || *r.Rating != c.want):
 			t.Errorf("score %q = %v, want %d", c.score, r.Rating, c.want)
 		}
+		if has := hasNote(r, "score"); has != c.note {
+			t.Errorf("score %q: notes = %v, want note %v", c.score, r.Notes, c.note)
+		}
 	}
-	if _, sk := parseOne(t, `1,mal,anime,T,,abc,Completed,,,,1`); len(sk) != 1 {
-		t.Errorf("non-numeric score must be reported: %+v", sk)
+}
+
+func hasNote(r Row, sub string) bool {
+	for _, n := range r.Notes {
+		if strings.Contains(n, sub) {
+			return true
+		}
 	}
+	return false
 }
 
 func TestParseStatusMapping(t *testing.T) {
@@ -236,9 +251,6 @@ func TestParseDateKeepsWrittenCalendarDay(t *testing.T) {
 			t.Errorf("%s: finish = %v", c.in, r.FinishedOn)
 		}
 	}
-	if r, _ := parseOne(t, `1,mal,anime,T,,,Completed,,garbage,,1`); r.StartedOn != nil {
-		t.Errorf("garbage date = %v, want nil", r.StartedOn)
-	}
 }
 
 func TestParseCapsTitleAndComment(t *testing.T) {
@@ -250,15 +262,32 @@ func TestParseCapsTitleAndComment(t *testing.T) {
 	if n := len([]rune(r.Comment)); n != 2000 {
 		t.Errorf("comment runes = %d", n)
 	}
-	if r, _ := parseOne(t, `7,mal,anime,"",,,Completed,,,,1`); r.Title != "MAL #7" {
-		t.Errorf("empty title = %q", r.Title)
+	if r, sk := parseOne(t, `7,mal,anime,"",,,Completed,,,,1`); len(sk) != 0 || r.Title != "MAL #7" || !hasNote(r, "title") {
+		t.Errorf("empty title = %q notes %v skipped %v", r.Title, r.Notes, sk)
 	}
 }
 
-func TestParseBadProgress(t *testing.T) {
-	for _, p := range []string{"x", "-1", "1.5"} {
-		if _, sk := parseOne(t, `1,mal,anime,T,,,Completed,,,,`+p); len(sk) != 1 || !strings.Contains(sk[0].Reason, "progress") {
-			t.Errorf("progress %q: %+v", p, sk)
+func TestParseBadProgressKeepsRowWithNote(t *testing.T) {
+	for _, p := range []string{"x", "-1", "1.5", "99999999999999999999", "5000000"} {
+		r, sk := parseOne(t, `1,mal,anime,T,,,Completed,,,,`+p)
+		if len(sk) != 0 || r.MALID != "1" || r.Progress != 0 || !hasNote(r, "progress") {
+			t.Errorf("progress %q: row %+v skipped %+v", p, r, sk)
 		}
+	}
+}
+
+func TestParseBadDatesKeepRowWithNotes(t *testing.T) {
+	r, sk := parseOne(t, `1,mal,anime,T,,,Completed,,garbage,"2024-03-05",1`)
+	if len(sk) != 0 || r.StartedOn != nil || !hasNote(r, "start date") {
+		t.Errorf("garbage start: %+v %+v", r, sk)
+	}
+	if r.FinishedOn == nil || !r.FinishedOn.Equal(*day(2024, 3, 5)) {
+		t.Errorf("plain date layout: %v", r.FinishedOn)
+	}
+	if hasNote(r, "end date") {
+		t.Errorf("plain date needs no note: %v", r.Notes)
+	}
+	if r, _ := parseOne(t, `1,mal,anime,T,,,Completed,,,nonsense,1`); r.FinishedOn != nil || !hasNote(r, "end date") {
+		t.Errorf("garbage end: %+v", r)
 	}
 }
