@@ -8,6 +8,8 @@ import (
 
 	"github.com/allister/allister/internal/config"
 	"github.com/allister/allister/internal/db"
+	"github.com/allister/allister/internal/provider"
+	"github.com/allister/allister/internal/provider/anilist"
 	"github.com/allister/allister/internal/settings"
 	"github.com/allister/allister/internal/web"
 )
@@ -27,5 +29,8 @@ func main() {
 	log.Printf("listening on %s (data dir %s)", addr, cfg.DataDir)
 	log.Fatal(http.ListenAndServe(addr, web.NewServer(web.Deps{
 		Settings: settings.New(database),
+		Providers: map[provider.Source]provider.Provider{
+			provider.AniList: anilist.New(anilist.DefaultURL, nil),
+		},
 	})))
 }

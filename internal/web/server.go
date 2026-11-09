@@ -8,6 +8,7 @@ import (
 	"log"
 	"net/http"
 
+	"github.com/allister/allister/internal/provider"
 	"github.com/allister/allister/internal/settings"
 )
 
@@ -21,7 +22,8 @@ var templateFS embed.FS
 
 // Deps holds server dependencies; it grows in later tasks.
 type Deps struct {
-	Settings *settings.Store
+	Settings  *settings.Store
+	Providers map[provider.Source]provider.Provider
 }
 
 type server struct {
@@ -31,7 +33,11 @@ type server struct {
 
 // pageNames lists every page template (templates/<name>.html). Add a page by
 // dropping its file in templates/ and listing it here.
-var pageNames = []string{"index", "settings"}
+var pageNames = []string{"index", "settings", "search"}
+
+// pagePartials lists extra template files a page needs (also rendered alone
+// for htmx requests).
+var pagePartials = map[string][]string{"search": {"templates/search_results.html"}}
 
 // parsePages builds one template set per page, each cloned from base.html plus
 // the page file, so pages can all define "title" and "content" without colliding.
@@ -40,7 +46,8 @@ func parsePages() map[string]*template.Template {
 	pages := make(map[string]*template.Template, len(pageNames))
 	for _, name := range pageNames {
 		t := template.Must(base.Clone())
-		pages[name] = template.Must(t.ParseFS(templateFS, "templates/"+name+".html"))
+		files := append([]string{"templates/" + name + ".html"}, pagePartials[name]...)
+		pages[name] = template.Must(t.ParseFS(templateFS, files...))
 	}
 	return pages
 }
@@ -55,6 +62,7 @@ func NewServer(deps Deps) http.Handler {
 	mux.HandleFunc("GET /{$}", s.index)
 	mux.HandleFunc("GET /settings", s.getSettings)
 	mux.HandleFunc("POST /settings", s.postSettings)
+	mux.HandleFunc("GET /anime/search", s.search)
 	return mux
 }
 
@@ -79,4 +87,22 @@ func (s *server) render(w http.ResponseWriter, r *http.Request, page string, dat
 
 func (s *server) index(w http.ResponseWriter, r *http.Request) {
 	s.render(w, r, "index", nil)
+}
+
+// renderPartial executes a named template of a page's set without the base layout.
+func (s *server) renderPartial(w http.ResponseWriter, page, name string, data any) {
+	t, ok := s.pages[page]
+	if !ok {
+		log.Printf("renderPartial: unknown page %q", page)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	var buf bytes.Buffer
+	if err := t.ExecuteTemplate(&buf, name, data); err != nil {
+		log.Printf("renderPartial %s/%s: %v", page, name, err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	buf.WriteTo(w)
 }
