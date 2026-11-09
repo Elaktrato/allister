@@ -7,7 +7,6 @@ import (
 
 	"github.com/allister/allister/internal/covers"
 	"github.com/allister/allister/internal/provider"
-	"github.com/allister/allister/internal/store"
 	"github.com/allister/allister/internal/titles"
 )
 
@@ -30,20 +29,7 @@ var templateFuncs = template.FuncMap{
 	},
 	// httpsURL returns u only when it is an absolute https URL, else "".
 	"httpsURL": httpsURL,
-	// statusLabel is the display name of a list status.
-	"statusLabel": func(s store.Status) string { return statusLabels[s] },
 }
-
-var statusLabels = map[store.Status]string{
-	store.Watching:    "Watching",
-	store.PlanToWatch: "Plan to watch",
-	store.Paused:      "Paused",
-	store.Completed:   "Completed",
-	store.Dropped:     "Dropped",
-}
-
-// statusOrder is the order statuses are offered in forms.
-var statusOrder = []store.Status{store.PlanToWatch, store.Watching, store.Completed, store.Paused, store.Dropped}
 
 func langLabel(tag string) string {
 	for _, o := range baseLangOptions {

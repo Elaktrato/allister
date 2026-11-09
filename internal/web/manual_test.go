@@ -8,14 +8,16 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"reflect"
 	"regexp"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/allister/allister/internal/provider"
+	"github.com/allister/allister/internal/library"
+	"github.com/allister/allister/internal/plugin"
+	"github.com/allister/allister/internal/plugin/plugintest"
 	"github.com/allister/allister/internal/settings"
-	"github.com/allister/allister/internal/store"
 )
 
 type upload struct {
@@ -48,31 +50,40 @@ func multipartBody(t testing.TB, v url.Values, up *upload) (*bytes.Buffer, strin
 	return &buf, mw.FormDataContentType()
 }
 
-func (e *env) postManual(t testing.TB, v url.Values, up *upload) *httptest.ResponseRecorder {
+// postMultipart posts v (and the optional upload) as multipart to target.
+func (e *env) postMultipart(t testing.TB, target string, v url.Values, up *upload) *httptest.ResponseRecorder {
 	t.Helper()
 	body, ct := multipartBody(t, v, up)
-	req := httptest.NewRequest("POST", "/anime/manual/new", body)
+	req := httptest.NewRequest("POST", target, body)
 	req.Header.Set("Content-Type", ct)
 	rec := httptest.NewRecorder()
 	e.h.ServeHTTP(rec, req)
 	return rec
 }
 
+func (e *env) postManual(t testing.TB, v url.Values, up *upload) *httptest.ResponseRecorder {
+	t.Helper()
+	return e.postMultipart(t, "/anime/manual/new", v, up)
+}
+
+// validManualValues is a valid anime manual form. ADAPTED: the schema's
+// fields are posted as field.<key> and the status is a core status class.
 func validManualValues() url.Values {
-	return url.Values{"title": {"My Show"}, "type": {"TV"}, "status": {"plan_to_watch"}}
+	return url.Values{"title": {"My Show"}, "field.type": {"TV"}, "status": {"planned"}}
 }
 
 func png1(extra string) []byte {
 	return append([]byte("\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00"), extra...)
 }
 
-func (e *env) animeCount(t testing.TB) int {
+// itemCount counts every saved item of every plugin.
+func (e *env) itemCount(t testing.TB) int {
 	t.Helper()
-	rows, err := e.st.List(context.Background(), nil)
-	if err != nil {
+	var n int
+	if err := e.d.QueryRow(`SELECT count(*) FROM items`).Scan(&n); err != nil {
 		t.Fatal(err)
 	}
-	return len(rows)
+	return n
 }
 
 func (e *env) coverFiles(t testing.TB) []string {
@@ -91,29 +102,37 @@ func (e *env) coverFiles(t testing.TB) []string {
 	return out
 }
 
-// mustRejectManual asserts a 422 with nothing saved and no cover file.
-func (e *env) mustRejectManual(t *testing.T, v url.Values, up *upload, want string) {
+// mustRejectAt asserts a 422 from target with nothing saved and no new cover file.
+func (e *env) mustRejectAt(t *testing.T, target string, v url.Values, up *upload, want string) string {
 	t.Helper()
-	rec := e.postManual(t, v, up)
+	items, files := e.itemCount(t), e.coverFiles(t)
+	rec := e.postMultipart(t, target, v, up)
 	if rec.Code != 422 {
 		t.Fatalf("status %d, want 422; body %s", rec.Code, rec.Body.String())
 	}
 	if want != "" {
 		mustContain(t, rec.Body.String(), want)
 	}
-	if n := e.animeCount(t); n != 0 {
-		t.Fatalf("%d anime saved", n)
+	if n := e.itemCount(t); n != items {
+		t.Fatalf("%d items saved", n-items)
 	}
-	if f := e.coverFiles(t); len(f) != 0 {
+	if f := e.coverFiles(t); !reflect.DeepEqual(f, files) {
 		t.Fatalf("cover files left: %v", f)
 	}
+	return rec.Body.String()
 }
 
-var manualLoc = regexp.MustCompile(`^/anime/manual/([0-9a-f-]{36})$`)
-
-func (e *env) createManual(t *testing.T, v url.Values, up *upload) string {
+func (e *env) mustRejectManual(t *testing.T, v url.Values, up *upload, want string) {
 	t.Helper()
-	rec := e.postManual(t, v, up)
+	e.mustRejectAt(t, "/anime/manual/new", v, up, want)
+}
+
+var manualLoc = regexp.MustCompile(`^/([a-z]+)/manual/([0-9a-f-]{36})(\?kind=[a-z]+)?$`)
+
+// createAt posts a manual form to target and returns the new item.
+func (e *env) createAt(t *testing.T, target string, v url.Values, up *upload) library.Item {
+	t.Helper()
+	rec := e.postMultipart(t, target, v, up)
 	if rec.Code != http.StatusSeeOther {
 		t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
 	}
@@ -121,7 +140,30 @@ func (e *env) createManual(t *testing.T, v url.Values, up *upload) string {
 	if m == nil {
 		t.Fatalf("location %q", rec.Header().Get("Location"))
 	}
-	return m[1]
+	items := e.savedItems(t, m[1], "manual", m[2])
+	if len(items) != 1 {
+		t.Fatalf("%d items", len(items))
+	}
+	return items[0]
+}
+
+func (e *env) createManual(t *testing.T, v url.Values, up *upload) string {
+	t.Helper()
+	return e.createAt(t, "/anime/manual/new", v, up).SourceID
+}
+
+// manualAnime returns the saved manual anime id with its entry.
+func (e *env) manualAnime(t *testing.T, id string) (library.Item, *library.Entry) {
+	t.Helper()
+	items := e.savedItems(t, "anime", "manual", id)
+	if len(items) != 1 {
+		t.Fatalf("%d items", len(items))
+	}
+	en, err := e.lib.Entry(context.Background(), items[0].ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return items[0], en
 }
 
 func TestManualFormRouteBeatsOverview(t *testing.T) {
@@ -131,7 +173,7 @@ func TestManualFormRouteBeatsOverview(t *testing.T) {
 		t.Fatalf("status %d", rec.Code)
 	}
 	mustContain(t, rec.Body.String(), `action="/anime/manual/new"`, `enctype="multipart/form-data"`,
-		`name="title"`, `name="type"`, `name="cover"`, `name="status"`)
+		`name="title"`, `name="field.type"`, `name="cover"`, `name="status"`)
 }
 
 func TestManualFormVaryHeader(t *testing.T) {
@@ -150,10 +192,15 @@ func TestManualFormDefaultsToPreferredLanguage(t *testing.T) {
 	mustContain(t, b, `<option value="en" selected>`)
 	mustNotContain(t, b, `<option value="ja" selected>`)
 	id := e.createManual(t, validManualValues(), nil) // no title_lang sent: preferred
-	sv, _ := e.st.FindBySource(context.Background(), provider.Manual, id)
-	if sv == nil || len(sv.Titles) != 1 || sv.Titles[0].Lang != "en" || sv.Titles[0].Text != "My Show" {
-		t.Fatalf("titles %+v", sv)
+	it, _ := e.manualAnime(t, id)
+	if !reflect.DeepEqual(it.Titles, []plugin.Title{{Lang: "en", Text: "My Show"}}) {
+		t.Fatalf("titles %+v", it.Titles)
 	}
+	// a preferred language the kind does not offer falls back to the first
+	if err := e.set.Set(context.Background(), settings.KeyTitleLang, "de"); err != nil {
+		t.Fatal(err)
+	}
+	mustContain(t, e.get("/anime/manual/new").Body.String(), `<option value="ja" selected>`)
 }
 
 func TestManualRequiresTitleAndType(t *testing.T) {
@@ -162,27 +209,25 @@ func TestManualRequiresTitleAndType(t *testing.T) {
 	v.Set("title", "   ")
 	e.mustRejectManual(t, v, nil, "Please enter a title")
 	v = validManualValues()
-	v.Set("type", "")
+	v.Set("field.type", "")
 	e.mustRejectManual(t, v, nil, "Please choose a type")
-	v.Set("type", "MANGA")
+	v.Set("field.type", "MANGA")
+	e.mustRejectManual(t, v, nil, "Please choose a type")
+	v.Del("field.type")
 	e.mustRejectManual(t, v, nil, "Please choose a type")
 }
 
 func TestManualSavesWithOptionalFieldsEmpty(t *testing.T) {
 	e := newEnv(t)
 	id := e.createManual(t, validManualValues(), nil)
-	sv, err := e.st.FindBySource(context.Background(), provider.Manual, id)
-	if err != nil || sv == nil {
-		t.Fatalf("%v %v", sv, err)
+	it, en := e.manualAnime(t, id)
+	if len(it.Fields) != 1 || it.Fields["type"].Text != "TV" || it.CoverPath != "" || len(it.Genres) != 0 || len(it.Tags) != 0 {
+		t.Fatalf("%+v", it)
 	}
-	if sv.Episodes != nil || sv.Year != nil || sv.Studio != "" || sv.Synopsis != "" || sv.CoverPath != "" || sv.Type != "TV" {
-		t.Fatalf("%+v", sv)
+	if it.SyncState != "done" {
+		t.Fatalf("sync_state %q", it.SyncState)
 	}
-	if sv.SyncState != "done" {
-		t.Fatalf("sync_state %q", sv.SyncState)
-	}
-	en, _ := e.st.GetListEntry(context.Background(), sv.ID)
-	if en == nil || en.Status != store.PlanToWatch || en.Rating != nil || en.Progress != 0 {
+	if en == nil || en.Status != library.Planned || en.Rating != nil || en.Progress["episode"] != 0 {
 		t.Fatalf("entry %+v", en)
 	}
 	if len(e.jobs.got) != 0 {
@@ -197,25 +242,31 @@ func TestManualSavesAllFields(t *testing.T) {
 	e := newEnv(t)
 	v := validManualValues()
 	v.Set("title_lang", "ja-latn")
-	v.Set("type", "MOVIE")
-	v.Set("episodes", "12")
-	v.Set("year", "1999")
-	v.Set("studio", "Studio X")
-	v.Set("synopsis", "Para one.\r\n\r\nPara <b>two</b>.")
-	v.Set("status", "watching")
+	v.Set("field.type", "MOVIE")
+	v.Set("field.episodes", "12")
+	v.Set("field.year", "1999")
+	v.Set("field.studio", "Studio X")
+	v.Set("field.synopsis", "Para one.\r\n\r\nPara <b>two</b>.")
+	v.Set("field.started_on", "1999-04-01")
+	v.Set("genres", "Drama, Mystery")
+	v.Set("tags", "Time Travel:80!\nTwist")
+	v.Set("status", "active")
 	v.Set("rating", "0")
 	v.Set("progress", "5")
 	v.Set("started_on", "2024-01-02")
 	v.Set("finished_on", "2024-02-03")
 	v.Set("comment", "fun")
 	id := e.createManual(t, v, nil)
-	sv, _ := e.st.FindBySource(context.Background(), provider.Manual, id)
-	if sv.Type != "MOVIE" || *sv.Episodes != 12 || *sv.Year != 1999 || sv.Studio != "Studio X" ||
-		sv.Synopsis != "Para one.\r\n\r\nPara <b>two</b>." || sv.Titles[0].Lang != "ja-latn" {
-		t.Fatalf("%+v", sv)
+	it, en := e.manualAnime(t, id)
+	f := it.Fields
+	if f["type"].Text != "MOVIE" || *f["episodes"].Num != 12 || *f["year"].Num != 1999 || f["studio"].Text != "Studio X" ||
+		f["synopsis"].Text != "Para one.\r\n\r\nPara <b>two</b>." || it.Titles[0].Lang != "ja-latn" || fmtDay(f["started_on"].Date) != "1999-04-01" {
+		t.Fatalf("%+v", it)
 	}
-	en, _ := e.st.GetListEntry(context.Background(), sv.ID)
-	if en.Status != store.Watching || en.Rating == nil || *en.Rating != 0 || en.Progress != 5 ||
+	if !reflect.DeepEqual(it.Genres, []string{"Drama", "Mystery"}) || len(it.Tags) != 2 || *it.Tags[0].Rank != 80 || !it.Tags[0].Spoiler {
+		t.Fatalf("terms %+v %+v", it.Genres, it.Tags)
+	}
+	if en.Status != library.Active || en.Rating == nil || *en.Rating != 0 || en.Progress["episode"] != 5 ||
 		fmtDay(en.StartedOn) != "2024-01-02" || fmtDay(en.FinishedOn) != "2024-02-03" || en.Comment != "fun" {
 		t.Fatalf("entry %+v", en)
 	}
@@ -228,31 +279,41 @@ func TestManualRatingBlankIsNil(t *testing.T) {
 	e := newEnv(t)
 	v := validManualValues()
 	v.Set("rating", "")
-	id := e.createManual(t, v, nil)
-	sv, _ := e.st.FindBySource(context.Background(), provider.Manual, id)
-	en, _ := e.st.GetListEntry(context.Background(), sv.ID)
+	_, en := e.manualAnime(t, e.createManual(t, v, nil))
 	if en.Rating != nil {
 		t.Fatalf("rating %v", *en.Rating)
 	}
 }
 
+// ADAPTED: the generic limits are 1000 characters for a one-line text field
+// (was 200 for the studio) and 20000 for a text-section field (was 5000 for
+// the synopsis, now the library's limit).
 func TestManualInvalidFieldsRejected(t *testing.T) {
 	long := func(n int) string { return strings.Repeat("あ", n) }
 	cases := map[string]func(url.Values){
-		"title_lang":    func(v url.Values) { v.Set("title_lang", "xx") },
-		"type":          func(v url.Values) { v.Set("type", "BOGUS") },
-		"episodes nan":  func(v url.Values) { v.Set("episodes", "abc") },
-		"episodes zero": func(v url.Values) { v.Set("episodes", "0") },
-		"episodes big":  func(v url.Values) { v.Set("episodes", "10001") },
-		"year low":      func(v url.Values) { v.Set("year", "1899") },
-		"year high":     func(v url.Values) { v.Set("year", "2101") },
-		"title long":    func(v url.Values) { v.Set("title", long(301)) },
-		"studio long":   func(v url.Values) { v.Set("studio", long(201)) },
-		"synopsis long": func(v url.Values) { v.Set("synopsis", long(5001)) },
-		"status":        func(v url.Values) { v.Set("status", "nope") },
-		"rating":        func(v url.Values) { v.Set("rating", "11") },
-		"date":          func(v url.Values) { v.Set("started_on", "yesterday") },
-		"progress>eps":  func(v url.Values) { v.Set("episodes", "12"); v.Set("progress", "13") },
+		"title_lang":     func(v url.Values) { v.Set("title_lang", "xx") },
+		"type":           func(v url.Values) { v.Set("field.type", "BOGUS") },
+		"episodes nan":   func(v url.Values) { v.Set("field.episodes", "abc") },
+		"episodes zero":  func(v url.Values) { v.Set("field.episodes", "0") },
+		"episodes big":   func(v url.Values) { v.Set("field.episodes", "10001") },
+		"episodes hex":   func(v url.Values) { v.Set("field.episodes", "0x10") },
+		"episodes inf":   func(v url.Values) { v.Set("field.episodes", "Inf") },
+		"year low":       func(v url.Values) { v.Set("field.year", "1899") },
+		"year high":      func(v url.Values) { v.Set("field.year", "2101") },
+		"date":           func(v url.Values) { v.Set("field.started_on", "1999-13-01") },
+		"title long":     func(v url.Values) { v.Set("title", long(301)) },
+		"title control":  func(v url.Values) { v.Set("title", "a\x07b") },
+		"studio long":    func(v url.Values) { v.Set("field.studio", long(1001)) },
+		"studio newline": func(v url.Values) { v.Set("field.studio", "a\nb") },
+		"synopsis long":  func(v url.Values) { v.Set("field.synopsis", long(20001)) },
+		"synopsis ctrl":  func(v url.Values) { v.Set("field.synopsis", "a\x00b") },
+		"unknown field":  func(v url.Values) { v.Set("field.nope", "x") },
+		"genre control":  func(v url.Values) { v.Set("genres", "a\x07") },
+		"tag rank":       func(v url.Values) { v.Set("tags", "x:101") },
+		"status":         func(v url.Values) { v.Set("status", "nope") },
+		"rating":         func(v url.Values) { v.Set("rating", "11") },
+		"entry date":     func(v url.Values) { v.Set("started_on", "yesterday") },
+		"progress>eps":   func(v url.Values) { v.Set("field.episodes", "12"); v.Set("progress", "13") },
 	}
 	for name, mod := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -266,8 +327,9 @@ func TestManualInvalidFieldsRejected(t *testing.T) {
 	e := newEnv(t)
 	v := validManualValues()
 	v.Set("title", long(300))
-	v.Set("episodes", "10000")
-	v.Set("year", "2100")
+	v.Set("field.episodes", "10000")
+	v.Set("field.year", "2100")
+	v.Set("field.studio", long(1000))
 	e.createManual(t, v, nil)
 }
 
@@ -275,10 +337,12 @@ func TestManualInvalidKeepsInput(t *testing.T) {
 	e := newEnv(t)
 	v := validManualValues()
 	v.Set("title", `Ti"tle <x>`)
-	v.Set("type", "OVA")
-	v.Set("year", "1800")
-	v.Set("studio", "Studio Q")
-	v.Set("synopsis", "Some text")
+	v.Set("field.type", "OVA")
+	v.Set("field.year", "1800")
+	v.Set("field.studio", "Studio Q")
+	v.Set("field.synopsis", "Some text")
+	v.Set("genres", "Gen <g>")
+	v.Set("tags", "Tag <t>:5!")
 	v.Set("comment", "my comment")
 	v.Set("rating", "7")
 	v.Set("status", "dropped")
@@ -289,8 +353,8 @@ func TestManualInvalidKeepsInput(t *testing.T) {
 	b := rec.Body.String()
 	mustContain(t, b, "Ti&#34;tle &lt;x&gt;", "Studio Q", "Some text", "my comment", `value="7"`,
 		`<option value="OVA" selected>`, `<option value="dropped" selected>`, "Year must be",
-		"choose the cover file again")
-	mustNotContain(t, b, "<x>")
+		"choose the cover file again", "Gen &lt;g&gt;", "Tag &lt;t&gt;:5!")
+	mustNotContain(t, b, "<x>", "<g>", "<t>")
 	if f := e.coverFiles(t); len(f) != 0 {
 		t.Fatalf("files %v", f)
 	}
@@ -316,15 +380,15 @@ func TestManualCoverSavedAndShown(t *testing.T) {
 	e := newEnv(t)
 	// client lies about type and name; sniffing decides
 	id := e.createManual(t, validManualValues(), &upload{"cover", "evil.html", "text/html", png1("a")})
-	sv, _ := e.st.FindBySource(context.Background(), provider.Manual, id)
-	if !regexp.MustCompile(`^[0-9a-f]{64}\.png$`).MatchString(sv.CoverPath) {
-		t.Fatalf("cover_path %q", sv.CoverPath)
+	it, _ := e.manualAnime(t, id)
+	if !regexp.MustCompile(`^[0-9a-f]{64}\.png$`).MatchString(it.CoverPath) {
+		t.Fatalf("cover_path %q", it.CoverPath)
 	}
-	if f := e.coverFiles(t); len(f) != 1 || f[0] != sv.CoverPath {
+	if f := e.coverFiles(t); len(f) != 1 || f[0] != it.CoverPath {
 		t.Fatalf("files %v", f)
 	}
-	mustContain(t, e.get("/anime/manual/"+id).Body.String(), `src="/covers/`+sv.CoverPath+`"`)
-	if rec := e.get("/covers/" + sv.CoverPath); rec.Code != 200 {
+	mustContain(t, e.get("/anime/manual/"+id).Body.String(), `src="/covers/`+it.CoverPath+`"`)
+	if rec := e.get("/covers/" + it.CoverPath); rec.Code != 200 {
 		t.Fatalf("serve %d", rec.Code)
 	}
 }
@@ -338,19 +402,20 @@ func TestManualCoverWithoutCoversDir(t *testing.T) {
 		t.Fatalf("status %d", rec.Code)
 	}
 	mustContain(t, rec.Body.String(), "not available")
-	if e.animeCount(t) != 0 {
+	if e.itemCount(t) != 0 {
 		t.Fatal("saved")
 	}
+	mustNotContain(t, e.get("/anime/manual/new").Body.String(), `name="cover"`)
 }
 
 func TestManualOversizeRequest(t *testing.T) {
 	e := newEnv(t)
 	big := png1(strings.Repeat("a", 13<<20))
 	rec := e.postManual(t, validManualValues(), &upload{"cover", "c.png", "image/png", big})
-	if rec.Code != 413 && rec.Code != 422 {
+	if rec.Code != 413 {
 		t.Fatalf("status %d", rec.Code)
 	}
-	if e.animeCount(t) != 0 || len(e.coverFiles(t)) != 0 {
+	if e.itemCount(t) != 0 || len(e.coverFiles(t)) != 0 {
 		t.Fatal("something saved")
 	}
 }
@@ -359,6 +424,36 @@ func TestManualCoverOver10MiBRejected(t *testing.T) {
 	e := newEnv(t)
 	big := png1(strings.Repeat("a", 10<<20)) // within the request cap, over the image cap
 	e.mustRejectManual(t, validManualValues(), &upload{"cover", "c.png", "image/png", big}, "10 MiB")
+}
+
+// A database failure after the cover file was written removes the file
+// unless another row references the same (content-hash) name.
+func TestManualCoverCleanupWhenSaveFails(t *testing.T) {
+	e := newEnv(t)
+	up := &upload{"cover", "c.png", "image/png", png1("shared")}
+	if _, err := e.d.Exec(`CREATE TRIGGER boom BEFORE INSERT ON items BEGIN SELECT RAISE(ABORT, 'boom'); END`); err != nil {
+		t.Fatal(err)
+	}
+	if rec := e.postManual(t, validManualValues(), up); rec.Code != 500 {
+		t.Fatalf("status %d", rec.Code)
+	}
+	if f := e.coverFiles(t); len(f) != 0 || e.itemCount(t) != 0 {
+		t.Fatalf("orphan file %v", f)
+	}
+	if _, err := e.d.Exec(`DROP TRIGGER boom`); err != nil {
+		t.Fatal(err)
+	}
+	id := e.createManual(t, validManualValues(), up)
+	it, _ := e.manualAnime(t, id)
+	if _, err := e.d.Exec(`CREATE TRIGGER boom BEFORE INSERT ON items BEGIN SELECT RAISE(ABORT, 'boom'); END`); err != nil {
+		t.Fatal(err)
+	}
+	if rec := e.postManual(t, validManualValues(), up); rec.Code != 500 {
+		t.Fatalf("status %d", rec.Code)
+	}
+	if f := e.coverFiles(t); len(f) != 1 || f[0] != it.CoverPath {
+		t.Fatalf("shared file removed: %v", f)
+	}
 }
 
 func TestManualEntryAppearsInList(t *testing.T) {
@@ -391,8 +486,8 @@ func TestManualIdenticalTitlesAllowed(t *testing.T) {
 	if a == b {
 		t.Fatal("same id")
 	}
-	if e.animeCount(t) != 2 {
-		t.Fatalf("count %d", e.animeCount(t))
+	if e.itemCount(t) != 2 {
+		t.Fatalf("count %d", e.itemCount(t))
 	}
 }
 
@@ -411,21 +506,150 @@ func TestListEmptyStateLinksToManual(t *testing.T) {
 
 func TestCleanupCoverKeepsSharedFiles(t *testing.T) {
 	e := newEnv(t)
-	s := &server{deps: Deps{Store: e.st, CoversDir: e.covers}}
+	s := &server{deps: Deps{Library: e.lib, CoversDir: e.covers}}
 	os.MkdirAll(e.covers, 0o755)
 	shared, orphan := "shared.png", "orphan.png"
 	for _, n := range []string{shared, orphan} {
 		os.WriteFile(e.covers+"/"+n, []byte("x"), 0o644)
 	}
-	a := provider.Anime{SearchResult: provider.SearchResult{Source: provider.Manual, ID: "m", CoverURL: shared,
-		Titles: []provider.Title{{Lang: "en", Text: "Shared"}}}}
-	if _, err := e.st.SaveAnime(context.Background(), a); err != nil {
-		t.Fatal(err)
-	}
-	req := httptest.NewRequest("GET", "/", nil)
-	s.cleanupCover(req, shared)
-	s.cleanupCover(req, orphan)
+	d := plugin.ItemData{ItemSummary: plugin.ItemSummary{Source: "manual", ID: "m", CoverURL: shared, Titles: ttl("Shared")}}
+	e.saveFixture(t, "anime", "anime", d)
+	s.cleanupCover(context.Background(), shared)
+	s.cleanupCover(context.Background(), orphan)
+	s.cleanupCover(context.Background(), "")
 	if f := e.coverFiles(t); len(f) != 1 || f[0] != shared {
 		t.Fatalf("files %v", f)
+	}
+}
+
+func TestManualFormOffersGenresAndTags(t *testing.T) {
+	e := newFixtureEnv(t)
+	b := e.get("/anime/manual/new").Body.String()
+	mustContain(t, b, `name="genres"`, `name="tags"`, "Time Travel:80!", "comma")
+	b = e.get("/book/manual/new").Body.String()
+	mustContain(t, b, `name="genres"`)
+	mustNotContain(t, b, `name="tags"`)
+	// genres enabled but not editable: no input
+	e2 := newFixtureEnv(t, func(book, _ *plugintest.Plugin) { book.M.Kinds[0].Genres.Editable = false })
+	mustNotContain(t, e2.get("/book/manual/new").Body.String(), `name="genres"`)
+}
+
+func TestManualBookFixture(t *testing.T) {
+	e := newFixtureEnv(t, func(book, _ *plugintest.Plugin) { book.M.Kinds[0].Fields[1].Unit = "pages" })
+	b := e.get("/book/manual/new").Body.String()
+	mustContain(t, b, "Add book manually", `action="/book/manual/new"`, `name="field.author"`, `name="field.isbn"`,
+		`type="number" name="field.pages"`, `min="1"`, ">pages<", `name="genres"`, `name="progress.pages"`,
+		"Want to read", `<option value="en" selected>`)
+	mustNotContain(t, b, "episode", "Episode", "Authors", `name="tags"`) // the nav names other plugins
+	v := url.Values{"title": {"Earthsea"}, "field.author": {"Ursula K. Le Guin"}, "field.pages": {"183"},
+		"field.isbn": {"978-0"}, "genres": {"Fantasy\nYoung adult"}, "status": {"active"}, "progress.pages": {"20"}}
+	it := e.createAt(t, "/book/manual/new", v, nil)
+	if it.PluginID != "book" || it.Kind != "book" || it.Fields["author"].Text != "Ursula K. Le Guin" || *it.Fields["pages"].Num != 183 ||
+		it.Fields["isbn"].Text != "978-0" || !reflect.DeepEqual(it.Genres, []string{"Fantasy", "Young adult"}) || it.SyncState != "done" {
+		t.Fatalf("%+v", it)
+	}
+	en, _ := e.lib.Entry(context.Background(), it.ID)
+	if en.Status != library.Active || en.Progress["pages"] != 20 {
+		t.Fatalf("entry %+v", en)
+	}
+	if len(e.jobs.got) != 0 {
+		t.Fatalf("job for a fixture: %+v", e.jobs.got)
+	}
+	// page above the typed total, page count below the field minimum
+	v.Set("progress.pages", "200")
+	e.mustRejectAt(t, "/book/manual/new", withTitle(v, "Other"), nil, "")
+	v.Set("progress.pages", "1")
+	v.Set("field.pages", "0")
+	e.mustRejectAt(t, "/book/manual/new", withTitle(v, "Other"), nil, "Pages must be")
+}
+
+// withTitle returns a copy of v with another title (mustRejectAt checks that
+// nothing new was saved, so these tests run on an empty library).
+func withTitle(v url.Values, title string) url.Values {
+	out := url.Values{}
+	for k, x := range v {
+		out[k] = append([]string(nil), x...)
+	}
+	out.Set("title", title)
+	return out
+}
+
+func tvWithNetworks(_, tv *plugintest.Plugin) {
+	k := &tv.M.Kinds[0]
+	k.Fields = append(k.Fields, plugin.FieldDef{Key: "networks", Label: "Networks", Type: plugin.FieldList, Editable: true})
+}
+
+func TestManualTVFixture(t *testing.T) {
+	e := newFixtureEnv(t, tvWithNetworks)
+	b := e.get("/tv/manual/new").Body.String()
+	mustContain(t, b, `<select name="field.type"`, `<option value="series">`, `<option value="miniseries">`,
+		`<textarea name="field.networks"`, "one per line", `name="tags"`, `name="progress.episode"`,
+		`<option value="original">`)
+	v := url.Values{"title": {"Dark"}, "title_lang": {"original"}, "field.type": {"series"}, "status": {"planned"},
+		"field.networks": {"Netflix\r\nNetflix\n  ZDF  \n\nnetflix"},
+		"genres":         {"Drama, Mystery\nThriller,,"},
+		"tags":           {"Time Travel:80!\nTwist\nRe:Zero\nSpoiler!\n  Plot:0  "}}
+	it := e.createAt(t, "/tv/manual/new", v, nil)
+	if !reflect.DeepEqual(it.Fields["networks"].List, []string{"Netflix", "ZDF", "netflix"}) {
+		t.Fatalf("list %q", it.Fields["networks"].List)
+	}
+	if !reflect.DeepEqual(it.Genres, []string{"Drama", "Mystery", "Thriller"}) || it.Titles[0].Lang != "original" {
+		t.Fatalf("%+v", it)
+	}
+	want := []plugin.Tag{{Name: "Time Travel", Rank: ip(80), Spoiler: true}, {Name: "Twist"}, {Name: "Re:Zero"},
+		{Name: "Spoiler", Spoiler: true}, {Name: "Plot", Rank: ip(0)}}
+	if !reflect.DeepEqual(it.Tags, want) {
+		t.Fatalf("tags %+v", it.Tags)
+	}
+	e2 := newFixtureEnv(t, tvWithNetworks)
+	many := make([]string, 51)
+	for i := range many {
+		many[i] = "n" + idStr(int64(i))
+	}
+	for name, mod := range map[string]func(url.Values){
+		"51 values": func(v url.Values) { v.Set("field.networks", strings.Join(many, "\n")) },
+		"enum":      func(v url.Values) { v.Set("field.type", "movie") },
+		"rank":      func(v url.Values) { v.Set("tags", "x:101") },
+		"rank sign": func(v url.Values) { v.Set("tags", "x:-1") },
+		"lang":      func(v url.Values) { v.Set("title_lang", "ja") },
+	} {
+		w := withTitle(v, "Other")
+		mod(w)
+		rec := e2.postMultipart(t, "/tv/manual/new", w, nil)
+		if rec.Code != 422 {
+			t.Errorf("%s: %d", name, rec.Code)
+		}
+	}
+	if e2.itemCount(t) != 0 {
+		t.Fatal("saved")
+	}
+}
+
+func TestManualRequiredFieldsEnforced(t *testing.T) {
+	e := newFixtureEnv(t, func(book, _ *plugintest.Plugin) { book.M.Kinds[0].Fields[0].Required = true })
+	mustContain(t, e.get("/book/manual/new").Body.String(), `name="field.author" value="" required`)
+	e.mustRejectAt(t, "/book/manual/new", url.Values{"title": {"X"}, "status": {"planned"}}, nil, "Please enter author")
+	e.mustRejectAt(t, "/book/manual/new", url.Values{"title": {"X"}, "status": {"planned"}, "field.author": {"   "}}, nil, "Please enter author")
+}
+
+func TestManualUnknownKind404(t *testing.T) {
+	e := newFixtureEnv(t)
+	if c := e.get("/book/manual/new?kind=comic").Code; c != 404 {
+		t.Fatalf("%d", c)
+	}
+	if c := e.postMultipart(t, "/book/manual/new?kind=comic", url.Values{"title": {"x"}}, nil).Code; c != 404 {
+		t.Fatalf("post %d", c)
+	}
+}
+
+func TestManualKindSwitch(t *testing.T) {
+	e := newFixtureEnv(t, withComicKind)
+	b := e.get("/book/manual/new").Body.String()
+	mustContain(t, b, `href="/book/manual/new?kind=comic"`)
+	b = e.get("/book/manual/new?kind=comic").Body.String()
+	mustContain(t, b, `action="/book/manual/new?kind=comic"`)
+	it := e.createAt(t, "/book/manual/new?kind=comic", url.Values{"title": {"Comic"}, "status": {"planned"}}, nil)
+	if it.Kind != "comic" {
+		t.Fatalf("kind %q", it.Kind)
 	}
 }

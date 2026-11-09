@@ -815,11 +815,11 @@ func TestListGetIsFullPageWithVary(t *testing.T) {
 	}
 }
 
+// ADAPTED: every plugin has the generic manual route now.
 func TestEmptyListHintLinksManualOnlyWhenMounted(t *testing.T) {
 	e := newFixtureEnv(t)
 	b := e.get("/tv").Body.String()
-	mustContain(t, b, "No shows in your list yet.", "Your list is empty", `href="/tv/search"`)
-	mustNotContain(t, b, `href="/tv/manual/new"`) // no manual route for this plugin yet
+	mustContain(t, b, "No shows in your list yet.", "Your list is empty", `href="/tv/search"`, `href="/tv/manual/new"`)
 	mustContain(t, e.get("/anime").Body.String(), `href="/anime/manual/new"`, `href="/anime/search"`)
 	e.addFixture(t, "tv", "show", tvShow("1", "Dark"), library.Entry{Status: library.Active})
 	d := e.get("/tv?status=dropped").Body.String()

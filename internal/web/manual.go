@@ -1,269 +1,211 @@
 package web
 
+// The generic manual create form: GET|POST /{plugin}/manual/new?kind=. The
+// form is generated from the kind's schema (details.go: title and title
+// language, every Editable field, genres and tags, a cover upload) plus the
+// list entry through the shared entry parser (parseEntryForm). Everything is
+// validated before anything is written; the item and its entry are saved in
+// ONE transaction (library.AddToList) with sync state done and no sync job.
+
 import (
 	"errors"
 	"fmt"
-	"log"
-	"mime/multipart"
 	"net/http"
-	"os"
-	"path/filepath"
-	"strconv"
+	"net/url"
+	"slices"
 	"strings"
 	"unicode/utf8"
 
-	"github.com/allister/allister/internal/covers"
 	"github.com/allister/allister/internal/ids"
-	"github.com/allister/allister/internal/provider"
-	"github.com/allister/allister/internal/store"
+	"github.com/allister/allister/internal/library"
+	"github.com/allister/allister/internal/plugin"
 )
 
-const (
-	maxManualBody     = 12 << 20
-	maxManualMemory   = 1 << 20
-	maxTitleRunes     = 300
-	maxStudioRunes    = 200
-	maxManualSynopsis = 5000
-	maxManualEpisodes = 10000
-	minManualYear     = 1900
-	maxManualYear     = 2100
-)
-
-// manualTypes is the AniList format vocabulary, so manual entries sort and
-// filter like sourced ones.
-var manualTypes = []langOption{
-	{"TV", "TV"}, {"TV_SHORT", "TV short"}, {"MOVIE", "Movie"}, {"SPECIAL", "Special"},
-	{"OVA", "OVA"}, {"ONA", "ONA"}, {"MUSIC", "Music"},
-}
-
-// manualForm is the form page's data; string fields echo the user's input.
+// manualForm is the data of manual_form.html; the string fields echo the
+// user's input.
 type manualForm struct {
-	legacyEntryForm
-	Title, TitleLang, Type string
-	EpisodesIn, Year       string
-	Studio, Synopsis       string
-	Langs                  []langOption
-	Types                  []langOption
-	FileDropped            bool
-	CoversEnabled          bool
+	itemForm
+	entryValues
+	Title, TitleLang string
+	Langs            []statusOpt
+	Statuses         []statusOpt
+	Progress         []progressInput
+	// Kinds links the form of every kind (only when there are several).
+	Kinds []choice
 }
 
-func (s *server) newManualForm(r *http.Request) (manualForm, error) {
-	opts, err := s.titleLangOptions(r)
-	if err != nil {
-		return manualForm{}, err
+// manualPath is the manual form URL of kind k (with ?kind= when the plugin
+// has several kinds).
+func manualPath(m plugin.Manifest, k string) string {
+	u := "/" + url.PathEscape(m.ID) + "/manual/new"
+	if len(m.Kinds) > 1 {
+		u += "?kind=" + url.QueryEscape(k)
 	}
-	f := manualForm{
-		legacyEntryForm: legacyEntryForm{Status: string(store.PlanToWatch)},
-		TitleLang:       s.deps.Settings.TitleLang(r.Context()),
-		Langs:           opts,
-		Types:           manualTypes,
-		CoversEnabled:   s.deps.CoversDir != "",
-	}
-	f.legacyEntryForm = f.legacyEntryForm.withStatuses()
-	return f, nil
+	return u
 }
 
-func (s *server) getManualNew(w http.ResponseWriter, r *http.Request) {
-	f, err := s.newManualForm(r)
-	if err != nil {
-		s.fail(w, r, err, "")
+// manualKind resolves the plugin and kind of a manual form request (the
+// first kind unless ?kind= names another); unknown kinds get the 404 page.
+func (s *server) manualKind(w http.ResponseWriter, r *http.Request, pluginID string) (plugin.Manifest, plugin.KindDef, bool) {
+	m, ok := s.deps.Registry.Manifest(pluginID)
+	if !ok || len(m.Kinds) == 0 {
+		s.errorPage(w, r, http.StatusNotFound, "Not found", "There is no such page.", "")
+		return m, plugin.KindDef{}, false
+	}
+	k := m.Kinds[0]
+	if raw := r.URL.Query().Get("kind"); raw != "" {
+		if k, ok = kindDef(m, raw); !ok {
+			s.errorPage(w, r, http.StatusNotFound, "Not found", "There is no such page.", "")
+			return m, k, false
+		}
+	}
+	return m, k, true
+}
+
+// titleLangs are the kind's title languages (never empty).
+func titleLangs(k plugin.KindDef) []string {
+	if len(k.TitleLanguages) == 0 {
+		return []string{"en"}
+	}
+	return k.TitleLanguages
+}
+
+// newManualForm builds the form of kind k: title language the preferred one
+// when the kind offers it, else the kind's first; status planned.
+func (s *server) newManualForm(r *http.Request, m plugin.Manifest, k plugin.KindDef, vals map[string]string, v entryValues) manualForm {
+	langs := titleLangs(k)
+	f := manualForm{itemForm: s.newItemForm(k, vals), entryValues: v, TitleLang: langs[0]}
+	if pref := s.deps.Settings.TitleLang(r.Context()); slices.Contains(langs, pref) {
+		f.TitleLang = pref
+	}
+	f.Heading, f.Submit = "Add "+lowerFirst(k.Label)+" manually", "Add"
+	f.Action, f.CancelURL = manualPath(m, k.Key), "/"+url.PathEscape(m.ID)
+	if f.Status == "" {
+		f.Status = string(library.Planned)
+	}
+	if len(m.Kinds) > 1 {
+		for _, x := range m.Kinds {
+			f.Kinds = append(f.Kinds, choice{Value: manualPath(m, x.Key), Label: x.Label, Selected: x.Key == k.Key})
+		}
+	}
+	return f
+}
+
+// finish sets the parts that depend on the (possibly posted) values.
+func (f *manualForm) finish(k plugin.KindDef, fields map[string]plugin.FieldValue) {
+	f.Langs = langChoices(titleLangs(k), f.TitleLang)
+	f.Statuses = nil
+	for _, st := range library.Statuses() {
+		f.Statuses = append(f.Statuses, statusOpt{Value: string(st), Label: statusLabel(k, st), Selected: string(st) == f.Status})
+	}
+	f.Progress = progressInputs(k, progressContext{Keys: k.Progress.Defaults, Fields: fields}, f.entryValues.Progress)
+}
+
+func (s *server) getManualNew(w http.ResponseWriter, r *http.Request, pluginID string) {
+	m, k, ok := s.manualKind(w, r, pluginID)
+	if !ok {
 		return
 	}
+	f := s.newManualForm(r, m, k, nil, entryValues{})
+	f.finish(k, nil)
 	s.render(w, r, "manual_form", f)
 }
 
-func hasOption(opts []langOption, v string) bool {
-	for _, o := range opts {
-		if o.Value == v {
-			return true
-		}
-	}
-	return false
-}
-
-// optInt parses an optional integer in [lo, hi]; blank gives nil.
-func optInt(v, label string, lo, hi int) (*int, string) {
-	if v == "" {
-		return nil, ""
-	}
-	n, err := strconv.Atoi(v)
-	if err != nil || n < lo || n > hi {
-		return nil, fmt.Sprintf("%s must be a whole number from %d to %d, or blank.", label, lo, hi)
-	}
-	return &n, ""
-}
-
-func tooLong(v, label string, max int) string {
-	if utf8.RuneCountInString(v) > max {
-		return fmt.Sprintf("%s must be at most %d characters.", label, max)
-	}
-	return ""
-}
-
-// parseMultipart limits and parses the body (multipart, or urlencoded as a
-// fallback). On failure it has written the response and returns false.
-func parseMultipart(w http.ResponseWriter, r *http.Request) bool {
-	r.Body = http.MaxBytesReader(w, r.Body, maxManualBody)
-	err := r.ParseMultipartForm(maxManualMemory)
-	if err == nil || errors.Is(err, http.ErrNotMultipart) {
-		return true
-	}
-	var tooBig *http.MaxBytesError
-	if errors.As(err, &tooBig) {
-		http.Error(w, "request body too large", http.StatusRequestEntityTooLarge)
-	} else {
-		http.Error(w, "bad request", http.StatusBadRequest)
-	}
-	return false
-}
-
-func (s *server) postManualNew(w http.ResponseWriter, r *http.Request) {
-	if !parseMultipart(w, r) {
+// postManualNew validates the title, the fields (type, bounds, enums,
+// lists), the terms, the entry (parseEntryForm, then against the typed
+// totals), library.ValidateItem (required fields and every storage rule)
+// and the cover options BEFORE writing anything; then it stores the cover
+// (content-sniffed) and saves item and entry in one transaction. A failed
+// save removes the stored cover file unless another row references it.
+func (s *server) postManualNew(w http.ResponseWriter, r *http.Request, pluginID string) {
+	m, k, ok := s.manualKind(w, r, pluginID)
+	if !ok || !parseItemBody(w, r) {
 		return
 	}
-	if r.MultipartForm != nil {
-		defer r.MultipartForm.RemoveAll()
-	}
+	defer cleanupForm(r)
 	ctx := r.Context()
-	f, err := s.newManualForm(r)
-	if err != nil {
-		s.fail(w, r, err, "")
-		return
-	}
-	fail := func(msg string) {
-		f.Error = msg
-		s.renderStatus(w, r, http.StatusUnprocessableEntity, "manual_form", f)
-	}
-
+	vals, fields, msg := parseFields(k, r)
+	ev, entry, emsg := s.parseEntryForm(k, k.Progress.Defaults, r)
+	f := s.newManualForm(r, m, k, vals, ev)
 	f.Title = strings.TrimSpace(r.PostFormValue("title"))
-	if v, ok := r.PostForm["title_lang"]; ok && len(v) > 0 && v[0] != "" {
-		f.TitleLang = v[0]
+	if l := strings.TrimSpace(r.PostFormValue("title_lang")); l != "" {
+		f.TitleLang = l
 	}
-	f.Type = r.PostFormValue("type")
-	f.EpisodesIn = strings.TrimSpace(r.PostFormValue("episodes"))
-	f.Year = strings.TrimSpace(r.PostFormValue("year"))
-	f.Studio = strings.TrimSpace(r.PostFormValue("studio"))
-	f.Synopsis = strings.TrimSpace(r.PostFormValue("synopsis"))
-
-	var fh *multipart.FileHeader
-	if r.MultipartForm != nil {
-		if fhs := r.MultipartForm.File["cover"]; len(fhs) > 0 {
-			fh = fhs[0]
-			f.FileDropped = true
-		}
-	}
-	f.legacyEntryForm, _, _ = parseLegacyEntryForm(r, f.legacyEntryForm) // echo only; validated below
-	f.legacyEntryForm = f.legacyEntryForm.withStatuses()
-
-	var episodes, year *int
-	var msg string
+	genres, tags, tmsg := parseTerms(k, r, &f.itemForm)
+	fh := coverUpload(r)
+	f.FileDropped = fh != nil
+	f.finish(k, fields)
 	switch {
 	case f.Title == "":
 		msg = "Please enter a title."
-	case tooLong(f.Title, "Title", maxTitleRunes) != "":
-		msg = tooLong(f.Title, "Title", maxTitleRunes)
-	case !hasOption(f.Langs, f.TitleLang):
+	case utf8.RuneCountInString(f.Title) > maxTitleRunes:
+		msg = fmt.Sprintf("Title must be at most %d characters.", maxTitleRunes)
+	case !slices.Contains(titleLangs(k), f.TitleLang):
 		msg = "Please choose a title language from the list."
-	case !hasOption(manualTypes, f.Type):
-		msg = "Please choose a type."
 	}
-	if msg == "" {
-		episodes, msg = optInt(f.EpisodesIn, "Episodes", 1, maxManualEpisodes)
-	}
-	if msg == "" {
-		year, msg = optInt(f.Year, "Year", minManualYear, maxManualYear)
-	}
-	if msg == "" {
-		if msg = tooLong(f.Studio, "Studio", maxStudioRunes); msg == "" {
-			msg = tooLong(f.Synopsis, "Synopsis", maxManualSynopsis)
+	for _, m := range []string{tmsg, emsg} {
+		if msg == "" {
+			msg = m
 		}
 	}
-	var entry store.ListEntry
-	if msg == "" {
-		f.legacyEntryForm, entry, msg = parseLegacyEntryForm(r, f.legacyEntryForm)
-		f.legacyEntryForm = f.legacyEntryForm.withStatuses()
+	d := plugin.ItemData{
+		ItemSummary: plugin.ItemSummary{Source: manualSource, ID: "new", Kind: k.Key,
+			Titles: []plugin.Title{{Lang: f.TitleLang, Text: f.Title}}, Fields: fields},
+		Genres: genres, Tags: tags,
 	}
 	if msg == "" {
-		if err := store.ValidateListEntry(entry, episodes); err != nil {
+		if err := s.deps.Library.ValidateItem(m.ID, k.Key, d); err != nil {
 			msg = invalidMessage(err)
 		}
+	}
+	if msg == "" {
+		msg = s.validateAgainstItem(k, progressContext{Keys: k.Progress.Defaults, Fields: fields}, entry)
 	}
 	if msg == "" && fh != nil && s.deps.CoversDir == "" {
 		msg = "Cover upload is not available on this server."
 	}
-	if msg != "" {
-		if f.FileDropped {
+	fail := func(msg string) {
+		if f.FileDropped && !strings.Contains(msg, "choose the cover file again") {
 			msg += " Please choose the cover file again, browsers cannot keep it."
 		}
+		f.Error = msg
+		s.renderStatus(w, r, http.StatusUnprocessableEntity, "manual_form", f)
+	}
+	if msg != "" {
 		fail(msg)
 		return
 	}
 
-	// Everything is valid: write the cover (content-checked), then the rows.
-	cover := ""
+	// Everything is valid: store the cover (content-checked), then the rows.
 	if fh != nil {
-		file, err := fh.Open()
-		if err != nil {
-			s.fail(w, r, err, "")
+		name, err := s.storeCover(fh)
+		var rej errCoverRejected
+		if errors.As(err, &rej) {
+			fail(rej.msg)
 			return
 		}
-		cover, err = covers.Save(s.deps.CoversDir, file)
-		file.Close()
 		if err != nil {
-			switch {
-			case errors.Is(err, covers.ErrNotImage):
-				fail("The cover must be a JPEG, PNG, WebP or GIF image. Please choose the cover file again.")
-			case errors.Is(err, covers.ErrTooLarge):
-				fail("The cover image must be smaller than 10 MiB. Please choose the cover file again.")
-			default:
-				s.fail(w, r, err, "")
-			}
+			s.internalError(w, r, err)
 			return
 		}
+		d.CoverURL = name
 	}
 	id, err := ids.NewManualID()
 	if err != nil {
-		s.cleanupCover(r, cover)
-		s.fail(w, r, err, "")
+		s.cleanupCover(ctx, d.CoverURL)
+		s.internalError(w, r, err)
 		return
 	}
-	a := provider.Anime{SearchResult: provider.SearchResult{
-		Source: provider.Manual, ID: id,
-		Titles: []provider.Title{{Lang: f.TitleLang, Text: f.Title}},
-		Type:   f.Type, Episodes: episodes, Year: year, Studio: f.Studio, Synopsis: f.Synopsis,
-		CoverURL: cover,
-	}}
-	// No sync job: manual entries have nothing to sync.
-	if _, err := s.deps.Store.AddToList(ctx, a, entry, store.WithSyncState("done")); err != nil {
-		s.cleanupCover(r, cover)
-		if errors.Is(err, store.ErrInvalid) {
-			f.FileDropped = f.FileDropped || fh != nil
+	d.ID = id
+	// No sync job: manual items have nothing to sync.
+	if _, err := s.deps.Library.AddToList(ctx, m.ID, k.Key, d, entry, library.WithSyncState("done")); err != nil {
+		s.cleanupCover(ctx, d.CoverURL)
+		if errors.Is(err, library.ErrInvalid) {
 			fail(invalidMessage(err))
 			return
 		}
-		s.fail(w, r, err, "")
+		s.internalError(w, r, err)
 		return
 	}
-	http.Redirect(w, r, animeURL(string(provider.Manual), id), http.StatusSeeOther)
-}
-
-// cleanupCover removes a just-written cover file after a failed save, unless
-// another row references the same content-hash name (then it stays). If the
-// check or removal fails the orphaned file is harmless and only logged.
-func (s *server) cleanupCover(r *http.Request, name string) {
-	if name == "" || s.deps.CoversDir == "" {
-		return
-	}
-	used, err := s.deps.Store.CoverReferenced(r.Context(), name)
-	if err != nil {
-		log.Printf("manual cover cleanup %s: %v", name, err)
-		return
-	}
-	if used {
-		return
-	}
-	if err := os.Remove(filepath.Join(s.deps.CoversDir, name)); err != nil && !os.IsNotExist(err) {
-		log.Printf("manual cover cleanup %s: %v", name, err)
-	}
+	http.Redirect(w, r, itemURL(m, manualSource, id, k.Key), http.StatusSeeOther)
 }

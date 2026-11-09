@@ -218,7 +218,7 @@ func TestMatchFlowEndToEnd(t *testing.T) {
 	// the overview offers matching
 	mustContain(t, e.get("/anime/manual/man1").Body.String(), "Match to AniList")
 
-	rec := e.do("POST", "/anime/manual/man1/match", url.Values{"anilist": {"https://anilist.co/anime/1535/Death-Note"}}, true)
+	rec := e.do("POST", "/anime/manual/man1/match", url.Values{"source_ref": {"https://anilist.co/anime/1535/Death-Note"}}, true)
 	if rec.Code != 204 || rec.Header().Get("HX-Redirect") != "/anime/anilist/1535" {
 		t.Fatalf("match: %d %q", rec.Code, rec.Header().Get("HX-Redirect"))
 	}
@@ -239,10 +239,10 @@ func TestMatchFlowEndToEnd(t *testing.T) {
 		t.Fatalf("anime id changed: %s != %d", got, id)
 	}
 	sv, en := e.snapshot(t, id)
-	if sv.Source != provider.AniList || !reflect.DeepEqual(en, enBefore) {
+	if sv.Source != "anilist" || !reflect.DeepEqual(en, enBefore) {
 		t.Fatalf("%+v\n%+v\n%+v", sv, en, enBefore)
 	}
-	if en.Rating == nil || *en.Rating != 0 || en.Progress != 3 || en.Comment != "c" || en.StartedOn == nil {
+	if en.Rating == nil || *en.Rating != 0 || en.Progress["episode"] != 3 || en.Comment != "c" || en.StartedOn == nil {
 		t.Fatalf("list data: %+v", en)
 	}
 

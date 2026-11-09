@@ -39,8 +39,10 @@ const manualSource = "manual"
 // maxPathIDBytes is the longest source or item id accepted from a URL.
 const maxPathIDBytes = 200
 
-// coreRoutes returns the generic routes every plugin gets, mounted under its
-// literal prefix /{plugin-id} and behind its enabled guard like any route set.
+// coreRoutes returns the generic routes every plugin gets (the whole route
+// set of every plugin, anime included), mounted under its literal prefix
+// /{plugin-id} and behind its enabled guard. Literal segments ("/manual/new")
+// win over the {source}/{id} wildcards in the mux.
 func (s *server) coreRoutes(pluginID string) routeSet {
 	return func(reg routeRegistrar) {
 		reg.Handle("GET /", func(w http.ResponseWriter, r *http.Request) { s.getList(w, r, pluginID) })
@@ -48,6 +50,13 @@ func (s *server) coreRoutes(pluginID string) routeSet {
 		reg.Handle("GET /{source}/{id}", func(w http.ResponseWriter, r *http.Request) { s.getItem(w, r, pluginID) })
 		reg.Handle("GET /{source}/{id}/add", func(w http.ResponseWriter, r *http.Request) { s.getAdd(w, r, pluginID) })
 		reg.Handle("POST /{source}/{id}/add", func(w http.ResponseWriter, r *http.Request) { s.postAdd(w, r, pluginID) })
+		reg.Handle("GET /manual/new", func(w http.ResponseWriter, r *http.Request) { s.getManualNew(w, r, pluginID) })
+		reg.Handle("POST /manual/new", func(w http.ResponseWriter, r *http.Request) { s.postManualNew(w, r, pluginID) })
+		reg.Handle("GET /{source}/{id}/edit", func(w http.ResponseWriter, r *http.Request) { s.getDetails(w, r, pluginID) })
+		reg.Handle("POST /{source}/{id}/edit", func(w http.ResponseWriter, r *http.Request) { s.postDetails(w, r, pluginID) })
+		reg.Handle("GET /{source}/{id}/match", func(w http.ResponseWriter, r *http.Request) { s.getMatch(w, r, pluginID) })
+		reg.Handle("GET /{source}/{id}/match/search", func(w http.ResponseWriter, r *http.Request) { s.getMatchSearch(w, r, pluginID) })
+		reg.Handle("POST /{source}/{id}/match", func(w http.ResponseWriter, r *http.Request) { s.postMatch(w, r, pluginID) })
 	}
 }
 

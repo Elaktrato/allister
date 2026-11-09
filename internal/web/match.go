@@ -1,225 +1,278 @@
 package web
 
+// Matching a manual item to a source: GET /{plugin}/manual/{id}/match (the
+// dialog), GET .../match/search?q= (results partial, the source's Search)
+// and POST .../match (field source_ref, a pasted URL or bare id, or pick, a
+// search result's id; pick wins). URLs are matched against the source's
+// declared URLPatterns by the core (plugin.MatchRef); no plugin code parses
+// URLs. The source's Details is fetched FIRST, so a source failure never
+// touches the database; then library.ConvertToSource converts the item in
+// place (the entry stays) and the plugin's sync job is enqueued.
+
 import (
 	"errors"
 	"log"
 	"net/http"
 	"net/url"
+	"sort"
 	"strings"
 
 	"github.com/allister/allister/internal/library"
 	"github.com/allister/allister/internal/plugin"
-	"github.com/allister/allister/internal/provider"
-	"github.com/allister/allister/internal/store"
-	"github.com/allister/allister/internal/titles"
 )
 
 // matchView is the data of the match dialog (match_dialog.html).
 type matchView struct {
 	// Action posts a match; SearchURL serves the results partial; CancelURL
 	// is the overview (cancel link without JavaScript).
-	Action, SearchURL, CancelURL string
-	// Title is the entry's resolved title, MALID its MAL id ("" if none).
-	Title, MALID string
-	// Anilist echoes the URL/number field.
-	Anilist string
-	// Error is a user-facing message; ExistingURL links the entry that
-	// already holds the chosen AniList anime.
+	Action, SearchURL, CancelURL                string
+	Heading, RefLabel, Placeholder, SearchLabel string
+	// Title is the item's resolved title; ExternalIDs its importer ids
+	// ("<type> <value>").
+	Title       string
+	ExternalIDs []string
+	// Source is the chosen source id (posted with every match); Sources
+	// links the dialog of every source (only when there are several).
+	Source  string
+	Sources []choice
+	// SourceRef echoes the URL/id field.
+	SourceRef string
+	// Error is a user-facing message; ExistingURL links the item that
+	// already holds the chosen source item.
 	Error, ExistingURL string
 	Search             searchView
 }
 
-func matchPath(source, id string) string { return animeURL(source, id) + "/match" }
-
-// matchTarget loads the saved manual entry the request is about; it writes a
-// 404 page and returns nil when there is none (unknown, not saved, or not manual).
-func (s *server) matchTarget(w http.ResponseWriter, r *http.Request) (provider.Source, string, *store.Saved) {
-	src, id, ok := s.route(w, r)
-	if !ok {
-		return "", "", nil
-	}
-	var saved *store.Saved
-	if src == provider.Manual {
-		var err error
-		if saved, err = s.deps.Store.FindBySource(r.Context(), src, id); err != nil {
-			s.fail(w, r, err, "")
-			return "", "", nil
-		}
-	}
-	if saved == nil {
-		s.errorPage(w, r, http.StatusNotFound, "Not found", "There is no such manual entry to match.", "")
-		return "", "", nil
-	}
-	return src, id, saved
+// matchTarget is the saved manual item of a match request.
+type matchTarget struct {
+	man  plugin.Manifest
+	kind plugin.KindDef
+	ref  itemRef // Kind resolved
+	item *library.Item
 }
 
-func (s *server) newMatchView(r *http.Request, src provider.Source, id string, saved *store.Saved) matchView {
-	return matchView{
-		Action: matchPath(string(src), id), SearchURL: matchPath(string(src), id) + "/search",
-		CancelURL: animeURL(string(src), id),
-		Title:     titles.Resolve(saved.Titles, s.deps.Settings.TitleLang(r.Context())),
-		MALID:     saved.MALID,
+func (s *server) matchNotFound(w http.ResponseWriter, r *http.Request) {
+	s.errorPage(w, r, http.StatusNotFound, "Not found", "There is no such manual item to match.", "")
+}
+
+// loadMatch resolves the saved manual item of the request (database only);
+// anything else (other sources, unknown or unsaved ids, a plugin without
+// sources) gets the 404 page.
+func (s *server) loadMatch(w http.ResponseWriter, r *http.Request, pluginID string) (*matchTarget, bool) {
+	m, ok := s.deps.Registry.Manifest(pluginID)
+	ref := itemRef{Plugin: pluginID, Source: r.PathValue("source"), ID: r.PathValue("id"), Kind: r.URL.Query().Get("kind")}
+	if !ok || len(m.Sources) == 0 || ref.Source != manualSource || !validPathID(ref.ID) || (ref.Kind != "" && !hasKind(m, ref.Kind)) {
+		s.matchNotFound(w, r)
+		return nil, false
 	}
+	it, k, err := s.findSaved(r.Context(), m, ref)
+	switch {
+	case errors.Is(err, errAmbiguousKind):
+		s.itemFail(w, r, m, ref.Source, err, "")
+		return nil, false
+	case err != nil:
+		s.internalError(w, r, err)
+		return nil, false
+	case it == nil:
+		s.matchNotFound(w, r)
+		return nil, false
+	}
+	ref.Kind = k.Key
+	return &matchTarget{man: m, kind: k, ref: ref, item: it}, true
+}
+
+// defaultSource is the first source that supports lookups, else the first.
+func defaultSource(m plugin.Manifest) plugin.SourceInfo {
+	for _, si := range m.Sources {
+		if si.SupportsLookup {
+			return si
+		}
+	}
+	return m.Sources[0]
+}
+
+// chooseSource is the source a request names ("" means the default).
+func chooseSource(m plugin.Manifest, id string) (plugin.SourceInfo, bool) {
+	if id == "" {
+		return defaultSource(m), true
+	}
+	return sourceInfo(m, id)
+}
+
+func (s *server) newMatchView(r *http.Request, t *matchTarget, si plugin.SourceInfo) matchView {
+	m := t.man
+	var extra url.Values
+	if len(m.Sources) > 1 {
+		extra = url.Values{"source": {si.ID}}
+	}
+	v := matchView{
+		Action:      itemAction(m, t.ref.Source, t.ref.ID, t.ref.Kind, "match", nil),
+		SearchURL:   itemAction(m, t.ref.Source, t.ref.ID, t.ref.Kind, "match/search", extra),
+		CancelURL:   itemURL(m, t.ref.Source, t.ref.ID, t.ref.Kind),
+		Heading:     "Match to " + si.Name,
+		RefLabel:    si.Name + " URL or id",
+		SearchLabel: "Or search " + si.Name,
+		Title:       orID(library.ResolveTitle(t.item.Titles, s.deps.Settings.TitleLang(r.Context())), t.ref.ID),
+		Source:      si.ID,
+	}
+	if len(si.URLPatterns) > 0 {
+		v.Placeholder = "https://" + strings.Replace(si.URLPatterns[0], "{id}", "123", 1)
+	}
+	v.Search.EmptyHint = "Type a title to search " + si.Name + "."
+	for typ, val := range t.item.ExternalIDs {
+		v.ExternalIDs = append(v.ExternalIDs, typ+" "+val)
+	}
+	sort.Strings(v.ExternalIDs)
+	if len(m.Sources) > 1 {
+		for _, x := range m.Sources {
+			v.Sources = append(v.Sources, choice{Value: itemAction(m, t.ref.Source, t.ref.ID, t.ref.Kind, "match", url.Values{"source": {x.ID}}),
+				Label: x.Name, Selected: x.ID == si.ID})
+		}
+	}
+	return v
 }
 
 // matchResponse writes the dialog (htmx) or the overview page with the dialog
 // open (no JavaScript).
-func (s *server) matchResponse(w http.ResponseWriter, r *http.Request, src provider.Source, id string, v matchView, status int) {
+func (s *server) matchResponse(w http.ResponseWriter, r *http.Request, t *matchTarget, v matchView, status int) {
 	if isPartialRequest(r) {
 		s.renderPartialStatus(w, status, "item", "match_dialog", v)
 		return
 	}
-	s.showItem(w, r, itemRef{Plugin: animePluginID, Source: string(src), ID: id}, itemExtras{Match: &v}, status)
+	s.showItem(w, r, t.ref, itemExtras{Match: &v}, status)
 }
 
-// unmatchedHint explains an imported manual item that its importer's
-// external id did not resolve ("" when the item carries no such id).
-//
-// TEMPORARY: the anime plugin keeps the legacy sentence (asserted by the
-// match tests) until matching becomes generic; other plugins get a neutral
-// one built from the importer's ExternalIDType.
-func unmatchedHint(m plugin.Manifest, it *library.Item) string {
-	for _, imp := range m.Importers {
-		v := it.ExternalIDs[imp.ExternalIDType]
-		if imp.ExternalIDType == "" || v == "" {
-			continue
-		}
-		if m.ID == animePluginID {
-			return "Imported from Yamtrack; AniList had no match for MyAnimeList #" + v + "."
-		}
-		return "Imported without a match; " + imp.ExternalIDType + " " + v
+func (s *server) getMatch(w http.ResponseWriter, r *http.Request, pluginID string) {
+	t, ok := s.loadMatch(w, r, pluginID)
+	if !ok {
+		return
 	}
-	return ""
+	si, ok := chooseSource(t.man, r.URL.Query().Get("source"))
+	if !ok {
+		s.matchNotFound(w, r)
+		return
+	}
+	s.matchResponse(w, r, t, s.newMatchView(r, t, si), http.StatusOK)
 }
 
-func (s *server) getMatch(w http.ResponseWriter, r *http.Request) {
-	src, id, saved := s.matchTarget(w, r)
-	if saved == nil {
+func (s *server) getMatchSearch(w http.ResponseWriter, r *http.Request, pluginID string) {
+	t, ok := s.loadMatch(w, r, pluginID)
+	if !ok {
 		return
 	}
-	s.matchResponse(w, r, src, id, s.newMatchView(r, src, id, saved), http.StatusOK)
-}
-
-func (s *server) getMatchSearch(w http.ResponseWriter, r *http.Request) {
-	m, ok := s.deps.Registry.Manifest(animePluginID)
-	if !ok || len(m.Sources) == 0 || len(m.Kinds) == 0 {
-		s.errorPage(w, r, http.StatusNotFound, "Not found", "There is no such manual entry to match.", "")
+	si, ok := chooseSource(t.man, r.URL.Query().Get("source"))
+	if !ok {
+		s.matchNotFound(w, r)
 		return
 	}
-	src, id, saved := s.matchTarget(w, r)
-	if saved == nil {
-		return
-	}
-	v := s.newMatchView(r, src, id, saved)
+	v := s.newMatchView(r, t, si)
 	q := cleanQuery(r.URL.Query().Get("q"))
 	v.Search.Query = q
-	if q != "" { // an empty query makes no AniList request
-		s.runSearch(r, m, m.Sources[0], m.Kinds[0], q, &v.Search)
+	if q != "" { // an empty query makes no source call
+		s.runSearch(r, t.man, si, t.kind, q, &v.Search)
 	}
 	if isPartialRequest(r) {
 		s.renderPartial(w, "item", "match_results", v)
 		return
 	}
-	s.matchResponse(w, r, src, id, v, http.StatusOK)
+	s.matchResponse(w, r, t, v, http.StatusOK)
 }
 
-// plainAnimeID accepts a search pick: 1 to 9 digits, no leading zero.
-func plainAnimeID(s string) bool {
-	return len(s) <= 9 && s != "" && s[0] != '0' && isASCIIDigits(s, maxIDDigits)
-}
-
-func (s *server) parseAniListInput(raw string) (string, bool) {
-	if s.deps.ParseAnimeURL == nil {
-		return raw, plainAnimeID(raw)
-	}
-	return s.deps.ParseAnimeURL(raw)
-}
-
-func (s *server) postMatch(w http.ResponseWriter, r *http.Request) {
-	src, id, saved := s.matchTarget(w, r)
-	if saved == nil {
-		return
-	}
-	if !parseForm(w, r) {
+// postMatch: reduce the input to a source id (no source call for invalid
+// input), fetch the details (a failure changes nothing), convert in one
+// transaction, enqueue the sync job, redirect to the item's new URL. A
+// second (concurrent or repeated) POST finds no manual item any more and
+// answers 404, or 422 when the conversion refuses it.
+func (s *server) postMatch(w http.ResponseWriter, r *http.Request, pluginID string) {
+	t, ok := s.loadMatch(w, r, pluginID)
+	if !ok || !parseForm(w, r) {
 		return
 	}
 	ctx := r.Context()
-	v := s.newMatchView(r, src, id, saved)
+	si, ok := chooseSource(t.man, strings.TrimSpace(r.PostFormValue("source")))
 	pick := strings.TrimSpace(r.PostFormValue("pick"))
-	raw := strings.TrimSpace(r.PostFormValue("anilist"))
-	v.Anilist = raw
+	raw := strings.TrimSpace(r.PostFormValue("source_ref"))
+	if !ok {
+		v := s.newMatchView(r, t, defaultSource(t.man))
+		v.SourceRef, v.Error = raw, "Please choose a source from the list."
+		s.matchResponse(w, r, t, v, http.StatusUnprocessableEntity)
+		return
+	}
+	v := s.newMatchView(r, t, si)
+	v.SourceRef = raw
 	fail := func(status int, msg string) {
 		v.Error = msg
-		s.matchResponse(w, r, src, id, v, status)
+		s.matchResponse(w, r, t, v, status)
 	}
 
-	// 1. Reduce the input to an AniList id (pick wins over the URL field).
-	var aid string
+	// 1. Reduce the input to a source id (pick wins over the reference).
+	var id string
 	switch {
 	case pick != "":
-		if !plainAnimeID(pick) {
-			fail(http.StatusUnprocessableEntity, "That search result is not a valid AniList id.")
+		if id, ok = plugin.MatchRef(nil, pick); !ok {
+			fail(http.StatusUnprocessableEntity, "That search result is not a valid "+si.Name+" id.")
 			return
 		}
-		aid = pick
 	case raw == "":
-		fail(http.StatusUnprocessableEntity, "Paste an AniList URL or number, or pick a search result.")
+		fail(http.StatusUnprocessableEntity, "Paste a "+si.Name+" URL or id, or pick a search result.")
 		return
 	default:
-		var ok bool
-		if aid, ok = s.parseAniListInput(raw); !ok {
-			fail(http.StatusUnprocessableEntity, "That does not look like an AniList anime URL or id. Example: https://anilist.co/anime/154587")
+		if id, ok = plugin.MatchRef(si.URLPatterns, raw); !ok {
+			msg := "That does not look like a " + si.Name + " URL or id."
+			if v.Placeholder != "" {
+				msg += " Example: " + v.Placeholder
+			}
+			fail(http.StatusUnprocessableEntity, msg)
 			return
 		}
 	}
 
-	// 2. Fetch the details first: a provider failure never touches the database.
-	a, err := s.fetchAnime(ctx, aid)
+	// 2. Fetch the details first: a source failure never touches the database.
+	src := s.source(t.man.ID, si.ID)
+	var d plugin.ItemData
+	err := errNoSource
+	if src != nil {
+		d, err = src.Details(ctx, t.kind.Key, id)
+	}
 	switch {
 	case err == nil:
-	case errors.Is(err, provider.ErrNotFound):
-		fail(http.StatusUnprocessableEntity, "AniList has no anime with that id.")
+	case errors.Is(err, plugin.ErrNotFound):
+		fail(http.StatusUnprocessableEntity, "No item with that id at "+si.Name+".")
 		return
-	case errors.Is(err, provider.ErrRateLimited), errors.Is(err, provider.ErrUnavailable):
-		log.Printf("match %s: fetch %s: %v", id, aid, err)
-		fail(http.StatusServiceUnavailable, providerMessage(err)+" Nothing was changed.")
+	case errors.Is(err, plugin.ErrRateLimited), errors.Is(err, plugin.ErrUnavailable):
+		log.Printf("match %s/%s: fetch %s/%s: %v", t.man.ID, t.ref.ID, si.ID, id, err)
+		fail(http.StatusServiceUnavailable, sourceMessage(t.man, si.ID, err)+" Nothing was changed.")
 		return
 	default:
-		s.fail(w, r, err, "")
+		s.internalError(w, r, err)
 		return
 	}
+	// the identity is the user's choice (matched against the manifest), not
+	// what the source returned
+	d.Source, d.ID, d.Kind = si.ID, id, t.kind.Key
 
-	// 3. Convert in one transaction.
-	err = s.deps.Store.ConvertToSource(ctx, saved.ID, a)
+	// 3. Convert in one transaction (entry untouched, progress clamped).
+	err = s.deps.Library.ConvertToSource(ctx, t.item.ID, d)
+	var ase *library.AlreadySavedError
 	switch {
 	case err == nil:
-	case errors.Is(err, store.ErrAlreadySaved):
-		msg := "That anime is already in your library, so nothing was changed."
-		var ase *store.AlreadySavedError
-		if errors.As(err, &ase) {
-			if ex, gerr := s.deps.Store.GetByID(ctx, ase.ExistingID); gerr == nil && ex != nil {
-				v.ExistingURL = animeURL(string(ex.Source), ex.Anime.ID)
-			}
+	case errors.As(err, &ase):
+		if ex, gerr := s.deps.Library.Item(ctx, ase.ExistingID); gerr == nil && ex != nil {
+			v.ExistingURL = itemURL(t.man, ex.Source, ex.SourceID, ex.Kind)
 		}
-		fail(http.StatusUnprocessableEntity, msg)
+		fail(http.StatusUnprocessableEntity, "That item is already in your library, so nothing was changed.")
 		return
-	case errors.Is(err, store.ErrInvalid):
+	case errors.Is(err, library.ErrInvalid):
 		fail(http.StatusUnprocessableEntity, invalidMessage(err))
 		return
-	case errors.Is(err, store.ErrNotFound): // deleted meanwhile
-		s.errorPage(w, r, http.StatusNotFound, "Not found", "There is no such manual entry to match.", "")
+	case errors.Is(err, library.ErrNoEntry): // deleted meanwhile
+		s.matchNotFound(w, r)
 		return
 	default:
-		s.fail(w, r, err, "")
+		s.internalError(w, r, err)
 		return
 	}
 
-	s.enqueueSync(ctx, animePluginID, saved.ID)
-	dest := "/anime/anilist/" + url.PathEscape(a.ID)
-	if isPartialRequest(r) {
-		w.Header().Set("HX-Redirect", dest)
-		w.WriteHeader(http.StatusNoContent)
-		return
-	}
-	http.Redirect(w, r, dest, http.StatusSeeOther)
+	s.enqueueSync(ctx, t.man.ID, t.item.ID)
+	s.done(w, r, itemURL(t.man, si.ID, id, t.kind.Key))
 }

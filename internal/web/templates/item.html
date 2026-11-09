@@ -21,6 +21,9 @@
       class="block rounded border border-indigo-500 px-4 py-2 text-center font-medium text-indigo-200 hover:bg-slate-800">{{.MatchLabel}}</a>
     {{if .UnmatchedHint}}<p class="text-xs text-slate-400">{{.UnmatchedHint}}</p>{{end}}
     {{end}}
+    {{if .DetailsURL}}
+    <a href="{{.DetailsURL}}" class="block rounded border border-slate-700 px-4 py-2 text-center text-sm hover:bg-slate-800">Edit details</a>
+    {{end}}
   </aside>
   <div class="min-w-0 space-y-6">
     <div>

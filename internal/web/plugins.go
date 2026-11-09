@@ -30,25 +30,6 @@ type routeRegistrar interface {
 // enabled guard, so a route cannot be added without being guarded.
 type routeSet func(reg routeRegistrar)
 
-// routeSets returns the route sets of plugins that have more than the
-// generic core routes. Every other plugin (the test fixtures) gets
-// coreRoutes only. Later tasks port the anime-only handlers to generic ones
-// and delete this override.
-func (s *server) routeSets() map[string]routeSet {
-	return map[string]routeSet{animePluginID: s.animeRoutes}
-}
-
-// animeRoutes is the core route set plus the legacy anime-shaped handlers
-// that are not generic yet (manual create and match, Task 10).
-func (s *server) animeRoutes(reg routeRegistrar) {
-	s.coreRoutes(animePluginID)(reg)
-	reg.Handle("GET /manual/new", s.getManualNew)
-	reg.Handle("POST /manual/new", s.postManualNew)
-	reg.Handle("GET /{source}/{id}/match", s.getMatch)
-	reg.Handle("POST /{source}/{id}/match", s.postMatch)
-	reg.Handle("GET /{source}/{id}/match/search", s.getMatchSearch)
-}
-
 // entryRoutes registers the list entry routes. They are core routes outside
 // every plugin prefix; the server mounts them behind itemPluginGuard, so the
 // plugin of the item {id} decides whether they answer.
@@ -160,8 +141,8 @@ func (s *server) internalError(w http.ResponseWriter, r *http.Request, err error
 	http.Error(w, "internal error", http.StatusInternalServerError)
 }
 
-// mountPlugins registers the routes of every installed plugin (its own set,
-// else coreRoutes) under the literal prefix /{plugin-id} (never a wildcard
+// mountPlugins registers the routes of every installed plugin (coreRoutes)
+// under the literal prefix /{plugin-id} (never a wildcard
 // first segment: the mux would panic on overlap with the core routes), the
 // entry routes behind the item's plugin guard and the person page. The
 // registry has already refused ids that collide with core first segments.
@@ -170,14 +151,9 @@ func (s *server) internalError(w http.ResponseWriter, r *http.Request, err error
 // plugin is only known after the lookup): see getPerson.
 func (s *server) mountPlugins(mux *http.ServeMux) {
 	s.pluginRoutes = map[string][]string{}
-	sets := s.routeSets()
 	for _, m := range s.deps.Registry.Manifests() {
-		set, ok := sets[m.ID]
-		if !ok {
-			set = s.coreRoutes(m.ID)
-		}
 		routes := []string{}
-		set(muxRegistrar{mux: mux, prefix: "/" + m.ID, guard: s.pluginGuard(m.ID), routes: &routes})
+		s.coreRoutes(m.ID)(muxRegistrar{mux: mux, prefix: "/" + m.ID, guard: s.pluginGuard(m.ID), routes: &routes})
 		s.pluginRoutes[m.ID] = routes
 	}
 	s.coreGuarded = []string{}

@@ -1,0 +1,38 @@
+{{define "title"}}Edit details - Allister{{end}}
+{{define "content"}}
+<h1 class="mb-6 text-2xl font-semibold">{{.Heading}}</h1>
+<form method="post" action="{{.Action}}" enctype="multipart/form-data" class="max-w-2xl space-y-4">
+  <input type="hidden" name="return" value="{{.Return}}">
+  {{if .Error}}
+  <div class="rounded border border-amber-700 bg-amber-950 p-3 text-amber-200" role="alert"><p>{{.Error}}</p></div>
+  {{end}}
+  <fieldset class="space-y-3">
+    <legend class="text-lg font-semibold">Titles</legend>
+    <p class="text-xs text-slate-400">Empty a title to remove it; at least one title must remain.</p>
+    {{range .Titles}}
+    {{if .Choose}}
+    <div class="grid gap-3 sm:grid-cols-[12rem_1fr]">
+      <label class="block text-sm">{{.Label}}
+        <select name="title_lang" class="mt-1 w-full rounded border border-slate-700 bg-slate-950 px-3 py-2">
+          {{range .Langs}}<option value="{{.Value}}"{{if .Selected}} selected{{end}}>{{.Label}}</option>{{end}}
+        </select>
+      </label>
+      <label class="block text-sm">Title
+        <input type="text" name="title" value="{{.Text}}" maxlength="300" class="mt-1 w-full rounded border border-slate-700 bg-slate-950 px-3 py-2">
+      </label>
+    </div>
+    {{else}}
+    <label class="block text-sm">Title ({{.Label}})
+      <input type="hidden" name="title_lang" value="{{.Lang}}">
+      <input type="text" name="title" value="{{.Text}}" maxlength="300" class="mt-1 w-full rounded border border-slate-700 bg-slate-950 px-3 py-2">
+    </label>
+    {{end}}
+    {{end}}
+  </fieldset>
+  {{template "item_inputs" .}}
+  <div class="flex justify-end gap-3">
+    <a href="{{.CancelURL}}" class="rounded px-4 py-2 hover:bg-slate-800">Cancel</a>
+    <button type="submit" class="rounded bg-indigo-600 px-4 py-2 font-medium hover:bg-indigo-500">{{.Submit}}</button>
+  </div>
+</form>
+{{end}}

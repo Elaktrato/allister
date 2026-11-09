@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"net/http/httptest"
 	"net/url"
 	"reflect"
 	"strconv"
@@ -13,10 +12,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/allister/allister/internal/library"
 	"github.com/allister/allister/internal/plugin"
 	"github.com/allister/allister/internal/plugin/plugintest"
 	"github.com/allister/allister/internal/provider"
-	"github.com/allister/allister/internal/store"
 )
 
 // matchProvider is the sample provider with a counted search.
@@ -35,63 +34,46 @@ func (m *matchProvider) Search(ctx context.Context, q string) ([]provider.Search
 	return m.results, m.searchErr
 }
 
-// localParse is a tiny stand-in for anilist.ParseAnimeURL (the web package must not import it).
-func localParse(s string) (string, bool) {
-	s = strings.TrimSpace(s)
-	if isASCIIDigits(s, maxIDDigits) {
-		return s, true
-	}
-	for _, p := range []string{"https://anilist.co/anime/", "anilist.co/anime/"} {
-		if rest, ok := strings.CutPrefix(s, p); ok {
-			id, _, _ := strings.Cut(rest, "/")
-			if isASCIIDigits(id, maxIDDigits) {
-				return id, true
-			}
-		}
-	}
-	return "", false
-}
-
 type matchEnv struct {
 	*env
 	mp *matchProvider
 }
 
+// newMatchEnv is newEnv with the counting search provider. ADAPTED: no
+// Deps.ParseAnimeURL any more, the anime manifest's URL pattern is used.
 func newMatchEnv(t *testing.T) *matchEnv {
 	t.Helper()
 	e := newEnv(t)
 	mp := &matchProvider{animeProvider: e.fp, results: []provider.SearchResult{e.fp.anime.SearchResult}}
-	_, e.h = newServer(Deps{
-		Settings: e.set, Store: e.st, Jobs: e.jobs, SyncJobs: testSyncJobs(), CoversDir: e.covers, ParseAnimeURL: localParse,
+	e.srv, e.h = newServer(Deps{
+		Settings: e.set, Store: e.st, Jobs: e.jobs, SyncJobs: testSyncJobs(), CoversDir: e.covers,
 		Providers: map[provider.Source]provider.Provider{provider.AniList: mp},
 	}, func() time.Time { return *e.now })
+	e.reg, e.lib = e.srv.deps.Registry, e.srv.deps.Library
 	return &matchEnv{env: e, mp: mp}
 }
 
-// unmatched saves an import-like manual entry with list data and returns its anime id.
+// unmatched saves an import-like manual anime "man1" with list data and
+// returns its item id. ADAPTED: seeded through the library.
 func (e *matchEnv) unmatched(t *testing.T) int64 {
 	t.Helper()
-	m := provider.Anime{SearchResult: provider.SearchResult{Source: provider.Manual, ID: "man1", Type: "TV",
-		Titles: []provider.Title{{Lang: "en", Text: "Lost Show <b>"}}, CoverURL: "oldcover.jpg"}, MALID: "5114"}
+	d := plugin.ItemData{ItemSummary: plugin.ItemSummary{Source: "manual", ID: "man1", Kind: "anime",
+		Titles: []plugin.Title{{Lang: "en", Text: "Lost Show <b>"}}, Fields: map[string]plugin.FieldValue{"type": {Text: "TV"}},
+		CoverURL: "oldcover.jpg"}, ExternalIDs: map[string]string{"mal": "5114"}}
 	start := time.Date(2024, 1, 2, 0, 0, 0, 0, time.UTC)
-	rating := 0
-	id, err := e.st.AddToList(context.Background(), m,
-		store.ListEntry{Status: store.Completed, Rating: &rating, Progress: 3, StartedOn: &start, Comment: "c"},
-		store.WithSyncState("pending"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	return id
+	return e.addFixture(t, "anime", "anime", d, library.Entry{Status: library.Completed, Rating: ip(0), StartedOn: &start,
+		Comment: "c", Progress: map[string]float64{"episode": 3}}, library.WithSyncState("pending"))
 }
 
-func (e *matchEnv) snapshot(t *testing.T, id int64) (*store.Saved, *store.ListEntry) {
+// snapshot returns the item and its entry. ADAPTED: library types.
+func (e *env) snapshot(t *testing.T, id int64) (*library.Item, *library.Entry) {
 	t.Helper()
-	sv, err := e.st.GetByID(context.Background(), id)
-	if err != nil || sv == nil {
-		t.Fatalf("get: %v %v", sv, err)
+	it, err := e.lib.Item(context.Background(), id)
+	if err != nil || it == nil {
+		t.Fatalf("get: %v %v", it, err)
 	}
-	en, _ := e.st.GetListEntry(context.Background(), id)
-	return sv, en
+	en, _ := e.lib.Entry(context.Background(), id)
+	return it, en
 }
 
 const matchURL = "/anime/manual/man1/match"
@@ -104,8 +86,10 @@ func TestMatchDialogOnlyForManual(t *testing.T) {
 	if rec.Code != 200 {
 		t.Fatalf("manual: %d", rec.Code)
 	}
-	mustContain(t, rec.Body.String(), `name="anilist"`, `name="q"`, `hx-get="/anime/manual/man1/match/search"`,
-		`keyup changed delay:400ms, search`, "MyAnimeList #5114", "Lost Show &lt;b&gt;", `id="match-results"`)
+	// ADAPTED: the reference field is source_ref, external ids show as "<type> <value>"
+	mustContain(t, rec.Body.String(), `name="source_ref"`, `name="q"`, `hx-get="/anime/manual/man1/match/search"`,
+		`keyup changed delay:400ms, search`, "mal 5114", "Lost Show &lt;b&gt;", `id="match-results"`, "Match to AniList",
+		`placeholder="https://anilist.co/anime/123"`)
 	mustNotContain(t, rec.Body.String(), "<html", "<b>")
 	if rec.Header().Get("Vary") != "HX-Request" {
 		t.Fatalf("vary %q", rec.Header().Get("Vary"))
@@ -128,6 +112,9 @@ func TestMatchDialogOnlyForManual(t *testing.T) {
 	if c := e.do("POST", "/anime/anilist/1535/match", url.Values{"pick": {"1535"}}, true).Code; c != 404 {
 		t.Fatalf("post anilist entry: %d", c)
 	}
+	if c := e.get(matchURL + "?source=nope").Code; c != 404 {
+		t.Fatalf("unknown source: %d", c)
+	}
 }
 
 func TestMatchDialogWithoutJSIsFullPage(t *testing.T) {
@@ -137,7 +124,7 @@ func TestMatchDialogWithoutJSIsFullPage(t *testing.T) {
 	if rec.Code != 200 {
 		t.Fatalf("%d", rec.Code)
 	}
-	mustContain(t, rec.Body.String(), "<html", `name="anilist"`, "Lost Show")
+	mustContain(t, rec.Body.String(), "<html", `name="source_ref"`, "Lost Show")
 }
 
 func TestOverviewOffersMatchForManualOnly(t *testing.T) {
@@ -155,16 +142,16 @@ func TestMatchByURLConverts(t *testing.T) {
 	e := newMatchEnv(t)
 	id := e.unmatched(t)
 	_, enBefore := e.snapshot(t, id)
-	rec := e.do("POST", matchURL, url.Values{"anilist": {"https://anilist.co/anime/1535/Death-Note"}}, false)
+	rec := e.do("POST", matchURL, url.Values{"source_ref": {"https://anilist.co/anime/1535/Death-Note"}}, false)
 	if rec.Code != 303 || rec.Header().Get("Location") != "/anime/anilist/1535" {
 		t.Fatalf("%d %q %s", rec.Code, rec.Header().Get("Location"), rec.Body.String())
 	}
-	sv, en := e.snapshot(t, id)
-	if sv.Source != provider.AniList || sv.Anime.ID != "1535" || !reflect.DeepEqual(en, enBefore) {
-		t.Fatalf("%+v %+v", sv, en)
+	it, en := e.snapshot(t, id)
+	if it.Source != "anilist" || it.SourceID != "1535" || it.SyncState != "pending" || !reflect.DeepEqual(en, enBefore) {
+		t.Fatalf("%+v %+v", it, en)
 	}
-	if sv.MALID != "5114" {
-		t.Fatalf("mal id %q", sv.MALID)
+	if it.ExternalIDs["mal"] != "5114" {
+		t.Fatalf("mal id %q", it.ExternalIDs["mal"])
 	}
 	mustContain(t, e.get("/anime/anilist/1535").Body.String(), "デスノート")
 	if c := e.get("/anime/manual/man1").Code; c != 404 {
@@ -179,20 +166,31 @@ func TestMatchByPickConverts(t *testing.T) {
 	if rec.Code != 204 || rec.Header().Get("HX-Redirect") != "/anime/anilist/1535" {
 		t.Fatalf("%d %q", rec.Code, rec.Header().Get("HX-Redirect"))
 	}
-	if sv, _ := e.snapshot(t, id); sv.Source != provider.AniList {
-		t.Fatalf("%+v", sv)
+	if it, _ := e.snapshot(t, id); it.Source != "anilist" {
+		t.Fatalf("%+v", it)
 	}
 }
 
 func TestMatchPickWinsOverURL(t *testing.T) {
 	e := newMatchEnv(t)
 	id := e.unmatched(t)
-	rec := e.do("POST", matchURL, url.Values{"pick": {"1535"}, "anilist": {"not a url"}}, true)
+	rec := e.do("POST", matchURL, url.Values{"pick": {"1535"}, "source_ref": {"not a url"}}, true)
 	if rec.Code != 204 {
 		t.Fatalf("%d", rec.Code)
 	}
-	if sv, _ := e.snapshot(t, id); sv.Anime.ID != "1535" {
-		t.Fatalf("%+v", sv)
+	if it, _ := e.snapshot(t, id); it.SourceID != "1535" {
+		t.Fatalf("%+v", it)
+	}
+}
+
+func TestMatchBareNumberAndLeadingZeros(t *testing.T) {
+	e := newMatchEnv(t)
+	id := e.unmatched(t)
+	if rec := e.do("POST", matchURL, url.Values{"source_ref": {" 001535 "}}, true); rec.Code != 204 || rec.Header().Get("HX-Redirect") != "/anime/anilist/1535" {
+		t.Fatalf("%d %q", rec.Code, rec.Header().Get("HX-Redirect"))
+	}
+	if it, _ := e.snapshot(t, id); it.SourceID != "1535" {
+		t.Fatalf("%+v", it)
 	}
 }
 
@@ -202,17 +200,21 @@ func TestMatchRejectsBadInput(t *testing.T) {
 	before, _ := e.snapshot(t, id)
 	for name, form := range map[string]url.Values{
 		"neither":     {},
-		"blank":       {"anilist": {"  "}},
-		"bad url":     {"anilist": {"https://example.com/anime/5"}},
+		"blank":       {"source_ref": {"  "}},
+		"bad url":     {"source_ref": {"https://example.com/anime/5"}},
+		"look-alike":  {"source_ref": {"https://anilist.co.evil.com/anime/5"}},
+		"userinfo":    {"source_ref": {"https://anilist.co@evil.com/anime/5"}},
 		"bad pick":    {"pick": {"12abc"}},
-		"manga":       {"anilist": {"https://anilist.co/manga/5"}},
+		"zero":        {"source_ref": {"0"}},
+		"manga":       {"source_ref": {"https://anilist.co/manga/5"}},
 		"pick as url": {"pick": {"https://anilist.co/anime/5"}},
+		"bad source":  {"pick": {"5"}, "source": {"mal"}},
 	} {
 		rec := e.do("POST", matchURL, form, true)
 		if rec.Code != 422 {
 			t.Errorf("%s: %d", name, rec.Code)
 		}
-		mustContain(t, rec.Body.String(), `name="anilist"`)
+		mustContain(t, rec.Body.String(), `name="source_ref"`)
 	}
 	if e.fp.animeCalls != 0 {
 		t.Fatalf("provider called %d times for invalid input", e.fp.animeCalls)
@@ -228,11 +230,12 @@ func TestMatchUnknownIDShowsError(t *testing.T) {
 	id := e.unmatched(t)
 	before, enB := e.snapshot(t, id)
 	e.fp.animeErr = provider.ErrNotFound
-	rec := e.do("POST", matchURL, url.Values{"anilist": {"999999"}}, true)
+	rec := e.do("POST", matchURL, url.Values{"source_ref": {"999999"}}, true)
 	if rec.Code != 422 {
 		t.Fatalf("%d", rec.Code)
 	}
-	mustContain(t, rec.Body.String(), "AniList has no anime with that id", `value="999999"`)
+	// ADAPTED: generic wording (was "AniList has no anime with that id")
+	mustContain(t, rec.Body.String(), "No item with that id at AniList", `value="999999"`)
 	after, enA := e.snapshot(t, id)
 	if !reflect.DeepEqual(before, after) || !reflect.DeepEqual(enB, enA) || len(e.jobs.got) != 0 {
 		t.Fatal("changed")
@@ -246,7 +249,7 @@ func TestMatchProviderDownChangesNothing(t *testing.T) {
 			id := e.unmatched(t)
 			before, enB := e.snapshot(t, id)
 			e.fp.animeErr = perr
-			rec := e.do("POST", matchURL, url.Values{"anilist": {"1535"}}, true)
+			rec := e.do("POST", matchURL, url.Values{"source_ref": {"1535"}}, true)
 			if rec.Code != 503 {
 				t.Fatalf("%d", rec.Code)
 			}
@@ -256,7 +259,7 @@ func TestMatchProviderDownChangesNothing(t *testing.T) {
 				t.Fatal("changed")
 			}
 			// no JS: still a readable page with the status
-			rec = e.do("POST", matchURL, url.Values{"anilist": {"1535"}}, false)
+			rec = e.do("POST", matchURL, url.Values{"source_ref": {"1535"}}, false)
 			if rec.Code != 503 {
 				t.Fatalf("nojs %d", rec.Code)
 			}
@@ -279,7 +282,8 @@ func TestMatchEnqueuesSync(t *testing.T) {
 	if len(e.jobs.got) != 1 || e.jobs.got[0].Kind != "sync_anime" {
 		t.Fatalf("%+v", e.jobs.got)
 	}
-	if p := e.jobs.got[0].Payload; !strings.Contains(strings.ReplaceAll(toJSON(p), " ", ""), `"anime_id":`+itoa(id)) {
+	p := strings.ReplaceAll(toJSON(e.jobs.got[0].Payload), " ", "")
+	if !strings.Contains(p, `"anime_id":`+itoa(id)) || !strings.Contains(p, `"plugin_id":"anime"`) {
 		t.Fatalf("payload %v", p)
 	}
 	// enqueue failure is logged, conversion stays
@@ -289,7 +293,7 @@ func TestMatchEnqueuesSync(t *testing.T) {
 	if rec := e2.do("POST", matchURL, url.Values{"pick": {"1535"}}, true); rec.Code != 204 {
 		t.Fatalf("%d", rec.Code)
 	}
-	if sv, _ := e2.snapshot(t, id2); sv.Source != provider.AniList {
+	if it, _ := e2.snapshot(t, id2); it.Source != "anilist" {
 		t.Fatal("not converted")
 	}
 }
@@ -299,7 +303,7 @@ func TestMatchRefusesDuplicateWithLink(t *testing.T) {
 	id := e.unmatched(t)
 	e.saved(t) // anilist 1535 already saved
 	before, _ := e.snapshot(t, id)
-	rec := e.do("POST", matchURL, url.Values{"anilist": {"1535"}}, true)
+	rec := e.do("POST", matchURL, url.Values{"source_ref": {"1535"}}, true)
 	if rec.Code != 422 {
 		t.Fatalf("%d", rec.Code)
 	}
@@ -331,7 +335,7 @@ func TestMatchSearchPartial(t *testing.T) {
 	mustNotContain(t, b, "<html")
 	// no JS: full page with the dialog open
 	b = e.get(matchURL + "/search?q=death").Body.String()
-	mustContain(t, b, "<html", `name="pick" value="1535"`, `name="anilist"`)
+	mustContain(t, b, "<html", `name="pick" value="1535"`, `name="source_ref"`)
 	// long query is capped
 	e.do("GET", matchURL+"/search?q="+strings.Repeat("é", 500), nil, true)
 	if got := e.mp.searches[len(e.mp.searches)-1]; len([]rune(got)) != 200 {
@@ -359,7 +363,7 @@ func TestMatchSearchErrors(t *testing.T) {
 
 func TestMatchKeepsOtherEntriesAndPeople(t *testing.T) {
 	e := newMatchEnv(t)
-	id := e.unmatched(t)
+	e.unmatched(t)
 	other := e.saved(t) // anilist 1535 (different from the match target below)
 	e.withCast(t, other, e.fp.cast...)
 	actor := e.personPath(t, "a1")
@@ -371,10 +375,9 @@ func TestMatchKeepsOtherEntriesAndPeople(t *testing.T) {
 	if e.personPath(t, "a1") != actor {
 		t.Fatal("person changed")
 	}
-	if sv, _ := e.st.GetByID(context.Background(), other); sv.Anime.ID != "1535" {
+	if it, _ := e.snapshot(t, other); it.SourceID != "1535" {
 		t.Fatal("other entry touched")
 	}
-	_ = id
 }
 
 func itoa(n int64) string { return strconv.FormatInt(n, 10) }
@@ -384,24 +387,193 @@ func toJSON(v any) string {
 	return string(b)
 }
 
-func TestMatchSearchWithoutAnimePlugin404(t *testing.T) {
-	// the anime routes are only mounted with the anime plugin; the handler
-	// still refuses to run without its manifest
-	e := newEnvWith(t, func(es plugin.EnabledStore) *plugin.Registry {
-		r := plugin.NewRegistry(es)
-		r.Register(plugintest.BookPlugin())
-		return r
+// REPLACES TestMatchSearchWithoutAnimePlugin404: a plugin without sources
+// offers no match (dialog, search and POST answer 404).
+func TestMatchNeedsASource(t *testing.T) {
+	e := newFixtureEnv(t, func(book, _ *plugintest.Plugin) {
+		book.M.Sources, book.Sources, book.M.Importers, book.Importers = nil, nil, nil, nil
 	})
-	man := provider.Anime{SearchResult: provider.SearchResult{Source: provider.Manual, ID: "man1", Titles: []provider.Title{{Lang: "en", Text: "M"}}}}
-	if _, err := e.st.SaveAnime(context.Background(), man, store.WithSyncState("done")); err != nil {
+	e.saveFixture(t, "book", "book", plugin.ItemData{ItemSummary: plugin.ItemSummary{Source: "manual", ID: "m1", Titles: ttl("Mine")}},
+		library.WithSyncState("done"))
+	mustNotContain(t, e.get("/book/manual/m1").Body.String(), "Match to")
+	for _, c := range []int{e.get("/book/manual/m1/match").Code, e.get("/book/manual/m1/match/search?q=x").Code,
+		e.do("POST", "/book/manual/m1/match", url.Values{"pick": {"1"}}, true).Code} {
+		if c != 404 {
+			t.Fatalf("%d", c)
+		}
+	}
+}
+
+// tvManual saves a manual tv show "m1" in the list at episode 30.
+func tvManual(t *testing.T, e *env) int64 {
+	t.Helper()
+	d := plugin.ItemData{ItemSummary: plugin.ItemSummary{Source: "manual", ID: "m1", Kind: "show", Titles: ttl("My Show"),
+		Fields: map[string]plugin.FieldValue{"type": {Text: "series"}}}}
+	return e.addFixture(t, "tv", "show", d, library.Entry{Status: library.Active, Comment: "mine",
+		Progress: map[string]float64{"episode": 30}}, library.WithSyncState("done"))
+}
+
+// REPLACES TestMatchUsesSourceLookup: matching asks the source's Search and
+// Details (never Lookup) and converts the item in place without a sync job
+// for a plugin that has none.
+func TestMatchUsesSourceDetailsAndSearch(t *testing.T) {
+	e := newFixtureEnv(t)
+	id := tvManual(t, e.env)
+	e.tv.Summaries = []plugin.ItemSummary{{Source: "tvdata", ID: "77", Kind: "show", Titles: ttl("Found Show"),
+		Fields: map[string]plugin.FieldValue{"year": {Num: num(2001)}}}}
+	e.tv.Data = tvShow("77", "Found Show")
+	b := e.do("GET", "/tv/manual/m1/match", nil, true).Body.String()
+	mustContain(t, b, "Match to Fake TV", "My Show", `placeholder="https://tv.example/show/123"`)
+	mustNotContain(t, b, "anime", "Anime", "AniList")
+	b = e.do("GET", "/tv/manual/m1/match/search?q=found", nil, true).Body.String()
+	mustContain(t, b, "Found Show", "2001", `name="pick" value="77"`)
+	if e.tv.Calls(plugintest.OpSearch) != 1 {
+		t.Fatalf("searches %d", e.tv.Calls(plugintest.OpSearch))
+	}
+	rec := e.do("POST", "/tv/manual/m1/match", url.Values{"source_ref": {"https://www.tv.example/show/77/found-show"}}, false)
+	if rec.Code != 303 || rec.Header().Get("Location") != "/tv/tvdata/77" {
+		t.Fatalf("%d %q %s", rec.Code, rec.Header().Get("Location"), rec.Body.String())
+	}
+	if e.tv.Calls(plugintest.OpDetails) != 1 || e.tv.Calls(plugintest.OpLookup) != 0 {
+		t.Fatalf("details %d lookup %d", e.tv.Calls(plugintest.OpDetails), e.tv.Calls(plugintest.OpLookup))
+	}
+	it, en := e.snapshot(t, id)
+	if it.Source != "tvdata" || it.SourceID != "77" || it.Titles[0].Text != "Found Show" || en.Comment != "mine" {
+		t.Fatalf("%+v %+v", it, en)
+	}
+	if len(e.jobs.got) != 0 {
+		t.Fatalf("job for a fixture: %+v", e.jobs.got)
+	}
+}
+
+func TestConvertClampsProgressToNewTotal(t *testing.T) {
+	e := newFixtureEnv(t)
+	id := tvManual(t, e.env)
+	e.tv.Data = tvShow("77", "Found")
+	e.tv.Data.Fields["episodes"] = plugin.FieldValue{Num: num(12)}
+	if rec := e.do("POST", "/tv/manual/m1/match", url.Values{"pick": {"77"}}, true); rec.Code != 204 {
+		t.Fatalf("%d %s", rec.Code, rec.Body.String())
+	}
+	if _, en := e.snapshot(t, id); en.Progress["episode"] != 12 || en.Status != library.Active || en.Comment != "mine" {
+		t.Fatalf("%+v", en)
+	}
+}
+
+func TestMatchFetchesBeforeAnyChange(t *testing.T) {
+	for name, c := range map[string]struct {
+		err  error
+		code int
+		want string
+	}{
+		"not found":    {plugin.ErrNotFound, 422, "No item with that id at Fake TV"},
+		"unavailable":  {plugin.ErrUnavailable, 503, "Nothing was changed"},
+		"rate limited": {plugin.ErrRateLimited, 503, "Nothing was changed"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			e := newFixtureEnv(t)
+			tvManual(t, e.env)
+			e.tv.Errs = map[string]error{plugintest.OpDetails: c.err}
+			before := dump(t, e.env)
+			rec := e.do("POST", "/tv/manual/m1/match", url.Values{"source_ref": {"77"}}, true)
+			if rec.Code != c.code {
+				t.Fatalf("%d", rec.Code)
+			}
+			mustContain(t, rec.Body.String(), c.want, `value="77"`)
+			if dump(t, e.env) != before {
+				t.Fatal("database changed")
+			}
+		})
+	}
+}
+
+func TestMatchConversionIsAtomic(t *testing.T) {
+	e := newFixtureEnv(t)
+	id := tvManual(t, e.env)
+	e.tv.Data = tvShow("77", "Found")
+	e.tv.Data.Relations = []plugin.Relation{{Kind: "sequel", Item: plugin.ItemSummary{Source: "tvdata", ID: "78"}}}
+	before := dump(t, e.env)
+	if _, err := e.d.Exec(`CREATE TRIGGER boom BEFORE INSERT ON relations BEGIN SELECT RAISE(ABORT, 'boom'); END`); err != nil {
 		t.Fatal(err)
 	}
-	req := httptest.NewRequest("GET", "/anime/manual/man1/match/search?q=x", nil)
-	req.SetPathValue("source", "manual")
-	req.SetPathValue("id", "man1")
-	rec := httptest.NewRecorder()
-	e.srv.getMatchSearch(rec, req)
-	if rec.Code != 404 {
-		t.Fatalf("got %d", rec.Code)
+	if rec := e.do("POST", "/tv/manual/m1/match", url.Values{"pick": {"77"}}, true); rec.Code != 500 {
+		t.Fatalf("%d", rec.Code)
+	}
+	if _, err := e.d.Exec(`DROP TRIGGER boom`); err != nil {
+		t.Fatal(err)
+	}
+	if dump(t, e.env) != before {
+		t.Fatal("not rolled back")
+	}
+	if it, _ := e.snapshot(t, id); it.Source != "manual" {
+		t.Fatal("converted")
+	}
+}
+
+func TestMatchConcurrentDoublePostNever500(t *testing.T) {
+	e := newFixtureEnv(t)
+	tvManual(t, e.env)
+	e.tv.Data = tvShow("77", "Found")
+	e.tv.Delay = 50 * time.Millisecond
+	codes := make([]int, 2)
+	var wg sync.WaitGroup
+	for i := range codes {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			codes[i] = e.do("POST", "/tv/manual/m1/match", url.Values{"pick": {"77"}}, true).Code
+		}(i)
+	}
+	wg.Wait()
+	ok := 0
+	for _, c := range codes {
+		switch c {
+		case 204:
+			ok++
+		case 404, 422:
+		default:
+			t.Fatalf("codes %v", codes)
+		}
+	}
+	if ok != 1 {
+		t.Fatalf("codes %v", codes)
+	}
+	if items := e.savedItems(t, "tv", "tvdata", "77"); len(items) != 1 {
+		t.Fatalf("%d items", len(items))
+	}
+}
+
+// twoSources gives the tv fixture a first source without lookup ("tvalt")
+// before its lookup source "tvdata".
+func twoSources(alt *plugintest.FakeSource) func(_, tv *plugintest.Plugin) {
+	return func(_, tv *plugintest.Plugin) {
+		tv.M.Sources = append([]plugin.SourceInfo{{ID: "tvalt", Name: "Alt TV", RequestsPerMinute: 10, URLPatterns: []string{"alt.example/s/{id}"}}}, tv.M.Sources...)
+		tv.Sources["tvalt"] = alt
+	}
+}
+
+func TestMatchWithSeveralSources(t *testing.T) {
+	alt := &plugintest.FakeSource{Data: tvShow("5", "Alt Show")}
+	e := newFixtureEnv(t, twoSources(alt))
+	id := tvManual(t, e.env)
+	e.tv.Data = tvShow("77", "Found")
+	// default: the first source with lookup support
+	b := e.do("GET", "/tv/manual/m1/match", nil, true).Body.String()
+	mustContain(t, b, `name="source" value="tvdata"`, "Fake TV", `href="/tv/manual/m1/match?source=tvalt"`)
+	b = e.do("GET", "/tv/manual/m1/match?source=tvalt", nil, true).Body.String()
+	mustContain(t, b, `name="source" value="tvalt"`, `placeholder="https://alt.example/s/123"`, `hx-get="/tv/manual/m1/match/search?source=tvalt"`)
+	e.do("GET", "/tv/manual/m1/match/search?source=tvalt&q=x", nil, true)
+	if alt.Calls(plugintest.OpSearch) != 1 || e.tv.Calls(plugintest.OpSearch) != 0 {
+		t.Fatal("searched the wrong source")
+	}
+	// a URL of the other source's pattern does not match the chosen source
+	if rec := e.do("POST", "/tv/manual/m1/match", url.Values{"source": {"tvalt"}, "source_ref": {"https://tv.example/show/77"}}, true); rec.Code != 422 {
+		t.Fatalf("%d", rec.Code)
+	}
+	rec := e.do("POST", "/tv/manual/m1/match", url.Values{"source": {"tvalt"}, "source_ref": {"alt.example/s/5"}}, true)
+	if rec.Code != 204 || rec.Header().Get("HX-Redirect") != "/tv/tvalt/5" {
+		t.Fatalf("%d %q", rec.Code, rec.Header().Get("HX-Redirect"))
+	}
+	if it, _ := e.snapshot(t, id); it.Source != "tvalt" || it.SourceID != "5" {
+		t.Fatalf("%+v", it)
 	}
 }

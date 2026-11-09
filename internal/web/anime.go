@@ -1,13 +1,14 @@
 package web
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"log"
 	"net/http"
 	"net/url"
 
+	"github.com/allister/allister/internal/library"
+	"github.com/allister/allister/internal/plugin"
 	"github.com/allister/allister/internal/provider"
 )
 
@@ -41,20 +42,6 @@ func isASCIIDigits(s string, maxLen int) bool {
 	return true
 }
 
-// route validates the path wildcards; it writes a 404 page and returns false
-// for an unknown source or malformed id.
-func (s *server) route(w http.ResponseWriter, r *http.Request) (provider.Source, string, bool) {
-	src, id := provider.Source(r.PathValue("source")), r.PathValue("id")
-	switch {
-	case src == provider.AniList && isASCIIDigits(id, maxIDDigits):
-	case src == provider.Manual && id != "" && len(id) <= 64:
-	default:
-		s.errorPage(w, r, http.StatusNotFound, "Not found", "There is no such anime.", "")
-		return "", "", false
-	}
-	return src, id, true
-}
-
 func (s *server) errorPage(w http.ResponseWriter, r *http.Request, status int, title, msg, retry string) {
 	s.renderStatus(w, r, status, "error", errorView{Title: title, Message: msg, RetryURL: retry})
 }
@@ -80,15 +67,22 @@ func (s *server) fail(w http.ResponseWriter, r *http.Request, err error, retry s
 	}
 }
 
-func (s *server) fetchAnime(ctx context.Context, id string) (provider.Anime, error) {
-	p := s.deps.Providers[provider.AniList]
-	if p == nil {
-		return provider.Anime{}, errNoProvider
+// unmatchedHint explains an imported manual item that its importer's
+// external id did not resolve ("" when the item carries no such id).
+//
+// TEMPORARY: the anime plugin keeps the legacy sentence (asserted by the
+// match tests) until the importer becomes generic (Task 11); other plugins
+// get a neutral one built from the importer's ExternalIDType.
+func unmatchedHint(m plugin.Manifest, it *library.Item) string {
+	for _, imp := range m.Importers {
+		v := it.ExternalIDs[imp.ExternalIDType]
+		if imp.ExternalIDType == "" || v == "" {
+			continue
+		}
+		if m.ID == animePluginID {
+			return "Imported from Yamtrack; AniList had no match for MyAnimeList #" + v + "."
+		}
+		return "Imported without a match; " + imp.ExternalIDType + " " + v
 	}
-	a, err := p.Anime(ctx, id)
-	if err != nil {
-		return provider.Anime{}, err
-	}
-	a.Source, a.ID = provider.AniList, id
-	return a, nil
+	return ""
 }

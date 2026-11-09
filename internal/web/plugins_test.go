@@ -114,7 +114,7 @@ func TestEveryAnimeRouteIsGuardedByTheRouteTable(t *testing.T) {
 	e := newEnv(t)
 	// the table itself: every route registered by the set carries the /anime prefix
 	var rec recordRoutes
-	e.srv.animeRoutes(&rec)
+	e.srv.coreRoutes(animePluginID)(&rec) // the anime route set is exactly the core one
 	if len(rec.patterns) == 0 || len(rec.patterns) != len(e.srv.pluginRoutes[animePluginID]) {
 		t.Fatalf("recorded %v vs mounted %v", rec.patterns, e.srv.pluginRoutes[animePluginID])
 	}
@@ -443,7 +443,7 @@ func TestEnqueuedJobsCarryPluginID(t *testing.T) {
 	}
 	m := newMatchEnv(t)
 	m.unmatched(t)
-	if rec := m.do("POST", matchURL, url.Values{"anilist": {"1535"}}, true); rec.Code >= 400 {
+	if rec := m.do("POST", matchURL, url.Values{"source_ref": {"1535"}}, true); rec.Code >= 400 {
 		t.Fatalf("match: %d %s", rec.Code, rec.Body.String())
 	}
 	if len(m.jobs.got) != 1 || m.jobs.got[0].Payload.(jobs.SyncPayload).PluginID != "anime" {

@@ -96,9 +96,12 @@ type itemView struct {
 	// MatchURL, MatchLabel and UnmatchedHint: a manual item that can be
 	// matched to the plugin's source.
 	MatchURL, MatchLabel, UnmatchedHint string
-	Sections                            []sectionView
-	Dialog                              *entryForm
-	Match                               *matchView
+	// DetailsURL opens "Edit details" (every saved item); it returns to
+	// the overview.
+	DetailsURL string
+	Sections   []sectionView
+	Dialog     *entryForm
+	Match      *matchView
 }
 
 func (s *server) itemView(ctx context.Context, li *loadedItem) itemView {
@@ -108,17 +111,18 @@ func (s *server) itemView(ctx context.Context, li *loadedItem) itemView {
 	if v.Title == "" {
 		v.Title = "(untitled)"
 	}
-	path := itemPath(m.ID, d.Source, d.ID)
 	if it := li.saved; it != nil {
+		overview := itemURL(m, d.Source, d.ID, d.Kind)
 		v.Cover = covers.Src(it.CoverPath)
 		v.PartialSync = it.SyncState != "done"
+		v.DetailsURL = itemAction(m, d.Source, d.ID, d.Kind, "edit", url.Values{"return": {overview}})
 		if it.Source == manualSource && len(m.Sources) > 0 {
-			v.MatchURL, v.MatchLabel = path+"/match", "Match to "+m.Sources[0].Name
+			v.MatchURL, v.MatchLabel = itemAction(m, d.Source, d.ID, d.Kind, "match", nil), "Match to "+defaultSource(m).Name
 			v.UnmatchedHint = unmatchedHint(m, it)
 		}
 		if li.entry != nil {
 			v.Entry = entrySummary(k, it, li.entry)
-			v.Entry.EditHXURL = v.Entry.EditURL + "?" + url.Values{"return": {itemURL(m, d.Source, d.ID, d.Kind)}}.Encode()
+			v.Entry.EditHXURL = v.Entry.EditURL + "?" + url.Values{"return": {overview}}.Encode()
 		}
 	} else {
 		v.Cover = httpURL(d.CoverURL)

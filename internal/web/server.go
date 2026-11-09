@@ -44,9 +44,6 @@ type Deps struct {
 	CoversDir string
 	// Imports runs the Yamtrack import; when nil the import pages answer 404.
 	Imports *yamtrack.Importer
-	// ParseAnimeURL reduces a pasted AniList URL or number to an anime id
-	// (anilist.ParseAnimeURL; injected because web must not import it).
-	ParseAnimeURL func(string) (id string, ok bool)
 	// Registry holds the installed plugins and their enabled flags. Required
 	// in production (cmd/allister builds it); when nil NewServer builds a
 	// default one with the anime plugin on top of Settings.
@@ -74,15 +71,17 @@ type server struct {
 
 // pageNames lists every page template (templates/<name>.html). Add a page by
 // dropping its file in templates/ and listing it here.
-var pageNames = []string{"settings", "search", "item", "list", "person", "manual_form", "import", "error"}
+var pageNames = []string{"settings", "search", "item", "list", "person", "manual_form", "details_form", "import", "error"}
 
 // pagePartials lists extra template files a page needs (also rendered alone
 // for htmx requests).
 var pagePartials = map[string][]string{
-	"search":   {"templates/search_results.html"},
-	"settings": {"templates/settings_plugins.html"},
-	"item":     {"templates/sections.html", "templates/add_dialog.html", "templates/progress_inputs.html", "templates/match_dialog.html"},
-	"list":     {"templates/list_row.html", "templates/entry_dialog.html", "templates/progress_inputs.html"},
+	"search":       {"templates/search_results.html"},
+	"settings":     {"templates/settings_plugins.html"},
+	"item":         {"templates/sections.html", "templates/add_dialog.html", "templates/progress_inputs.html", "templates/match_dialog.html"},
+	"list":         {"templates/list_row.html", "templates/entry_dialog.html", "templates/progress_inputs.html"},
+	"manual_form":  {"templates/item_inputs.html", "templates/progress_inputs.html"},
+	"details_form": {"templates/item_inputs.html"},
 }
 
 // parsePages builds one template set per page, each cloned from base.html plus

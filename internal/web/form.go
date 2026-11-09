@@ -3,16 +3,12 @@ package web
 import (
 	"errors"
 	"net/http"
-	"strconv"
 	"strings"
-
-	"github.com/allister/allister/internal/library"
-	"github.com/allister/allister/internal/store"
 )
 
-// Shared form handling. The generic entry form parser is parseEntryForm
-// (add.go, used by add and edit); the legacy anime-shaped one below is kept
-// only for the manual form (manual.go) until it becomes generic.
+// Shared form handling. The one entry form parser is parseEntryForm (add.go,
+// used by add, edit and manual create); the schema-generated item forms are
+// in details.go.
 
 const maxFormBytes = 64 << 10
 
@@ -59,67 +55,6 @@ func safeReturn(raw, pluginID string) string {
 type statusOpt struct {
 	Value, Label string
 	Selected     bool
-}
-
-// legacyEntryForm is the list entry part of the legacy manual form; the
-// string fields echo the user's input.
-//
-// TODO(Task 10): remove when the manual form uses parseEntryForm.
-type legacyEntryForm struct {
-	Status, Rating, Progress       string
-	StartedOn, FinishedOn, Comment string
-	Statuses                       []statusOpt
-	Error                          string
-}
-
-func (f legacyEntryForm) withStatuses() legacyEntryForm {
-	f.Statuses = nil
-	for _, st := range statusOrder {
-		f.Statuses = append(f.Statuses, statusOpt{string(st), statusLabels[st], string(st) == f.Status})
-	}
-	return f
-}
-
-// parseLegacyEntryForm reads and validates the legacy (anime-shaped) form
-// fields; msg is a user-facing message and non-empty on error.
-//
-// TODO(Task 10): remove when the manual form uses parseEntryForm.
-func parseLegacyEntryForm(r *http.Request, f legacyEntryForm) (legacyEntryForm, store.ListEntry, string) {
-	f.Status = strings.TrimSpace(r.PostFormValue("status"))
-	f.Rating = strings.TrimSpace(r.PostFormValue("rating"))
-	f.Progress = strings.TrimSpace(r.PostFormValue("progress"))
-	f.StartedOn = strings.TrimSpace(r.PostFormValue("started_on"))
-	f.FinishedOn = strings.TrimSpace(r.PostFormValue("finished_on"))
-	f.Comment = strings.TrimSpace(r.PostFormValue("comment"))
-	if rs := []rune(f.Comment); len(rs) > library.MaxCommentRunes {
-		f.Comment = string(rs[:library.MaxCommentRunes])
-	}
-	e := store.ListEntry{Status: store.Status(f.Status), Comment: f.Comment}
-	if _, ok := statusLabels[e.Status]; !ok {
-		return f, e, "Please choose a status."
-	}
-	if f.Rating != "" {
-		n, err := strconv.Atoi(f.Rating)
-		if err != nil || n < 0 || n > 10 {
-			return f, e, "Rating must be a whole number from 0 to 10, or blank for unrated."
-		}
-		e.Rating = &n
-	}
-	if f.Progress != "" {
-		n, err := strconv.Atoi(f.Progress)
-		if err != nil || n < 0 {
-			return f, e, "Progress must be a whole number, 0 or more."
-		}
-		e.Progress = n
-	}
-	var msg string
-	if e.StartedOn, msg = parseDay(f.StartedOn, "Start date"); msg != "" {
-		return f, e, msg
-	}
-	if e.FinishedOn, msg = parseDay(f.FinishedOn, "Finish date"); msg != "" {
-		return f, e, msg
-	}
-	return f, e, ""
 }
 
 func invalidMessage(err error) string {

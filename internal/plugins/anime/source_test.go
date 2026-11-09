@@ -524,6 +524,13 @@ func TestSourceOutputIsAcceptedByLibrary(t *testing.T) {
 			if err := lib.SaveCredits(ctx(), itemID, cr); err != nil {
 				t.Fatalf("SaveCredits: %v", err)
 			}
+			// type is a required field (manual entries must choose one) but a
+			// source may lack it (the hostile format is unknown): SaveItem
+			// accepts that; ValidateItem checks everything else once a type
+			// is given, as Edit details asks the user to do.
+			if _, ok := d.Fields["type"]; !ok && name == "hostile" {
+				d.Fields["type"] = plugin.FieldValue{Text: "TV"}
+			}
 			if err := lib.ValidateItem("anime", "anime", d); err != nil {
 				t.Fatalf("ValidateItem: %v", err)
 			}
