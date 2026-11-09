@@ -289,3 +289,84 @@ func (l *Library) ClearProgress(ctx context.Context, itemID int64, keys ...strin
 	}
 	return nil
 }
+
+// UpdateEntry replaces the existing entry of e.ItemID (like UpsertEntry) and,
+// when activeKeys is not nil, first makes activeKeys the item's active
+// progress combination (like SetActiveProgress: it must equal, as a set, one
+// of the kind's allowed combinations; values of keys that stop being active
+// are retained). Everything happens in ONE write-locking transaction: e is
+// validated against the item's NEW active keys and totals, and on any error
+// neither the combination nor the entry changes. A nil activeKeys keeps the
+// combination, and an unchanged combination (in any order) leaves the item
+// row untouched. It returns ErrNoEntry when the item or its entry does not
+// exist; it never creates an entry.
+func (l *Library) UpdateEntry(ctx context.Context, e Entry, activeKeys []string) error {
+	tx, err := l.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("update entry: %w", err)
+	}
+	defer tx.Rollback()
+	pluginID, kindKey, active, hasEntry, err := itemMeta(ctx, tx, e.ItemID)
+	if err != nil {
+		return err
+	}
+	if !hasEntry {
+		return ErrNoEntry
+	}
+	if activeKeys != nil {
+		def, err := l.kindDef(pluginID, kindKey)
+		if err != nil {
+			return err
+		}
+		norm, err := normalizeProgress(def, activeKeys)
+		if err != nil {
+			return err
+		}
+		if !sameKeys(norm, active) {
+			pk, err := json.Marshal(norm)
+			if err != nil {
+				return fmt.Errorf("update entry: %w", err)
+			}
+			if _, err := tx.ExecContext(ctx, `UPDATE items SET progress_keys = ?, updated_at = `+nowSQL+` WHERE id = ?`, string(pk), e.ItemID); err != nil {
+				return fmt.Errorf("update entry: %w", err)
+			}
+		}
+	}
+	it, def, err := l.txItem(ctx, tx, e.ItemID)
+	if err != nil {
+		return err
+	}
+	if err := l.ValidateEntry(def, it, e); err != nil {
+		return err
+	}
+	if err := writeEntry(ctx, tx, e.ItemID, e); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("update entry: %w", err)
+	}
+	return nil
+}
+
+// sameKeys reports whether a and b hold the same keys (as sets of unique keys).
+func sameKeys(a, b []string) bool {
+	as, bs := slices.Clone(a), slices.Clone(b)
+	slices.Sort(as)
+	slices.Sort(bs)
+	return slices.Equal(as, bs)
+}
+
+// ItemPluginID returns the plugin id of item id (with or without an entry),
+// or ErrNoEntry when there is no such item. The web layer uses it to guard
+// the entry routes by the item's plugin before anything else happens.
+func (l *Library) ItemPluginID(ctx context.Context, id int64) (string, error) {
+	var p string
+	err := l.db.QueryRowContext(ctx, `SELECT plugin_id FROM items WHERE id = ?`, id).Scan(&p)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", ErrNoEntry
+	}
+	if err != nil {
+		return "", fmt.Errorf("item plugin: %w", err)
+	}
+	return p, nil
+}

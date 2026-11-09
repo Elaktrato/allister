@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -424,3 +425,120 @@ func TestHugeTermListFailsFast(t *testing.T) {
 		t.Fatalf("took %v", d)
 	}
 }
+
+func TestUpdateEntrySwitchesCombinationAndWritesAtomically(t *testing.T) {
+	e := newEnv(t)
+	l := e.lib
+	id := addShow(t, l, "ue", fp(10), Entry{Status: Active, Progress: map[string]float64{"episode": 2}})
+	itemRow := func() string {
+		var pk, upd string
+		if err := e.db.QueryRow(`SELECT progress_keys, updated_at FROM items WHERE id = ?`, id).Scan(&pk, &upd); err != nil {
+			t.Fatal(err)
+		}
+		return pk + " " + upd
+	}
+	// nil keys: the active combination stays and the item row is not touched
+	if _, err := e.db.Exec(`UPDATE items SET updated_at = '2000-01-01T00:00:00Z' WHERE id = ?`, id); err != nil {
+		t.Fatal(err)
+	}
+	before := itemRow()
+	if err := l.UpdateEntry(bg, Entry{ItemID: id, Status: Paused, Rating: ip(0), Progress: map[string]float64{"episode": 3}}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if itemRow() != before {
+		t.Fatalf("item touched: %s -> %s", before, itemRow())
+	}
+	// the same combination in another order is no change either
+	if err := l.UpdateEntry(bg, Entry{ItemID: id, Status: Paused, Progress: map[string]float64{"episode": 3}}, []string{"episode"}); err != nil {
+		t.Fatal(err)
+	}
+	if itemRow() != before {
+		t.Fatal("item touched by an unchanged combination")
+	}
+	if en := mustEntry(t, l, id); en.Status != Paused || en.Progress["episode"] != 3 {
+		t.Fatalf("%+v", en)
+	}
+	// switch: the new keys are active and the values for them written in one go
+	if err := l.UpdateEntry(bg, Entry{ItemID: id, Status: Active, Progress: map[string]float64{"episode": 4, "position": 600}}, []string{"position", "episode"}); err != nil {
+		t.Fatal(err)
+	}
+	if it := mustItem(t, l, id); !slices.Equal(it.ProgressKeys, []string{"position", "episode"}) {
+		t.Fatalf("keys %v", it.ProgressKeys)
+	}
+	if got := progressOf(t, l, id); got["episode"] != 4 || got["position"] != 600 {
+		t.Fatalf("progress %v", got)
+	}
+	// back: the inactive value is retained
+	if err := l.UpdateEntry(bg, Entry{ItemID: id, Status: Active, Progress: map[string]float64{"episode": 5}}, []string{"episode"}); err != nil {
+		t.Fatal(err)
+	}
+	if n := count(t, e.db, `SELECT count(*) FROM entry_progress WHERE item_id = ? AND key = 'position' AND value = 600`, id); n != 1 {
+		t.Fatal("position not retained")
+	}
+}
+
+func TestUpdateEntryRollsBackOnError(t *testing.T) {
+	e := newEnv(t)
+	l := e.lib
+	id := addShow(t, l, "ur", fp(10), Entry{Status: Active, Progress: map[string]float64{"episode": 2}, Comment: "old"})
+	snapshot := func() string {
+		var pk string
+		if err := e.db.QueryRow(`SELECT progress_keys || updated_at FROM items WHERE id = ?`, id).Scan(&pk); err != nil {
+			t.Fatal(err)
+		}
+		en := mustEntry(t, l, id)
+		return fmt.Sprintf("%s %v %s %v %d", pk, en.Status, en.Comment, en.Progress,
+			count(t, e.db, `SELECT count(*) FROM entry_progress WHERE item_id = ?`, id))
+	}
+	before := snapshot()
+	for name, c := range map[string]struct {
+		e    Entry
+		keys []string
+		want string
+	}{
+		"above the new total":             {Entry{Status: Completed, Comment: "new", Progress: map[string]float64{"season": 1, "episode": 11}}, []string{"season", "episode"}, "above the total"},
+		"key outside the new combination": {Entry{Status: Completed, Comment: "new", Progress: map[string]float64{"position": 5}}, []string{"season", "episode"}, "not active"},
+		"ineligible combination":          {Entry{Status: Completed, Comment: "new"}, []string{"season", "position"}, "combination"},
+		"empty combination":               {Entry{Status: Completed, Comment: "new"}, []string{}, "combination"},
+		"bad status":                      {Entry{Status: "watching", Comment: "new"}, []string{"season", "episode"}, "status"},
+		"finish before start": {Entry{Status: Completed, StartedOn: tp(day(2024, 2, 1)), FinishedOn: tp(day(2024, 1, 1))},
+			[]string{"season", "episode"}, "before the start"},
+	} {
+		c.e.ItemID = id
+		err := l.UpdateEntry(bg, c.e, c.keys)
+		if !errors.Is(err, ErrInvalid) || !strings.Contains(err.Error(), c.want) {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if got := snapshot(); got != before {
+			t.Fatalf("%s: changed\n%s\n%s", name, before, got)
+		}
+	}
+	// no item, no entry
+	if err := l.UpdateEntry(bg, Entry{ItemID: 9999, Status: Active}, nil); err != ErrNoEntry {
+		t.Fatalf("unknown item: %v", err)
+	}
+	bare := mustSave(t, l, "tv", "show", tvData("bare", nil))
+	if err := l.UpdateEntry(bg, Entry{ItemID: bare, Status: Active}, []string{"episode"}); err != ErrNoEntry {
+		t.Fatalf("no entry: %v", err)
+	}
+	if en, _ := l.Entry(bg, bare); en != nil {
+		t.Fatal("entry created")
+	}
+}
+
+func TestItemPluginID(t *testing.T) {
+	e := newEnv(t)
+	id := addShow(t, e.lib, "pi", nil, Entry{Status: Active})
+	if p, err := e.lib.ItemPluginID(bg, id); err != nil || p != "tv" {
+		t.Fatalf("%q %v", p, err)
+	}
+	bare := mustSave(t, e.lib, "book", "book", bookWith("pb", nil))
+	if p, err := e.lib.ItemPluginID(bg, bare); err != nil || p != "book" {
+		t.Fatalf("no entry: %q %v", p, err)
+	}
+	if _, err := e.lib.ItemPluginID(bg, 9999); err != ErrNoEntry {
+		t.Fatalf("unknown: %v", err)
+	}
+}
+
+func tp(t time.Time) *time.Time { return &t }
