@@ -116,7 +116,7 @@ func newServer(deps Deps, now func() time.Time) (*server, http.Handler) {
 	mux.HandleFunc("GET /anime/{source}/{id}/match", s.getMatch)
 	mux.HandleFunc("POST /anime/{source}/{id}/match", s.postMatch)
 	mux.HandleFunc("GET /anime/{source}/{id}/match/search", s.getMatchSearch)
-	return s, mux
+	return s, refuseCrossOrigin(mux)
 }
 
 // isPartialRequest reports whether r is an htmx request that wants only a
