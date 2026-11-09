@@ -406,17 +406,11 @@ func TestOverviewOfDisabledPlugin404(t *testing.T) {
 }
 
 func TestOverviewKindParameterResolvesAmbiguity(t *testing.T) {
-	e := newFixtureEnv(t, func(book, _ *plugintest.Plugin) {
-		comic := book.M.Kinds[0]
-		comic.Key, comic.Label, comic.LabelPlural = "comic", "Comic", "Comics"
-		comic.Sections = append([]plugin.SectionDef(nil), comic.Sections...)
-		book.M.Kinds = append(book.M.Kinds, comic)
-	})
+	e := newFixtureEnv(t, withComicKind)
 	e.saveFixture(t, "book", "book", bookItem("7", "The Novel"))
 	cd := bookItem("7", "The Comic")
 	cd.Kind = "comic"
 	e.saveFixture(t, "book", "comic", cd)
-	mustContain(t, e.get("/book/books/7").Body.String(), "The Novel</h1>")
 	mustContain(t, e.get("/book/books/7?kind=book").Body.String(), "The Novel</h1>")
 	mustContain(t, e.get("/book/books/7?kind=comic").Body.String(), "The Comic</h1>")
 	if c := e.get("/book/books/7?kind=show").Code; c != 404 {
@@ -649,4 +643,68 @@ func TestSavedAnimeRelationKeepsExternalURL(t *testing.T) {
 	e.saved(t)
 	b := e.get("/anime/anilist/1535").Body.String()
 	mustContain(t, b, `href="/anime/anilist/2000"`, `href="https://anilist.co/manga/30021"`, "Manga Title")
+}
+
+// withComicKind adds a second kind "comic" (a copy of book) to the book fixture.
+func withComicKind(book, _ *plugintest.Plugin) {
+	comic := book.M.Kinds[0]
+	comic.Key, comic.Label, comic.LabelPlural = "comic", "Comic", "Comics"
+	comic.Sections = append([]plugin.SectionDef(nil), comic.Sections...)
+	book.M.Kinds = append(book.M.Kinds, comic)
+}
+
+func TestOverviewSeveralSavedKindsNeedKind(t *testing.T) {
+	e := newFixtureEnv(t, withComicKind)
+	e.saveFixture(t, "book", "book", bookItem("7", "The Novel"))
+	// one saved kind: no ?kind= needed
+	mustContain(t, e.get("/book/books/7").Body.String(), "The Novel</h1>")
+	cd := bookItem("7", "The Comic")
+	cd.Kind = "comic"
+	e.saveFixture(t, "book", "comic", cd)
+	rec := e.get("/book/books/7")
+	if rec.Code != 404 {
+		t.Fatalf("several saved kinds without ?kind=: %d", rec.Code)
+	}
+	mustContain(t, rec.Body.String(), "Several kinds share this id: add ?kind=…")
+	mustNotContain(t, rec.Body.String(), "The Novel", "The Comic")
+	mustContain(t, e.get("/book/books/7?kind=book").Body.String(), "The Novel</h1>")
+	mustContain(t, e.get("/book/books/7?kind=comic").Body.String(), "The Comic</h1>")
+}
+
+func TestFmtProgressClampsBadValues(t *testing.T) {
+	count := plugin.ProgressDef{Key: "episode", Type: plugin.Count, TotalField: "episodes"}
+	dur := plugin.ProgressDef{Key: "position", Type: plugin.Duration}
+	pct := plugin.ProgressDef{Key: "percent", Type: plugin.Percent}
+	fields := map[string]plugin.FieldValue{"episodes": {Num: num(10)}}
+	for _, tc := range []struct {
+		def  plugin.ProgressDef
+		v    float64
+		want string
+	}{
+		{dur, -59, "0:00:00"},
+		{dur, 3723, "1:02:03"},
+		{dur, 1e12, "999:59:59"},
+		{dur, 999*3600 + 59*60 + 59, "999:59:59"},
+		{count, -3, "0 / 10"},
+		{pct, -5, "0%"},
+		{count, 4, "4 / 10"},
+	} {
+		if got := fmtProgress(tc.def, tc.v, fields); got != tc.want {
+			t.Errorf("fmtProgress(%s, %v) = %q, want %q", tc.def.Type, tc.v, got, tc.want)
+		}
+	}
+}
+
+func TestTitlesBlockStartsWithResolvedTitle(t *testing.T) {
+	e := newFixtureEnv(t)
+	d := tvShow("1", "")
+	// the preferred language (ja) is missing: ResolveTitle falls back to en
+	d.Titles = []plugin.Title{{Lang: "original", Text: "Orig Title"}, {Lang: "en", Text: "Eng Title"}}
+	e.saveFixture(t, "tv", "show", d)
+	b := e.get("/tv/tvdata/1").Body.String()
+	mustContain(t, b, "Eng Title</h1>")
+	sec := b[strings.Index(b, "</h1>"):]
+	if i, j := strings.Index(sec, "Eng Title"), strings.Index(sec, "Orig Title"); i < 0 || j < 0 || i > j {
+		t.Fatalf("titles block order: en at %d, original at %d", i, j)
+	}
 }

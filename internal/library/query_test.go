@@ -895,3 +895,21 @@ func TestListLoadsRowsWithBoundedQueries(t *testing.T) {
 		t.Fatalf("statements: page of 2 = %d, page of 100 = %d (want equal and small)", small, large)
 	}
 }
+
+func TestResolveTitleIndex(t *testing.T) {
+	ts := []plugin.Title{{Lang: "original", Text: "O"}, {Lang: "en", Text: "E"}, {Lang: "de", Text: "D"}}
+	for _, tc := range []struct {
+		pref string
+		want int
+	}{{"de", 2}, {"fr", 1}, {"en", 1}} {
+		if got := ResolveTitleIndex(ts, tc.pref); got != tc.want {
+			t.Errorf("%s: got %d, want %d", tc.pref, got, tc.want)
+		}
+		if ResolveTitle(ts, tc.pref) != ts[tc.want].Text {
+			t.Errorf("%s: ResolveTitle disagrees", tc.pref)
+		}
+	}
+	if ResolveTitleIndex(nil, "en") != -1 || ResolveTitleIndex([]plugin.Title{{Lang: "x", Text: "X"}}, "en") != 0 {
+		t.Error("empty or no match")
+	}
+}

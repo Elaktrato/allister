@@ -638,3 +638,36 @@ func TestOptionsProviderReplacesTheClient(t *testing.T) {
 		t.Fatalf("lookup err = %v", err)
 	}
 }
+
+func TestSourceSharedDetailsExpireAfterTTL(t *testing.T) {
+	var queries []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		queries = append(queries, string(b))
+		w.Header().Set("Content-Type", "application/json")
+		w.Write(fixture(t, "anime.json"))
+	}))
+	t.Cleanup(srv.Close)
+	now := time.Unix(1000, 0)
+	s := New(Options{AniListURL: srv.URL, HTTP: srv.Client(), now: func() time.Time { return now }}).Source("anilist")
+	if _, err := s.Details(ctx(), "anime", "154587"); err != nil {
+		t.Fatal(err)
+	}
+	now = now.Add(sharedTTL - time.Millisecond)
+	if _, err := s.Recommendations(ctx(), "anime", "154587"); err != nil {
+		t.Fatal(err)
+	}
+	if len(queries) != 1 {
+		t.Fatalf("within the TTL: %d requests, want 1", len(queries))
+	}
+	if _, err := s.Details(ctx(), "anime", "154587"); err != nil {
+		t.Fatal(err)
+	}
+	now = now.Add(sharedTTL)
+	if _, err := s.Recommendations(ctx(), "anime", "154587"); err != nil {
+		t.Fatal(err)
+	}
+	if len(queries) != 3 {
+		t.Fatalf("after the TTL: %d requests, want 3", len(queries))
+	}
+}

@@ -28,8 +28,11 @@ const (
 // overview (Details, then Recommendations of the same id) costs one request,
 // Details keeps its response for a moment and the next Recommendations of
 // that id takes it (once; see shared).
+//
+// TODO(Task 11): remove when recommendations are async/split
 type source struct {
-	c provider.Provider
+	c   provider.Provider
+	now func() time.Time // clock of the shared reuse; never nil
 
 	mu     sync.Mutex
 	shared sharedAnime
@@ -68,7 +71,7 @@ func checkID(id string) error {
 
 func (s *source) keep(id string, a provider.Anime) {
 	s.mu.Lock()
-	s.shared = sharedAnime{id: id, a: a, at: time.Now()}
+	s.shared = sharedAnime{id: id, a: a, at: s.now()}
 	s.mu.Unlock()
 }
 
@@ -77,7 +80,7 @@ func (s *source) take(id string) (provider.Anime, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	sh := s.shared
-	if sh.id != id || time.Since(sh.at) >= sharedTTL {
+	if sh.id != id || s.now().Sub(sh.at) >= sharedTTL {
 		return provider.Anime{}, false
 	}
 	s.shared = sharedAnime{}

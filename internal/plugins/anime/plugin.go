@@ -6,6 +6,7 @@ package anime
 
 import (
 	"net/http"
+	"time"
 
 	"github.com/allister/allister/internal/plugin"
 	"github.com/allister/allister/internal/plugins/anime/animedef"
@@ -32,6 +33,10 @@ type Options struct {
 	// are then ignored): the server shares its one client this way, and tests
 	// inject a fake. Lookup needs a provider with an AnimeByMALID method.
 	Provider provider.Provider
+
+	// now is the clock of the source's one-shot Details reuse (tests);
+	// nil means time.Now.
+	now func() time.Time
 }
 
 type animePlugin struct {
@@ -40,14 +45,18 @@ type animePlugin struct {
 
 // New returns the anime plugin.
 func New(opts Options) plugin.Plugin {
+	now := opts.now
+	if now == nil {
+		now = time.Now
+	}
 	if opts.Provider != nil {
-		return &animePlugin{source: &source{c: opts.Provider}}
+		return &animePlugin{source: &source{c: opts.Provider, now: now}}
 	}
 	url := opts.AniListURL
 	if url == "" {
 		url = anilist.DefaultURL
 	}
-	return &animePlugin{source: &source{c: anilist.New(url, opts.HTTP)}}
+	return &animePlugin{source: &source{c: anilist.New(url, opts.HTTP), now: now}}
 }
 
 func (p *animePlugin) Manifest() plugin.Manifest { return manifest() }

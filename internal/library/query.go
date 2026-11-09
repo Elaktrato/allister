@@ -185,17 +185,26 @@ var titleFallback = []string{"ja", "ja-latn", "en"}
 // falls back to native (ja), romaji (ja-latn), English (en), then the first
 // title. It returns "" only for an empty slice.
 func ResolveTitle(ts []plugin.Title, preferred string) string {
+	if i := ResolveTitleIndex(ts, preferred); i >= 0 {
+		return ts[i].Text
+	}
+	return ""
+}
+
+// ResolveTitleIndex returns the index in ts of the title ResolveTitle
+// chooses, or -1 for an empty slice.
+func ResolveTitleIndex(ts []plugin.Title, preferred string) int {
 	for _, lang := range append([]string{preferred}, titleFallback...) {
-		for _, t := range ts {
+		for i, t := range ts {
 			if t.Lang == lang {
-				return t.Text
+				return i
 			}
 		}
 	}
 	if len(ts) > 0 {
-		return ts[0].Text
+		return 0
 	}
-	return ""
+	return -1
 }
 
 // clause is one WHERE condition with its bound arguments. Only constants and

@@ -276,8 +276,9 @@ func TestPersonPageIsFullPageForHTMX(t *testing.T) {
 }
 
 // tvPeople saves a tv show with "Carl Character, voiced by Ann Actor" and
-// returns the people paths of the actor and the character.
-func tvPeople(t *testing.T, e *env) (actor, character string) {
+// returns the people paths of the actor and the character and the show's
+// item id.
+func tvPeople(t *testing.T, e *env) (actor, character string, itemID int64) {
 	t.Helper()
 	id := e.saveFixture(t, "tv", "show", tvShow("1", "Cast Show"))
 	err := e.lib.SaveCredits(context.Background(), id, []plugin.Credit{{
@@ -291,12 +292,12 @@ func tvPeople(t *testing.T, e *env) (actor, character string) {
 	if err != nil || len(ps) != 2 {
 		t.Fatalf("people %+v %v", ps, err)
 	}
-	return "/people/" + idStr(ps[1].ID), "/people/" + idStr(ps[0].ID)
+	return "/people/" + idStr(ps[1].ID), "/people/" + idStr(ps[0].ID), id
 }
 
 func TestGenericPersonPageForFixturePlugin(t *testing.T) {
 	e := newFixtureEnv(t)
-	actor, character := tvPeople(t, e.env)
+	actor, character, showID := tvPeople(t, e.env)
 	rec := e.get(actor)
 	if rec.Code != 200 {
 		t.Fatalf("actor: %d", rec.Code)
@@ -307,7 +308,7 @@ func TestGenericPersonPageForFixturePlugin(t *testing.T) {
 	mustContain(t, b, "Carl Character", "Cast Show")
 	mustNotContain(t, b, "as Carl Character", "Ann Actor")
 	// empty state names the plugin's kind
-	if err := e.lib.SaveCredits(context.Background(), 1, nil); err != nil {
+	if err := e.lib.SaveCredits(context.Background(), showID, nil); err != nil {
 		t.Fatal(err)
 	}
 	mustContain(t, e.get(actor).Body.String(), "Not in any show in your list")
@@ -315,7 +316,7 @@ func TestGenericPersonPageForFixturePlugin(t *testing.T) {
 
 func TestPersonPageOfDisabledPlugin404(t *testing.T) {
 	e := newFixtureEnv(t)
-	actor, _ := tvPeople(t, e.env)
+	actor, _, _ := tvPeople(t, e.env)
 	a := e.addEntry(t, provider.AniList, "77", nil, store.Watching, 0, titleEn("Anime Show")...)
 	va := pperson("v1", "Voice One", "", "")
 	e.withCast(t, a, provider.CastMember{Character: pperson("c9", "Hero", "", ""), Actor: &va})
