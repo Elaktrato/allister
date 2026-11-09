@@ -5,18 +5,16 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
-	"time"
 
+	"github.com/allister/allister/internal/library"
 	"github.com/allister/allister/internal/store"
 )
 
-// Shared list-entry form handling for the add dialog (anime.go) and the edit
-// dialog (list.go).
+// Shared form handling. The generic entry form parser is parseEntryForm
+// (add.go); the legacy anime-shaped one below is kept for the edit dialog
+// (list.go) and the manual form (manual.go) until they become generic.
 
-const (
-	maxCommentRunes = 2000
-	maxFormBytes    = 64 << 10
-)
+const maxFormBytes = 64 << 10
 
 // parseForm limits the body to maxFormBytes and parses it. On failure it has
 // written the response (413 for an oversized body, else 400) and returns false.
@@ -59,8 +57,11 @@ type statusOpt struct {
 	Selected     bool
 }
 
-// addForm is the add dialog's data; the string fields echo the user's input.
-type addForm struct {
+// legacyEntryForm is the legacy edit dialog's data (and part of the manual
+// form); the string fields echo the user's input.
+//
+// TODO(Task 9/10): remove when edit and manual use parseEntryForm.
+type legacyEntryForm struct {
 	Action, CancelURL              string
 	Status, Rating, Progress       string
 	StartedOn, FinishedOn, Comment string
@@ -72,17 +73,7 @@ type addForm struct {
 	Heading, Submit, Return string
 }
 
-func newAddForm(source, id string) addForm {
-	return addForm{
-		Action:    addURL(source, id),
-		CancelURL: animeURL(source, id),
-		Status:    string(store.PlanToWatch),
-		Heading:   "Add to list",
-		Submit:    "Add",
-	}
-}
-
-func (f addForm) withStatuses() addForm {
+func (f legacyEntryForm) withStatuses() legacyEntryForm {
 	f.Statuses = nil
 	for _, st := range statusOrder {
 		f.Statuses = append(f.Statuses, statusOpt{string(st), statusLabels[st], string(st) == f.Status})
@@ -90,17 +81,19 @@ func (f addForm) withStatuses() addForm {
 	return f
 }
 
-// parseEntryForm reads and validates the form fields; msg is a user-facing
-// message and non-empty on error.
-func parseEntryForm(r *http.Request, f addForm) (addForm, store.ListEntry, string) {
+// parseLegacyEntryForm reads and validates the legacy (anime-shaped) form
+// fields; msg is a user-facing message and non-empty on error.
+//
+// TODO(Task 9/10): remove when edit and manual use parseEntryForm.
+func parseLegacyEntryForm(r *http.Request, f legacyEntryForm) (legacyEntryForm, store.ListEntry, string) {
 	f.Status = strings.TrimSpace(r.PostFormValue("status"))
 	f.Rating = strings.TrimSpace(r.PostFormValue("rating"))
 	f.Progress = strings.TrimSpace(r.PostFormValue("progress"))
 	f.StartedOn = strings.TrimSpace(r.PostFormValue("started_on"))
 	f.FinishedOn = strings.TrimSpace(r.PostFormValue("finished_on"))
 	f.Comment = strings.TrimSpace(r.PostFormValue("comment"))
-	if rs := []rune(f.Comment); len(rs) > maxCommentRunes {
-		f.Comment = string(rs[:maxCommentRunes])
+	if rs := []rune(f.Comment); len(rs) > library.MaxCommentRunes {
+		f.Comment = string(rs[:library.MaxCommentRunes])
 	}
 	e := store.ListEntry{Status: store.Status(f.Status), Comment: f.Comment}
 	if _, ok := statusLabels[e.Status]; !ok {
@@ -128,17 +121,6 @@ func parseEntryForm(r *http.Request, f addForm) (addForm, store.ListEntry, strin
 		return f, e, msg
 	}
 	return f, e, ""
-}
-
-func parseDay(v, label string) (*time.Time, string) {
-	if v == "" {
-		return nil, ""
-	}
-	t, err := time.Parse("2006-01-02", v)
-	if err != nil {
-		return nil, label + " must be a date like 2024-01-31."
-	}
-	return &t, ""
 }
 
 func invalidMessage(err error) string {

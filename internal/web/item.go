@@ -45,6 +45,8 @@ func (s *server) coreRoutes(pluginID string) routeSet {
 	return func(reg routeRegistrar) {
 		reg.Handle("GET /search", func(w http.ResponseWriter, r *http.Request) { s.search(w, r, pluginID) })
 		reg.Handle("GET /{source}/{id}", func(w http.ResponseWriter, r *http.Request) { s.getItem(w, r, pluginID) })
+		reg.Handle("GET /{source}/{id}/add", func(w http.ResponseWriter, r *http.Request) { s.getAdd(w, r, pluginID) })
+		reg.Handle("POST /{source}/{id}/add", func(w http.ResponseWriter, r *http.Request) { s.postAdd(w, r, pluginID) })
 	}
 }
 
@@ -119,11 +121,13 @@ func (s *server) getItem(w http.ResponseWriter, r *http.Request, pluginID string
 	s.showItem(w, r, ref, itemExtras{}, http.StatusOK)
 }
 
-// itemExtras are the legacy dialogs an overview can be rendered with (no
-// JavaScript fallback of the add and match dialogs). UseCache lets a fresh
-// cache entry replace the source calls of an unsaved item.
+// itemExtras are the dialogs an overview can be rendered with (no
+// JavaScript fallback of the add and match dialogs). Dialog carries the add
+// form's values and messages; the rest of the form is built from the loaded
+// item. UseCache lets a fresh cache entry replace the source calls of an
+// unsaved item.
 type itemExtras struct {
-	Dialog   *addForm
+	Dialog   *entryForm
 	Match    *matchView
 	UseCache bool
 }
@@ -138,11 +142,15 @@ func (s *server) showItem(w http.ResponseWriter, r *http.Request, ref itemRef, x
 	}
 	v := s.itemView(r.Context(), li)
 	if x.Dialog != nil {
-		f := *x.Dialog
-		if f.Episodes == nil {
-			f.Episodes = primaryTotal(li)
+		pc := progressContext{Keys: li.kind.Progress.Defaults, Fields: li.data.Fields}
+		if li.saved != nil {
+			pc.Keys = li.saved.ProgressKeys
 		}
-		f = f.withStatuses()
+		f := newEntryForm(m, li.kind, li.data.Source, li.data.ID, pc, x.Dialog.entryValues)
+		f.Error, f.ExistingURL = x.Dialog.Error, x.Dialog.ExistingURL
+		if li.entry != nil && f.Error == "" {
+			f.Error, f.ExistingURL = alreadyInList(li.kind), itemURL(m, li.data.Source, li.data.ID, li.kind.Key)
+		}
 		v.Dialog = &f
 	}
 	v.Match = x.Match
@@ -319,19 +327,4 @@ func (s *server) loadLive(ctx context.Context, m plugin.Manifest, ref itemRef, u
 		li.credits = append(li.credits, cv)
 	}
 	return li, nil
-}
-
-// primaryTotal is the total of the kind's primary progress track (the
-// legacy add dialog's episode total), nil when unknown.
-func primaryTotal(li *loadedItem) *int {
-	for _, d := range li.kind.Progress.Eligible {
-		if d.Key != li.kind.Progress.PrimaryKey || d.TotalField == "" {
-			continue
-		}
-		if v := li.data.Fields[d.TotalField].Num; v != nil {
-			n := int(*v)
-			return &n
-		}
-	}
-	return nil
 }

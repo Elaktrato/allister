@@ -94,7 +94,7 @@ type itemView struct {
 	// matched to the plugin's source.
 	MatchURL, MatchLabel, UnmatchedHint string
 	Sections                            []sectionView
-	Dialog                              *addForm
+	Dialog                              *entryForm
 	Match                               *matchView
 }
 
@@ -120,7 +120,7 @@ func (s *server) itemView(ctx context.Context, li *loadedItem) itemView {
 		v.Cover = httpURL(d.CoverURL)
 	}
 	if v.Entry == nil {
-		v.AddURL = path + "/add"
+		v.AddURL = addPath(m, d.Source, d.ID, d.Kind)
 	}
 	for _, sec := range k.Sections {
 		if sv, ok := s.section(li, sec, lang); ok {

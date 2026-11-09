@@ -59,7 +59,7 @@ func newMatchEnv(t *testing.T) *matchEnv {
 	e := newEnv(t)
 	mp := &matchProvider{animeProvider: e.fp, results: []provider.SearchResult{e.fp.anime.SearchResult}}
 	_, e.h = newServer(Deps{
-		Settings: e.set, Store: e.st, Jobs: e.jobs, CoversDir: e.covers, ParseAnimeURL: localParse,
+		Settings: e.set, Store: e.st, Jobs: e.jobs, SyncJobs: testSyncJobs(), CoversDir: e.covers, ParseAnimeURL: localParse,
 		Providers: map[provider.Source]provider.Provider{provider.AniList: mp},
 	}, func() time.Time { return *e.now })
 	return &matchEnv{env: e, mp: mp}

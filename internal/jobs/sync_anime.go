@@ -25,6 +25,14 @@ type SyncPayload struct {
 	PluginID string `json:"plugin_id,omitempty"`
 }
 
+// AnimeSyncJob returns the kind and payload of the sync job of the saved
+// anime item itemID. It is the anime plugin's entry of web.Deps.SyncJobs, so
+// the web layer enqueues the job without knowing its kind (Task 11 renames
+// the kind).
+func AnimeSyncJob(itemID int64) (kind string, payload any) {
+	return KindSyncAnime, SyncPayload{AnimeID: itemID, PluginID: "anime"}
+}
+
 // SyncDeps are the dependencies of the SyncAnime handler.
 type SyncDeps struct {
 	Store     *store.Store

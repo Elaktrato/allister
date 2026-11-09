@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"testing"
 	"time"
+
+	"github.com/allister/allister/internal/jobs"
 )
 
 func TestServeDrainsInFlightRequestsOnShutdown(t *testing.T) {
@@ -60,5 +62,18 @@ func TestServeReturnsListenError(t *testing.T) {
 	srv := &http.Server{Addr: "256.0.0.1:bad"}
 	if err := serve(context.Background(), srv, time.Second); err == nil {
 		t.Fatal("expected listen error")
+	}
+}
+
+func TestSyncJobsWiresAnime(t *testing.T) {
+	job := syncJobs()["anime"]
+	if job == nil {
+		t.Fatal("no anime sync job")
+	}
+	if kind, payload := job(7); kind != jobs.KindSyncAnime || payload != (jobs.SyncPayload{AnimeID: 7, PluginID: "anime"}) {
+		t.Fatalf("got %q %+v", kind, payload)
+	}
+	if len(syncJobs()) != 1 {
+		t.Fatalf("unexpected sync jobs: %v", syncJobs())
 	}
 }

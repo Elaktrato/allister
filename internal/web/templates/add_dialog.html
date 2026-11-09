@@ -2,7 +2,6 @@
 <div data-dialog class="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-black/70 p-4" role="dialog" aria-modal="true" aria-labelledby="add-dialog-title">
   <form method="post" action="{{.Action}}" hx-post="{{.Action}}" hx-target="#dialog-slot" hx-swap="innerHTML"
     class="w-full max-w-md space-y-4 rounded border border-slate-700 bg-slate-900 p-5">
-    {{if .Return}}<input type="hidden" name="return" value="{{.Return}}">{{end}}
     <h2 id="add-dialog-title" class="text-xl font-semibold">{{.Heading}}</h2>
     {{if .Error}}
     <div class="rounded border border-amber-700 bg-amber-950 p-3 text-amber-200" role="alert">
@@ -20,13 +19,7 @@
         <input type="number" min="0" max="10" step="1" name="rating" value="{{.Rating}}" placeholder="0–10"
           class="mt-1 w-full rounded border border-slate-700 bg-slate-950 px-3 py-2">
       </label>
-      <label class="block text-sm">Progress
-        <span class="mt-1 flex items-center gap-2">
-          <input type="number" min="0"{{if .Episodes}} max="{{.Episodes}}"{{end}} step="1" name="progress" value="{{.Progress}}" placeholder="0"
-            class="w-full rounded border border-slate-700 bg-slate-950 px-3 py-2">
-          {{if .Episodes}}<span class="whitespace-nowrap text-slate-400">/ {{.Episodes}}</span>{{end}}
-        </span>
-      </label>
+      {{template "progress_inputs" .Progress}}
     </div>
     <div class="grid grid-cols-2 gap-3">
       <label class="block text-sm">Started

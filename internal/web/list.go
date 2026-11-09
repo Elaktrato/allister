@@ -57,7 +57,7 @@ type listView struct {
 	Page, Pages             int
 	PrevURL, NextURL        string
 	Return                  string
-	Dialog                  *addForm
+	Dialog                  *legacyEntryForm
 	DialogReturn, ListTitle string
 }
 
@@ -177,7 +177,7 @@ func (s *server) getList(w http.ResponseWriter, r *http.Request) {
 }
 
 // showList renders the full list page, with the edit dialog open when dialog is set.
-func (s *server) showList(w http.ResponseWriter, r *http.Request, status string, page int, dialog *addForm, code int) {
+func (s *server) showList(w http.ResponseWriter, r *http.Request, status string, page int, dialog *legacyEntryForm, code int) {
 	v, err := s.buildList(r, status, page)
 	if err != nil {
 		s.fail(w, r, err, "")
@@ -255,9 +255,9 @@ func (s *server) postIncrement(w http.ResponseWriter, r *http.Request) {
 }
 
 // editForm prefills the dialog from the current entry.
-func (s *server) editForm(row store.ListRow, ret string) addForm {
+func (s *server) editForm(row store.ListRow, ret string) legacyEntryForm {
 	e := row.Entry
-	f := addForm{
+	f := legacyEntryForm{
 		Action: "/list/" + strconv.FormatInt(row.AnimeID, 10) + "/edit", CancelURL: ret, Return: ret,
 		Heading: "Edit list entry", Submit: "Save", Status: string(e.Status),
 		Progress: strconv.Itoa(e.Progress), StartedOn: fmtDay(e.StartedOn), FinishedOn: fmtDay(e.FinishedOn),
@@ -271,10 +271,10 @@ func (s *server) editForm(row store.ListRow, ret string) addForm {
 
 // editResponse writes the edit dialog (partial) or the full list with the
 // dialog open (no JavaScript).
-func (s *server) editResponse(w http.ResponseWriter, r *http.Request, f addForm, code int) {
+func (s *server) editResponse(w http.ResponseWriter, r *http.Request, f legacyEntryForm, code int) {
 	f = f.withStatuses()
 	if isPartialRequest(r) {
-		s.renderPartialStatus(w, code, "list", "add_dialog", f)
+		s.renderPartialStatus(w, code, "list", "legacy_entry_dialog", f)
 		return
 	}
 	var status string
@@ -309,7 +309,7 @@ func (s *server) postEdit(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	f, entry, msg := parseEntryForm(r, s.editForm(row, safeReturn(r.PostFormValue("return"))))
+	f, entry, msg := parseLegacyEntryForm(r, s.editForm(row, safeReturn(r.PostFormValue("return"))))
 	if msg == "" {
 		entry.AnimeID = id
 		err := s.deps.Store.UpsertListEntry(r.Context(), entry)

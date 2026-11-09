@@ -16,7 +16,7 @@ import (
 const (
 	maxTitleRunes = animemap.MaxTitleRunes
 	// maxCommentRunes mirrors the library's entry comment limit
-	// (library.maxCommentRunes, internal/library/entries.go).
+	// (library.MaxCommentRunes, internal/library/entries.go).
 	maxCommentRunes = 2000
 )
 

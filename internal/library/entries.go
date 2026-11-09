@@ -35,7 +35,9 @@ const (
 	tableEntryProgress = "entry_progress"
 )
 
-const maxCommentRunes = 2000
+// MaxCommentRunes is the longest entry comment (in runes) the library
+// accepts; forms cap the typed comment at it.
+const MaxCommentRunes = 2000
 
 // Entry is the user's list entry of an item. Progress holds the values of
 // the item's ACTIVE progress keys; values of keys that are no longer active
@@ -74,8 +76,8 @@ func (l *Library) ValidateEntry(kind plugin.KindDef, item *Item, e Entry) error 
 	if e.Rating != nil && (*e.Rating < 0 || *e.Rating > 10) {
 		return invalid("rating %d must be between 0 and 10", *e.Rating)
 	}
-	if utf8.RuneCountInString(e.Comment) > maxCommentRunes {
-		return invalid("comment is longer than %d characters", maxCommentRunes)
+	if utf8.RuneCountInString(e.Comment) > MaxCommentRunes {
+		return invalid("comment is longer than %d characters", MaxCommentRunes)
 	}
 	if err := cleanText("comment", e.Comment, multiLine); err != nil {
 		return err

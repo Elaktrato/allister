@@ -210,7 +210,7 @@ func (s *server) postMatch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.enqueueSync(ctx, saved.ID)
+	s.enqueueSync(ctx, animePluginID, saved.ID)
 	dest := "/anime/anilist/" + url.PathEscape(a.ID)
 	if isPartialRequest(r) {
 		w.Header().Set("HX-Redirect", dest)

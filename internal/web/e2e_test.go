@@ -29,7 +29,7 @@ func newE2EEnv(t *testing.T) *env {
 	t.Helper()
 	e := newEnv(t)
 	_, e.h = newServer(Deps{
-		Settings: e.set, Store: e.st, Jobs: e.jobs, CoversDir: e.covers,
+		Settings: e.set, Store: e.st, Jobs: e.jobs, SyncJobs: testSyncJobs(), CoversDir: e.covers,
 		Providers: map[provider.Source]provider.Provider{provider.AniList: searchProvider{e.fp}},
 	}, func() time.Time { return *e.now })
 	return e
@@ -50,7 +50,7 @@ func TestSearchAddListFlow(t *testing.T) {
 	}
 	mustContain(t, rec.Body.String(), "Add to list")
 	// add
-	rec = e.do("POST", "/anime/anilist/1535/add", url.Values{"status": {"watching"}, "progress": {"3"}}, true)
+	rec = e.do("POST", "/anime/anilist/1535/add", url.Values{"status": {"active"}, "progress": {"3"}}, true)
 	if rec.Code != 204 || rec.Header().Get("HX-Redirect") != "/anime" {
 		t.Fatalf("add: %d %q", rec.Code, rec.Header().Get("HX-Redirect"))
 	}

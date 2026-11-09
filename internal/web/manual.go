@@ -38,7 +38,7 @@ var manualTypes = []langOption{
 
 // manualForm is the form page's data; string fields echo the user's input.
 type manualForm struct {
-	addForm
+	legacyEntryForm
 	Title, TitleLang, Type string
 	EpisodesIn, Year       string
 	Studio, Synopsis       string
@@ -54,13 +54,13 @@ func (s *server) newManualForm(r *http.Request) (manualForm, error) {
 		return manualForm{}, err
 	}
 	f := manualForm{
-		addForm:       addForm{Status: string(store.PlanToWatch)},
-		TitleLang:     s.deps.Settings.TitleLang(r.Context()),
-		Langs:         opts,
-		Types:         manualTypes,
-		CoversEnabled: s.deps.CoversDir != "",
+		legacyEntryForm: legacyEntryForm{Status: string(store.PlanToWatch)},
+		TitleLang:       s.deps.Settings.TitleLang(r.Context()),
+		Langs:           opts,
+		Types:           manualTypes,
+		CoversEnabled:   s.deps.CoversDir != "",
 	}
-	f.addForm = f.addForm.withStatuses()
+	f.legacyEntryForm = f.legacyEntryForm.withStatuses()
 	return f, nil
 }
 
@@ -153,8 +153,8 @@ func (s *server) postManualNew(w http.ResponseWriter, r *http.Request) {
 			f.FileDropped = true
 		}
 	}
-	f.addForm, _, _ = parseEntryForm(r, f.addForm) // echo only; validated below
-	f.addForm = f.addForm.withStatuses()
+	f.legacyEntryForm, _, _ = parseLegacyEntryForm(r, f.legacyEntryForm) // echo only; validated below
+	f.legacyEntryForm = f.legacyEntryForm.withStatuses()
 
 	var episodes, year *int
 	var msg string
@@ -181,8 +181,8 @@ func (s *server) postManualNew(w http.ResponseWriter, r *http.Request) {
 	}
 	var entry store.ListEntry
 	if msg == "" {
-		f.addForm, entry, msg = parseEntryForm(r, f.addForm)
-		f.addForm = f.addForm.withStatuses()
+		f.legacyEntryForm, entry, msg = parseLegacyEntryForm(r, f.legacyEntryForm)
+		f.legacyEntryForm = f.legacyEntryForm.withStatuses()
 	}
 	if msg == "" {
 		if err := store.ValidateListEntry(entry, episodes); err != nil {

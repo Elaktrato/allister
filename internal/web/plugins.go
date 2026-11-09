@@ -42,8 +42,6 @@ func (s *server) animeRoutes(reg routeRegistrar) {
 	reg.Handle("GET /", s.getList)
 	reg.Handle("GET /manual/new", s.getManualNew)
 	reg.Handle("POST /manual/new", s.postManualNew)
-	reg.Handle("GET /{source}/{id}/add", s.getAdd)
-	reg.Handle("POST /{source}/{id}/add", s.postAdd)
 	reg.Handle("GET /{source}/{id}/match", s.getMatch)
 	reg.Handle("POST /{source}/{id}/match", s.postMatch)
 	reg.Handle("GET /{source}/{id}/match/search", s.getMatchSearch)

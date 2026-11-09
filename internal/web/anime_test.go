@@ -3,7 +3,6 @@ package web
 import (
 	"context"
 	"database/sql"
-	"errors"
 	"github.com/allister/allister/internal/plugin"
 	"net/http"
 	"net/http/httptest"
@@ -103,12 +102,18 @@ func newEnvWith(t *testing.T, mk func(es plugin.EnabledStore) *plugin.Registry) 
 		e.reg = mk(e.set)
 	}
 	e.srv, e.h = newServer(Deps{
-		Settings: e.set, Store: e.st, Jobs: e.jobs, CoversDir: e.covers, Registry: e.reg,
+		Settings: e.set, Store: e.st, Jobs: e.jobs, SyncJobs: testSyncJobs(), CoversDir: e.covers, Registry: e.reg,
 		Providers: map[provider.Source]provider.Provider{provider.AniList: e.fp},
 	}, func() time.Time { return *e.now })
 	e.reg = e.srv.deps.Registry
 	e.lib = e.srv.deps.Library
 	return e
+}
+
+// testSyncJobs is the production wiring of Deps.SyncJobs (cmd/allister):
+// only the anime plugin has a sync job; the fixtures have none.
+func testSyncJobs() map[string]func(int64) (string, any) {
+	return map[string]func(int64) (string, any){"anime": jobs.AnimeSyncJob}
 }
 
 func sampleAnimeProvider() *animeProvider {
@@ -189,248 +194,6 @@ func (e *env) saved(t *testing.T) int64 {
 		t.Fatal(err)
 	}
 	return id
-}
-
-func TestAddDialogPartialVsFull(t *testing.T) {
-	e := newEnv(t)
-	rec := e.do("GET", "/anime/anilist/1535/add", nil, true)
-	if rec.Code != 200 {
-		t.Fatalf("got %d", rec.Code)
-	}
-	b := rec.Body.String()
-	mustContain(t, b, `<form`, `name="status"`, `value="plan_to_watch" selected`, `type="date"`, `name="started_on"`, `name="finished_on"`,
-		`type="number" min="0" max="10" step="1"`, `placeholder="0–10"`, `max="37"`, "/ 37", "Cancel", `hx-post="/anime/anilist/1535/add"`)
-	mustNotContain(t, b, "<html", "Light Yagami")
-	if rec.Header().Get("Vary") == "" {
-		t.Fatal("no Vary")
-	}
-	full := e.get("/anime/anilist/1535/add")
-	if full.Code != 200 {
-		t.Fatalf("got %d", full.Code)
-	}
-	mustContain(t, full.Body.String(), "<html", "Light Yagami", `name="status"`, `action="/anime/anilist/1535/add"`)
-}
-
-func TestAddCreatesEntryAndJob(t *testing.T) {
-	e := newEnv(t)
-	rec := e.post(okForm(), true)
-	if rec.Code != 204 || rec.Header().Get("HX-Redirect") != "/anime" {
-		t.Fatalf("got %d %v", rec.Code, rec.Header())
-	}
-	ctx := context.Background()
-	sv, _ := e.st.FindBySource(ctx, provider.AniList, "1535")
-	if sv == nil {
-		t.Fatal("not saved")
-	}
-	en, _ := e.st.GetListEntry(ctx, sv.ID)
-	if en == nil || en.Status != store.Watching || en.Rating == nil || *en.Rating != 8 || en.Progress != 3 ||
-		en.StartedOn == nil || en.StartedOn.Format("2006-01-02") != "2024-01-02" || en.FinishedOn != nil || en.Comment != "nice" {
-		t.Fatalf("%+v", en)
-	}
-	if len(e.jobs.got) != 1 || e.jobs.got[0].Kind != jobs.KindSyncAnime || e.jobs.got[0].Payload != (jobs.SyncPayload{AnimeID: sv.ID, PluginID: "anime"}) {
-		t.Fatalf("jobs %+v", e.jobs.got)
-	}
-}
-
-func TestAddPlainPostRedirects303(t *testing.T) {
-	e := newEnv(t)
-	rec := e.post(okForm(), false)
-	if rec.Code != 303 || rec.Header().Get("Location") != "/anime" {
-		t.Fatalf("got %d %v", rec.Code, rec.Header())
-	}
-}
-
-func TestAddRatingBlankAndZero(t *testing.T) {
-	for _, tc := range []struct {
-		in   string
-		want *int
-	}{{"", nil}, {"0", ip(0)}} {
-		e := newEnv(t)
-		f := okForm()
-		f.Set("rating", tc.in)
-		if rec := e.post(f, true); rec.Code != 204 {
-			t.Fatalf("got %d", rec.Code)
-		}
-		sv, _ := e.st.FindBySource(context.Background(), provider.AniList, "1535")
-		en, _ := e.st.GetListEntry(context.Background(), sv.ID)
-		if (tc.want == nil) != (en.Rating == nil) || (tc.want != nil && *tc.want != *en.Rating) {
-			t.Fatalf("%q -> %v", tc.in, en.Rating)
-		}
-	}
-}
-
-func TestAddRejectsInvalidRating(t *testing.T) {
-	for _, bad := range []string{"11", "abc", "-1", "5.5"} {
-		e := newEnv(t)
-		f := okForm()
-		f.Set("rating", bad)
-		rec := e.post(f, true)
-		if rec.Code != 422 {
-			t.Fatalf("%q: got %d", bad, rec.Code)
-		}
-		mustContain(t, rec.Body.String(), "Rating", `value="`+bad+`"`, `value="nice"`[:0]+"nice")
-		assertNothingSaved(t, e)
-	}
-}
-
-func assertNothingSaved(t *testing.T, e *env) {
-	t.Helper()
-	if sv, _ := e.st.FindBySource(context.Background(), provider.AniList, "1535"); sv != nil {
-		t.Fatal("anime saved")
-	}
-	if len(e.jobs.got) != 0 {
-		t.Fatal("job enqueued")
-	}
-}
-
-func TestAddOtherValidationErrors(t *testing.T) {
-	cases := map[string]func(url.Values){
-		"progress over total": func(f url.Values) { f.Set("progress", "38") },
-		"progress negative":   func(f url.Values) { f.Set("progress", "-1") },
-		"progress text":       func(f url.Values) { f.Set("progress", "x") },
-		"finish before start": func(f url.Values) { f.Set("started_on", "2024-02-01"); f.Set("finished_on", "2024-01-01") },
-		"bad date":            func(f url.Values) { f.Set("started_on", "01/02/2024") },
-		"unknown status":      func(f url.Values) { f.Set("status", "nope") },
-		"missing status":      func(f url.Values) { f.Del("status") },
-	}
-	for name, mod := range cases {
-		e := newEnv(t)
-		f := okForm()
-		mod(f)
-		rec := e.post(f, true)
-		if rec.Code != 422 {
-			t.Errorf("%s: got %d", name, rec.Code)
-		}
-		mustContain(t, rec.Body.String(), "<form")
-		assertNothingSaved(t, e)
-	}
-}
-
-func TestAddBlankProgressAndDatesAndCommentCap(t *testing.T) {
-	e := newEnv(t)
-	f := url.Values{"status": {"plan_to_watch"}, "progress": {""}, "comment": {strings.Repeat("あ", 2500)}}
-	if rec := e.post(f, true); rec.Code != 204 {
-		t.Fatalf("got %d", rec.Code)
-	}
-	sv, _ := e.st.FindBySource(context.Background(), provider.AniList, "1535")
-	en, _ := e.st.GetListEntry(context.Background(), sv.ID)
-	if en.Progress != 0 || en.StartedOn != nil || len([]rune(en.Comment)) != 2000 {
-		t.Fatalf("%+v", en)
-	}
-}
-
-func TestAddDuplicateIsBlocked(t *testing.T) {
-	e := newEnv(t)
-	if rec := e.post(okForm(), true); rec.Code != 204 {
-		t.Fatalf("got %d", rec.Code)
-	}
-	rec := e.post(okForm(), true)
-	if rec.Code != 409 {
-		t.Fatalf("got %d", rec.Code)
-	}
-	mustContain(t, rec.Body.String(), "already in your list", `href="/anime/anilist/1535"`)
-	if len(e.jobs.got) != 1 {
-		t.Fatalf("jobs %d", len(e.jobs.got))
-	}
-}
-
-func TestAddSavedWithoutEntryGetsEntryNoJob(t *testing.T) {
-	e := newEnv(t)
-	id := e.saved(t)
-	rec := e.post(okForm(), true)
-	if rec.Code != 204 {
-		t.Fatalf("got %d", rec.Code)
-	}
-	en, _ := e.st.GetListEntry(context.Background(), id)
-	if en == nil || en.Status != store.Watching {
-		t.Fatalf("%+v", en)
-	}
-	if len(e.jobs.got) != 0 {
-		t.Fatal("job enqueued for existing anime")
-	}
-	if e.fp.animeCalls != 0 {
-		t.Fatal("provider called")
-	}
-}
-
-func TestAddSavedWithoutEntryValidatesAgainstStoredEpisodes(t *testing.T) {
-	e := newEnv(t)
-	id := e.saved(t)
-	f := okForm()
-	f.Set("progress", "99")
-	if rec := e.post(f, true); rec.Code != 422 {
-		t.Fatalf("got %d", rec.Code)
-	}
-	if en, _ := e.st.GetListEntry(context.Background(), id); en != nil {
-		t.Fatal("entry created")
-	}
-}
-
-func TestAddWithProviderDownUsesAlreadyFetchedDetails(t *testing.T) {
-	e := newEnv(t)
-	if rec := e.get("/anime/anilist/1535"); rec.Code != 200 {
-		t.Fatal(rec.Code)
-	}
-	e.fp.animeErr = provider.ErrUnavailable
-	before := e.fp.animeCalls
-	rec := e.post(okForm(), true)
-	if rec.Code != 204 {
-		t.Fatalf("got %d", rec.Code)
-	}
-	if e.fp.animeCalls != before {
-		t.Fatal("provider was called again")
-	}
-	if sv, _ := e.st.FindBySource(context.Background(), provider.AniList, "1535"); sv == nil {
-		t.Fatal("not saved")
-	}
-}
-
-func TestAddCacheExpiresAfterTTL(t *testing.T) {
-	e := newEnv(t)
-	e.get("/anime/anilist/1535")
-	*e.now = e.now.Add(11 * time.Minute)
-	e.fp.animeErr = provider.ErrUnavailable
-	rec := e.post(okForm(), true)
-	if rec.Code != 503 {
-		t.Fatalf("got %d", rec.Code)
-	}
-	mustContain(t, rec.Body.String(), "<form", `value="nice"`[:0]+"nice", "AniList")
-	assertNothingSaved(t, e)
-	// within the TTL it is served from cache
-	e.fp.animeErr = nil
-	e.get("/anime/anilist/1535")
-	*e.now = e.now.Add(9 * time.Minute)
-	e.fp.animeErr = provider.ErrUnavailable
-	if rec := e.post(okForm(), true); rec.Code != 204 {
-		t.Fatalf("got %d", rec.Code)
-	}
-}
-
-func TestAddCacheMissFetchesOnceAndNotFoundIs404(t *testing.T) {
-	e := newEnv(t)
-	if rec := e.post(okForm(), true); rec.Code != 204 || e.fp.animeCalls != 1 {
-		t.Fatalf("got %d calls %d", rec.Code, e.fp.animeCalls)
-	}
-	e = newEnv(t)
-	e.fp.animeErr = provider.ErrNotFound
-	if rec := e.post(okForm(), true); rec.Code != 404 {
-		t.Fatalf("got %d", rec.Code)
-	}
-}
-
-func TestAddEnqueueFailureStillSucceeds(t *testing.T) {
-	e := newEnv(t)
-	e.jobs.fail = errors.New("boom")
-	if rec := e.post(okForm(), true); rec.Code != 204 {
-		t.Fatalf("got %d", rec.Code)
-	}
-}
-
-func TestAddManualNotSavedIs404(t *testing.T) {
-	e := newEnv(t)
-	if rec := e.do("POST", "/anime/manual/5/add", okForm(), true); rec.Code != 404 {
-		t.Fatalf("got %d", rec.Code)
-	}
 }
 
 func TestCacheBoundedAndExpires(t *testing.T) {

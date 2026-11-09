@@ -432,7 +432,7 @@ func TestStoreErrorFallsBackToDefault(t *testing.T) {
 
 func TestEnqueuedJobsCarryPluginID(t *testing.T) {
 	e := newEnv(t)
-	if rec := e.post(okForm(), true); rec.Code != 204 {
+	if rec := e.post(okAddForm(), true); rec.Code != 204 {
 		t.Fatalf("add: %d", rec.Code)
 	}
 	if len(e.jobs.got) != 1 || e.jobs.got[0].Payload.(jobs.SyncPayload).PluginID != "anime" {

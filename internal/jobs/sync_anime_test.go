@@ -279,3 +279,10 @@ func TestSyncAnimeStopsOnCancelledContext(t *testing.T) {
 		t.Fatal("must not be done")
 	}
 }
+
+func TestAnimeSyncJob(t *testing.T) {
+	kind, payload := AnimeSyncJob(42)
+	if kind != KindSyncAnime || payload != (SyncPayload{AnimeID: 42, PluginID: "anime"}) {
+		t.Fatalf("got %q %+v", kind, payload)
+	}
+}

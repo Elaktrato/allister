@@ -99,6 +99,7 @@ func run() error {
 			Store:         st,
 			Providers:     providers,
 			Jobs:          queue,
+			SyncJobs:      syncJobs(),
 			CoversDir:     coversDir,
 			Imports:       importer,
 			ParseAnimeURL: anilist.ParseAnimeURL,
@@ -117,6 +118,12 @@ func run() error {
 // serve listens on srv.Addr and runs srv until ctx is cancelled, then shuts it
 // down gracefully and returns only after Shutdown has finished. A normal
 // shutdown returns nil; a listen/serve failure is returned.
+// syncJobs maps each plugin with a background sync to the job of a newly
+// saved item (web.Deps.SyncJobs).
+func syncJobs() map[string]func(itemID int64) (kind string, payload any) {
+	return map[string]func(int64) (string, any){"anime": jobs.AnimeSyncJob}
+}
+
 func serve(ctx context.Context, srv *http.Server, shutdownTimeout time.Duration) error {
 	ln, err := net.Listen("tcp", srv.Addr)
 	if err != nil {

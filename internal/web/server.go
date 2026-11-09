@@ -35,6 +35,11 @@ type Deps struct {
 	Providers map[provider.Source]provider.Provider
 	// Jobs enqueues background jobs (see package jobs).
 	Jobs JobQueue
+	// SyncJobs maps a plugin id to the sync job of a newly saved item of
+	// that plugin (kind and payload for Jobs.Enqueue), so the web layer
+	// never knows the job kinds of plugins. A plugin without an entry gets no
+	// sync job (the test fixtures). cmd/allister wires the anime plugin's.
+	SyncJobs map[string]func(itemID int64) (kind string, payload any)
 	// CoversDir is DATA_DIR/covers; when empty /covers/ is not served.
 	CoversDir string
 	// Imports runs the Yamtrack import; when nil the import pages answer 404.
@@ -75,8 +80,8 @@ var pageNames = []string{"settings", "search", "item", "list", "person", "manual
 var pagePartials = map[string][]string{
 	"search":   {"templates/search_results.html"},
 	"settings": {"templates/settings_plugins.html"},
-	"item":     {"templates/sections.html", "templates/add_dialog.html", "templates/match_dialog.html"},
-	"list":     {"templates/list_row.html", "templates/add_dialog.html"},
+	"item":     {"templates/sections.html", "templates/add_dialog.html", "templates/progress_inputs.html", "templates/match_dialog.html"},
+	"list":     {"templates/list_row.html", "templates/legacy_entry_dialog.html"},
 }
 
 // parsePages builds one template set per page, each cloned from base.html plus

@@ -37,5 +37,5 @@
   </p>
 </div>
 {{end}}
-<div id="dialog-slot" hx-on::before-swap="var s=event.detail.xhr.status;if(s===422||s===409||s===503){event.detail.shouldSwap=true;event.detail.isError=false}">{{with .Dialog}}{{template "add_dialog" .}}{{end}}</div>
+<div id="dialog-slot" hx-on::before-swap="var s=event.detail.xhr.status;if(s===422||s===409||s===503){event.detail.shouldSwap=true;event.detail.isError=false}">{{with .Dialog}}{{template "legacy_entry_dialog" .}}{{end}}</div>
 {{end}}
