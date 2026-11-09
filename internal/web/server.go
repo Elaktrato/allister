@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/allister/allister/internal/importer/yamtrack"
 	"github.com/allister/allister/internal/provider"
 	"github.com/allister/allister/internal/settings"
 	"github.com/allister/allister/internal/store"
@@ -34,6 +35,8 @@ type Deps struct {
 	Jobs JobQueue
 	// CoversDir is DATA_DIR/covers; when empty /covers/ is not served.
 	CoversDir string
+	// Imports runs the Yamtrack import; when nil the import pages answer 404.
+	Imports *yamtrack.Importer
 }
 
 // JobQueue is the part of jobs.Queue the web layer needs.
@@ -49,7 +52,7 @@ type server struct {
 
 // pageNames lists every page template (templates/<name>.html). Add a page by
 // dropping its file in templates/ and listing it here.
-var pageNames = []string{"index", "settings", "search", "anime", "list", "person", "manual_form", "error"}
+var pageNames = []string{"index", "settings", "search", "anime", "list", "person", "manual_form", "import", "error"}
 
 // pagePartials lists extra template files a page needs (also rendered alone
 // for htmx requests).
@@ -91,6 +94,9 @@ func newServer(deps Deps, now func() time.Time) (*server, http.Handler) {
 	mux.HandleFunc("GET /{$}", s.index)
 	mux.HandleFunc("GET /settings", s.getSettings)
 	mux.HandleFunc("POST /settings", s.postSettings)
+	mux.HandleFunc("GET /settings/import", s.getImport)
+	mux.HandleFunc("POST /settings/import", s.postImport)
+	mux.HandleFunc("POST /settings/import/cancel", s.postImportCancel)
 	mux.HandleFunc("GET /anime", s.getList)
 	mux.HandleFunc("POST /list/{id}/increment", s.postIncrement)
 	mux.HandleFunc("GET /list/{id}/edit", s.getEdit)

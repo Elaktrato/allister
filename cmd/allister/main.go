@@ -15,6 +15,7 @@ import (
 
 	"github.com/allister/allister/internal/config"
 	"github.com/allister/allister/internal/db"
+	"github.com/allister/allister/internal/importer/yamtrack"
 	"github.com/allister/allister/internal/jobs"
 	"github.com/allister/allister/internal/provider"
 	"github.com/allister/allister/internal/provider/anilist"
@@ -42,8 +43,9 @@ func run() error {
 	defer database.Close()
 
 	st := store.New(database)
+	aniClient := anilist.New(anilist.DefaultURL, nil)
 	providers := map[provider.Source]provider.Provider{
-		provider.AniList: anilist.New(anilist.DefaultURL, nil),
+		provider.AniList: aniClient,
 	}
 
 	sigCtx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
@@ -60,6 +62,8 @@ func run() error {
 		Providers: providers,
 		CoversDir: coversDir,
 	}))
+	importer := yamtrack.New(database, st, aniClient, queue)
+	queue.Register(yamtrack.KindImport, importer.Handler())
 	var wg sync.WaitGroup
 	wg.Add(1)
 	go func() {
@@ -76,6 +80,7 @@ func run() error {
 			Providers: providers,
 			Jobs:      queue,
 			CoversDir: coversDir,
+			Imports:   importer,
 		}),
 		ReadHeaderTimeout: 10 * time.Second,
 		IdleTimeout:       120 * time.Second,

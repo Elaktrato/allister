@@ -52,6 +52,7 @@ func (s *server) getSettings(w http.ResponseWriter, r *http.Request) {
 	s.render(w, r, "settings", map[string]any{
 		"Options":  opts,
 		"Selected": s.deps.Settings.TitleLang(r.Context()),
+		"Imports":  s.deps.Imports != nil,
 	})
 }
 

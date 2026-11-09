@@ -1,0 +1,61 @@
+{{define "title"}}Import from Yamtrack - Allister{{end}}
+
+{{define "import_list"}}
+<section class="mt-6">
+  <h3 class="mb-2 font-medium">{{.Heading}} <span class="text-slate-400">({{.Count}})</span></h3>
+  {{if .Note}}<p class="mb-2 text-sm text-slate-400">{{.Note}}</p>{{end}}
+  <ul class="divide-y divide-slate-800 rounded border border-slate-800 text-sm">
+    {{range .Rows}}
+    <li class="flex flex-col gap-1 px-3 py-2 sm:flex-row sm:items-baseline sm:gap-3">
+      {{if .URL}}<a href="{{.URL}}" class="font-medium text-indigo-400 underline hover:text-indigo-300">{{.Title}}</a>{{else}}<span class="font-medium">{{.Title}}</span>{{end}}
+      {{if .Message}}<span class="break-words text-slate-400">{{.Message}}</span>{{end}}
+    </li>
+    {{end}}
+    {{if .More}}<li class="px-3 py-2 text-slate-400">and {{.More}} more</li>{{end}}
+  </ul>
+</section>
+{{end}}
+
+{{define "import_progress"}}<section id="import-progress"{{if and .Report .Report.Active}} hx-get="/settings/import" hx-trigger="every 3s" hx-swap="outerHTML"{{end}} class="mt-8">
+{{with .Report}}
+  <h2 class="mb-2 text-lg font-semibold">Latest import</h2>
+  <p class="mb-3 text-sm text-slate-400">{{.Filename}} &middot; <span data-state="{{.State}}" class="font-medium text-slate-200">{{$.State}}</span>{{if .Active}} &middot; about {{.Remaining}} rows left, {{$.ETA}} remaining{{end}}</p>
+  <div class="h-3 w-full overflow-hidden rounded bg-slate-800" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="{{.Percent}}" aria-label="Import progress">
+    <div class="h-full bg-indigo-500" style="width: {{.Percent}}%"></div>
+  </div>
+  <dl class="mt-4 grid grid-cols-2 gap-3 text-sm sm:grid-cols-3 md:grid-cols-6">
+    <div class="rounded border border-slate-800 p-3"><dt class="text-slate-400">Total</dt><dd class="text-lg font-semibold" data-count="total">{{.Total}}</dd></div>
+    <div class="rounded border border-slate-800 p-3"><dt class="text-slate-400">Processed</dt><dd class="text-lg font-semibold" data-count="processed">{{.Processed}}</dd></div>
+    <div class="rounded border border-slate-800 p-3"><dt class="text-slate-400">Imported</dt><dd class="text-lg font-semibold" data-count="imported">{{.Imported}}</dd></div>
+    <div class="rounded border border-slate-800 p-3"><dt class="text-slate-400">Skipped</dt><dd class="text-lg font-semibold" data-count="skipped">{{.Skipped}}</dd></div>
+    <div class="rounded border border-slate-800 p-3"><dt class="text-slate-400">Unmatched</dt><dd class="text-lg font-semibold" data-count="unmatched">{{.Unmatched}}</dd></div>
+    <div class="rounded border border-slate-800 p-3"><dt class="text-slate-400">Failed</dt><dd class="text-lg font-semibold" data-count="failed">{{.Failed}}</dd></div>
+  </dl>
+  {{if .Ignored}}<p class="mt-2 text-sm text-slate-400">{{.Ignored}} rows of other media types (games, manga, ...) were ignored.</p>{{end}}
+  {{if .Active}}
+  <form method="post" action="/settings/import/cancel" class="mt-4">
+    <button type="submit" class="rounded border border-slate-600 px-4 py-2 hover:bg-slate-800">Cancel import</button>
+  </form>
+  {{end}}
+  {{range $.Lists}}{{template "import_list" .}}{{end}}
+{{end}}
+</section>{{end}}
+
+{{define "content"}}
+<h1 class="mb-6 text-2xl font-semibold">Import from Yamtrack</h1>
+<p class="mb-4 max-w-2xl text-sm text-slate-400">Upload the CSV export from Yamtrack. Anime rows are matched by their MyAnimeList id on AniList, a few per minute, so a large export takes a while. You can leave this page; the import continues in the background.</p>
+{{if .Error}}
+<div class="mb-4 max-w-2xl rounded border border-amber-700 bg-amber-950 p-3 text-amber-200" role="alert">
+  <p>{{.Error}}</p>
+  {{if .Conflict}}<p class="mt-1"><a href="/settings/import" class="underline">View progress</a></p>{{end}}
+</div>
+{{end}}
+<form method="post" action="/settings/import" enctype="multipart/form-data" class="flex max-w-xl flex-col gap-3 sm:flex-row sm:items-end">
+  <label class="block flex-1 text-sm">Yamtrack CSV file (up to 20 MiB)
+    <input type="file" name="file" accept=".csv,text/csv" required class="mt-1 w-full rounded border border-slate-700 bg-slate-950 px-3 py-2">
+  </label>
+  <button type="submit" class="rounded bg-indigo-600 px-4 py-2 font-medium hover:bg-indigo-500">Upload and import</button>
+</form>
+{{template "import_progress" .}}
+<p class="mt-8"><a href="/settings" class="text-sm text-slate-400 underline hover:text-slate-200">Back to settings</a></p>
+{{end}}

@@ -9,4 +9,8 @@
   </select>
   <button type="submit" class="self-start rounded bg-indigo-600 px-4 py-2 font-medium hover:bg-indigo-500">Save</button>
 </form>
+{{if .Imports}}
+<h2 class="mb-2 mt-10 text-lg font-semibold">Data</h2>
+<p><a href="/settings/import" class="text-indigo-400 underline hover:text-indigo-300">Import from Yamtrack</a></p>
+{{end}}
 {{end}}
