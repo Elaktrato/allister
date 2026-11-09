@@ -16,7 +16,7 @@ func TestListPageLimitOffsetKeepsOrder(t *testing.T) {
 	for i := 0; i < 5; i++ {
 		id := mustSave(t, s, sample(provider.AniList, fmt.Sprint(i), nil))
 		s.UpsertListEntry(ctx, ListEntry{AnimeID: id, Status: Watching})
-		s.db.Exec(`UPDATE list_entries SET updated_at = ? WHERE anime_id = ?`, fmt.Sprintf("2024-01-0%dT00:00:00Z", i+1), id)
+		s.db.Exec(`UPDATE entries SET updated_at = ? WHERE item_id = ?`, fmt.Sprintf("2024-01-0%dT00:00:00Z", i+1), id)
 		ids = append(ids, id)
 	}
 	// newest first: ids[4], ids[3], ids[2], ids[1], ids[0]
@@ -84,24 +84,21 @@ func TestDeleteAnimeCascades(t *testing.T) {
 	other := mustSave(t, s, sample(provider.AniList, "3", nil))
 	s.UpsertListEntry(ctx, ListEntry{AnimeID: id, Status: Watching})
 	s.UpsertListEntry(ctx, ListEntry{AnimeID: other, Status: Watching})
-	if _, err := s.db.Exec(`INSERT INTO people (source, source_id, name) VALUES ('anilist','c1','Char')`); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := s.db.Exec(`INSERT INTO anime_cast (anime_id, character_person_id, role) VALUES (?, (SELECT id FROM people LIMIT 1), 'MAIN')`, id); err != nil {
+	if err := s.SaveCast(ctx, id, []provider.CastMember{{Character: provider.Person{Source: provider.AniList, ID: "c1", Name: "Char"}, Role: "MAIN"}}); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.DeleteAnime(ctx, id); err != nil {
 		t.Fatal(err)
 	}
-	for _, tbl := range []string{"anime_titles", "anime_relations", "anime_cast", "list_entries"} {
+	for _, tbl := range []string{"item_titles", "item_fields", "relations", "credits", "entries", "entry_progress"} {
 		var n int
-		s.db.QueryRow(`SELECT COUNT(*) FROM `+tbl+` WHERE anime_id = ?`, id).Scan(&n)
+		s.db.QueryRow(`SELECT COUNT(*) FROM `+tbl+` WHERE item_id = ?`, id).Scan(&n)
 		if n != 0 {
 			t.Errorf("%s has %d rows", tbl, n)
 		}
 	}
 	var n int
-	s.db.QueryRow(`SELECT COUNT(*) FROM anime WHERE id = ?`, id).Scan(&n)
+	s.db.QueryRow(`SELECT COUNT(*) FROM items WHERE id = ?`, id).Scan(&n)
 	if n != 0 {
 		t.Error("anime remains")
 	}

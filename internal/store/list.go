@@ -2,71 +2,47 @@ package store
 
 import (
 	"context"
-	"database/sql"
 	"errors"
-	"fmt"
-	"strconv"
 
+	"github.com/allister/allister/internal/library"
 	"github.com/allister/allister/internal/provider"
 )
-
-const nowSQL = `strftime('%Y-%m-%dT%H:%M:%SZ','now')`
 
 // UpsertListEntry inserts or replaces the list entry of e.AnimeID and sets
 // updated_at. It returns an error wrapping ErrInvalid for an unknown status
 // or anime, rating outside 0 to 10, negative progress, progress above a known
 // episode total, or FinishedOn before StartedOn.
 func (s *Store) UpsertListEntry(ctx context.Context, e ListEntry) error {
-	var eps sql.NullInt64
-	err := s.db.QueryRowContext(ctx, `SELECT episodes FROM anime WHERE id = ?`, e.AnimeID).Scan(&eps)
-	if errors.Is(err, sql.ErrNoRows) {
+	it, err := s.lib.Item(ctx, e.AnimeID)
+	if err != nil {
+		return wrapf("upsert list entry", err)
+	}
+	sv := saved(it)
+	if sv == nil {
 		return invalid("anime %d does not exist", e.AnimeID)
 	}
-	if err != nil {
-		return fmt.Errorf("upsert list entry: %w", err)
-	}
-	if err := ValidateListEntry(e, nullInt(eps)); err != nil {
+	if err := ValidateListEntry(e, sv.Episodes); err != nil {
 		return err
 	}
-	return upsertListEntry(ctx, s.db, e)
+	// the library validates again inside its transaction
+	err = s.lib.UpsertEntry(ctx, entry(e))
+	if errors.Is(err, library.ErrNoEntry) {
+		return invalid("anime %d does not exist", e.AnimeID)
+	}
+	return wrapf("upsert list entry", err)
 }
 
 // ValidateListEntry checks e without touching the database: known status,
 // rating 0 to 10 or nil, progress between 0 and the episode total (when
-// episodes is non-nil), FinishedOn not before StartedOn. Errors wrap ErrInvalid.
+// episodes is non-nil), FinishedOn not before StartedOn. Errors wrap
+// ErrInvalid. The rules are the library's (ValidateEntry against the anime
+// kind); only the messages keep their legacy wording.
 func ValidateListEntry(e ListEntry, episodes *int) error {
 	if !e.Status.valid() {
-		return invalid("unknown status %q", e.Status)
+		return invalid("unknown status %q", e.Status) // the legacy vocabulary
 	}
-	if e.Rating != nil && (*e.Rating < 0 || *e.Rating > 10) {
-		return invalid("rating must be between 0 and 10, got %d", *e.Rating)
-	}
-	if e.Progress < 0 {
-		return invalid("progress must not be negative, got %d", e.Progress)
-	}
-	if e.StartedOn != nil && e.FinishedOn != nil && fmtDate(e.FinishedOn).(string) < fmtDate(e.StartedOn).(string) {
-		return invalid("finish date is before start date")
-	}
-	if episodes != nil && e.Progress > *episodes {
-		return invalid("progress %d is above the episode total %d", e.Progress, *episodes)
-	}
-	return nil
-}
-
-type execer interface {
-	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
-}
-
-func upsertListEntry(ctx context.Context, x execer, e ListEntry) error {
-	_, err := x.ExecContext(ctx, `INSERT INTO list_entries
-		(anime_id, status, rating, progress, started_on, finished_on, comment, updated_at)
-		VALUES (?,?,?,?,?,?,?,`+nowSQL+`)
-		ON CONFLICT(anime_id) DO UPDATE SET status=excluded.status, rating=excluded.rating,
-		  progress=excluded.progress, started_on=excluded.started_on, finished_on=excluded.finished_on,
-		  comment=excluded.comment, updated_at=excluded.updated_at`,
-		e.AnimeID, string(e.Status), intArg(e.Rating), e.Progress, fmtDate(e.StartedOn), fmtDate(e.FinishedOn), e.Comment)
-	if err != nil {
-		return fmt.Errorf("upsert list entry: %w", err)
+	if err := validator.ValidateEntry(animeKindDef, animeItem(episodes), entry(e)); err != nil {
+		return legacyEntryError(e, episodes, err)
 	}
 	return nil
 }
@@ -76,81 +52,45 @@ func upsertListEntry(ctx context.Context, x execer, e ListEntry) error {
 // ValidateListEntry, checked against a.Episodes) wraps ErrInvalid and saves
 // nothing; an existing (source, source_id) returns ErrAlreadySaved.
 func (s *Store) AddToList(ctx context.Context, a provider.Anime, e ListEntry, opts ...SaveOption) (int64, error) {
-	o := saveOpts{syncState: "pending"}
-	for _, f := range opts {
-		f(&o)
-	}
 	if err := ValidateListEntry(e, a.Episodes); err != nil {
 		return 0, err
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return 0, fmt.Errorf("add to list: %w", err)
-	}
-	defer tx.Rollback()
-	id, err := saveAnimeTx(ctx, tx, a, o)
+	d, err := itemData(a)
 	if err != nil {
 		return 0, err
 	}
-	e.AnimeID = id
-	if err := upsertListEntry(ctx, tx, e); err != nil {
-		return 0, err
-	}
-	if err := tx.Commit(); err != nil {
-		return 0, fmt.Errorf("add to list: %w", err)
+	id, err := s.lib.AddToList(ctx, animePlugin, animeKind, d, entry(e), libOpts(opts)...)
+	if err != nil {
+		return 0, wrapf("add to list", err)
 	}
 	return id, nil
 }
 
 // GetListEntry returns the list entry or nil, nil when absent.
 func (s *Store) GetListEntry(ctx context.Context, animeID int64) (*ListEntry, error) {
-	var (
-		e          ListEntry
-		st         string
-		rating     sql.NullInt64
-		start, end sql.NullString
-	)
-	err := s.db.QueryRowContext(ctx, `SELECT anime_id, status, rating, progress, started_on, finished_on, comment
-		FROM list_entries WHERE anime_id = ?`, animeID).Scan(&e.AnimeID, &st, &rating, &e.Progress, &start, &end, &e.Comment)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, nil
+	e, err := s.lib.Entry(ctx, animeID)
+	if err != nil || e == nil {
+		return nil, wrapf("get list entry", err)
 	}
-	if err != nil {
-		return nil, fmt.Errorf("get list entry: %w", err)
-	}
-	e.Status, e.Rating, e.StartedOn, e.FinishedOn = Status(st), nullInt(rating), parseDate(start), parseDate(end)
-	return &e, nil
+	le := listEntry(*e)
+	return &le, nil
 }
 
-// RemoveListEntry deletes the list entry only; the anime stays saved.
+// RemoveListEntry deletes the list entry (with its progress) only; the anime
+// stays saved.
 func (s *Store) RemoveListEntry(ctx context.Context, animeID int64) error {
-	_, err := s.db.ExecContext(ctx, `DELETE FROM list_entries WHERE anime_id = ?`, animeID)
-	return err
+	return s.lib.RemoveEntry(ctx, animeID)
 }
 
 // IncrementProgress adds 1 to the progress, never above a known episode
 // total (no-op at the total; counts on when the total is unknown). It returns
 // ErrNoEntry when the anime has no list entry.
 func (s *Store) IncrementProgress(ctx context.Context, animeID int64) error {
-	res, err := s.db.ExecContext(ctx, `UPDATE list_entries SET progress = progress + 1, updated_at = `+nowSQL+`
-		WHERE anime_id = ? AND (
-		  (SELECT episodes FROM anime WHERE id = list_entries.anime_id) IS NULL
-		  OR progress < (SELECT episodes FROM anime WHERE id = list_entries.anime_id))`, animeID)
-	if err != nil {
-		return fmt.Errorf("increment progress: %w", err)
-	}
-	if n, _ := res.RowsAffected(); n > 0 {
-		return nil
-	}
-	var one int
-	err = s.db.QueryRowContext(ctx, `SELECT 1 FROM list_entries WHERE anime_id = ?`, animeID).Scan(&one)
-	if errors.Is(err, sql.ErrNoRows) {
+	err := s.lib.Increment(ctx, animeID)
+	if errors.Is(err, library.ErrNoEntry) {
 		return ErrNoEntry
 	}
-	if err != nil {
-		return fmt.Errorf("increment progress: %w", err)
-	}
-	return nil // at the total already
+	return mapErr(err)
 }
 
 // List returns all list rows, newest updated first, optionally filtered by status.
@@ -161,100 +101,58 @@ func (s *Store) List(ctx context.Context, status *Status) ([]ListRow, error) {
 // ListPage is List restricted to limit rows starting at offset (limit < 0
 // means no limit). The order is stable: updated_at, then id, newest first.
 func (s *Store) ListPage(ctx context.Context, status *Status, limit, offset int) ([]ListRow, error) {
-	var where string
-	var args []any
+	var core *library.Status
 	if status != nil {
-		where = ` WHERE l.status = ?`
-		args = append(args, string(*status))
+		c, ok := toCore[*status]
+		if !ok {
+			return nil, nil // no entry has an unknown status
+		}
+		core = &c
 	}
-	args = append(args, limit, offset)
-	return s.listRows(ctx, where+` ORDER BY l.updated_at DESC, a.id DESC LIMIT ? OFFSET ?`, args...)
+	rows, err := s.lib.Rows(ctx, animeQuery(core), "", limit, offset)
+	if err != nil {
+		return nil, wrapf("list", err)
+	}
+	var out []ListRow
+	for _, r := range rows {
+		out = append(out, listRow(r))
+	}
+	return out, nil
 }
 
 // GetListRow returns the list row of one anime, or nil, nil when it has no
 // list entry.
 func (s *Store) GetListRow(ctx context.Context, animeID int64) (*ListRow, error) {
-	rows, err := s.listRows(ctx, ` WHERE a.id = ?`, animeID)
-	if err != nil || len(rows) == 0 {
-		return nil, err
+	r, err := s.lib.Row(ctx, animeID, "")
+	if err != nil || r == nil || r.Item.PluginID != animePlugin {
+		return nil, wrapf("list", err)
 	}
-	return &rows[0], nil
+	lr := listRow(*r)
+	return &lr, nil
 }
 
 // DeleteAnime removes the anime with its titles, relations, cast rows and
 // list entry (foreign key cascades). People rows and cover files stay. It
 // returns ErrNoEntry when the id does not exist.
 func (s *Store) DeleteAnime(ctx context.Context, animeID int64) error {
-	res, err := s.db.ExecContext(ctx, `DELETE FROM anime WHERE id = ?`, animeID)
-	if err != nil {
-		return fmt.Errorf("delete anime: %w", err)
-	}
-	if n, _ := res.RowsAffected(); n == 0 {
+	err := s.lib.DeleteItem(ctx, animeID)
+	if errors.Is(err, library.ErrNoEntry) {
 		return ErrNoEntry
 	}
-	return nil
-}
-
-// listRows runs the list query with the given trailing SQL (WHERE/ORDER/LIMIT).
-func (s *Store) listRows(ctx context.Context, tail string, args ...any) ([]ListRow, error) {
-	q := `SELECT a.id, a.cover_path, a.type, a.episodes, a.sync_state, a.source, a.source_id, a.mal_id,
-		l.status, l.rating, l.progress, l.started_on, l.finished_on, l.comment
-		FROM list_entries l JOIN anime a ON a.id = l.anime_id` + tail
-	rows, err := s.db.QueryContext(ctx, q, args...)
-	if err != nil {
-		return nil, fmt.Errorf("list: %w", err)
-	}
-	var out []ListRow
-	for rows.Next() {
-		var (
-			r          ListRow
-			eps, rat   sql.NullInt64
-			mal        sql.NullInt64
-			src, st    string
-			start, end sql.NullString
-		)
-		if err := rows.Scan(&r.AnimeID, &r.CoverPath, &r.Type, &eps, &r.SyncState, &src, &r.SourceID, &mal,
-			&st, &rat, &r.Entry.Progress, &start, &end, &r.Entry.Comment); err != nil {
-			rows.Close()
-			return nil, fmt.Errorf("list: %w", err)
-		}
-		r.Source = provider.Source(src)
-		if mal.Valid {
-			r.MALID = strconv.FormatInt(mal.Int64, 10)
-		}
-		r.Episodes = nullInt(eps)
-		r.Entry.AnimeID, r.Entry.Status, r.Entry.Rating = r.AnimeID, Status(st), nullInt(rat)
-		r.Entry.StartedOn, r.Entry.FinishedOn = parseDate(start), parseDate(end)
-		out = append(out, r)
-	}
-	err = rows.Err()
-	rows.Close() // release the connection before the title lookups
-	if err != nil {
-		return nil, fmt.Errorf("list: %w", err)
-	}
-	for i := range out {
-		if out[i].Titles, err = s.titles(ctx, out[i].AnimeID); err != nil {
-			return nil, err
-		}
-	}
-	return out, nil
+	return wrapf("delete anime", err)
 }
 
 // Counts returns the number of list entries per status (absent = 0).
 func (s *Store) Counts(ctx context.Context) (map[Status]int, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT status, COUNT(*) FROM list_entries GROUP BY status`)
+	m, err := s.lib.Counts(ctx, animeQuery(nil))
 	if err != nil {
-		return nil, fmt.Errorf("counts: %w", err)
+		return nil, wrapf("counts", err)
 	}
-	defer rows.Close()
 	out := map[Status]int{}
-	for rows.Next() {
-		var st string
-		var n int
-		if err := rows.Scan(&st, &n); err != nil {
-			return nil, fmt.Errorf("counts: %w", err)
+	for st, n := range m {
+		if n > 0 {
+			out[fromCore(st)] = n
 		}
-		out[Status(st)] = n
 	}
-	return out, rows.Err()
+	return out, nil
 }

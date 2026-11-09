@@ -417,7 +417,8 @@ func TestCleanupCoverKeepsSharedFiles(t *testing.T) {
 	for _, n := range []string{shared, orphan} {
 		os.WriteFile(e.covers+"/"+n, []byte("x"), 0o644)
 	}
-	a := provider.Anime{SearchResult: provider.SearchResult{Source: provider.Manual, ID: "m", CoverURL: shared}}
+	a := provider.Anime{SearchResult: provider.SearchResult{Source: provider.Manual, ID: "m", CoverURL: shared,
+		Titles: []provider.Title{{Lang: "en", Text: "Shared"}}}}
 	if _, err := e.st.SaveAnime(context.Background(), a); err != nil {
 		t.Fatal(err)
 	}

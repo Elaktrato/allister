@@ -58,8 +58,8 @@ func TestPostSettingsInvalid(t *testing.T) {
 
 func TestPostSettingsStoredLanguage(t *testing.T) {
 	h, st, d := newTestServer(t)
-	d.Exec(`INSERT INTO anime(id, source, source_id) VALUES(1,'x','1')`)
-	d.Exec(`INSERT INTO anime_titles(anime_id, lang, text) VALUES(1,'de','T')`)
+	d.Exec(`INSERT INTO items(id, plugin_id, kind, source, source_id) VALUES(1,'anime','anime','x','1')`)
+	d.Exec(`INSERT INTO item_titles(item_id, lang, text) VALUES(1,'de','T')`)
 	if rec := postForm(h, "/settings", url.Values{"title_lang": {"de"}}); rec.Code != http.StatusSeeOther {
 		t.Fatalf("got %d", rec.Code)
 	}
@@ -70,8 +70,8 @@ func TestPostSettingsStoredLanguage(t *testing.T) {
 
 func TestGetSettingsShowsSelected(t *testing.T) {
 	h, st, d := newTestServer(t)
-	d.Exec(`INSERT INTO anime(id, source, source_id) VALUES(1,'x','1')`)
-	d.Exec(`INSERT INTO anime_titles(anime_id, lang, text) VALUES(1,'fr','T'),(1,'pt-br','U')`)
+	d.Exec(`INSERT INTO items(id, plugin_id, kind, source, source_id) VALUES(1,'anime','anime','x','1')`)
+	d.Exec(`INSERT INTO item_titles(item_id, lang, text) VALUES(1,'fr','T'),(1,'pt-br','U')`)
 	st.Set(context.Background(), settings.KeyTitleLang, "ja-latn")
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/settings", nil))

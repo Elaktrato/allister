@@ -47,7 +47,7 @@ func TestConvertKeepsListEntry(t *testing.T) {
 	ctx := context.Background()
 	id, want := manualEntry(t, s)
 	var before string
-	if err := s.db.QueryRow(`SELECT updated_at FROM list_entries WHERE anime_id = ?`, id).Scan(&before); err != nil {
+	if err := s.db.QueryRow(`SELECT updated_at FROM entries WHERE item_id = ?`, id).Scan(&before); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.ConvertToSource(ctx, id, matched("700")); err != nil {
@@ -61,7 +61,7 @@ func TestConvertKeepsListEntry(t *testing.T) {
 		t.Fatal("rating 0 lost")
 	}
 	var after string
-	s.db.QueryRow(`SELECT updated_at FROM list_entries WHERE anime_id = ?`, id).Scan(&after)
+	s.db.QueryRow(`SELECT updated_at FROM entries WHERE item_id = ?`, id).Scan(&after)
 	if after != before {
 		t.Fatalf("updated_at changed %q -> %q", before, after)
 	}
@@ -179,7 +179,7 @@ func TestConvertIsAtomicOnFailure(t *testing.T) {
 	ctx := context.Background()
 	id, _ := manualEntry(t, s)
 	before, _ := s.GetByID(ctx, id)
-	if _, err := s.db.Exec(`CREATE TRIGGER boom BEFORE INSERT ON anime_relations
+	if _, err := s.db.Exec(`CREATE TRIGGER boom BEFORE INSERT ON relations
 		BEGIN SELECT RAISE(ABORT, 'forced failure'); END`); err != nil {
 		t.Fatal(err)
 	}
@@ -213,7 +213,7 @@ func TestConvertClampsProgressToNewTotal(t *testing.T) {
 			ctx := context.Background()
 			id, want := manualEntry(t, s)
 			const old = "2001-02-03T04:05:06Z"
-			if _, err := s.db.Exec(`UPDATE list_entries SET updated_at = ? WHERE anime_id = ?`, old, id); err != nil {
+			if _, err := s.db.Exec(`UPDATE entries SET updated_at = ? WHERE item_id = ?`, old, id); err != nil {
 				t.Fatal(err)
 			}
 			a := matched("700")
@@ -233,7 +233,7 @@ func TestConvertClampsProgressToNewTotal(t *testing.T) {
 				t.Fatalf("entry %+v, want %+v", *got, want)
 			}
 			var after string
-			s.db.QueryRow(`SELECT updated_at FROM list_entries WHERE anime_id = ?`, id).Scan(&after)
+			s.db.QueryRow(`SELECT updated_at FROM entries WHERE item_id = ?`, id).Scan(&after)
 			if c.clamped == (after == old) {
 				t.Fatalf("updated_at %q (clamped=%v)", after, c.clamped)
 			}

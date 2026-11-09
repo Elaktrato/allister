@@ -106,14 +106,14 @@ func TestSetters(t *testing.T) {
 	s := newStore(t)
 	ctx := context.Background()
 	id := mustSave(t, s, sample(provider.AniList, "1", nil))
-	if err := s.SetAnimeCoverPath(ctx, id, "covers/1.jpg"); err != nil {
+	if err := s.SetAnimeCoverPath(ctx, id, "1.jpg"); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.SetSyncState(ctx, id, "done"); err != nil {
 		t.Fatal(err)
 	}
 	got, _ := s.FindBySource(ctx, provider.AniList, "1")
-	if got.CoverPath != "covers/1.jpg" || got.SyncState != "done" {
+	if got.CoverPath != "1.jpg" || got.SyncState != "done" {
 		t.Fatalf("%+v", got)
 	}
 }
@@ -128,10 +128,10 @@ func TestCascadeOnRemovingAnime(t *testing.T) {
 	if err := s.UpsertListEntry(ctx, ListEntry{AnimeID: id, Status: Watching}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.db.Exec(`DELETE FROM anime WHERE id = ?`, id); err != nil {
+	if _, err := s.db.Exec(`DELETE FROM items WHERE id = ?`, id); err != nil {
 		t.Fatal(err)
 	}
-	for _, tbl := range []string{"anime_titles", "anime_cast", "list_entries"} {
+	for _, tbl := range []string{"item_titles", "item_fields", "credits", "entries", "entry_progress"} {
 		var n int
 		s.db.QueryRow(`SELECT COUNT(*) FROM ` + tbl).Scan(&n)
 		if n != 0 {

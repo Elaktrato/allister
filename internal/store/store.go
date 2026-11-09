@@ -1,8 +1,14 @@
 // Package store persists saved anime, their cast and the user's list entries.
 //
-// Image convention: anime.cover_path and people.image_path initially hold the
+// It is a thin adapter over the generic library (internal/library): every
+// anime is an item of plugin "anime", kind "anime"; list entries, progress
+// (key "episode"), cast (credits) and people live in the library's tables.
+// The legacy API and its observable behaviour are kept; validation and
+// persistence are delegated to the library (see adapter.go for the mapping).
+//
+// Image convention: items.cover_path and people.image_path initially hold the
 // remote URL (starting with "http") until the image has been downloaded and a
-// local path replaces it via SetAnimeCoverPath / SetPersonImagePath.
+// local file name replaces it via SetAnimeCoverPath / SetPersonImagePath.
 package store
 
 import (
@@ -11,6 +17,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/allister/allister/internal/library"
 	"github.com/allister/allister/internal/provider"
 )
 
@@ -105,41 +112,13 @@ type PersonAppearance struct {
 }
 
 // Store is the persistence layer over *sql.DB.
-type Store struct{ db *sql.DB }
+type Store struct {
+	db  *sql.DB
+	lib *library.Library
+}
 
-func New(db *sql.DB) *Store { return &Store{db: db} }
+// New returns a Store over db. It builds its own library with a registry that
+// holds the anime plugin's manifest (see adapter.go).
+func New(db *sql.DB) *Store { return &Store{db: db, lib: library.New(db, animeRegistry)} }
 
 const dateLayout = "2006-01-02"
-
-func fmtDate(t *time.Time) any {
-	if t == nil {
-		return nil
-	}
-	return t.Format(dateLayout) // calendar day in the input's own zone
-}
-
-func parseDate(ns sql.NullString) *time.Time {
-	if !ns.Valid || ns.String == "" {
-		return nil
-	}
-	t, err := time.Parse(dateLayout, ns.String)
-	if err != nil {
-		return nil
-	}
-	return &t
-}
-
-func nullInt(n sql.NullInt64) *int {
-	if !n.Valid {
-		return nil
-	}
-	v := int(n.Int64)
-	return &v
-}
-
-func intArg(p *int) any {
-	if p == nil {
-		return nil
-	}
-	return *p
-}

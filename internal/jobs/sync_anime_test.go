@@ -245,7 +245,7 @@ func TestSyncAnimeCastNotFoundIsDone(t *testing.T) {
 func TestSyncAnimeDeletedAnimeSucceeds(t *testing.T) {
 	e := newSyncEnv(t)
 	id := e.save(t, provider.AniList, e.srv.URL+"/ok/cover")
-	if _, err := e.d.Exec(`DELETE FROM anime WHERE id=?`, id); err != nil {
+	if _, err := e.d.Exec(`DELETE FROM items WHERE id=?`, id); err != nil {
 		t.Fatal(err)
 	}
 	if err := e.run(id); err != nil || e.prov.calls != 0 {

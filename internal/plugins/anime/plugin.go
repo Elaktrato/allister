@@ -8,16 +8,17 @@ import (
 	"net/http"
 
 	"github.com/allister/allister/internal/plugin"
+	"github.com/allister/allister/internal/plugins/anime/animedef"
 	"github.com/allister/allister/internal/provider/anilist"
 )
 
 // Plugin and source ids and the one kind key of this plugin.
 const (
-	PluginID   = "anime"
-	KindAnime  = "anime"
-	SourceID   = "anilist"
-	ImporterID = "yamtrack"
-	ExporterID = "json"
+	PluginID   = animedef.PluginID
+	KindAnime  = animedef.KindAnime
+	SourceID   = animedef.SourceID
+	ImporterID = animedef.ImporterID
+	ExporterID = animedef.ExporterID
 )
 
 // Options configures the plugin. The zero value talks to the real AniList.

@@ -33,7 +33,7 @@ func TestSaveCastLinksVoiceActors(t *testing.T) {
 		t.Fatal(err)
 	}
 	var n, nulls int
-	s.db.QueryRow(`SELECT COUNT(*), COALESCE(SUM(actor_person_id IS NULL),0) FROM anime_cast WHERE anime_id=?`, id).Scan(&n, &nulls)
+	s.db.QueryRow(`SELECT COUNT(*), COALESCE(SUM(counterpart_person_id IS NULL),0) FROM credits WHERE item_id=?`, id).Scan(&n, &nulls)
 	if n != 2 || nulls != 1 {
 		t.Fatalf("n=%d nulls=%d", n, nulls)
 	}
@@ -66,14 +66,14 @@ func TestSaveCastIsIdempotent(t *testing.T) {
 		}
 	}
 	var n, people int
-	s.db.QueryRow(`SELECT COUNT(*) FROM anime_cast`).Scan(&n)
+	s.db.QueryRow(`SELECT COUNT(*) FROM credits`).Scan(&n)
 	s.db.QueryRow(`SELECT COUNT(*) FROM people`).Scan(&people)
 	if n != 2 || people != 4 {
 		t.Fatalf("cast=%d people=%d", n, people)
 	}
 	// a re-sync replaces the cast and keeps a local image path
 	va := personID(t, s, "anilist", "v1")
-	if err := s.SetPersonImagePath(ctx, va, "people/v1.jpg"); err != nil {
+	if err := s.SetPersonImagePath(ctx, va, "v1.jpg"); err != nil {
 		t.Fatal(err)
 	}
 	m := cast("1", "1")
@@ -82,10 +82,10 @@ func TestSaveCastIsIdempotent(t *testing.T) {
 		t.Fatal(err)
 	}
 	p, _ := s.Person(ctx, va)
-	if p.Name != "Renamed" || p.ImagePath != "people/v1.jpg" {
+	if p.Name != "Renamed" || p.ImagePath != "v1.jpg" {
 		t.Fatalf("%+v", p)
 	}
-	s.db.QueryRow(`SELECT COUNT(*) FROM anime_cast`).Scan(&n)
+	s.db.QueryRow(`SELECT COUNT(*) FROM credits`).Scan(&n)
 	if n != 1 {
 		t.Fatal(n)
 	}

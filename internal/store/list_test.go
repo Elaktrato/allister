@@ -185,9 +185,9 @@ func TestListFiltersAndOrders(t *testing.T) {
 		s.UpsertListEntry(ctx, ListEntry{AnimeID: id, Status: st})
 	}
 	// force distinct timestamps: a oldest, b newest
-	s.db.Exec(`UPDATE list_entries SET updated_at = '2024-01-01T00:00:00Z' WHERE anime_id = ?`, a)
-	s.db.Exec(`UPDATE list_entries SET updated_at = '2024-03-01T00:00:00Z' WHERE anime_id = ?`, b)
-	s.db.Exec(`UPDATE list_entries SET updated_at = '2024-02-01T00:00:00Z' WHERE anime_id = ?`, c)
+	s.db.Exec(`UPDATE entries SET updated_at = '2024-01-01T00:00:00Z' WHERE item_id = ?`, a)
+	s.db.Exec(`UPDATE entries SET updated_at = '2024-03-01T00:00:00Z' WHERE item_id = ?`, b)
+	s.db.Exec(`UPDATE entries SET updated_at = '2024-02-01T00:00:00Z' WHERE item_id = ?`, c)
 
 	all, err := s.List(ctx, nil)
 	if err != nil || len(all) != 3 || all[0].AnimeID != b || all[1].AnimeID != c || all[2].AnimeID != a {

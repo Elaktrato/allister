@@ -112,14 +112,14 @@ func TestAddToListRollsBackWhenListInsertFails(t *testing.T) {
 	ctx := context.Background()
 	a := sample(provider.AniList, "1", intp(12))
 	a.Relations = []provider.Relation{{Kind: "sequel", Source: provider.AniList, ID: "2", Titles: []provider.Title{{Lang: "en", Text: "S2"}}}}
-	if _, err := s.db.Exec(`CREATE TRIGGER boom BEFORE INSERT ON list_entries BEGIN SELECT RAISE(ABORT, 'boom'); END`); err != nil {
+	if _, err := s.db.Exec(`CREATE TRIGGER boom BEFORE INSERT ON entries BEGIN SELECT RAISE(ABORT, 'boom'); END`); err != nil {
 		t.Fatal(err)
 	}
 	_, err := s.AddToList(ctx, a, ListEntry{Status: Watching, Progress: 1})
 	if err == nil || errors.Is(err, ErrInvalid) || errors.Is(err, ErrAlreadySaved) {
 		t.Fatalf("want a database error, got %v", err)
 	}
-	for _, tbl := range []string{"anime", "anime_titles", "anime_relations", "list_entries"} {
+	for _, tbl := range []string{"items", "item_titles", "relations", "entries", "entry_progress"} {
 		if n := countRows(t, s, tbl); n != 0 {
 			t.Fatalf("%s has %d rows after rollback", tbl, n)
 		}

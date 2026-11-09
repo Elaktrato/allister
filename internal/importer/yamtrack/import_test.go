@@ -212,7 +212,7 @@ func (e *env) report() *Report {
 
 func (e *env) animeCount() int {
 	var n int
-	if err := e.d.QueryRow(`SELECT COUNT(*) FROM anime`).Scan(&n); err != nil {
+	if err := e.d.QueryRow(`SELECT COUNT(*) FROM items`).Scan(&n); err != nil {
 		e.t.Fatal(err)
 	}
 	return n
