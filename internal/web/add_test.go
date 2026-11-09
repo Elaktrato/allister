@@ -625,3 +625,126 @@ func TestAddRoutesMovedToCoreRoutes(t *testing.T) {
 	}
 	e.assertNothingSavedFor(t, "book", "books", "42")
 }
+
+func TestAddInvalidFormMakesNoSourceCall(t *testing.T) {
+	for name, f := range map[string]url.Values{
+		"rating":         {"status": {"active"}, "rating": {"11"}},
+		"status":         {"status": {"watching"}},
+		"inactive key":   {"status": {"active"}, "progress.percent": {"5"}},
+		"bad date":       {"status": {"active"}, "started_on": {"2024-13-01"}},
+		"finish < start": {"status": {"active"}, "started_on": {"2024-02-01"}, "finished_on": {"2024-01-01"}},
+		"nul in comment": {"status": {"active"}, "comment": {"a\x00b"}},
+	} {
+		e := newAddEnv(t)
+		e.book.Err = plugin.ErrUnavailable // would be a 503 if the source were asked
+		rec := e.do("POST", "/book/books/42/add", f, true)
+		if rec.Code != 422 {
+			t.Errorf("%s: got %d", name, rec.Code)
+		}
+		if n := e.book.Calls(plugintest.OpDetails); n != 0 {
+			t.Errorf("%s: %d source calls", name, n)
+		}
+		e.assertNothingSavedFor(t, "book", "books", "42")
+	}
+}
+
+func TestAddValidFormWithSourceDownIs503(t *testing.T) {
+	e := newAddEnv(t)
+	e.book.Err = plugin.ErrRateLimited
+	rec := e.do("POST", "/book/books/42/add", url.Values{"status": {"active"}, "progress.pages": {"5"}}, true)
+	if rec.Code != 503 {
+		t.Fatalf("got %d", rec.Code)
+	}
+	mustContain(t, rec.Body.String(), "Fake Books is rate limiting", `value="5"`)
+	e.assertNothingSavedFor(t, "book", "books", "42")
+}
+
+func TestAddDialogThenPostCostsOneDetailsCall(t *testing.T) {
+	e := newAddEnv(t)
+	if c := e.do("GET", "/book/books/42/add", nil, true).Code; c != 200 {
+		t.Fatalf("dialog: %d", c)
+	}
+	if rec := e.do("POST", "/book/books/42/add", url.Values{"status": {"active"}, "progress.pages": {"300"}}, true); rec.Code != 204 {
+		t.Fatalf("post: %d %s", rec.Code, rec.Body.String())
+	}
+	if n := e.book.Calls(plugintest.OpDetails); n != 1 {
+		t.Fatalf("%d Details calls, want 1", n)
+	}
+	// the dialog's cache entry does not stand in for the full overview
+	if b := e.get("/book/books/43").Body.String(); !strings.Contains(b, "Earthsea") {
+		t.Fatal("overview broken")
+	}
+}
+
+func TestAddDialogCacheEntryDoesNotHideOverviewSections(t *testing.T) {
+	e := newAddEnv(t)
+	e.book.Credits = []plugin.Credit{{Role: "author", Person: plugin.PersonRef{ID: "p1", Name: "Ursula Person"}}}
+	e.do("GET", "/book/books/42/add", nil, true)
+	// no-JS dialog page of the same item: the people section is still there
+	mustContain(t, e.get("/book/books/42/add").Body.String(), "Ursula Person")
+}
+
+func TestAddConcurrentAttachToSavedItem(t *testing.T) {
+	e := newEnv(t)
+	e.saved(t)
+	var wg sync.WaitGroup
+	codes := make([]int, 6)
+	for i := range codes {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			codes[i] = e.post(okAddForm(), i%2 == 0).Code
+		}(i)
+	}
+	wg.Wait()
+	ok := 0
+	for _, c := range codes {
+		switch c {
+		case 204, 303:
+			ok++
+		case 409:
+		default:
+			t.Fatalf("codes %v", codes)
+		}
+	}
+	if ok != 1 || len(e.jobs.got) != 0 {
+		t.Fatalf("codes %v jobs %d", codes, len(e.jobs.got))
+	}
+}
+
+func TestAddExplicitProgressKeyBeatsShorthand(t *testing.T) {
+	e := newAddEnv(t)
+	f := url.Values{"status": {"active"}, "progress": {"7"}, "progress.pages": {"12"}}
+	if rec := e.do("POST", "/book/books/42/add", f, true); rec.Code != 204 {
+		t.Fatalf("got %d", rec.Code)
+	}
+	if got := e.savedEntry(t, "book", "books", "42").Progress["pages"]; got != 12 {
+		t.Fatalf("pages = %v, want 12 (explicit key wins)", got)
+	}
+}
+
+func TestAddRejectsThirteenDigitCount(t *testing.T) {
+	e := newAddEnv(t)
+	delete(e.tv.Data.Fields, "episodes") // unbounded: only the digit limit applies
+	rec := e.do("POST", "/tv/tvdata/5/add", url.Values{"status": {"active"}, "progress.episode": {"1234567890123"}}, true)
+	if rec.Code != 422 {
+		t.Fatalf("got %d", rec.Code)
+	}
+	mustContain(t, rec.Body.String(), "Episode must be a whole number")
+	e.assertNothingSavedFor(t, "tv", "tvdata", "5")
+	if rec := e.do("POST", "/tv/tvdata/5/add", url.Values{"status": {"active"}, "progress.episode": {"123456789012"}}, true); rec.Code != 204 {
+		t.Fatalf("12 digits: %d", rec.Code)
+	}
+}
+
+func TestAddRepeatedParametersFirstWins(t *testing.T) {
+	e := newAddEnv(t)
+	f := url.Values{"status": {"completed", "dropped"}, "rating": {"6", "x"}, "progress.pages": {"9", "999"}, "comment": {"one", "two"}}
+	if rec := e.do("POST", "/book/books/42/add", f, true); rec.Code != 204 {
+		t.Fatalf("got %d %s", rec.Code, rec.Body.String())
+	}
+	en := e.savedEntry(t, "book", "books", "42")
+	if en.Status != library.Completed || *en.Rating != 6 || en.Progress["pages"] != 9 || en.Comment != "one" {
+		t.Fatalf("%+v", en)
+	}
+}

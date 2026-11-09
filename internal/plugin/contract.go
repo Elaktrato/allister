@@ -81,7 +81,11 @@ func StatusClasses() []StatusClass {
 	return []StatusClass{Planned, Active, Paused, Completed, Dropped}
 }
 
-// FieldDef declares one typed item field.
+// FieldDef declares one typed item field. Unit is an optional short unit
+// label of a number field ("eps", "pages"): a single line of at most 20
+// characters without control characters, shown after the number wherever
+// the core prints the value ("37 eps"); empty means none and is omitted
+// from JSON.
 type FieldDef struct {
 	Key        string    `json:"key"`
 	Label      string    `json:"label"`
@@ -94,6 +98,7 @@ type FieldDef struct {
 	Filterable bool      `json:"filterable,omitempty"`
 	Sortable   bool      `json:"sortable,omitempty"`
 	Required   bool      `json:"required,omitempty"`
+	Unit       string    `json:"unit,omitempty"`
 }
 
 // StatusLabels names the five status classes for one media kind.

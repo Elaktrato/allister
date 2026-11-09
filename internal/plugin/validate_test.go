@@ -110,6 +110,12 @@ func TestValidateRejects(t *testing.T) {
 		{"exporter without extension", book, func(m *plugin.Manifest) {
 			m.Exporters = []plugin.ExporterInfo{{ID: "j", Name: "J", MIME: "application/json"}}
 		}, `exporters[0].extension: required`},
+		{"unit with a control character", tv, func(m *plugin.Manifest) { m.Kinds[0].Fields[1].Unit = "ep\ns" },
+			`kinds[0].fields[1].unit: must be a single line without control characters`},
+		{"unit too long", tv, func(m *plugin.Manifest) { m.Kinds[0].Fields[1].Unit = strings.Repeat("é", 21) },
+			`kinds[0].fields[1].unit: longer than 20 characters`},
+		{"unit on a text field", book, func(m *plugin.Manifest) { m.Kinds[0].Fields[0].Unit = "x" },
+			`kinds[0].fields[0].unit: only number fields take a unit`},
 		{"progress total on percent", book, func(m *plugin.Manifest) { m.Kinds[0].Progress.Eligible[1].TotalField = "pages" }, `kinds[0].progress.eligible[1].total_field: percent progress has no total`},
 	}
 	for _, tc := range tests {
@@ -124,6 +130,14 @@ func TestValidateRejects(t *testing.T) {
 				t.Fatalf("error %q does not contain %q", err, tc.want)
 			}
 		})
+	}
+}
+
+func TestValidateAcceptsUnit(t *testing.T) {
+	m := tv()
+	m.Kinds[0].Fields[1].Unit = strings.Repeat("é", 20)
+	if err := plugin.Validate(m); err != nil {
+		t.Fatal(err)
 	}
 }
 

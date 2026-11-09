@@ -39,7 +39,7 @@ func TestManifestJSONRoundTrip(t *testing.T) {
 		Kinds: []plugin.KindDef{{
 			Key: "k", Label: "K", LabelPlural: "Ks",
 			Fields: []plugin.FieldDef{
-				{Key: "n", Label: "N", Type: plugin.FieldNumber, Min: fptr(0), Max: fptr(10), Show: true, Editable: true, Filterable: true, Sortable: true, Required: true},
+				{Key: "n", Label: "N", Type: plugin.FieldNumber, Unit: "pcs", Min: fptr(0), Max: fptr(10), Show: true, Editable: true, Filterable: true, Sortable: true, Required: true},
 				{Key: "e", Label: "E", Type: plugin.FieldEnum, EnumValues: []string{"a", "b"}},
 			},
 			Genres:   plugin.TermDef{Enabled: true, Label: "Genres", Editable: true, Filterable: true},
@@ -146,5 +146,21 @@ func TestCreditDetailJSON(t *testing.T) {
 	var c plugin.Credit
 	if err := json.Unmarshal(b, &c); err != nil || c.Detail != "MAIN" {
 		t.Fatalf("round trip: %+v %v", c, err)
+	}
+}
+
+func TestFieldUnitJSON(t *testing.T) {
+	f := plugin.FieldDef{Key: "episodes", Label: "Episodes", Type: plugin.FieldNumber, Unit: "eps"}
+	b, err := json.Marshal(f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(b), `"unit":"eps"`) {
+		t.Fatalf("json %s", b)
+	}
+	roundTrip(t, "field with unit", f)
+	f.Unit = ""
+	if b, _ = json.Marshal(f); strings.Contains(string(b), "unit") {
+		t.Fatalf("empty unit not omitted: %s", b)
 	}
 }

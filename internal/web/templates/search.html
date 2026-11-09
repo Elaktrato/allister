@@ -7,10 +7,10 @@
     hx-get="{{.Action}}" hx-trigger="keyup changed delay:400ms, search" hx-include="closest form"
     hx-target="#results" hx-push-url="true"
     class="w-full rounded border border-slate-700 bg-slate-900 px-3 py-2">
-  {{if .Kinds}}<select name="kind" aria-label="Kind" class="rounded border border-slate-700 bg-slate-900 px-3 py-2">
+  {{if .Kinds}}<select name="kind" aria-label="Kind" hx-get="{{$.Action}}" hx-trigger="change" hx-target="#results" hx-include="closest form" hx-push-url="true" class="rounded border border-slate-700 bg-slate-900 px-3 py-2">
     {{range .Kinds}}<option value="{{.Value}}"{{if .Selected}} selected{{end}}>{{.Label}}</option>{{end}}
   </select>{{end}}
-  {{if .Sources}}<select name="source" aria-label="Source" class="rounded border border-slate-700 bg-slate-900 px-3 py-2">
+  {{if .Sources}}<select name="source" aria-label="Source" hx-get="{{$.Action}}" hx-trigger="change" hx-target="#results" hx-include="closest form" hx-push-url="true" class="rounded border border-slate-700 bg-slate-900 px-3 py-2">
     {{range .Sources}}<option value="{{.Value}}"{{if .Selected}} selected{{end}}>{{.Label}}</option>{{end}}
   </select>{{end}}
   <button type="submit" class="rounded bg-indigo-600 px-4 py-2 font-medium hover:bg-indigo-500">Search</button>

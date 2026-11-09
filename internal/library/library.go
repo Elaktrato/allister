@@ -40,6 +40,8 @@ var (
 	// ErrInvalid is wrapped by errors that describe invalid input; the error
 	// text carries the human-readable reason.
 	ErrInvalid = errors.New("invalid")
+	// ErrEntryExists: CreateEntry found an entry for the item already.
+	ErrEntryExists = errors.New("library: item already has an entry")
 	// ErrNoEntry: the item (or person) does not exist.
 	ErrNoEntry = errors.New("library: no such entry")
 )

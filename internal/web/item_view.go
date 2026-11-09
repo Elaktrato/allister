@@ -219,12 +219,16 @@ func sourceLink(m plugin.Manifest, d plugin.ItemData) (extLink, bool) {
 	return extLink{Label: label, Href: href}, true
 }
 
-// fieldText formats a field value by its type; href is set for an https url.
+// fieldText formats a field value by its type (a number with its unit,
+// "37 eps"); href is set for an https url.
 func fieldText(fd plugin.FieldDef, v plugin.FieldValue) (text, href string) {
 	switch fd.Type {
 	case plugin.FieldNumber:
 		if v.Num != nil {
 			text = fmtNum(*v.Num)
+			if fd.Unit != "" {
+				text += " " + fd.Unit
+			}
 		}
 	case plugin.FieldDate:
 		if v.Date != nil {

@@ -83,7 +83,7 @@ func TestSearchUsesPluginSource(t *testing.T) {
 		t.Fatalf("queries %v", fp.queries)
 	}
 	body := rec.Body.String()
-	for _, want := range []string{`href="/anime/anilist/1535"`, "Madhouse", "37", "2006", "TV",
+	for _, want := range []string{`href="/anime/anilist/1535"`, "Madhouse", "37 eps", "2006", "TV", "TV · 37 eps · 2006 · Madhouse",
 		`src="https://img.example/c.jpg"`, `loading="lazy"`, `href="/anime/manual/new"`, "Can't find it? Add manually"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("missing %q in body", want)
@@ -218,6 +218,14 @@ func TestSearchSynopsisTruncatedAtRune(t *testing.T) {
 }
 
 func TestSearchOmitsNilFields(t *testing.T) {
+	// present: the episode count carries the field's unit
+	full := doSearch(func() http.Handler {
+		h, _ := searchServer(t, &fakeProvider{results: []provider.SearchResult{sampleResult()}})
+		return h
+	}(), "x", true).Body.String()
+	if !strings.Contains(full, "37 eps") {
+		t.Fatalf("missing \"37 eps\" in %s", full)
+	}
 	r := sampleResult()
 	r.Episodes, r.Year, r.Studio, r.CoverURL = nil, nil, "", ""
 	fp := &fakeProvider{results: []provider.SearchResult{r}}
@@ -385,4 +393,23 @@ func TestSearchOfDisabledPlugin404(t *testing.T) {
 	if e.book.Calls(plugintest.OpSearch) != 0 {
 		t.Fatal("searched while disabled")
 	}
+}
+
+func TestSearchSwitchesRequestOnChange(t *testing.T) {
+	other := &plugintest.FakeSource{}
+	e := newFixtureEnv(t, withComicKind, func(book, _ *plugintest.Plugin) {
+		book.M.Sources = append(book.M.Sources, plugin.SourceInfo{ID: "openlib", Name: "Open Library", RequestsPerMinute: 60})
+		book.Sources["openlib"] = other
+	})
+	b := e.get("/book/search?q=x").Body.String()
+	for _, name := range []string{"kind", "source"} {
+		mustContain(t, b, `<select name="`+name+`" aria-label=`, `hx-get="/book/search" hx-trigger="change" hx-target="#results" hx-include="closest form" hx-push-url="true"`)
+	}
+	if n := strings.Count(b, `hx-trigger="change"`); n != 2 {
+		t.Fatalf("%d change triggers, want 2", n)
+	}
+	// the plain GET form still works without JavaScript
+	mustContain(t, b, `<form method="get" action="/book/search"`, `<button type="submit"`)
+	// one kind and one source: no selects, no change triggers
+	mustNotContain(t, e.get("/tv/search?q=x").Body.String(), `hx-trigger="change"`, "<select")
 }

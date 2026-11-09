@@ -335,3 +335,53 @@ func TestEntryTableConstraints(t *testing.T) {
 		t.Fatal("rating check missing")
 	}
 }
+
+func TestCreateEntryInsertsOnlyWhenAbsent(t *testing.T) {
+	e := newEnv(t)
+	id := mustSave(t, e.lib, "book", "book", bookWith("ce1", fp(10)))
+	// validated against the stored item before anything is written
+	wantInvalid(t, e.lib.CreateEntry(bg, Entry{ItemID: id, Status: Active, Progress: map[string]float64{"pages": 11}}), "total")
+	wantInvalid(t, e.lib.CreateEntry(bg, Entry{ItemID: id, Status: "watching"}), "status")
+	if n := count(t, e.db, `SELECT count(*) FROM entries`); n != 0 {
+		t.Fatal("invalid create wrote an entry")
+	}
+	if err := e.lib.CreateEntry(bg, Entry{ItemID: id, Status: Active, Comment: "first", Progress: map[string]float64{"pages": 4}}); err != nil {
+		t.Fatal(err)
+	}
+	// an existing entry is never touched
+	err := e.lib.CreateEntry(bg, Entry{ItemID: id, Status: Dropped, Comment: "second", Progress: map[string]float64{"pages": 9}})
+	if !errors.Is(err, ErrEntryExists) {
+		t.Fatalf("err = %v, want ErrEntryExists", err)
+	}
+	if got := mustEntry(t, e.lib, id); got.Status != Active || got.Comment != "first" || got.Progress["pages"] != 4 {
+		t.Fatalf("entry changed: %+v", got)
+	}
+	if err := e.lib.CreateEntry(bg, Entry{ItemID: 9999, Status: Active}); !errors.Is(err, ErrNoEntry) {
+		t.Fatalf("unknown item: %v", err)
+	}
+}
+
+func TestCreateEntryIsAtomicUnderConcurrency(t *testing.T) {
+	e := newEnv(t)
+	id := mustSave(t, e.lib, "book", "book", bookWith("ce2", fp(10)))
+	const n = 8
+	errs := make(chan error, n)
+	for i := 0; i < n; i++ {
+		go func(i int) {
+			errs <- e.lib.CreateEntry(bg, Entry{ItemID: id, Status: Active, Progress: map[string]float64{"pages": float64(i)}})
+		}(i)
+	}
+	ok := 0
+	for i := 0; i < n; i++ {
+		switch err := <-errs; {
+		case err == nil:
+			ok++
+		case errors.Is(err, ErrEntryExists):
+		default:
+			t.Fatalf("unexpected error %v", err)
+		}
+	}
+	if ok != 1 || count(t, e.db, `SELECT count(*) FROM entries`) != 1 {
+		t.Fatalf("%d creates succeeded", ok)
+	}
+}

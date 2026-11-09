@@ -288,6 +288,7 @@ func (s *server) loadLive(ctx context.Context, m plugin.Manifest, ref itemRef, u
 	c, hit := cachedDetail{}, false
 	if useCache {
 		c, hit = s.cache.get(key)
+		hit = hit && !c.DetailsOnly
 	}
 	if !hit {
 		src := s.source(m.ID, ref.Source)

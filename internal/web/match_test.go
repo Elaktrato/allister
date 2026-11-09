@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net/http/httptest"
 	"net/url"
 	"reflect"
 	"strconv"
@@ -12,6 +13,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/allister/allister/internal/plugin"
+	"github.com/allister/allister/internal/plugin/plugintest"
 	"github.com/allister/allister/internal/provider"
 	"github.com/allister/allister/internal/store"
 )
@@ -324,7 +327,7 @@ func TestMatchSearchPartial(t *testing.T) {
 	if rec.Code != 200 || len(e.mp.searches) != 1 {
 		t.Fatalf("%d %v", rec.Code, e.mp.searches)
 	}
-	mustContain(t, b, "デスノート", "TV", "37", "2006", `name="pick" value="1535"`, `action="/anime/manual/man1/match"`, "https://img.example/c.jpg")
+	mustContain(t, b, "デスノート", "TV", "37 eps", "2006", `name="pick" value="1535"`, `action="/anime/manual/man1/match"`, "https://img.example/c.jpg")
 	mustNotContain(t, b, "<html")
 	// no JS: full page with the dialog open
 	b = e.get(matchURL + "/search?q=death").Body.String()
@@ -379,4 +382,26 @@ func itoa(n int64) string { return strconv.FormatInt(n, 10) }
 func toJSON(v any) string {
 	b, _ := json.Marshal(v)
 	return string(b)
+}
+
+func TestMatchSearchWithoutAnimePlugin404(t *testing.T) {
+	// the anime routes are only mounted with the anime plugin; the handler
+	// still refuses to run without its manifest
+	e := newEnvWith(t, func(es plugin.EnabledStore) *plugin.Registry {
+		r := plugin.NewRegistry(es)
+		r.Register(plugintest.BookPlugin())
+		return r
+	})
+	man := provider.Anime{SearchResult: provider.SearchResult{Source: provider.Manual, ID: "man1", Titles: []provider.Title{{Lang: "en", Text: "M"}}}}
+	if _, err := e.st.SaveAnime(context.Background(), man, store.WithSyncState("done")); err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest("GET", "/anime/manual/man1/match/search?q=x", nil)
+	req.SetPathValue("source", "manual")
+	req.SetPathValue("id", "man1")
+	rec := httptest.NewRecorder()
+	e.srv.getMatchSearch(rec, req)
+	if rec.Code != 404 {
+		t.Fatalf("got %d", rec.Code)
+	}
 }

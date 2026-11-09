@@ -115,6 +115,13 @@ func (l *Library) ValidateEntry(kind plugin.KindDef, item *Item, e Entry) error 
 // writeEntry stores the scalar part of the entry and the progress values
 // present in e.Progress. The caller validated e.
 func writeEntry(ctx context.Context, tx *sql.Tx, itemID int64, e Entry) error {
+	_, err := writeEntryMode(ctx, tx, itemID, e, false)
+	return err
+}
+
+// writeEntryMode is writeEntry; with createOnly an existing entry is left
+// untouched and created is false (nothing written).
+func writeEntryMode(ctx context.Context, tx *sql.Tx, itemID int64, e Entry, createOnly bool) (created bool, err error) {
 	started, _ := writtenDay(e.StartedOn)
 	finished, _ := writtenDay(e.FinishedOn)
 	var rating, st, fin any
@@ -127,12 +134,24 @@ func writeEntry(ctx context.Context, tx *sql.Tx, itemID int64, e Entry) error {
 	if finished != "" {
 		fin = finished
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO `+tableEntries+`(item_id, status, rating, comment, started_on, finished_on, updated_at)
+	conflict := `DO UPDATE SET status = excluded.status, rating = excluded.rating, comment = excluded.comment,
+		  started_on = excluded.started_on, finished_on = excluded.finished_on, updated_at = excluded.updated_at`
+	if createOnly {
+		conflict = `DO NOTHING`
+	}
+	res, err := tx.ExecContext(ctx, `INSERT INTO `+tableEntries+`(item_id, status, rating, comment, started_on, finished_on, updated_at)
 		VALUES (?,?,?,?,?,?,`+nowSQL+`)
-		ON CONFLICT(item_id) DO UPDATE SET status = excluded.status, rating = excluded.rating, comment = excluded.comment,
-		  started_on = excluded.started_on, finished_on = excluded.finished_on, updated_at = excluded.updated_at`,
-		itemID, string(e.Status), rating, e.Comment, st, fin); err != nil {
-		return fmt.Errorf("save entry: %w", err)
+		ON CONFLICT(item_id) `+conflict,
+		itemID, string(e.Status), rating, e.Comment, st, fin)
+	if err != nil {
+		return false, fmt.Errorf("save entry: %w", err)
+	}
+	if createOnly {
+		if n, err := res.RowsAffected(); err != nil {
+			return false, fmt.Errorf("save entry: %w", err)
+		} else if n == 0 {
+			return false, nil
+		}
 	}
 	keys := make([]string, 0, len(e.Progress))
 	for k := range e.Progress {
@@ -142,10 +161,10 @@ func writeEntry(ctx context.Context, tx *sql.Tx, itemID int64, e Entry) error {
 	for _, k := range keys {
 		if _, err := tx.ExecContext(ctx, `INSERT INTO `+tableEntryProgress+`(item_id, key, value) VALUES (?,?,?)
 			ON CONFLICT(item_id, key) DO UPDATE SET value = excluded.value`, itemID, k, e.Progress[k]); err != nil {
-			return fmt.Errorf("save entry progress: %w", err)
+			return false, fmt.Errorf("save entry progress: %w", err)
 		}
 	}
-	return nil
+	return true, nil
 }
 
 // AddToList saves the item and its list entry in ONE transaction and returns
@@ -211,6 +230,37 @@ func (l *Library) UpsertEntry(ctx context.Context, e Entry) error {
 	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("save entry: %w", err)
+	}
+	return nil
+}
+
+// CreateEntry creates the entry of e.ItemID only when the item has none yet
+// (insert-if-absent): in ONE write-locking transaction it validates e against
+// the stored item (like UpsertEntry) and inserts it. An existing entry is
+// left untouched and ErrEntryExists is returned; an unknown item is
+// ErrNoEntry. Progress values are written for the keys in e.Progress.
+func (l *Library) CreateEntry(ctx context.Context, e Entry) error {
+	tx, err := l.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("create entry: %w", err)
+	}
+	defer tx.Rollback()
+	it, def, err := l.txItem(ctx, tx, e.ItemID)
+	if err != nil {
+		return err
+	}
+	if err := l.ValidateEntry(def, it, e); err != nil {
+		return err
+	}
+	created, err := writeEntryMode(ctx, tx, e.ItemID, e, true)
+	if err != nil {
+		return err
+	}
+	if !created {
+		return ErrEntryExists
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("create entry: %w", err)
 	}
 	return nil
 }

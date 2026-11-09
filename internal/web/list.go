@@ -255,6 +255,10 @@ func (s *server) postIncrement(w http.ResponseWriter, r *http.Request) {
 }
 
 // editForm prefills the dialog from the current entry.
+//
+// TODO(Task 9): the generic edit dialog must prefill stored duration
+// progress (whole seconds) as h:mm:ss (fmtDuration) so it round-trips
+// through parseEntryForm's duration parser.
 func (s *server) editForm(row store.ListRow, ret string) legacyEntryForm {
 	e := row.Entry
 	f := legacyEntryForm{

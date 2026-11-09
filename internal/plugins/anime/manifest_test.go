@@ -61,18 +61,19 @@ func TestManifestMatchesBaseline(t *testing.T) {
 		key                                  string
 		typ                                  plugin.FieldType
 		show, editable, filterable, sortable bool
+		unit                                 string
 	}{
-		{"type", plugin.FieldEnum, true, true, true, false},
-		{"episodes", plugin.FieldNumber, true, true, false, false},
-		{"year", plugin.FieldNumber, true, true, true, true},
-		{"studio", plugin.FieldText, true, true, true, false},
-		{"synopsis", plugin.FieldText, false, true, false, false},
-		{"source_material", plugin.FieldText, true, true, false, false},
-		{"started_on", plugin.FieldDate, true, true, false, false},
-		{"ended_on", plugin.FieldDate, true, true, false, false},
+		{"type", plugin.FieldEnum, true, true, true, false, ""},
+		{"episodes", plugin.FieldNumber, true, true, false, false, "eps"},
+		{"year", plugin.FieldNumber, true, true, true, true, ""},
+		{"studio", plugin.FieldText, true, true, true, false, ""},
+		{"synopsis", plugin.FieldText, false, true, false, false, ""},
+		{"source_material", plugin.FieldText, true, true, false, false, ""},
+		{"started_on", plugin.FieldDate, true, true, false, false, ""},
+		{"ended_on", plugin.FieldDate, true, true, false, false, ""},
 	} {
 		g := f[d.key]
-		if g.Type != d.typ || g.Show != d.show || g.Editable != d.editable || g.Filterable != d.filterable || g.Sortable != d.sortable || g.Required {
+		if g.Type != d.typ || g.Show != d.show || g.Editable != d.editable || g.Filterable != d.filterable || g.Sortable != d.sortable || g.Required || g.Unit != d.unit {
 			t.Errorf("%s flags = %+v, want %+v", d.key, g, d)
 		}
 	}

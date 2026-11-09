@@ -6,7 +6,11 @@ import (
 	"math"
 	"regexp"
 	"strings"
+	"unicode/utf8"
 )
+
+// maxUnitRunes is the longest FieldDef.Unit.
+const maxUnitRunes = 20
 
 var (
 	// idRe: plugin, kind, source, importer and exporter ids are lower-case
@@ -170,6 +174,16 @@ func validateKind(p *problems, path string, k KindDef) {
 		}
 		if f.Type != FieldEnum && len(f.EnumValues) > 0 {
 			p.add(fp+".enum_values", "only enum fields take values")
+		}
+		if f.Unit != "" {
+			switch {
+			case f.Type != FieldNumber:
+				p.add(fp+".unit", "only number fields take a unit")
+			case !utf8.ValidString(f.Unit) || strings.IndexFunc(f.Unit, isControl) >= 0:
+				p.add(fp+".unit", "must be a single line without control characters")
+			case utf8.RuneCountInString(f.Unit) > maxUnitRunes:
+				p.add(fp+".unit", "longer than %d characters", maxUnitRunes)
+			}
 		}
 		if f.Min != nil && !finite(*f.Min) {
 			p.add(fp+".min", "must be a finite number")

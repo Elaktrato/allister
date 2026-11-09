@@ -16,8 +16,11 @@ const (
 // cachedDetail is what the overview of an unsaved item fetched from its
 // plugin's source: the details, the credits (CreditsFailed when People
 // failed) and the recommendations (nil when not fetched or failed).
+// DetailsOnly marks an entry the add dialog stored after a lone Details
+// call: the add flow uses it, the overview treats it as a miss.
 type cachedDetail struct {
 	Data          plugin.ItemData
+	DetailsOnly   bool
 	Credits       []plugin.Credit
 	CreditsFailed bool
 	Recs          []plugin.ItemSummary

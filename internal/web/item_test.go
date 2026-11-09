@@ -26,7 +26,7 @@ func TestOverviewLiveForUnsaved(t *testing.T) {
 		t.Fatalf("got %d", rec.Code)
 	}
 	b := rec.Body.String()
-	mustContain(t, b, "デスノート", "Line one.", "Line two.", "Madhouse", "2006-10-04", "2007-06-27", "MANGA", "37",
+	mustContain(t, b, "デスノート", "Line one.", "Line two.", "Madhouse", "2006-10-04", "2007-06-27", "MANGA", "37 eps",
 		"Light Yagami", "Mamoru Miyano", "Sequel Title", `href="/anime/anilist/2000"`, `href="https://anilist.co/manga/30021"`,
 		"Rec Title", `href="/anime/anilist/3000"`, "https://img.example/r.jpg", "https://img.example/c.jpg", "https://img.example/l.jpg",
 		"View on AniList", `href="https://anilist.co/anime/1535"`, "Add to list", `hx-get="/anime/anilist/1535/add"`)
@@ -707,4 +707,17 @@ func TestTitlesBlockStartsWithResolvedTitle(t *testing.T) {
 	if i, j := strings.Index(sec, "Eng Title"), strings.Index(sec, "Orig Title"); i < 0 || j < 0 || i > j {
 		t.Fatalf("titles block order: en at %d, original at %d", i, j)
 	}
+}
+
+func TestFieldUnitRendersAfterNumbers(t *testing.T) {
+	e := newFixtureEnv(t, func(book, _ *plugintest.Plugin) {
+		f := &book.M.Kinds[0].Fields[1] // pages
+		f.Unit, f.Show = "pages", true
+	})
+	d := bookItem("1", "Unit Book")
+	d.Fields["pages"] = plugin.FieldValue{Num: num(320)}
+	e.saveFixture(t, "book", "book", d)
+	mustContain(t, e.get("/book/books/1").Body.String(), "Pages:</dt> <dd class=\"inline\">320 pages</dd>")
+	e.book.Summaries = []plugin.ItemSummary{d.ItemSummary}
+	mustContain(t, e.get("/book/search?q=u").Body.String(), "Ursula K. Le Guin · 320 pages")
 }

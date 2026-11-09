@@ -66,7 +66,9 @@ type progressContext struct {
 }
 
 // readEntryValues reads the raw form values. The comment is trimmed and
-// capped at library.MaxCommentRunes.
+// capped at library.MaxCommentRunes. A repeated parameter counts with its
+// FIRST value (PostFormValue). When both progress.<primary> and the
+// progressShorthand are sent, the explicit progress.<primary> wins.
 func readEntryValues(kind plugin.KindDef, r *http.Request) entryValues {
 	get := func(k string) string { return strings.TrimSpace(r.PostFormValue(k)) }
 	v := entryValues{Status: get("status"), Rating: get("rating"), StartedOn: get("started_on"),
@@ -142,15 +144,20 @@ func parseProgress(def plugin.ProgressDef, raw string) (float64, string) {
 	return 0, def.Label + " must be a whole number, 0 or more."
 }
 
-// parseEntryForm is THE entry form parser (add, and later edit and manual):
-// it reads and validates the form against the kind and the item's progress
-// context, ending with library.ValidateEntry, so a nil message means the
-// entry can be written as is. Field names: status (a core status class),
-// rating (blank or 0..10), progress.<key> per active progress key (plus the
+// parseEntryForm is THE entry form parser (add, and later edit and manual).
+// It is SYNTACTIC: it needs only the kind and the item's active progress
+// keys (a saved item's keys, else the kind's defaults), never the item's
+// data, so it runs before any source call. It checks the status class, the
+// rating, that every progress key is active, the typed progress values, the
+// dates and the comment hygiene, ending with library.ValidateEntry against
+// an item without totals (percent bounds, finish before start, text rules).
+// The total-dependent check is validateAgainstItem, run once the item's data
+// is known. Field names: status (a core status class), rating (blank or
+// 0..10), progress.<key> per active progress key (plus the
 // progressShorthand), started_on and finished_on (YYYY-MM-DD calendar days,
 // stored as the UTC midnight of the typed day) and comment. msg is a
 // user-facing message, non-empty on error.
-func (s *server) parseEntryForm(kind plugin.KindDef, pc progressContext, r *http.Request) (entryValues, library.Entry, string) {
+func (s *server) parseEntryForm(kind plugin.KindDef, keys []string, r *http.Request) (entryValues, library.Entry, string) {
 	v := readEntryValues(kind, r)
 	e := library.Entry{Status: library.Status(v.Status), Comment: v.Comment, Progress: map[string]float64{}}
 	if !slices.Contains(library.Statuses(), e.Status) {
@@ -167,18 +174,18 @@ func (s *server) parseEntryForm(kind plugin.KindDef, pc progressContext, r *http
 	if v.orphan != "" {
 		return v, e, "This item has no main progress; use the progress fields."
 	}
-	keys := make([]string, 0, len(v.Progress))
+	sent := make([]string, 0, len(v.Progress))
 	for k := range v.Progress {
-		keys = append(keys, k)
+		sent = append(sent, k)
 	}
-	sort.Strings(keys)
-	for _, key := range keys {
+	sort.Strings(sent)
+	for _, key := range sent {
 		raw := v.Progress[key]
 		if raw == "" {
 			continue
 		}
 		def, ok := progressDefOf(kind, key)
-		if !ok || !slices.Contains(pc.Keys, key) {
+		if !ok || !slices.Contains(keys, key) {
 			label := truncateRunes(key, 32)
 			if ok {
 				label = def.Label
@@ -198,10 +205,20 @@ func (s *server) parseEntryForm(kind plugin.KindDef, pc progressContext, r *http
 	if e.FinishedOn, msg = parseDay(v.FinishedOn, "Finish date"); msg != "" {
 		return v, e, msg
 	}
-	if err := s.deps.Library.ValidateEntry(kind, &library.Item{ProgressKeys: pc.Keys, Fields: pc.Fields}, e); err != nil {
+	if err := s.deps.Library.ValidateEntry(kind, &library.Item{ProgressKeys: keys}, e); err != nil {
 		return v, e, invalidMessage(err)
 	}
 	return v, e, ""
+}
+
+// validateAgainstItem is the total-dependent second step of the entry form:
+// library.ValidateEntry against the item's active keys and field values
+// (progress above a total). msg is "" when e can be written.
+func (s *server) validateAgainstItem(kind plugin.KindDef, pc progressContext, e library.Entry) string {
+	if err := s.deps.Library.ValidateEntry(kind, &library.Item{ProgressKeys: pc.Keys, Fields: pc.Fields}, e); err != nil {
+		return invalidMessage(err)
+	}
+	return ""
 }
 
 // parseDay reads a calendar day YYYY-MM-DD as its UTC midnight.
@@ -281,14 +298,24 @@ func alreadyInList(k plugin.KindDef) string {
 }
 
 // addTarget is the item of an add request: saved (with its entry, if any)
-// or live data of the plugin's source.
+// or an unsaved item of the plugin's source whose live data is fetched on
+// demand (fetchLive).
 type addTarget struct {
-	man   plugin.Manifest
-	kind  plugin.KindDef
-	ref   itemRef // Kind resolved
-	saved *library.Item
-	entry *library.Entry
-	data  plugin.ItemData // live data, unsaved only
+	man      plugin.Manifest
+	kind     plugin.KindDef
+	ref      itemRef // Kind resolved
+	saved    *library.Item
+	entry    *library.Entry
+	data     plugin.ItemData // live data, unsaved only
+	haveData bool            // data is set (from the cache or the source)
+}
+
+// keys are the item's active progress keys.
+func (t *addTarget) keys() []string {
+	if t.saved != nil {
+		return t.saved.ProgressKeys
+	}
+	return t.kind.Progress.Defaults
 }
 
 func (t *addTarget) progress() progressContext {
@@ -322,10 +349,11 @@ func kindFor(m plugin.Manifest, ref itemRef) plugin.KindDef {
 	return m.Kinds[0]
 }
 
-// resolveAdd finds the saved item of ref, else its live data: a fresh
-// overview cache entry (no source call), else one Details call (not
-// cached). Unsaved manual items, undeclared sources and an unsaved id of a
-// plugin with several kinds without ?kind= are errNoSuchItem.
+// resolveAdd finds the saved item of ref (database only, no source call).
+// For an unsaved item it takes the live data from a fresh overview cache
+// entry when there is one; fetchLive asks the source otherwise. Unsaved
+// manual items, undeclared sources and an unsaved id of a plugin with
+// several kinds without ?kind= are errNoSuchItem.
 func (s *server) resolveAdd(ctx context.Context, m plugin.Manifest, ref itemRef) (*addTarget, error) {
 	saved, k, err := s.findSaved(ctx, m, ref)
 	if err != nil {
@@ -350,23 +378,41 @@ func (s *server) resolveAdd(ctx context.Context, m plugin.Manifest, ref itemRef)
 	}
 	t := &addTarget{man: m, kind: kindFor(m, ref), ref: ref}
 	if c, ok := s.cache.get(liveKey(m.ID, ref.Source, ref.Kind, ref.ID)); ok {
-		t.data = c.Data
-	} else {
-		src := s.source(m.ID, ref.Source)
-		if src == nil {
-			return nil, errNoSource
-		}
-		if t.data, err = src.Details(ctx, ref.Kind, ref.ID); err != nil {
-			return nil, err
-		}
+		t.setData(c.Data)
 	}
-	// the identity comes from the URL (matched against the manifest)
-	t.data.Source, t.data.ID, t.data.Kind = ref.Source, ref.ID, ref.Kind
 	return t, nil
 }
 
-// addFailure handles a resolveAdd error: source outages re-render the dialog
-// (keeping the form) with a readable message, the rest use error pages.
+// setData sets the live data; the identity comes from the URL (matched
+// against the manifest), not from what the source returned.
+func (t *addTarget) setData(d plugin.ItemData) {
+	t.data, t.haveData = d, true
+	t.data.Source, t.data.ID, t.data.Kind = t.ref.Source, t.ref.ID, t.ref.Kind
+}
+
+// fetchLive makes sure an unsaved target has its live data: one Details
+// call on a cache miss, kept in the overview cache (marked DetailsOnly) so
+// the dialog and its POST cost one source call together.
+func (s *server) fetchLive(ctx context.Context, t *addTarget) error {
+	if t.saved != nil || t.haveData {
+		return nil
+	}
+	src := s.source(t.man.ID, t.ref.Source)
+	if src == nil {
+		return errNoSource
+	}
+	d, err := src.Details(ctx, t.ref.Kind, t.ref.ID)
+	if err != nil {
+		return err
+	}
+	s.cache.put(liveKey(t.man.ID, t.ref.Source, t.ref.Kind, t.ref.ID), cachedDetail{Data: d, DetailsOnly: true})
+	t.setData(d)
+	return nil
+}
+
+// addFailure handles a resolveAdd or fetchLive error: source outages
+// re-render the dialog (keeping the form) with a readable message, the rest
+// use error pages.
 func (s *server) addFailure(w http.ResponseWriter, r *http.Request, m plugin.Manifest, ref itemRef, v entryValues, err error) {
 	retry := itemURL(m, ref.Source, ref.ID, ref.Kind)
 	if !errors.Is(err, plugin.ErrRateLimited) && !errors.Is(err, plugin.ErrUnavailable) {
@@ -405,7 +451,11 @@ func (s *server) getAdd(w http.ResponseWriter, r *http.Request, pluginID string)
 		s.showItem(w, r, ref, itemExtras{Dialog: &entryForm{entryValues: v}, UseCache: true}, http.StatusOK)
 		return
 	}
-	t, err := s.resolveAdd(r.Context(), m, ref)
+	ctx := r.Context()
+	t, err := s.resolveAdd(ctx, m, ref)
+	if err == nil {
+		err = s.fetchLive(ctx, t)
+	}
 	if err != nil {
 		s.addFailure(w, r, m, ref, v, err)
 		return
@@ -419,6 +469,10 @@ func (s *server) getAdd(w http.ResponseWriter, r *http.Request, pluginID string)
 	s.renderPartial(w, "item", "add_dialog", f)
 }
 
+// postAdd: resolve the saved item (database only), parse the form
+// syntactically (422 without any source call), fetch the live data of an
+// unsaved item (cache, else one Details call), validate against the item's
+// totals, then save.
 func (s *server) postAdd(w http.ResponseWriter, r *http.Request, pluginID string) {
 	m, ref, ok := s.addRef(w, r, pluginID)
 	if !ok || !parseForm(w, r) {
@@ -434,7 +488,14 @@ func (s *server) postAdd(w http.ResponseWriter, r *http.Request, pluginID string
 		s.addConflict(w, r, t, readEntryValues(t.kind, r))
 		return
 	}
-	v, entry, msg := s.parseEntryForm(t.kind, t.progress(), r)
+	v, entry, msg := s.parseEntryForm(t.kind, t.keys(), r)
+	if msg == "" {
+		if err := s.fetchLive(ctx, t); err != nil {
+			s.addFailure(w, r, m, t.ref, v, err)
+			return
+		}
+		msg = s.validateAgainstItem(t.kind, t.progress(), entry)
+	}
 	if msg != "" {
 		f := t.form(v)
 		f.Error = msg
@@ -469,30 +530,23 @@ func (s *server) postAdd(w http.ResponseWriter, r *http.Request, pluginID string
 }
 
 // attachEntry gives an already saved item its list entry (no re-save, no
-// job). An entry that appeared meanwhile is a conflict.
+// job) with library.CreateEntry, which inserts only when the item has no
+// entry yet: an entry that appeared meanwhile is the same 409 as before.
 func (s *server) attachEntry(w http.ResponseWriter, r *http.Request, t *addTarget, v entryValues, entry library.Entry) {
-	ctx := r.Context()
-	existing, err := s.deps.Library.Entry(ctx, t.saved.ID)
-	if err != nil {
-		s.itemFail(w, r, t.man, t.ref.Source, err, "")
-		return
-	}
-	if existing != nil {
-		s.addConflict(w, r, t, v)
-		return
-	}
 	entry.ItemID = t.saved.ID
-	if err := s.deps.Library.UpsertEntry(ctx, entry); err != nil {
-		if errors.Is(err, library.ErrInvalid) {
-			f := t.form(v)
-			f.Error = invalidMessage(err)
-			s.addDialog(w, r, t, f, http.StatusUnprocessableEntity)
-			return
-		}
+	err := s.deps.Library.CreateEntry(r.Context(), entry)
+	switch {
+	case err == nil:
+		s.addDone(w, r, t.man.ID)
+	case errors.Is(err, library.ErrEntryExists):
+		s.addConflict(w, r, t, v)
+	case errors.Is(err, library.ErrInvalid):
+		f := t.form(v)
+		f.Error = invalidMessage(err)
+		s.addDialog(w, r, t, f, http.StatusUnprocessableEntity)
+	default:
 		s.itemFail(w, r, t.man, t.ref.Source, err, "")
-		return
 	}
-	s.addDone(w, r, t.man.ID)
 }
 
 // addConflict answers 409: the item is already in the list (with a link).
