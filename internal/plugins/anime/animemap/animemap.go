@@ -12,6 +12,7 @@
 package animemap
 
 import (
+	"net/url"
 	"slices"
 
 	"github.com/allister/allister/internal/plugin"
@@ -178,13 +179,28 @@ func (c cleaner) itemData(a provider.Anime) plugin.ItemData {
 		if kind == "source" {
 			itemKind = "manga"
 		}
-		item := plugin.ItemSummary{Source: sourceOf(r.Source), ID: id, Kind: itemKind, Titles: c.titles(r.Titles)}
+		item := plugin.ItemSummary{Source: sourceOf(r.Source), ID: id, Kind: itemKind, Titles: c.titles(r.Titles),
+			URL: relationURL(sourceOf(r.Source), itemKind, id)}
 		if ty := c.single(r.Type, MaxNameRunes); ty != "" {
 			item.Fields = map[string]plugin.FieldValue{"type": {Text: ty}}
 		}
 		d.Relations = append(d.Relations, plugin.Relation{Kind: kind, Item: item})
 	}
 	return d
+}
+
+// relationURL is the AniList page of a related item ("" for another source or
+// no id): /manga/{id} for a manga, /anime/{id} otherwise. The id is path
+// escaped and the result cleaned by plugin.HTTPSURL.
+func relationURL(source, itemKind, id string) string {
+	if source != animedef.SourceID || id == "" {
+		return ""
+	}
+	section := "anime"
+	if itemKind == "manga" {
+		section = "manga"
+	}
+	return plugin.HTTPSURL("https://anilist.co/" + section + "/" + url.PathEscape(id))
 }
 
 // Recommendations maps recommendations, dropping those without an id.

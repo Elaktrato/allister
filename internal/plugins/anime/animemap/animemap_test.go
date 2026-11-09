@@ -65,3 +65,23 @@ func TestUserItemDataRewritesNothing(t *testing.T) {
 		t.Fatalf("source mode: %+v", s)
 	}
 }
+
+func TestItemDataRelationURLs(t *testing.T) {
+	a := provider.Anime{SearchResult: provider.SearchResult{Source: provider.AniList, ID: "1"}}
+	a.Relations = []provider.Relation{
+		{Kind: "source", Source: provider.AniList, ID: "30021"},
+		{Kind: "sequel", Source: provider.AniList, ID: "2000"},
+		{Kind: "other", Source: "elsewhere", ID: "9"},
+		{Kind: "sequel", Source: provider.AniList, ID: "1/../x?y"},
+	}
+	d := ItemData(a)
+	want := []string{"https://anilist.co/manga/30021", "https://anilist.co/anime/2000", "", "https://anilist.co/anime/1%2F..%2Fx%3Fy"}
+	if len(d.Relations) != len(want) {
+		t.Fatalf("relations %+v", d.Relations)
+	}
+	for i, w := range want {
+		if got := d.Relations[i].Item.URL; got != w {
+			t.Errorf("relation %d url = %q, want %q", i, got, w)
+		}
+	}
+}

@@ -41,7 +41,7 @@ func WithProgressKeys(keys []string) SaveOption {
 }
 
 type relRow struct {
-	kind, source, sourceID, kindItem, coverURL, titles, fields string
+	kind, source, sourceID, kindItem, coverURL, url, titles, fields string
 }
 
 // prepared is the validated, normalised form of an ItemData.
@@ -139,7 +139,7 @@ func normalizeRelations(rs []plugin.Relation) ([]relRow, error) {
 		if err != nil {
 			return nil, invalid("relation fields: %v", err)
 		}
-		out = append(out, relRow{r.Kind, r.Item.Source, r.Item.ID, r.Item.Kind, r.Item.CoverURL, string(titles), string(fields)})
+		out = append(out, relRow{r.Kind, r.Item.Source, r.Item.ID, r.Item.Kind, r.Item.CoverURL, r.Item.URL, string(titles), string(fields)})
 	}
 	return out, nil
 }
@@ -153,6 +153,9 @@ func checkRelation(r plugin.Relation) error {
 		}
 	}
 	if err := checkImageRef("relation item cover", r.Item.CoverURL); err != nil {
+		return err
+	}
+	if err := checkHTTPURL("relation item url", r.Item.URL); err != nil {
 		return err
 	}
 	for _, t := range r.Item.Titles {
@@ -351,8 +354,8 @@ func insertParts(ctx context.Context, tx *sql.Tx, id int64, p *prepared) error {
 	}
 	for i, r := range p.rels {
 		if _, err := tx.ExecContext(ctx, `INSERT INTO `+tableRelations+`
-			(item_id, seq, kind, source, source_id, kind_item, cover_url, titles_json, fields_json)
-			VALUES (?,?,?,?,?,?,?,?,?)`, id, i, r.kind, r.source, r.sourceID, r.kindItem, r.coverURL, r.titles, r.fields); err != nil {
+			(item_id, seq, kind, source, source_id, kind_item, cover_url, url, titles_json, fields_json)
+			VALUES (?,?,?,?,?,?,?,?,?,?)`, id, i, r.kind, r.source, r.sourceID, r.kindItem, r.coverURL, r.url, r.titles, r.fields); err != nil {
 			return fmt.Errorf("save relations: %w", err)
 		}
 	}
@@ -471,7 +474,7 @@ func (l *Library) loadParts(ctx context.Context, it *Item) error {
 		return fmt.Errorf("load external ids: %w", err)
 	}
 
-	rows, err = l.db.QueryContext(ctx, `SELECT kind, source, source_id, kind_item, cover_url, titles_json, fields_json
+	rows, err = l.db.QueryContext(ctx, `SELECT kind, source, source_id, kind_item, cover_url, url, titles_json, fields_json
 		FROM `+tableRelations+` WHERE item_id = ? ORDER BY seq`, it.ID)
 	if err != nil {
 		return fmt.Errorf("load relations: %w", err)
@@ -479,7 +482,7 @@ func (l *Library) loadParts(ctx context.Context, it *Item) error {
 	for rows.Next() {
 		var r plugin.Relation
 		var tj, fj string
-		if err := rows.Scan(&r.Kind, &r.Item.Source, &r.Item.ID, &r.Item.Kind, &r.Item.CoverURL, &tj, &fj); err != nil {
+		if err := rows.Scan(&r.Kind, &r.Item.Source, &r.Item.ID, &r.Item.Kind, &r.Item.CoverURL, &r.Item.URL, &tj, &fj); err != nil {
 			rows.Close()
 			return fmt.Errorf("load relations: %w", err)
 		}

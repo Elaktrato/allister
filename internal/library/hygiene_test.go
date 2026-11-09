@@ -242,6 +242,11 @@ func TestURLAndFileReferencesAreValidated(t *testing.T) {
 			t.Fatalf("cover %q: %v", ok, err)
 		}
 	}
+	for _, u := range badURLs {
+		wantInvalid(t, saveMod(l, func(d *plugin.ItemData) {
+			d.Relations = []plugin.Relation{{Kind: "sequel", Item: plugin.ItemSummary{Source: "books", ID: "r", URL: u}}}
+		}), "relation item url")
+	}
 	id := tvItem(t, l, "9")
 	for _, u := range badURLs {
 		wantInvalid(t, l.SaveCredits(ctx, id, []plugin.Credit{{Role: "a", Person: plugin.PersonRef{ID: "p", Name: "N", URL: u}}}), "url")

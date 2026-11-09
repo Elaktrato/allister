@@ -17,7 +17,7 @@ var ctx = context.Background()
 func TestSaveItemRoundTripsAllParts(t *testing.T) {
 	l := newLib(t)
 	rel := plugin.Relation{Kind: "sequel", Item: plugin.ItemSummary{
-		Source: "books", ID: "99", Kind: "book", CoverURL: "https://img.example/99.jpg",
+		Source: "books", ID: "99", Kind: "book", CoverURL: "https://img.example/99.jpg", URL: "https://books.example/work/99",
 		Titles: []plugin.Title{{Lang: "en", Text: "Dune Messiah"}},
 		Fields: map[string]plugin.FieldValue{"pages": {Num: fp(256)}},
 	}}

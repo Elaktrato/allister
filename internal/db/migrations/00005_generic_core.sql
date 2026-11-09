@@ -76,6 +76,7 @@ CREATE TABLE relations_g (
     source_id   TEXT NOT NULL DEFAULT '',
     kind_item   TEXT NOT NULL DEFAULT '',
     cover_url   TEXT NOT NULL DEFAULT '',
+    url         TEXT NOT NULL DEFAULT '',
     titles_json TEXT NOT NULL DEFAULT '[]',
     fields_json TEXT NOT NULL DEFAULT '{}',
     PRIMARY KEY (item_id, seq)

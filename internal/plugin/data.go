@@ -53,7 +53,11 @@ type Credit struct {
 	WithRole string     `json:"with_role,omitempty"`
 }
 
-// ItemSummary is the short form of an item as returned by search.
+// ItemSummary is the short form of an item as returned by search. URL is an
+// optional http(s) link to the item's page on the source site (used for
+// relations the core cannot link internally, for example a manga related to
+// an anime); empty means none and is omitted from JSON. The core only ever
+// renders it as a link when it is https.
 type ItemSummary struct {
 	Source   string                `json:"source"`
 	ID       string                `json:"id"`
@@ -61,6 +65,7 @@ type ItemSummary struct {
 	Titles   []Title               `json:"titles,omitempty"`
 	Fields   map[string]FieldValue `json:"fields,omitempty"`
 	CoverURL string                `json:"cover_url,omitempty"`
+	URL      string                `json:"url,omitempty"`
 }
 
 // Relation links an item to a related item.

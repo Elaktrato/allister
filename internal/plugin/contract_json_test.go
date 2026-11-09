@@ -79,6 +79,10 @@ func TestRuntimeDataJSONRoundTrip(t *testing.T) {
 	roundTrip(t, "credit with detail", plugin.Credit{Role: "character", Detail: "MAIN", Person: plugin.PersonRef{ID: "1", Name: "Char"}})
 	roundTrip(t, "summary", summary)
 	roundTrip(t, "relation", plugin.Relation{Kind: "SEQUEL", Item: summary})
+	withURL := summary
+	withURL.URL = "https://s.example/1"
+	roundTrip(t, "summary with url", withURL)
+	roundTrip(t, "relation with url", plugin.Relation{Kind: "SEQUEL", Item: withURL})
 	roundTrip(t, "tag", plugin.Tag{Name: "Time Travel", Rank: iptr(0), Spoiler: true})
 	roundTrip(t, "tag plain", plugin.Tag{Name: "Plain"})
 	roundTrip(t, "itemdata", plugin.ItemData{
@@ -112,6 +116,21 @@ func TestJSONIgnoresUnknownFields(t *testing.T) {
 	var c plugin.Credit
 	if err := json.Unmarshal([]byte(`{"role":"r","person":{"id":"1","name":"n","extra":1},"zzz":2}`), &c); err != nil || c.Person.Name != "n" {
 		t.Fatalf("credit: %v %+v", err, c)
+	}
+}
+
+func TestItemSummaryURLJSON(t *testing.T) {
+	b, err := json.Marshal(plugin.ItemSummary{Source: "s", ID: "1", Kind: "k"})
+	if err != nil || strings.Contains(string(b), "url") {
+		t.Fatalf("empty url must be omitted: %s %v", b, err)
+	}
+	b, err = json.Marshal(plugin.ItemSummary{Source: "s", ID: "1", Kind: "k", URL: "https://s.example/1"})
+	if err != nil || !strings.Contains(string(b), `"url":"https://s.example/1"`) {
+		t.Fatalf("url missing: %s %v", b, err)
+	}
+	var got plugin.ItemSummary
+	if err := json.Unmarshal(b, &got); err != nil || got.URL != "https://s.example/1" {
+		t.Fatalf("round trip: %+v %v", got, err)
 	}
 }
 
