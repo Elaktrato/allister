@@ -6,7 +6,7 @@
 // from the registry's validated manifest snapshot. It does NOT check whether a
 // plugin is enabled; that is the web layer's job.
 //
-// Image convention: items.cover_path and people_g.image_path initially hold
+// Image convention: items.cover_path and people.image_path initially hold
 // the remote URL (starting with "http") until the image has been downloaded
 // and a local path replaces it via SetCoverPath / SetPersonImagePath.
 //
@@ -22,15 +22,15 @@ import (
 	"github.com/allister/allister/internal/plugin"
 )
 
-// SQL table names that change when the legacy tables are retired: the final
-// names are "people" and "relations". Keep every use of them going through
-// these constants.
 // nowSQL is the SQL expression for the current UTC time stamp.
 const nowSQL = `strftime('%Y-%m-%dT%H:%M:%SZ','now')`
 
+// SQL table names of people and relations (they were people_g and
+// relations_g until migration 00007 retired the legacy tables). Keep every
+// use of them going through these constants.
 const (
-	tablePeople    = "people_g"
-	tableRelations = "relations_g"
+	tablePeople    = "people"
+	tableRelations = "relations"
 )
 
 var (
@@ -83,6 +83,7 @@ type Person struct {
 // SavedCredit is a stored credit with its people resolved.
 type SavedCredit struct {
 	Role     string
+	Detail   string
 	Person   Person
 	With     *Person
 	WithRole string
@@ -150,6 +151,45 @@ func (l *Library) SetPersonImagePath(ctx context.Context, personID int64, path s
 		return err
 	}
 	return l.setOne(ctx, "set person image", `UPDATE `+tablePeople+` SET image_path = ? WHERE id = ?`, path, personID)
+}
+
+// ImageReferenced reports whether any item cover or person image holds the
+// stored value name (for example a downloaded file's base name). Content-hash
+// file names are shared, so callers check this before deleting a file. The
+// empty name is never referenced.
+func (l *Library) ImageReferenced(ctx context.Context, name string) (bool, error) {
+	if name == "" {
+		return false, nil
+	}
+	var ok bool
+	err := l.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM items WHERE cover_path = ?1)
+		OR EXISTS(SELECT 1 FROM `+tablePeople+` WHERE image_path = ?1)`, name).Scan(&ok)
+	if err != nil {
+		return false, fmt.Errorf("image referenced: %w", err)
+	}
+	return ok, nil
+}
+
+// ItemsToSync returns the ids of the plugin's items whose sync state is
+// pending or partial, in ascending id order.
+func (l *Library) ItemsToSync(ctx context.Context, pluginID string) ([]int64, error) {
+	rows, err := l.db.QueryContext(ctx, `SELECT id FROM items WHERE plugin_id = ? AND sync_state IN ('pending','partial') ORDER BY id`, pluginID)
+	if err != nil {
+		return nil, fmt.Errorf("items to sync: %w", err)
+	}
+	var ids []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return nil, fmt.Errorf("items to sync: %w", err)
+		}
+		ids = append(ids, id)
+	}
+	if err := closeRows(rows); err != nil {
+		return nil, fmt.Errorf("items to sync: %w", err)
+	}
+	return ids, nil
 }
 
 // DeleteItem removes the item and, by cascade, everything attached to it.

@@ -161,7 +161,7 @@ func TestListFieldValuesDedupedCaseSensitiveKeepFirst(t *testing.T) {
 func TestSaveCreditsAtomicOnFailure(t *testing.T) {
 	for _, tc := range []struct{ name, trigger string }{
 		{"credits insert", `CREATE TRIGGER boom BEFORE INSERT ON credits WHEN NEW.role = 'boom' BEGIN SELECT RAISE(ABORT,'boom'); END`},
-		{"people insert", `CREATE TRIGGER boom BEFORE INSERT ON people_g WHEN NEW.source_id = 'bad' BEGIN SELECT RAISE(ABORT,'boom'); END`},
+		{"people insert", `CREATE TRIGGER boom BEFORE INSERT ON people WHEN NEW.source_id = 'bad' BEGIN SELECT RAISE(ABORT,'boom'); END`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			e := newEnv(t)
@@ -188,7 +188,7 @@ func TestSaveCreditsAtomicOnFailure(t *testing.T) {
 			if err != nil || len(got) != 2 || got[0].Person.Name != "Old" || got[1].Person.SourceID != "p2" {
 				t.Fatalf("old credits not intact: %+v %v", got, err)
 			}
-			if n := count(t, e.db, `SELECT count(*) FROM people_g`); n != 2 {
+			if n := count(t, e.db, `SELECT count(*) FROM people`); n != 2 {
 				t.Fatalf("people = %d, want 2 (changes rolled back)", n)
 			}
 		})

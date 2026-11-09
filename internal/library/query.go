@@ -3,6 +3,7 @@ package library
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"math"
 	"slices"
@@ -146,8 +147,8 @@ type RowFlags struct {
 	PartialSync bool
 }
 
-// Row is one list row. Item has titles, fields, genres, tags, cover and sync
-// state (no relations, external ids or credits); Entry.Progress holds the
+// Row is one list row. Item has titles, fields, external ids, genres, tags,
+// cover and sync state (no relations or credits); Entry.Progress holds the
 // active keys only. Title is resolved for the requested language.
 type Row struct {
 	Item  Item
@@ -727,16 +728,63 @@ func (l *Library) List(ctx context.Context, q Query, lang string) (Page, error) 
 	if total == 0 {
 		return pg, nil
 	}
-	args := append(slices.Clone(c.unmatched.args), whereArgs...)
+	if pg.Rows, err = l.loadRows(ctx, c.unmatched, whereSQL, whereArgs, order, orderArgs, size, (pageNo-1)*size, lang); err != nil {
+		return Page{}, err
+	}
+	return pg, nil
+}
+
+// Rows returns the matching entries like List, but as one slice cut by limit
+// and offset instead of pages: limit < 0 means no limit, an offset beyond the
+// last row yields no rows. q.Page and q.PageSize are ignored.
+func (l *Library) Rows(ctx context.Context, q Query, lang string, limit, offset int) ([]Row, error) {
+	c, err := l.compile(q)
+	if err != nil {
+		return nil, err
+	}
+	whereSQL, whereArgs := c.where()
+	order, orderArgs, err := c.orderBy(q.Sort, lang)
+	if err != nil {
+		return nil, err
+	}
+	if limit < 0 {
+		limit = -1
+	}
+	return l.loadRows(ctx, c.unmatched, whereSQL, whereArgs, order, orderArgs, limit, max(offset, 0), lang)
+}
+
+// Row returns the list row of one item (of any plugin), or nil, nil when the
+// item does not exist or has no entry.
+func (l *Library) Row(ctx context.Context, itemID int64, lang string) (*Row, error) {
+	var pluginID string
+	err := l.db.QueryRowContext(ctx, `SELECT i.plugin_id FROM items i JOIN `+tableEntries+` e ON e.item_id = i.id WHERE i.id = ?`, itemID).Scan(&pluginID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("list row: %w", err)
+	}
+	man, _ := l.reg.Manifest(pluginID) // an uninstalled plugin has no importers: never unmatched
+	rows, err := l.loadRows(ctx, unmatchedClause(man), ` WHERE items.id = ?`, []any{itemID}, "", nil, 1, 0, lang)
+	if err != nil || len(rows) == 0 {
+		return nil, err
+	}
+	return &rows[0], nil
+}
+
+// loadRows runs the row query with the given conditions and order and loads
+// the rows' parts with a fixed number of queries.
+func (l *Library) loadRows(ctx context.Context, unmatched clause, whereSQL string, whereArgs []any, order string, orderArgs []any, limit, offset int, lang string) ([]Row, error) {
+	args := append(slices.Clone(unmatched.args), whereArgs...)
 	args = append(args, orderArgs...)
-	args = append(args, size, (pageNo-1)*size)
+	args = append(args, limit, offset)
 	rows, err := l.db.QueryContext(ctx, `SELECT items.id, items.plugin_id, items.kind, items.source, items.source_id, items.cover_path,
 		items.external_url, items.sync_state, items.progress_keys, e.status, e.rating, e.comment, e.started_on, e.finished_on, e.updated_at,
-		(`+c.unmatched.sql+`), (items.sync_state <> 'done')`+fromSQL+whereSQL+order+` LIMIT ? OFFSET ?`, args...)
+		(`+unmatched.sql+`), (items.sync_state <> 'done')`+fromSQL+whereSQL+order+` LIMIT ? OFFSET ?`, args...)
 	if err != nil {
-		return Page{}, fmt.Errorf("list: %w", err)
+		return nil, fmt.Errorf("list: %w", err)
 	}
-	byID := map[int64]*Row{}
+	var out []Row
 	var ids []any
 	for rows.Next() {
 		var r Row
@@ -747,37 +795,41 @@ func (l *Library) List(ctx context.Context, q Query, lang string) (Page, error) 
 			&r.Item.ExternalURL, &r.Item.SyncState, &pk, &status, &rating, &r.Entry.Comment, &started, &finished, &updated,
 			&r.Flags.Unmatched, &r.Flags.PartialSync); err != nil {
 			rows.Close()
-			return Page{}, fmt.Errorf("list: %w", err)
+			return nil, fmt.Errorf("list: %w", err)
 		}
 		if err := decodeKeys(pk, &r.Item.ProgressKeys); err != nil {
 			rows.Close()
-			return Page{}, err
+			return nil, err
 		}
 		r.Entry.ItemID = r.Item.ID
 		r.Entry.Progress = map[string]float64{}
 		if err := r.Entry.fill(status, rating, started, finished, updated); err != nil {
 			rows.Close()
-			return Page{}, err
+			return nil, err
 		}
-		pg.Rows = append(pg.Rows, r)
+		out = append(out, r)
 		ids = append(ids, r.Item.ID)
 	}
 	if err := closeRows(rows); err != nil {
-		return Page{}, fmt.Errorf("list: %w", err)
+		return nil, fmt.Errorf("list: %w", err)
 	}
-	for i := range pg.Rows {
-		byID[pg.Rows[i].Item.ID] = &pg.Rows[i]
+	if len(out) == 0 {
+		return nil, nil
+	}
+	byID := map[int64]*Row{}
+	for i := range out {
+		byID[out[i].Item.ID] = &out[i]
 	}
 	if err := l.loadRowParts(ctx, ids, byID); err != nil {
-		return Page{}, err
+		return nil, err
 	}
-	for i := range pg.Rows {
-		pg.Rows[i].Title = ResolveTitle(pg.Rows[i].Item.Titles, lang)
+	for i := range out {
+		out[i].Title = ResolveTitle(out[i].Item.Titles, lang)
 	}
-	return pg, nil
+	return out, nil
 }
 
-// loadRowParts loads titles, fields, terms and progress of the listed items
+// loadRowParts loads titles, fields, terms, external ids and progress of the listed items
 // with one query each.
 func (l *Library) loadRowParts(ctx context.Context, ids []any, byID map[int64]*Row) error {
 	in := ` WHERE item_id IN (` + placeholders(len(ids)) + `)`
@@ -857,6 +909,21 @@ func (l *Library) loadRowParts(ctx context.Context, ids []any, byID map[int64]*R
 			t.Rank = &rk
 		}
 		it.Tags = append(it.Tags, t)
+		return nil
+	}); err != nil {
+		return err
+	}
+	if err := query("external ids", `SELECT item_id, type, value FROM external_ids`+in, func(r *sql.Rows) error {
+		var id int64
+		var k, v string
+		if err := r.Scan(&id, &k, &v); err != nil {
+			return err
+		}
+		it := &byID[id].Item
+		if it.ExternalIDs == nil {
+			it.ExternalIDs = map[string]string{}
+		}
+		it.ExternalIDs[k] = v
 		return nil
 	}); err != nil {
 		return err

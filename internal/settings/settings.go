@@ -48,11 +48,11 @@ func (s *Store) TitleLang(ctx context.Context) string {
 	return v
 }
 
-// KnownLanguages returns the distinct language tags found in stored anime
+// KnownLanguages returns the distinct language tags found in stored item
 // titles, sorted. The settings page uses it to offer languages beyond the
 // built-in ja, ja-latn and en.
 func (s *Store) KnownLanguages(ctx context.Context) ([]string, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT DISTINCT lang FROM anime_titles ORDER BY lang`)
+	rows, err := s.db.QueryContext(ctx, `SELECT DISTINCT lang FROM item_titles ORDER BY lang`)
 	if err != nil {
 		return nil, err
 	}

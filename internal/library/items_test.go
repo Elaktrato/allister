@@ -448,7 +448,7 @@ func TestSetTermsReplacesAtomically(t *testing.T) {
 }
 
 func TestSaveItemIsAtomicOnFailure(t *testing.T) {
-	for _, tbl := range []string{"item_titles", "item_fields", "external_ids", "relations_g", "item_terms"} {
+	for _, tbl := range []string{"item_titles", "item_fields", "external_ids", "relations", "item_terms"} {
 		t.Run(tbl, func(t *testing.T) {
 			e := newEnv(t)
 			if _, err := e.db.Exec(`CREATE TRIGGER boom BEFORE INSERT ON ` + tbl + ` BEGIN SELECT RAISE(ABORT,'boom'); END`); err != nil {
@@ -462,7 +462,7 @@ func TestSaveItemIsAtomicOnFailure(t *testing.T) {
 			if _, err := e.lib.SaveItem(ctx, "book", "book", d); err == nil || errors.Is(err, ErrInvalid) {
 				t.Fatalf("err = %v, want a database error", err)
 			}
-			for _, t2 := range []string{"items", "item_titles", "item_fields", "external_ids", "relations_g", "item_terms"} {
+			for _, t2 := range []string{"items", "item_titles", "item_fields", "external_ids", "relations", "item_terms"} {
 				if n := count(t, e.db, `SELECT count(*) FROM `+t2); n != 0 {
 					t.Errorf("%s has %d rows after failed save", t2, n)
 				}

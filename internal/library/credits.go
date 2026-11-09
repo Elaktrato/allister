@@ -6,11 +6,15 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/allister/allister/internal/plugin"
 )
 
-const maxCredits = 500
+const (
+	maxCredits     = 500
+	maxDetailRunes = 100
+)
 
 // SaveCredits replaces the credits of the item in one transaction (existing
 // credits are deleted first, so a re-sync is idempotent). People are upserted
@@ -25,6 +29,12 @@ func (l *Library) SaveCredits(ctx context.Context, itemID int64, credits []plugi
 	for _, c := range credits {
 		if err := cleanText("credit role", c.Role, singleLine); err != nil {
 			return err
+		}
+		if err := cleanText("credit detail", c.Detail, singleLine); err != nil {
+			return err
+		}
+		if utf8.RuneCountInString(c.Detail) > maxDetailRunes {
+			return invalid("credit detail is longer than %d characters", maxDetailRunes)
 		}
 		if err := cleanText("credit counterpart role", c.WithRole, singleLine); err != nil {
 			return err
@@ -67,8 +77,8 @@ func (l *Library) SaveCredits(ctx context.Context, itemID int64, credits []plugi
 			}
 			with = id
 		}
-		if _, err := tx.ExecContext(ctx, `INSERT INTO credits(item_id, seq, role, person_id, counterpart_person_id, counterpart_role)
-			VALUES (?,?,?,?,?,?)`, itemID, i, c.Role, pid, with, c.WithRole); err != nil {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO credits(item_id, seq, role, detail, person_id, counterpart_person_id, counterpart_role)
+			VALUES (?,?,?,?,?,?,?)`, itemID, i, c.Role, c.Detail, pid, with, c.WithRole); err != nil {
 			return fmt.Errorf("save credits: %w", err)
 		}
 	}
@@ -125,7 +135,7 @@ func upsertPerson(ctx context.Context, tx *sql.Tx, pluginID, source string, p pl
 
 // Credits returns the item's credits ordered by seq with people resolved.
 func (l *Library) Credits(ctx context.Context, itemID int64) ([]SavedCredit, error) {
-	rows, err := l.db.QueryContext(ctx, `SELECT c.seq, c.role, c.counterpart_role,
+	rows, err := l.db.QueryContext(ctx, `SELECT c.seq, c.role, c.detail, c.counterpart_role,
 		p.id, p.plugin_id, p.source, p.source_id, p.name, p.image_path, p.external_url,
 		w.id, w.plugin_id, w.source, w.source_id, w.name, w.image_path, w.external_url
 		FROM credits c
@@ -140,7 +150,7 @@ func (l *Library) Credits(ctx context.Context, itemID int64) ([]SavedCredit, err
 		var c SavedCredit
 		var wid sql.NullInt64
 		var wp, wsrc, wsid, wname, wimg, wurl sql.NullString
-		if err := rows.Scan(&c.Seq, &c.Role, &c.WithRole,
+		if err := rows.Scan(&c.Seq, &c.Role, &c.Detail, &c.WithRole,
 			&c.Person.ID, &c.Person.PluginID, &c.Person.Source, &c.Person.SourceID, &c.Person.Name, &c.Person.ImagePath, &c.Person.ExternalURL,
 			&wid, &wp, &wsrc, &wsid, &wname, &wimg, &wurl); err != nil {
 			rows.Close()

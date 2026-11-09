@@ -18,6 +18,23 @@ var migrations embed.FS
 // pragmas to every pooled connection (foreign keys, WAL, busy timeout) and
 // runs all pending migrations.
 func Open(path string) (*sql.DB, error) {
+	d, err := open(path)
+	if err != nil {
+		return nil, err
+	}
+	if err := setupGoose(); err != nil {
+		d.Close()
+		return nil, err
+	}
+	if err := goose.Up(d, "migrations"); err != nil {
+		d.Close()
+		return nil, fmt.Errorf("migrate: %w", err)
+	}
+	return d, nil
+}
+
+// open opens the database with the pragmas but runs no migration.
+func open(path string) (*sql.DB, error) {
 	q := url.Values{}
 	q.Add("_pragma", "foreign_keys(1)")
 	q.Add("_pragma", "journal_mode(WAL)")
@@ -34,15 +51,12 @@ func Open(path string) (*sql.DB, error) {
 		d.Close()
 		return nil, fmt.Errorf("ping sqlite: %w", err)
 	}
+	return d, nil
+}
+
+// setupGoose points goose at the embedded migrations.
+func setupGoose() error {
 	goose.SetBaseFS(migrations)
 	goose.SetLogger(goose.NopLogger())
-	if err := goose.SetDialect("sqlite3"); err != nil {
-		d.Close()
-		return nil, err
-	}
-	if err := goose.Up(d, "migrations"); err != nil {
-		d.Close()
-		return nil, fmt.Errorf("migrate: %w", err)
-	}
-	return d, nil
+	return goose.SetDialect("sqlite3")
 }

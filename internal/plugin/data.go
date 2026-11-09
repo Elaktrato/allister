@@ -41,8 +41,11 @@ type PersonRef struct {
 
 // Credit is a person with a role on an item. With is an optional counterpart
 // ("character, voiced by X": Person is the character, With the voice actor).
+// Detail is an optional free-text qualifier of the role shown next to it (for
+// example MAIN or SUPPORTING for an anime character).
 type Credit struct {
 	Role     string     `json:"role"`
+	Detail   string     `json:"detail,omitempty"`
 	Person   PersonRef  `json:"person"`
 	With     *PersonRef `json:"with,omitempty"`
 	WithRole string     `json:"with_role,omitempty"`

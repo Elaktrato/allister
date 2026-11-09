@@ -59,9 +59,9 @@ func TestTitleLangDefault(t *testing.T) {
 
 func TestKnownLanguages(t *testing.T) {
 	s, exec := newStore(t)
-	exec(`INSERT INTO anime(id, source, source_id) VALUES(1,'x','1')`)
-	exec(`INSERT INTO anime(id, source, source_id) VALUES(2,'x','2')`)
-	exec(`INSERT INTO anime_titles(anime_id, lang, text) VALUES(1,'fr','a'),(1,'en','b'),(2,'fr','c'),(2,'de','d')`)
+	exec(`INSERT INTO items(id, plugin_id, kind, source, source_id) VALUES(1,'anime','anime','x','1')`)
+	exec(`INSERT INTO items(id, plugin_id, kind, source, source_id) VALUES(2,'anime','anime','x','2')`)
+	exec(`INSERT INTO item_titles(item_id, lang, text) VALUES(1,'fr','a'),(1,'en','b'),(2,'fr','c'),(2,'de','d')`)
 	got, err := s.KnownLanguages(context.Background())
 	if err != nil {
 		t.Fatal(err)

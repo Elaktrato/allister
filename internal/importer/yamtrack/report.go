@@ -115,7 +115,7 @@ func (im *Importer) Latest(ctx context.Context) (*Report, error) {
 
 func (im *Importer) items(ctx context.Context, importID int64, outcome string) ([]Item, error) {
 	rows, err := im.db.QueryContext(ctx, `SELECT r.title, r.message, COALESCE(r.anime_id, 0), COALESCE(a.source_id, '')
-		FROM import_rows r LEFT JOIN anime a ON a.id = r.anime_id
+		FROM import_rows r LEFT JOIN items a ON a.id = r.anime_id
 		WHERE r.import_id=? AND r.outcome=? ORDER BY r.seq LIMIT ?`, importID, outcome, listCap)
 	if err != nil {
 		return nil, fmt.Errorf("latest import: %w", err)

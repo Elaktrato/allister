@@ -29,7 +29,7 @@ func TestSaveCreditsIsIdempotent(t *testing.T) {
 	if err != nil || len(got) != 2 {
 		t.Fatalf("credits = %v, %v", got, err)
 	}
-	if n := count(t, e.db, `SELECT count(*) FROM people_g`); n != 2 {
+	if n := count(t, e.db, `SELECT count(*) FROM people`); n != 2 {
 		t.Fatalf("people = %d", n)
 	}
 	if got[0].Seq != 0 || got[1].Seq != 1 || got[0].Person.SourceID != "p1" || got[0].Person.Source != "tvdata" || got[0].Person.PluginID != "tv" ||
@@ -96,7 +96,7 @@ func TestPeopleAreNamespacedPerPlugin(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if n := count(t, e.db, `SELECT count(*) FROM people_g`); n != 2 {
+	if n := count(t, e.db, `SELECT count(*) FROM people`); n != 2 {
 		t.Fatalf("people = %d, want 2", n)
 	}
 	pa, _ := e.lib.ItemPeople(ctx, a)
@@ -163,12 +163,12 @@ func TestDeleteItemCascadesButKeepsPeople(t *testing.T) {
 	if err := e.lib.DeleteItem(ctx, id); err != nil {
 		t.Fatal(err)
 	}
-	for _, tbl := range []string{"items", "item_titles", "item_fields", "external_ids", "relations_g", "item_terms", "credits"} {
+	for _, tbl := range []string{"items", "item_titles", "item_fields", "external_ids", "relations", "item_terms", "credits"} {
 		if n := count(t, e.db, `SELECT count(*) FROM `+tbl); n != 0 {
 			t.Errorf("%s has %d rows", tbl, n)
 		}
 	}
-	if n := count(t, e.db, `SELECT count(*) FROM people_g`); n != 1 {
+	if n := count(t, e.db, `SELECT count(*) FROM people`); n != 1 {
 		t.Errorf("people = %d, want 1 kept", n)
 	}
 }

@@ -286,3 +286,23 @@ func (e *Entry) fill(status string, rating sql.NullInt64, started, finished sql.
 	}
 	return nil
 }
+
+// RemoveEntry deletes the item's entry together with its progress values
+// (active and retained), so a later entry starts from zero. The item stays.
+// It is a no-op (nil) when the item has no entry or does not exist.
+func (l *Library) RemoveEntry(ctx context.Context, itemID int64) error {
+	tx, err := l.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("remove entry: %w", err)
+	}
+	defer tx.Rollback()
+	for _, q := range []string{`DELETE FROM ` + tableEntryProgress + ` WHERE item_id = ?`, `DELETE FROM ` + tableEntries + ` WHERE item_id = ?`} {
+		if _, err := tx.ExecContext(ctx, q, itemID); err != nil {
+			return fmt.Errorf("remove entry: %w", err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("remove entry: %w", err)
+	}
+	return nil
+}
