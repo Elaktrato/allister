@@ -21,7 +21,11 @@ const (
 	maxGenres     = 50
 	maxTags       = 100
 	maxRelations  = 200
-	maxCredits    = 500
+	maxRecs       = 200
+	// maxCommentRunes mirrors the library's entry comment limit
+	// (library.maxCommentRunes, internal/library/entries.go).
+	maxCommentRunes = 2000
+	maxCredits      = 500
 )
 
 // source adapts the legacy AniList client to plugin.Source. Everything it
@@ -98,7 +102,7 @@ func (s *source) Recommendations(ctx context.Context, kind, id string) ([]plugin
 	out := make([]plugin.ItemSummary, 0, len(a.Recommendations))
 	for _, r := range a.Recommendations {
 		sid := plugin.SingleLine(r.ID, maxIDRunes)
-		if sid == "" || len(out) == maxRelations {
+		if sid == "" || len(out) == maxRecs {
 			continue
 		}
 		out = append(out, plugin.ItemSummary{

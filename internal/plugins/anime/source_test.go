@@ -406,8 +406,8 @@ func TestSourceSanitisesHostileData(t *testing.T) {
 		t.Fatal(err)
 	}
 	tm := titles(d.Titles)
-	if tm["ja-latn"] != "Line BreakTitle" {
-		t.Errorf("romaji = %q, want newline as space and NUL removed", tm["ja-latn"])
+	if tm["ja-latn"] != "Line Break Title" {
+		t.Errorf("romaji = %q, want newline and NUL as spaces", tm["ja-latn"])
 	}
 	if tm["ja"] != "日本 語" {
 		t.Errorf("native = %q", tm["ja"])
@@ -424,7 +424,7 @@ func TestSourceSanitisesHostileData(t *testing.T) {
 	if d.ExternalURL != "" {
 		t.Errorf("javascript: url must be dropped, got %q", d.ExternalURL)
 	}
-	if d.Fields["studio"].Text != "Studio Name" || d.Fields["source_material"].Text != "MANGA" {
+	if d.Fields["studio"].Text != "Studio Name" || d.Fields["source_material"].Text != "MAN GA" {
 		t.Errorf("fields = %+v", d.Fields)
 	}
 	if _, ok := d.Fields["type"]; ok {
@@ -468,7 +468,7 @@ func TestSourceSanitisesHostileData(t *testing.T) {
 	if c.Person.Name != "Na me" || c.Person.ImageURL != "https://cdn.example/c.png" || c.Person.URL != "" {
 		t.Errorf("person = %+v", c.Person)
 	}
-	if c.With == nil || c.With.Name != "Actor" || c.With.ImageURL != "" || c.With.URL != "https://anilist.co/staff/2" {
+	if c.With == nil || c.With.Name != "Ac tor" || c.With.ImageURL != "" || c.With.URL != "https://anilist.co/staff/2" {
 		t.Errorf("with = %+v", c.With)
 	}
 }

@@ -192,16 +192,38 @@ func TestImporterBadFormat(t *testing.T) {
 	}
 }
 
-func TestImporterReadErrorIsBadInput(t *testing.T) {
+func TestImporterReadErrorKeepsItsCause(t *testing.T) {
 	_, err := importer(t).Parse(context.Background(), errReader{})
-	if !errors.Is(err, plugin.ErrBadInput) {
-		t.Errorf("err = %v", err)
+	if err == nil || !strings.Contains(err.Error(), "boom") {
+		t.Fatalf("err = %v, want the read error", err)
+	}
+	if errors.Is(err, plugin.ErrBadInput) {
+		t.Errorf("an I/O error is not bad input: %v", err)
+	}
+	if !errors.Is(err, errBoom) {
+		t.Errorf("cause not preserved: %v", err)
+	}
+}
+
+func TestImporterTruncatedCommentIsNoted(t *testing.T) {
+	long := strings.Repeat("é", 2500)
+	res := parseCSV(t, "media_id,media_type,status,title,notes\n1,anime,Completed,T,"+long+"\n2,anime,Completed,T,short\n")
+	if n := len([]rune(res.Entries[0].Comment)); n != 2000 {
+		t.Errorf("comment runes = %d", n)
+	}
+	if !strings.Contains(strings.Join(res.Entries[0].Notes, "|"), "comment truncated to 2000 characters") {
+		t.Errorf("notes = %v", res.Entries[0].Notes)
+	}
+	if len(res.Entries[1].Notes) != 0 {
+		t.Errorf("notes = %v", res.Entries[1].Notes)
 	}
 }
 
 type errReader struct{}
 
-func (errReader) Read([]byte) (int, error) { return 0, errors.New("boom") }
+var errBoom = errors.New("boom")
+
+func (errReader) Read([]byte) (int, error) { return 0, errBoom }
 
 func TestImporterCancelledContext(t *testing.T) {
 	c, cancel := context.WithCancel(context.Background())

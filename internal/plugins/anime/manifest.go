@@ -19,7 +19,7 @@ func manifest() plugin.Manifest {
 			Label:       "Anime",
 			LabelPlural: "Anime",
 			Fields: []plugin.FieldDef{
-				{Key: "type", Label: "Type", Type: plugin.FieldEnum, EnumValues: append([]string(nil), typeValues...)},
+				{Key: "type", Label: "Type", Type: plugin.FieldEnum, EnumValues: append([]string(nil), typeValues...), Show: true, Editable: true, Filterable: true},
 				{Key: "episodes", Label: "Episodes", Type: plugin.FieldNumber, Min: num(1), Max: num(10000), Show: true, Editable: true},
 				{Key: "year", Label: "Year", Type: plugin.FieldNumber, Min: num(1900), Max: num(2100), Show: true, Editable: true, Filterable: true, Sortable: true},
 				{Key: "studio", Label: "Studio", Type: plugin.FieldText, Show: true, Editable: true, Filterable: true},

@@ -36,20 +36,26 @@ func truncateRunes(s string, max int) string {
 	return s
 }
 
-// SingleLine returns s as one clean line: invalid UTF-8 and NUL are removed,
-// every run of whitespace and C0/C1 control characters (tab, newline and CR
-// included) becomes ONE space, the result is trimmed and cut to at most
-// maxRunes runes. Zero-width joiners and emoji are kept.
+// SingleLine returns s as one clean line. Every run of whitespace and C0/C1
+// control characters, NUL included, becomes ONE space; the result is trimmed
+// and cut to at most maxRunes runes.
+//
+// Whitespace is unicode.IsSpace, so NBSP (U+00A0), U+2028 and U+2029 count as
+// whitespace and turn into a space. U+FEFF (byte order mark / zero width
+// no-break space) and U+200B (zero width space) are NOT whitespace to Go and
+// are kept as they are: they are format characters, not controls, the library
+// accepts them, and U+200D (zero width joiner) must survive for emoji
+// sequences. Invalid UTF-8 bytes (including encoded lone surrogates) are
+// dropped, and so is a literal U+FFFD in otherwise valid text (it is only
+// ever the mark of a decoding failure).
 func SingleLine(s string, maxRunes int) string {
 	var b strings.Builder
 	space := false
 	for _, r := range s {
 		switch {
 		case r == utf8.RuneError:
-			continue // invalid byte (or a literal U+FFFD, which is just as useless)
-		case r == 0:
 			continue
-		case isControl(r) || unicode.IsSpace(r):
+		case r == 0 || isControl(r) || unicode.IsSpace(r):
 			space = true
 			continue
 		}
@@ -63,8 +69,9 @@ func SingleLine(s string, maxRunes int) string {
 }
 
 // MultiLine returns s as clean multi-line text: invalid UTF-8, NUL and C0/C1
-// control characters are removed except newline and tab, CRLF and CR become
-// a newline, the result is trimmed and cut to at most maxRunes runes.
+// control characters are removed except newline and tab (NUL and the other
+// controls vanish WITHOUT leaving a space, unlike SingleLine), CRLF and CR
+// become a newline, the result is trimmed and cut to at most maxRunes runes.
 func MultiLine(s string, maxRunes int) string {
 	s = strings.ReplaceAll(s, "\r\n", "\n")
 	s = strings.ReplaceAll(s, "\r", "\n")
@@ -82,10 +89,17 @@ func MultiLine(s string, maxRunes int) string {
 	return strings.TrimSpace(truncateRunes(b.String(), maxRunes))
 }
 
-// HTTPSURL returns s as an absolute http(s) URL, or "" when it is not one.
-// Control characters are stripped first, the value is trimmed, a
-// protocol-relative "//host/x" becomes "https://host/x" and "http://" is kept
-// as given. A URL without a host is "".
+// maxURLRunes is the longest URL HTTPSURL accepts.
+const maxURLRunes = 2048
+
+// HTTPSURL returns s as a clean absolute http(s) URL, or "" when it is not
+// one. Control characters and invalid UTF-8 are stripped first, then the
+// value is trimmed. A protocol-relative "//host/x" becomes "https://host/x";
+// "http://" is kept as given. Userinfo ("user:pw@") is removed so a
+// credential never ends up stored or rendered, the scheme and host are
+// lower-cased, and path, query and fragment are kept as given. A URL with no
+// host, a host containing whitespace, a scheme other than http/https or more
+// than 2048 runes is "".
 func HTTPSURL(s string) string {
 	var b strings.Builder
 	for _, r := range s {
@@ -95,15 +109,31 @@ func HTTPSURL(s string) string {
 		b.WriteRune(r)
 	}
 	s = strings.TrimSpace(b.String())
+	if utf8.RuneCountInString(s) > maxURLRunes {
+		return ""
+	}
 	if strings.HasPrefix(s, "//") {
 		s = "https:" + s
 	}
 	u, err := url.Parse(s)
-	if err != nil || u.Host == "" || u.Hostname() == "" {
+	if err != nil || u.Hostname() == "" || strings.IndexFunc(u.Host, unicode.IsSpace) >= 0 {
 		return ""
 	}
-	if u.Scheme != "http" && u.Scheme != "https" {
+	scheme := strings.ToLower(u.Scheme)
+	if scheme != "http" && scheme != "https" {
 		return ""
 	}
-	return s
+	// Rebuild by hand: url.URL.String would percent-escape an IDN host. The
+	// part after the authority (path, query, fragment) is kept as given.
+	rest := s[strings.Index(s, "//")+2:]
+	if i := strings.IndexAny(rest, "/?#"); i >= 0 {
+		rest = rest[i:]
+	} else {
+		rest = ""
+	}
+	out := scheme + "://" + strings.ToLower(u.Host) + rest
+	if utf8.RuneCountInString(out) > maxURLRunes {
+		return ""
+	}
+	return out
 }

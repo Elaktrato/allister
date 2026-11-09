@@ -47,31 +47,33 @@ func TestManifestMatchesBaseline(t *testing.T) {
 	if want := []string{"type", "episodes", "year", "studio", "synopsis", "source_material", "started_on", "ended_on"}; !reflect.DeepEqual(keys, want) {
 		t.Errorf("fields = %v", keys)
 	}
-	ty := f["type"]
-	if ty.Type != plugin.FieldEnum || ty.Label != "Type" || ty.Show || ty.Editable || ty.Filterable || ty.Sortable ||
+	if ty := f["type"]; ty.Type != plugin.FieldEnum || ty.Label != "Type" ||
 		!reflect.DeepEqual(ty.EnumValues, []string{"TV", "TV_SHORT", "MOVIE", "SPECIAL", "OVA", "ONA", "MUSIC"}) {
 		t.Errorf("type = %+v", ty)
 	}
-	ep := f["episodes"]
-	if ep.Type != plugin.FieldNumber || ep.Min == nil || *ep.Min != 1 || ep.Max == nil || *ep.Max != 10000 || !ep.Show || !ep.Editable || ep.Filterable || ep.Sortable {
+	if ep := f["episodes"]; ep.Type != plugin.FieldNumber || ep.Min == nil || *ep.Min != 1 || ep.Max == nil || *ep.Max != 10000 {
 		t.Errorf("episodes = %+v", ep)
 	}
-	y := f["year"]
-	if y.Type != plugin.FieldNumber || *y.Min != 1900 || *y.Max != 2100 || !y.Show || !y.Editable || !y.Filterable || !y.Sortable {
+	if y := f["year"]; y.Type != plugin.FieldNumber || y.Min == nil || *y.Min != 1900 || y.Max == nil || *y.Max != 2100 {
 		t.Errorf("year = %+v", y)
 	}
-	if s := f["studio"]; s.Type != plugin.FieldText || !s.Show || !s.Editable || !s.Filterable || s.Sortable {
-		t.Errorf("studio = %+v", s)
-	}
-	if s := f["synopsis"]; s.Type != plugin.FieldText || s.Show || !s.Editable {
-		t.Errorf("synopsis = %+v", s)
-	}
-	if s := f["source_material"]; s.Type != plugin.FieldText || !s.Show || !s.Editable {
-		t.Errorf("source_material = %+v", s)
-	}
-	for _, key := range []string{"started_on", "ended_on"} {
-		if d := f[key]; d.Type != plugin.FieldDate || !d.Show || !d.Editable {
-			t.Errorf("%s = %+v", key, d)
+	for _, d := range []struct {
+		key                                  string
+		typ                                  plugin.FieldType
+		show, editable, filterable, sortable bool
+	}{
+		{"type", plugin.FieldEnum, true, true, true, false},
+		{"episodes", plugin.FieldNumber, true, true, false, false},
+		{"year", plugin.FieldNumber, true, true, true, true},
+		{"studio", plugin.FieldText, true, true, true, false},
+		{"synopsis", plugin.FieldText, false, true, false, false},
+		{"source_material", plugin.FieldText, true, true, false, false},
+		{"started_on", plugin.FieldDate, true, true, false, false},
+		{"ended_on", plugin.FieldDate, true, true, false, false},
+	} {
+		g := f[d.key]
+		if g.Type != d.typ || g.Show != d.show || g.Editable != d.editable || g.Filterable != d.filterable || g.Sortable != d.sortable || g.Required {
+			t.Errorf("%s flags = %+v, want %+v", d.key, g, d)
 		}
 	}
 	wantProgress := plugin.ProgressSpec{
