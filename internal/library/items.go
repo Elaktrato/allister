@@ -77,6 +77,9 @@ func normalizeTitles(ts []plugin.Title) ([]plugin.Title, error) {
 		if text == "" {
 			continue
 		}
+		if err := cleanText("title", text, singleLine); err != nil {
+			return nil, err
+		}
 		lang := strings.ToLower(strings.TrimSpace(t.Lang))
 		if !validLang(lang) {
 			return nil, invalid("title language %q must be letters, digits and '-'", t.Lang)
@@ -125,6 +128,9 @@ func normalizeRelations(rs []plugin.Relation) ([]relRow, error) {
 		if strings.TrimSpace(r.Kind) == "" {
 			return nil, invalid("a relation needs a kind")
 		}
+		if err := checkRelation(r); err != nil {
+			return nil, err
+		}
 		titles, err := json.Marshal(r.Item.Titles)
 		if err != nil {
 			return nil, invalid("relation titles: %v", err)
@@ -138,16 +144,62 @@ func normalizeRelations(rs []plugin.Relation) ([]relRow, error) {
 	return out, nil
 }
 
+// checkRelation applies the text rules to every stored string of a relation.
+func checkRelation(r plugin.Relation) error {
+	for _, v := range [][2]string{{"relation kind", r.Kind}, {"relation item source", r.Item.Source},
+		{"relation item id", r.Item.ID}, {"relation item kind", r.Item.Kind}} {
+		if err := cleanText(v[0], v[1], singleLine); err != nil {
+			return err
+		}
+	}
+	if err := checkImageRef("relation item cover", r.Item.CoverURL); err != nil {
+		return err
+	}
+	for _, t := range r.Item.Titles {
+		if err := cleanText("relation item title", t.Text, singleLine); err != nil {
+			return err
+		}
+		if err := cleanText("relation item title language", t.Lang, singleLine); err != nil {
+			return err
+		}
+	}
+	for k, f := range r.Item.Fields {
+		if err := cleanText("relation item field key", k, singleLine); err != nil {
+			return err
+		}
+		if err := cleanText("relation item field "+k, f.Text, multiLine); err != nil {
+			return err
+		}
+		for _, v := range f.List {
+			if err := cleanText("relation item field "+k, v, singleLine); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
 func normalizeExternalIDs(ids map[string]string) ([][2]string, error) {
 	var out [][2]string
+	seen := map[string]bool{}
 	for k, v := range ids {
 		k, v = strings.TrimSpace(k), strings.TrimSpace(v)
 		if k == "" {
 			return nil, invalid("an external id needs a type")
 		}
+		if err := cleanText("external id type", k, singleLine); err != nil {
+			return nil, err
+		}
+		if err := cleanText("external id "+k, v, singleLine); err != nil {
+			return nil, err
+		}
 		if v == "" {
 			continue
 		}
+		if seen[k] {
+			return nil, invalid("external id type %q is given more than once", k)
+		}
+		seen[k] = true
 		out = append(out, [2]string{k, v})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i][0] < out[j][0] })
@@ -167,6 +219,18 @@ func (l *Library) prepare(pluginID, kind string, d plugin.ItemData, progress []s
 	p := &prepared{def: def, source: strings.TrimSpace(d.Source), sourceID: strings.TrimSpace(d.ID)}
 	if p.source == "" || p.sourceID == "" {
 		return nil, invalid("an item needs a source and a source id")
+	}
+	if err := cleanText("source", p.source, singleLine); err != nil {
+		return nil, err
+	}
+	if err := cleanText("source id", p.sourceID, singleLine); err != nil {
+		return nil, err
+	}
+	if err := checkHTTPURL("external url", d.ExternalURL); err != nil {
+		return nil, err
+	}
+	if err := checkImageRef("cover", d.CoverURL); err != nil {
+		return nil, err
 	}
 	if p.titles, err = normalizeTitles(d.Titles); err != nil {
 		return nil, err
@@ -212,6 +276,9 @@ func (l *Library) SaveItem(ctx context.Context, pluginID, kind string, d plugin.
 	o := saveOpts{syncState: "pending"}
 	for _, f := range opts {
 		f(&o)
+	}
+	if err := checkSyncState(o.syncState); err != nil {
+		return 0, err
 	}
 	p, err := l.prepare(pluginID, kind, d, o.progressKeys)
 	if err != nil {
@@ -262,8 +329,8 @@ func insertParts(ctx context.Context, tx *sql.Tx, id int64, p *prepared) error {
 		}
 	}
 	for _, f := range p.fields {
-		if _, err := tx.ExecContext(ctx, `INSERT INTO item_fields(item_id, key, text, num, date, seq) VALUES (?,?,?,?,?,?)`,
-			id, f.key, f.text, f.num, f.date, f.seq); err != nil {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO item_fields(item_id, key, vtype, text, num, date, seq) VALUES (?,?,?,?,?,?,?)`,
+			id, f.key, string(f.vtype), f.text, f.num, f.date, f.seq); err != nil {
 			return fmt.Errorf("save fields: %w", err)
 		}
 	}
@@ -339,20 +406,16 @@ func (l *Library) loadParts(ctx context.Context, it *Item) error {
 		return fmt.Errorf("load titles: %w", err)
 	}
 
-	var def *plugin.KindDef
-	if d, err := l.kindDef(it.PluginID, it.Kind); err == nil {
-		def = &d
-	}
-	acc := newFieldAcc(def)
-	rows, err = l.db.QueryContext(ctx, `SELECT key, text, num, date FROM item_fields WHERE item_id = ? ORDER BY key, seq`, it.ID)
+	acc := newFieldAcc()
+	rows, err = l.db.QueryContext(ctx, `SELECT key, vtype, text, num, date FROM item_fields WHERE item_id = ? ORDER BY key, seq`, it.ID)
 	if err != nil {
 		return fmt.Errorf("load fields: %w", err)
 	}
 	for rows.Next() {
-		var key string
+		var key, vtype string
 		var text, date sql.NullString
 		var num sql.NullFloat64
-		if err := rows.Scan(&key, &text, &num, &date); err != nil {
+		if err := rows.Scan(&key, &vtype, &text, &num, &date); err != nil {
 			rows.Close()
 			return fmt.Errorf("load fields: %w", err)
 		}
@@ -367,7 +430,10 @@ func (l *Library) loadParts(ctx context.Context, it *Item) error {
 		if num.Valid {
 			np = &num.Float64
 		}
-		acc.add(key, tp, np, dp)
+		if err := acc.add(key, vtype, tp, np, dp); err != nil {
+			rows.Close()
+			return fmt.Errorf("load fields: %w", err)
+		}
 	}
 	if err := closeRows(rows); err != nil {
 		return fmt.Errorf("load fields: %w", err)

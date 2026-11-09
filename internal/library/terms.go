@@ -3,6 +3,7 @@ package library
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 	"unicode/utf8"
@@ -41,6 +42,9 @@ func normalizeTerms(def plugin.KindDef, genres []string, tags []plugin.Tag) ([]t
 		t := strings.TrimSpace(name)
 		if t == "" {
 			return nil
+		}
+		if err := cleanText(kind, t, singleLine); err != nil {
+			return err
 		}
 		if utf8.RuneCountInString(t) > maxTermRunes {
 			return invalid("%s %q is longer than %d characters", kind, t, maxTermRunes)
@@ -102,7 +106,7 @@ func (l *Library) SetTerms(ctx context.Context, itemID int64, genres []string, t
 	defer tx.Rollback()
 	var pluginID, kind string
 	switch err := tx.QueryRowContext(ctx, `SELECT plugin_id, kind FROM items WHERE id = ?`, itemID).Scan(&pluginID, &kind); {
-	case err == sql.ErrNoRows:
+	case errors.Is(err, sql.ErrNoRows):
 		return ErrNoEntry
 	case err != nil:
 		return fmt.Errorf("set terms: %w", err)
@@ -121,7 +125,7 @@ func (l *Library) SetTerms(ctx context.Context, itemID int64, genres []string, t
 	if err := insertTerms(ctx, tx, itemID, rows); err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE items SET updated_at = strftime('%Y-%m-%dT%H:%M:%SZ','now') WHERE id = ?`, itemID); err != nil {
+	if _, err := tx.ExecContext(ctx, `UPDATE items SET updated_at = `+nowSQL+` WHERE id = ?`, itemID); err != nil {
 		return fmt.Errorf("set terms: %w", err)
 	}
 	if err := tx.Commit(); err != nil {

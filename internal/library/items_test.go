@@ -474,20 +474,20 @@ func TestSaveItemIsAtomicOnFailure(t *testing.T) {
 func TestSettersAndDeleteItem(t *testing.T) {
 	l := newLib(t)
 	id := mustSave(t, l, "book", "book", bookData("1"))
-	if err := l.SetCoverPath(ctx, id, "covers/1.jpg"); err != nil {
+	if err := l.SetCoverPath(ctx, id, "1.jpg"); err != nil {
 		t.Fatal(err)
 	}
 	if err := l.SetSyncState(ctx, id, "done"); err != nil {
 		t.Fatal(err)
 	}
 	it := mustItem(t, l, id)
-	if it.CoverPath != "covers/1.jpg" || it.SyncState != "done" {
+	if it.CoverPath != "1.jpg" || it.SyncState != "done" {
 		t.Fatalf("%+v", it)
 	}
 	if err := l.SetCoverPath(ctx, 999, "x"); !errors.Is(err, ErrNoEntry) {
 		t.Fatalf("err = %v", err)
 	}
-	if err := l.SetSyncState(ctx, 999, "x"); !errors.Is(err, ErrNoEntry) {
+	if err := l.SetSyncState(ctx, 999, "done"); !errors.Is(err, ErrNoEntry) {
 		t.Fatalf("err = %v", err)
 	}
 	if err := l.DeleteItem(ctx, 999); !errors.Is(err, ErrNoEntry) {

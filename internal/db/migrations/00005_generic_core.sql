@@ -26,6 +26,7 @@ CREATE TABLE item_titles (
 CREATE TABLE item_fields (
     item_id INTEGER NOT NULL REFERENCES items(id) ON DELETE CASCADE,
     key     TEXT NOT NULL,
+    vtype   TEXT NOT NULL,
     text    TEXT,
     num     REAL,
     date    TEXT,

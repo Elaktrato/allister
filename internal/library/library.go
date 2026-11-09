@@ -25,6 +25,9 @@ import (
 // SQL table names that change when the legacy tables are retired: the final
 // names are "people" and "relations". Keep every use of them going through
 // these constants.
+// nowSQL is the SQL expression for the current UTC time stamp.
+const nowSQL = `strftime('%Y-%m-%dT%H:%M:%SZ','now')`
+
 const (
 	tablePeople    = "people_g"
 	tableRelations = "relations_g"
@@ -127,16 +130,25 @@ func (l *Library) setOne(ctx context.Context, what, query string, args ...any) e
 
 // SetCoverPath replaces the item's cover (remote URL or local path).
 func (l *Library) SetCoverPath(ctx context.Context, itemID int64, path string) error {
-	return l.setOne(ctx, "set cover path", `UPDATE items SET cover_path = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%SZ','now') WHERE id = ?`, path, itemID)
+	if err := checkImageRef("cover", path); err != nil {
+		return err
+	}
+	return l.setOne(ctx, "set cover path", `UPDATE items SET cover_path = ?, updated_at = `+nowSQL+` WHERE id = ?`, path, itemID)
 }
 
 // SetSyncState sets the item's sync state.
 func (l *Library) SetSyncState(ctx context.Context, itemID int64, state string) error {
-	return l.setOne(ctx, "set sync state", `UPDATE items SET sync_state = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%SZ','now') WHERE id = ?`, state, itemID)
+	if err := checkSyncState(state); err != nil {
+		return err
+	}
+	return l.setOne(ctx, "set sync state", `UPDATE items SET sync_state = ?, updated_at = `+nowSQL+` WHERE id = ?`, state, itemID)
 }
 
 // SetPersonImagePath replaces the person's image (remote URL or local path).
 func (l *Library) SetPersonImagePath(ctx context.Context, personID int64, path string) error {
+	if err := checkImageRef("person image", path); err != nil {
+		return err
+	}
 	return l.setOne(ctx, "set person image", `UPDATE `+tablePeople+` SET image_path = ? WHERE id = ?`, path, personID)
 }
 

@@ -23,11 +23,19 @@ func (l *Library) SaveCredits(ctx context.Context, itemID int64, credits []plugi
 		return invalid("more than %d credits", maxCredits)
 	}
 	for _, c := range credits {
-		if strings.TrimSpace(c.Person.ID) == "" {
-			return invalid("a credit needs a person id")
+		if err := cleanText("credit role", c.Role, singleLine); err != nil {
+			return err
 		}
-		if c.With != nil && strings.TrimSpace(c.With.ID) == "" {
-			return invalid("a credit counterpart needs a person id")
+		if err := cleanText("credit counterpart role", c.WithRole, singleLine); err != nil {
+			return err
+		}
+		if err := checkPerson("credit person", c.Person); err != nil {
+			return err
+		}
+		if c.With != nil {
+			if err := checkPerson("credit counterpart person", *c.With); err != nil {
+				return err
+			}
 		}
 	}
 	tx, err := l.db.BeginTx(ctx, nil)
@@ -70,16 +78,45 @@ func (l *Library) SaveCredits(ctx context.Context, itemID int64, credits []plugi
 	return nil
 }
 
+func checkPerson(path string, p plugin.PersonRef) error {
+	if strings.TrimSpace(p.ID) == "" {
+		return invalid("%s needs a person id", path)
+	}
+	if err := cleanText(path+" id", p.ID, singleLine); err != nil {
+		return err
+	}
+	if err := cleanText(path+" name", p.Name, singleLine); err != nil {
+		return err
+	}
+	if err := checkHTTPURL(path+" url", p.URL); err != nil {
+		return err
+	}
+	return checkImageRef(path+" image", p.ImageURL)
+}
+
 func upsertPerson(ctx context.Context, tx *sql.Tx, pluginID, source string, p plugin.PersonRef) (int64, error) {
+	name := strings.TrimSpace(p.Name)
+	if name == "" {
+		// a new person needs a name; a known one keeps the stored name
+		var one int
+		err := tx.QueryRowContext(ctx, `SELECT 1 FROM `+tablePeople+` WHERE plugin_id = ? AND source = ? AND source_id = ?`,
+			pluginID, source, strings.TrimSpace(p.ID)).Scan(&one)
+		if errors.Is(err, sql.ErrNoRows) {
+			return 0, invalid("person %q needs a name", p.ID)
+		}
+		if err != nil {
+			return 0, fmt.Errorf("save person: %w", err)
+		}
+	}
 	var id int64
 	err := tx.QueryRowContext(ctx, `INSERT INTO `+tablePeople+`(plugin_id, source, source_id, name, image_path, external_url)
 		VALUES (?,?,?,?,?,?)
-		ON CONFLICT(plugin_id, source, source_id) DO UPDATE SET name = excluded.name, external_url = excluded.external_url,
+		ON CONFLICT(plugin_id, source, source_id) DO UPDATE SET name = CASE WHEN excluded.name <> '' THEN excluded.name ELSE `+tablePeople+`.name END, external_url = excluded.external_url,
 		  image_path = CASE
 		    WHEN `+tablePeople+`.image_path <> '' AND `+tablePeople+`.image_path NOT LIKE 'http%' THEN `+tablePeople+`.image_path
 		    WHEN excluded.image_path <> '' THEN excluded.image_path
 		    ELSE `+tablePeople+`.image_path END
-		RETURNING id`, pluginID, source, strings.TrimSpace(p.ID), p.Name, p.ImageURL, p.URL).Scan(&id)
+		RETURNING id`, pluginID, source, strings.TrimSpace(p.ID), name, p.ImageURL, p.URL).Scan(&id)
 	if err != nil {
 		return 0, fmt.Errorf("save person: %w", err)
 	}

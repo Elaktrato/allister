@@ -115,7 +115,7 @@ func TestSetPersonImagePathSurvivesResync(t *testing.T) {
 	}
 	pp, _ := l.ItemPeople(ctx, id)
 	pid := pp[0].ID
-	if err := l.SetPersonImagePath(ctx, pid, "people/1.jpg"); err != nil {
+	if err := l.SetPersonImagePath(ctx, pid, "1.jpg"); err != nil {
 		t.Fatal(err)
 	}
 	c[0].Person.Name = "A2"
@@ -124,7 +124,7 @@ func TestSetPersonImagePathSurvivesResync(t *testing.T) {
 		t.Fatal(err)
 	}
 	p, _ := l.Person(ctx, pid)
-	if p.ImagePath != "people/1.jpg" || p.Name != "A2" {
+	if p.ImagePath != "1.jpg" || p.Name != "A2" {
 		t.Fatalf("person = %+v", p)
 	}
 	// a remote url is replaced by a new remote url; empty incoming keeps the stored one
