@@ -59,6 +59,13 @@ type SearchResult struct {
 	Studio, Synopsis, CoverURL string
 }
 
+// Tag is a named tag with an optional relevance rank (0 to 100) and a spoiler flag.
+type Tag struct {
+	Name    string
+	Rank    *int
+	Spoiler bool
+}
+
 // Anime is the full detail of an anime.
 type Anime struct {
 	SearchResult
@@ -67,6 +74,8 @@ type Anime struct {
 	MALID                       string
 	Relations                   []Relation
 	Recommendations             []Recommendation
+	Genres                      []string
+	Tags                        []Tag
 }
 
 // Provider is a metadata source.

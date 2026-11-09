@@ -48,6 +48,7 @@ const animeFields = `id idMal ` + titleFields + ` format episodes seasonYear
     startDate { year month day } endDate { year month day } source
     description(asHtml: true) coverImage { large }
     studios(isMain: true) { nodes { name } } siteUrl
+    genres tags { name rank isMediaSpoiler }
     relations { edges { relationType node { id type format ` + titleFields + ` } } }
     recommendations(perPage: $recs, sort: RATING_DESC) {
       nodes { mediaRecommendation { id ` + titleFields + ` coverImage { large } } }
@@ -223,7 +224,13 @@ type apiMedia struct {
 			Name string `json:"name"`
 		} `json:"nodes"`
 	} `json:"studios"`
-	SiteURL   string `json:"siteUrl"`
+	SiteURL string   `json:"siteUrl"`
+	Genres  []string `json:"genres"`
+	Tags    []struct {
+		Name           string `json:"name"`
+		Rank           *int   `json:"rank"`
+		IsMediaSpoiler bool   `json:"isMediaSpoiler"`
+	} `json:"tags"`
 	Relations struct {
 		Edges []struct {
 			RelationType string `json:"relationType"`
@@ -373,6 +380,23 @@ func (m *apiMedia) anime() provider.Anime {
 	}
 	if m.IDMal != nil {
 		a.MALID = strconv.Itoa(*m.IDMal)
+	}
+	for _, g := range m.Genres {
+		if g = strings.TrimSpace(g); g != "" {
+			a.Genres = append(a.Genres, g)
+		}
+	}
+	for _, t := range m.Tags {
+		name := strings.TrimSpace(t.Name)
+		if name == "" {
+			continue
+		}
+		tag := provider.Tag{Name: name, Spoiler: t.IsMediaSpoiler}
+		if t.Rank != nil && *t.Rank >= 0 && *t.Rank <= 100 {
+			r := *t.Rank
+			tag.Rank = &r
+		}
+		a.Tags = append(a.Tags, tag)
 	}
 	for _, e := range m.Relations.Edges {
 		kind, ok := relationKind(e.RelationType, e.Node.Type)

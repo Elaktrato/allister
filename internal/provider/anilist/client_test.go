@@ -371,3 +371,75 @@ func TestAnimeByMALIDRejectsNonDigitsWithoutRequest(t *testing.T) {
 		t.Fatalf("%d requests made", hits)
 	}
 }
+
+func TestAnimeMapsGenresAndTags(t *testing.T) {
+	var body string
+	c := serve(t, 200, fixture(t, "anime.json"), &body)
+	a, err := c.Anime(context.Background(), "154587")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var req struct {
+		Query string `json:"query"`
+	}
+	if err := json.Unmarshal([]byte(body), &req); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(req.Query, "genres") || !strings.Contains(req.Query, "tags { name rank isMediaSpoiler }") {
+		t.Errorf("query does not request genres and tags: %s", req.Query)
+	}
+	if len(a.Genres) != 3 || a.Genres[0] != "Adventure" || a.Genres[2] != "Fantasy" {
+		t.Errorf("genres = %v", a.Genres)
+	}
+	if len(a.Tags) != 28 {
+		t.Fatalf("tags = %d, want 28", len(a.Tags))
+	}
+	if a.Tags[0].Name != "Travel" || a.Tags[0].Rank == nil || *a.Tags[0].Rank != 96 || a.Tags[0].Spoiler {
+		t.Errorf("tag 0 = %+v", a.Tags[0])
+	}
+	var found bool
+	for _, tg := range a.Tags {
+		if tg.Name == "Time Skip" {
+			found = true
+			if !tg.Spoiler {
+				t.Errorf("Time Skip must be a spoiler: %+v", tg)
+			}
+		}
+	}
+	if !found {
+		t.Error("Time Skip tag missing")
+	}
+}
+
+func TestAnimeGenresAndTagsAreCleaned(t *testing.T) {
+	body := `{"data":{"Media":{"id":1,"title":{"romaji":"A"},
+	 "genres":[" Action ","","  ","Drama"],
+	 "tags":[{"name":" Magic ","rank":50,"isMediaSpoiler":false},{"name":"","rank":10},{"name":"  "},
+	  {"name":"Zero","rank":0},{"name":"Full","rank":100},{"name":"Over","rank":101},{"name":"Neg","rank":-1},{"name":"NoRank","rank":null,"isMediaSpoiler":true}]}}}`
+	a, err := serve(t, 200, []byte(body), nil).Anime(context.Background(), "1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(a.Genres) != 2 || a.Genres[0] != "Action" || a.Genres[1] != "Drama" {
+		t.Errorf("genres = %v", a.Genres)
+	}
+	rank := func(tg provider.Tag) int {
+		if tg.Rank == nil {
+			return -99
+		}
+		return *tg.Rank
+	}
+	want := []struct {
+		name string
+		rank int
+		spo  bool
+	}{{"Magic", 50, false}, {"Zero", 0, false}, {"Full", 100, false}, {"Over", -99, false}, {"Neg", -99, false}, {"NoRank", -99, true}}
+	if len(a.Tags) != len(want) {
+		t.Fatalf("tags = %+v", a.Tags)
+	}
+	for i, w := range want {
+		if a.Tags[i].Name != w.name || rank(a.Tags[i]) != w.rank || a.Tags[i].Spoiler != w.spo {
+			t.Errorf("tag %d = %+v, want %+v", i, a.Tags[i], w)
+		}
+	}
+}
