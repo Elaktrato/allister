@@ -1,0 +1,3 @@
+#!/bin/sh
+# Run Go inside Docker (Go is not installed on the host). Usage: scripts/go.sh test ./...
+exec docker run --rm -v "$PWD":/src -v allister-gomod:/go/pkg/mod -v allister-gocache:/root/.cache/go-build -w /src -e CGO_ENABLED=0 golang:1.23 go "$@"

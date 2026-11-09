@@ -1,0 +1,5 @@
+.git
+.superpowers
+docs
+*.md
+internal/web/static/app.css

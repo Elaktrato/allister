@@ -1,3 +1,4 @@
 .superpowers/
 yamtrack_*.csv
 *:Zone.Identifier
+internal/web/static/app.css

@@ -1,0 +1,14 @@
+services:
+  allister:
+    build: .
+    ports:
+      - "${PORT:-8080}:${PORT:-8080}"
+    environment:
+      PORT: "${PORT:-8080}"
+      DATA_DIR: /data
+    volumes:
+      - allister-data:/data
+    restart: unless-stopped
+
+volumes:
+  allister-data:
