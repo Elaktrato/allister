@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/allister/allister/internal/plugin"
 	"github.com/allister/allister/internal/provider"
 	"github.com/allister/allister/internal/store"
 )
@@ -271,5 +272,77 @@ func TestPersonPageIsFullPageForHTMX(t *testing.T) {
 	mustContain(t, rec.Body.String(), "<html")
 	if rec.Header().Get("Vary") != "HX-Request" {
 		t.Fatal(rec.Header())
+	}
+}
+
+// tvPeople saves a tv show with "Carl Character, voiced by Ann Actor" and
+// returns the people paths of the actor and the character.
+func tvPeople(t *testing.T, e *env) (actor, character string) {
+	t.Helper()
+	id := e.saveFixture(t, "tv", "show", tvShow("1", "Cast Show"))
+	err := e.lib.SaveCredits(context.Background(), id, []plugin.Credit{{
+		Role: "character", Person: plugin.PersonRef{ID: "c1", Name: "Carl Character"},
+		With: &plugin.PersonRef{ID: "a1", Name: "Ann Actor", URL: "https://tv.example/p/a1"}, WithRole: "Actor",
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ps, err := e.lib.ItemPeople(context.Background(), id)
+	if err != nil || len(ps) != 2 {
+		t.Fatalf("people %+v %v", ps, err)
+	}
+	return "/people/" + idStr(ps[1].ID), "/people/" + idStr(ps[0].ID)
+}
+
+func TestGenericPersonPageForFixturePlugin(t *testing.T) {
+	e := newFixtureEnv(t)
+	actor, character := tvPeople(t, e.env)
+	rec := e.get(actor)
+	if rec.Code != 200 {
+		t.Fatalf("actor: %d", rec.Code)
+	}
+	b := rec.Body.String()
+	mustContain(t, b, "Ann Actor", "Cast Show", `href="/tv/tvdata/1"`, "as Carl Character", "View on Fake TV", `href="https://tv.example/p/a1"`)
+	b = e.get(character).Body.String()
+	mustContain(t, b, "Carl Character", "Cast Show")
+	mustNotContain(t, b, "as Carl Character", "Ann Actor")
+	// empty state names the plugin's kind
+	if err := e.lib.SaveCredits(context.Background(), 1, nil); err != nil {
+		t.Fatal(err)
+	}
+	mustContain(t, e.get(actor).Body.String(), "Not in any show in your list")
+}
+
+func TestPersonPageOfDisabledPlugin404(t *testing.T) {
+	e := newFixtureEnv(t)
+	actor, _ := tvPeople(t, e.env)
+	a := e.addEntry(t, provider.AniList, "77", nil, store.Watching, 0, titleEn("Anime Show")...)
+	va := pperson("v1", "Voice One", "", "")
+	e.withCast(t, a, provider.CastMember{Character: pperson("c9", "Hero", "", ""), Actor: &va})
+	animePerson := e.personPath(t, "v1")
+	for _, p := range []string{actor, animePerson} {
+		if c := e.get(p).Code; c != 200 {
+			t.Fatalf("%s enabled: %d", p, c)
+		}
+	}
+	// the person's own plugin decides, not the anime flag
+	e.disable(t, "tv")
+	rec := e.get(actor)
+	if rec.Code != 404 {
+		t.Fatalf("tv person with tv disabled: %d", rec.Code)
+	}
+	mustNotContain(t, rec.Body.String(), "Ann Actor")
+	if c := e.get(animePerson).Code; c != 200 {
+		t.Fatalf("anime person with tv disabled: %d", c)
+	}
+	e.disable(t, "anime")
+	if c := e.get(animePerson).Code; c != 404 {
+		t.Fatalf("anime person with anime disabled: %d", c)
+	}
+	if err := e.reg.SetEnabled(context.Background(), "tv", true); err != nil {
+		t.Fatal(err)
+	}
+	if c := e.get(actor).Code; c != 200 {
+		t.Fatalf("tv person re-enabled with anime disabled: %d", c)
 	}
 }

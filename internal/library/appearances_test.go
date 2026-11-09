@@ -108,3 +108,32 @@ func TestAppearancesCharacterAndActor(t *testing.T) {
 		t.Fatalf("unknown = %v, %v", as, err)
 	}
 }
+
+func TestAppearancesMarkCounterpartRows(t *testing.T) {
+	l := newLib(t)
+	hero := plugin.PersonRef{ID: "c1", Name: "Hero"}
+	actor := plugin.PersonRef{ID: "a1", Name: "Actor"}
+	d := tvData("z", nil)
+	itemID := mustSave(t, l, "tv", "show", d)
+	if err := l.SaveCredits(bg, itemID, []plugin.Credit{
+		{Role: "character", Person: hero, With: &actor, WithRole: "actor"},
+		{Role: "actor", Person: actor},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var aid, hid int64
+	l.db.QueryRow(`SELECT id FROM ` + tablePeople + ` WHERE source_id = 'a1'`).Scan(&aid)
+	l.db.QueryRow(`SELECT id FROM ` + tablePeople + ` WHERE source_id = 'c1'`).Scan(&hid)
+	as, err := l.Appearances(bg, aid)
+	if err != nil || len(as) != 2 {
+		t.Fatalf("actor rows %+v %v", as, err)
+	}
+	// credit order: the counterpart row (seq 0) first, then the direct credit
+	if !as[0].AsCounterpart || as[0].With == nil || as[0].With.Name != "Hero" || as[1].AsCounterpart {
+		t.Fatalf("actor rows %+v", as)
+	}
+	as, _ = l.Appearances(bg, hid)
+	if len(as) != 1 || as[0].AsCounterpart || as[0].With == nil || as[0].With.Name != "Actor" {
+		t.Fatalf("character rows %+v", as)
+	}
+}

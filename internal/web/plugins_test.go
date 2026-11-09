@@ -82,7 +82,7 @@ func (e *env) disable(t *testing.T, id string) {
 func TestDisabledPluginRoutes404(t *testing.T) {
 	e := newEnv(t)
 	id := e.addEntry(t, provider.AniList, "1535", nil, store.Watching, 1)
-	if len(e.srv.pluginRoutes[animePluginID]) < 10 || len(e.srv.coreGuarded) < 5 {
+	if len(e.srv.pluginRoutes[animePluginID]) < 10 || len(e.srv.coreGuarded) < 4 {
 		t.Fatalf("route tables too small: %v %v", e.srv.pluginRoutes, e.srv.coreGuarded)
 	}
 	e.disable(t, "anime")

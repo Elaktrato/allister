@@ -7,7 +7,7 @@
   </div>
   <div class="min-w-0 flex-1">
     <h1 class="text-2xl font-semibold break-words">{{.Name}}</h1>
-    {{if .ExtURL}}<a href="{{.ExtURL}}" rel="noopener noreferrer" class="text-sm text-indigo-300 hover:underline">View on AniList</a>{{end}}
+    {{if .ExtURL}}<a href="{{.ExtURL}}" rel="noopener noreferrer" class="text-sm text-indigo-300 hover:underline">{{.LinkLabel}}</a>{{end}}
     <h2 class="mt-6 mb-3 text-lg font-semibold">In your list</h2>
     {{if .Appearances}}
     <ul class="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
@@ -19,13 +19,13 @@
         </a>
         <div class="min-w-0">
           <a href="{{.Href}}" class="font-medium text-indigo-300 hover:underline">{{.Title}}</a>
-          {{if .VoicedCharacter}}<p class="mt-1 text-sm text-slate-300">as {{.VoicedCharacter}}</p>{{end}}
+          {{if .As}}<p class="mt-1 text-sm text-slate-300">as {{.As}}</p>{{end}}
         </div>
       </li>
       {{end}}
     </ul>
     {{else}}
-    <p class="text-slate-400">Not in any anime in your list.</p>
+    <p class="text-slate-400">{{.Empty}}</p>
     {{end}}
   </div>
 </div>

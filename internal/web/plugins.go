@@ -54,14 +54,13 @@ func (s *server) animeRoutes(reg routeRegistrar) {
 // only (through the adapter store), so they are guarded by the anime plugin's
 // enabled flag.
 //
-// TEMPORARY COUPLING: Task 9 (generic list routes) and the generic people
-// page make these plugin-aware and delete the anime guard here.
+// TEMPORARY COUPLING: Task 9 (generic list routes) makes these plugin-aware
+// (the owning plugin of the item decides) and deletes the anime guard here.
 func (s *server) listRoutes(reg routeRegistrar) {
 	reg.Handle("POST /list/{id}/increment", s.postIncrement)
 	reg.Handle("GET /list/{id}/edit", s.getEdit)
 	reg.Handle("POST /list/{id}/edit", s.postEdit)
 	reg.Handle("POST /list/{id}/remove", s.postRemove)
-	reg.Handle("GET /people/{id}", s.getPerson)
 }
 
 // muxRegistrar mounts relative patterns on a mux behind a guard.
@@ -108,8 +107,11 @@ func (s *server) pluginGuard(id string) func(http.HandlerFunc) http.Handler {
 // mountPlugins registers the routes of every installed plugin (its own set,
 // else coreRoutes) under the literal prefix /{plugin-id} (never a wildcard
 // first segment: the mux would panic on overlap with the core routes), the
-// guarded list routes. The registry has already refused ids that collide
-// with core first segments.
+// guarded list routes and the person page. The registry has already refused
+// ids that collide with core first segments.
+//
+// The person page is guarded inside its handler by the PERSON's plugin (the
+// plugin is only known after the lookup): see getPerson.
 func (s *server) mountPlugins(mux *http.ServeMux) {
 	s.pluginRoutes = map[string][]string{}
 	sets := s.routeSets()
@@ -124,6 +126,7 @@ func (s *server) mountPlugins(mux *http.ServeMux) {
 	}
 	s.coreGuarded = []string{}
 	s.listRoutes(muxRegistrar{mux: mux, guard: s.pluginGuard(animePluginID), routes: &s.coreGuarded})
+	mux.HandleFunc("GET /people/{id}", s.getPerson)
 }
 
 // defaultRegistry is the registry used when Deps.Registry is nil: the anime

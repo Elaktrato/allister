@@ -13,6 +13,8 @@ import (
 // Role "character", With X and WithRole "actor"; the row of X is the mirror
 // image. A person who is both credited and a counterpart gets both kinds of
 // rows. People belong to one plugin, so items of other plugins never appear.
+// AsCounterpart marks the mirror rows: the person is the counterpart of the
+// credit (the voice actor of With), not the credited person.
 type Appearance struct {
 	ItemID                                      int64
 	PluginID, Kind, Source, SourceID, CoverPath string
@@ -20,19 +22,20 @@ type Appearance struct {
 	Role                                        string
 	With                                        *Person
 	WithRole                                    string
+	AsCounterpart                               bool
 }
 
 // Appearances returns the person's appearances ordered by the lower-cased
 // first stored title, then item id, then credit position. An unknown person
 // has none.
 func (l *Library) Appearances(ctx context.Context, personID int64) ([]Appearance, error) {
-	rows, err := l.db.QueryContext(ctx, `SELECT i.id, i.plugin_id, i.kind, i.source, i.source_id, i.cover_path, a.role, a.with_role,
+	rows, err := l.db.QueryContext(ctx, `SELECT i.id, i.plugin_id, i.kind, i.source, i.source_id, i.cover_path, a.role, a.with_role, a.mirror,
 		w.id, w.plugin_id, w.source, w.source_id, w.name, w.image_path, w.external_url
 		FROM (
-		  SELECT c.item_id, c.seq, c.role AS role, c.counterpart_role AS with_role, c.counterpart_person_id AS other
+		  SELECT c.item_id, c.seq, c.role AS role, c.counterpart_role AS with_role, c.counterpart_person_id AS other, 0 AS mirror
 		    FROM credits c WHERE c.person_id = ?1
 		  UNION ALL
-		  SELECT c.item_id, c.seq, c.counterpart_role, c.role, c.person_id
+		  SELECT c.item_id, c.seq, c.counterpart_role, c.role, c.person_id, 1
 		    FROM credits c WHERE c.counterpart_person_id = ?1
 		) a
 		JOIN items i ON i.id = a.item_id
@@ -46,7 +49,7 @@ func (l *Library) Appearances(ctx context.Context, personID int64) ([]Appearance
 		var a Appearance
 		var wid sql.NullInt64
 		var wp, wsrc, wsid, wname, wimg, wurl sql.NullString
-		if err := rows.Scan(&a.ItemID, &a.PluginID, &a.Kind, &a.Source, &a.SourceID, &a.CoverPath, &a.Role, &a.WithRole,
+		if err := rows.Scan(&a.ItemID, &a.PluginID, &a.Kind, &a.Source, &a.SourceID, &a.CoverPath, &a.Role, &a.WithRole, &a.AsCounterpart,
 			&wid, &wp, &wsrc, &wsid, &wname, &wimg, &wurl); err != nil {
 			rows.Close()
 			return nil, fmt.Errorf("appearances: %w", err)

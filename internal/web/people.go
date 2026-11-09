@@ -8,25 +8,30 @@ import (
 	"strings"
 
 	"github.com/allister/allister/internal/covers"
-	"github.com/allister/allister/internal/titles"
+	"github.com/allister/allister/internal/library"
+	"github.com/allister/allister/internal/plugin"
 )
 
-// appearanceView is one anime row on a person page. VoicedCharacter is set
-// only when the person is the voice actor of that character.
+// appearanceView is one item row on a person page. As is set only when the
+// person is the counterpart of the credit (the voice actor of a character):
+// it names the credited person ("as <character>").
 type appearanceView struct {
 	Title, Href, Cover string
-	VoicedCharacter    string
+	As                 string
 }
 
 type personPageView struct {
-	Name, Photo, ExtURL string
-	Appearances         []appearanceView
+	Name, Photo, ExtURL, LinkLabel string
+	Appearances                    []appearanceView
+	// Empty is the friendly message without appearances.
+	Empty string
 }
 
-// getPerson renders /people/{id}: the person's photo, name, AniList link and
-// the anime of the user's list they appear in. Rows are ordered by resolved
-// title (case-insensitive), then anime id, then character name, so the page
-// is deterministic.
+// getPerson renders /people/{id}: the person's photo, name, external link
+// and the saved items of THEIR plugin they appear in. The person's plugin
+// guards the page: unknown or disabled, it answers 404 like an unknown
+// person. Rows are ordered by resolved title (case-insensitive), then item
+// id, then credit position, so the page is deterministic.
 func (s *server) getPerson(w http.ResponseWriter, r *http.Request) {
 	raw := r.PathValue("id")
 	if !isASCIIDigits(raw, maxIDDigits) {
@@ -39,7 +44,7 @@ func (s *server) getPerson(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
-	p, err := s.deps.Store.Person(ctx, id)
+	p, err := s.deps.Library.Person(ctx, id)
 	if err != nil {
 		log.Printf("person %d: %v", id, err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
@@ -49,46 +54,78 @@ func (s *server) getPerson(w http.ResponseWriter, r *http.Request) {
 		s.personNotFound(w, r)
 		return
 	}
-	apps, err := s.deps.Store.PersonAnime(ctx, id)
+	m, ok := s.deps.Registry.Manifest(p.PluginID)
+	if !ok || !s.deps.Registry.IsEnabled(p.PluginID) {
+		s.personNotFound(w, r)
+		return
+	}
+	apps, err := s.deps.Library.Appearances(ctx, id)
 	if err != nil {
-		log.Printf("person %d anime: %v", id, err)
+		log.Printf("person %d appearances: %v", id, err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
 	lang := s.deps.Settings.TitleLang(ctx)
-	v := personPageView{Name: p.Name, Photo: covers.Src(p.ImagePath), ExtURL: httpsURL(p.ExternalURL)}
-	sortKeys := make([]string, 0, len(apps))
-	for _, a := range apps {
-		av := appearanceView{
-			Title: titles.Resolve(a.Titles, lang), Href: animeURL(string(a.Source), a.SourceID),
-			Cover: covers.Src(a.CoverPath),
+	v := personPageView{Name: p.Name, Photo: covers.Src(p.ImagePath), ExtURL: httpsURL(p.ExternalURL), Empty: emptyPersonMessage(m)}
+	if v.ExtURL != "" {
+		v.LinkLabel = "External page"
+		if si, ok := sourceInfo(m, p.Source); ok {
+			v.LinkLabel = orDefault(si.LinkLabel, "View on "+si.Name)
 		}
+	}
+	type key struct {
+		item    int64
+		mirror  bool
+		role    string
+		against int64
+	}
+	type row struct {
+		view   appearanceView
+		sortBy string
+		item   int64
+	}
+	seen := map[key]bool{}
+	var rows []row
+	for _, a := range apps {
+		if a.PluginID != p.PluginID || !hasKind(m, a.Kind) {
+			continue
+		}
+		k := key{item: a.ItemID, mirror: a.AsCounterpart, role: a.Role}
+		if a.AsCounterpart && a.With != nil {
+			k.against = a.With.ID
+		}
+		if seen[k] {
+			continue
+		}
+		seen[k] = true
+		av := appearanceView{Title: library.ResolveTitle(a.Titles, lang), Href: itemURL(m, a.Source, a.SourceID, a.Kind), Cover: covers.Src(a.CoverPath)}
 		if av.Title == "" {
 			av.Title = "(untitled)"
 		}
-		if a.AsActor {
-			av.VoicedCharacter = a.Character
+		if a.AsCounterpart && a.With != nil {
+			av.As = a.With.Name
 		}
-		v.Appearances = append(v.Appearances, av)
-		sortKeys = append(sortKeys, strings.ToLower(av.Title))
+		rows = append(rows, row{view: av, sortBy: strings.ToLower(av.Title), item: a.ItemID})
 	}
-	idx := make([]int, len(apps))
-	for i := range idx {
-		idx[i] = i
-	}
-	sort.SliceStable(idx, func(i, j int) bool {
-		a, b := idx[i], idx[j]
-		if sortKeys[a] != sortKeys[b] {
-			return sortKeys[a] < sortKeys[b]
+	sort.SliceStable(rows, func(i, j int) bool {
+		if rows[i].sortBy != rows[j].sortBy {
+			return rows[i].sortBy < rows[j].sortBy
 		}
-		return apps[a].AnimeID < apps[b].AnimeID
+		return rows[i].item < rows[j].item
 	})
-	sorted := make([]appearanceView, len(idx))
-	for i, k := range idx {
-		sorted[i] = v.Appearances[k]
+	for _, r := range rows {
+		v.Appearances = append(v.Appearances, r.view)
 	}
-	v.Appearances = sorted
 	s.render(w, r, "person", v)
+}
+
+// emptyPersonMessage names the plugin's kind: "Not in any anime in your list."
+func emptyPersonMessage(m plugin.Manifest) string {
+	noun := "item"
+	if len(m.Kinds) == 1 && m.Kinds[0].Label != "" {
+		noun = strings.ToLower(m.Kinds[0].Label)
+	}
+	return "Not in any " + noun + " in your list."
 }
 
 func (s *server) personNotFound(w http.ResponseWriter, r *http.Request) {
