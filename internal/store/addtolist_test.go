@@ -48,7 +48,7 @@ func TestAddToListSavesBoth(t *testing.T) {
 	}
 }
 
-func TestAddToListRollsBackOnInvalidEntry(t *testing.T) {
+func TestAddToListRejectsInvalidEntryBeforeSaving(t *testing.T) {
 	s := newStore(t)
 	ctx := context.Background()
 	_, err := s.AddToList(ctx, sample(provider.AniList, "1", intp(12)), ListEntry{Status: Watching, Progress: 99})
@@ -93,5 +93,42 @@ func TestCastWithLocalIDs(t *testing.T) {
 	}
 	if c, err := s.Cast(ctx, 9999); err != nil || len(c) != 0 {
 		t.Fatal(c, err)
+	}
+}
+
+func countRows(t *testing.T, s *Store, table string) int {
+	t.Helper()
+	var n int
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM ` + table).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	return n
+}
+
+// The list entry write fails inside the transaction, after the anime, titles
+// and relations were inserted; everything must be rolled back.
+func TestAddToListRollsBackWhenListInsertFails(t *testing.T) {
+	s := newStore(t)
+	ctx := context.Background()
+	a := sample(provider.AniList, "1", intp(12))
+	a.Relations = []provider.Relation{{Kind: "sequel", Source: provider.AniList, ID: "2", Titles: []provider.Title{{Lang: "en", Text: "S2"}}}}
+	if _, err := s.db.Exec(`CREATE TRIGGER boom BEFORE INSERT ON list_entries BEGIN SELECT RAISE(ABORT, 'boom'); END`); err != nil {
+		t.Fatal(err)
+	}
+	_, err := s.AddToList(ctx, a, ListEntry{Status: Watching, Progress: 1})
+	if err == nil || errors.Is(err, ErrInvalid) || errors.Is(err, ErrAlreadySaved) {
+		t.Fatalf("want a database error, got %v", err)
+	}
+	for _, tbl := range []string{"anime", "anime_titles", "anime_relations", "list_entries"} {
+		if n := countRows(t, s, tbl); n != 0 {
+			t.Fatalf("%s has %d rows after rollback", tbl, n)
+		}
+	}
+	if _, err := s.db.Exec(`DROP TRIGGER boom`); err != nil {
+		t.Fatal(err)
+	}
+	id, err := s.AddToList(ctx, a, ListEntry{Status: Watching, Progress: 1})
+	if err != nil || id == 0 {
+		t.Fatalf("retry: %d %v", id, err)
 	}
 }
