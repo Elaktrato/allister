@@ -17,7 +17,7 @@ func (q *Queue) SweepSync(ctx context.Context, st *store.Store) (int, error) {
 		return 0, fmt.Errorf("sweep sync: %w", err)
 	}
 	for i, id := range ids {
-		if err := q.Enqueue(ctx, KindSyncAnime, SyncPayload{AnimeID: id}); err != nil {
+		if err := q.Enqueue(ctx, KindSyncAnime, SyncPayload{AnimeID: id, PluginID: "anime"}); err != nil {
 			return i, fmt.Errorf("sweep sync: %w", err)
 		}
 	}

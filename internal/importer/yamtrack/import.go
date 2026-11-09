@@ -74,9 +74,14 @@ type ActiveError struct{ ID int64 }
 func (e *ActiveError) Error() string { return fmt.Sprintf("import %d is still active", e.ID) }
 func (e *ActiveError) Unwrap() error { return ErrActive }
 
+// pluginID is the plugin that owns Yamtrack imports and the anime they create.
+const pluginID = "anime"
+
 // Payload is the payload of an import_yamtrack job.
 type Payload struct {
 	ImportID int64 `json:"import_id"`
+	// PluginID is the plugin the import belongs to (queue gate, see jobs.WithPluginGate).
+	PluginID string `json:"plugin_id,omitempty"`
 }
 
 // Resolver finds an anime by its MyAnimeList id (anilist.Client).
@@ -206,7 +211,7 @@ func (im *Importer) Submit(ctx context.Context, filename string, r io.Reader) (i
 	if err := tx.Commit(); err != nil {
 		return 0, fmt.Errorf("import: %w", err)
 	}
-	if err := im.queue.Enqueue(ctx, KindImport, Payload{ImportID: id}); err != nil {
+	if err := im.queue.Enqueue(ctx, KindImport, Payload{ImportID: id, PluginID: pluginID}); err != nil {
 		if _, uerr := im.db.ExecContext(context.WithoutCancel(ctx),
 			`UPDATE imports SET state=?, finished_at=`+nowSQL+` WHERE id=?`, stateFailed, id); uerr != nil {
 			log.Printf("import %d: mark failed: %v", id, uerr)
@@ -296,7 +301,7 @@ func (im *Importer) Resume(ctx context.Context) (int64, error) {
 	if err := tx.Commit(); err != nil {
 		return 0, fmt.Errorf("resume import: %w", err)
 	}
-	if err := im.queue.Enqueue(ctx, KindImport, Payload{ImportID: id}); err != nil {
+	if err := im.queue.Enqueue(ctx, KindImport, Payload{ImportID: id, PluginID: pluginID}); err != nil {
 		if _, uerr := im.db.ExecContext(context.WithoutCancel(ctx),
 			`UPDATE imports SET state=?, finished_at=`+nowSQL+`, note=? WHERE id=?`, stateFailed, "Stopped: could not queue the job: "+err.Error(), id); uerr != nil {
 			log.Printf("import %d: mark failed: %v", id, uerr)
@@ -532,7 +537,7 @@ func (im *Importer) handleSaved(ctx context.Context, importID int64, seq int, ro
 	}
 	syncNote := ""
 	if saved.SyncState == "pending" {
-		if err := im.queue.Enqueue(dctx, jobs.KindSyncAnime, jobs.SyncPayload{AnimeID: saved.ID}); err != nil {
+		if err := im.queue.Enqueue(dctx, jobs.KindSyncAnime, jobs.SyncPayload{AnimeID: saved.ID, PluginID: pluginID}); err != nil {
 			syncNote = "sync not queued: " + err.Error()
 		}
 	}
@@ -588,7 +593,7 @@ func (im *Importer) saveUnmatched(ctx context.Context, importID int64, seq int, 
 // finishSaved enqueues the sync job (cover, cast) for a saved anime and
 // records the row.
 func (im *Importer) finishSaved(ctx context.Context, importID int64, seq int, animeID int64, outcome, msg string) error {
-	if err := im.queue.Enqueue(ctx, jobs.KindSyncAnime, jobs.SyncPayload{AnimeID: animeID}); err != nil {
+	if err := im.queue.Enqueue(ctx, jobs.KindSyncAnime, jobs.SyncPayload{AnimeID: animeID, PluginID: pluginID}); err != nil {
 		note := "sync not queued: " + err.Error()
 		if msg != "" {
 			note = msg + "; " + note

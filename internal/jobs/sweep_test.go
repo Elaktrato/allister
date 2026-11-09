@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/allister/allister/internal/provider"
+	"github.com/allister/allister/internal/store"
 )
 
 func TestSyncCastTroubleTakesPartialPath(t *testing.T) {
@@ -127,5 +128,35 @@ func TestRecoverResetsRunningBeforeSweep(t *testing.T) {
 	}
 	if liveSyncJobs(t, e, id) != 1 {
 		t.Fatal("duplicate job")
+	}
+}
+
+func TestSweepCarriesPluginIDAndSkipsGatedLiveJobs(t *testing.T) {
+	e := newSyncEnv(t)
+	ctx := context.Background()
+	g := &gate{}
+	g.set("anime", true) // disabled: its pending jobs stay live, so the sweep must not duplicate them
+	q := testQueue(t, e.d, newClock(), WithPluginGate(g.allow))
+	mk := func(extID string) int64 {
+		id, err := e.st.SaveAnime(ctx, provider.Anime{SearchResult: provider.SearchResult{Source: provider.AniList, ID: extID,
+			Titles: []provider.Title{{Lang: "en", Text: "T" + extID}}}}, store.WithSyncState("pending"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+	a, b := mk("1"), mk("2")
+	enqueue(t, q, KindSyncAnime, SyncPayload{AnimeID: a, PluginID: "anime"})
+	n, err := q.SweepSync(ctx, e.st)
+	if err != nil || n != 1 {
+		t.Fatalf("n=%d err=%v", n, err)
+	}
+	if liveSyncJobs(t, e, a) != 1 || liveSyncJobs(t, e, b) != 1 {
+		t.Fatal("sweep duplicated or missed jobs")
+	}
+	var pid string
+	if err := e.d.QueryRow(`SELECT json_extract(payload_json,'$.plugin_id') FROM jobs
+		WHERE json_extract(payload_json,'$.anime_id') = ?`, b).Scan(&pid); err != nil || pid != "anime" {
+		t.Fatalf("plugin_id %q err=%v", pid, err)
 	}
 }

@@ -20,6 +20,9 @@ const KindSyncAnime = "sync_anime"
 // SyncPayload is the payload of a sync_anime job.
 type SyncPayload struct {
 	AnimeID int64 `json:"anime_id"`
+	// PluginID names the owning plugin so the queue can pause the job while
+	// the plugin is disabled (see WithPluginGate). Empty means never gated.
+	PluginID string `json:"plugin_id,omitempty"`
 }
 
 // SyncDeps are the dependencies of the SyncAnime handler.

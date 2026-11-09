@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"strings"
 	"sync"
 	"time"
 )
@@ -46,8 +47,18 @@ func WithBackoff(f func(attempt int) time.Duration) Option {
 	return func(q *Queue) { q.backoff = f }
 }
 
+// WithPluginGate makes the queue skip pending jobs whose JSON payload has a
+// non-empty "plugin_id" for which allow returns false. Such a job stays
+// pending (no attempt counted, run_after unchanged) and is claimed on a later
+// poll once allow returns true; jobs without plugin_id are never blocked.
+// allow is called once per distinct pending plugin_id at every claim.
+func WithPluginGate(allow func(pluginID string) bool) Option {
+	return func(q *Queue) { q.gate = allow }
+}
+
 // Queue is a persistent job queue.
 type Queue struct {
+	gate        func(string) bool
 	db          *sql.DB
 	poll        time.Duration
 	minInterval time.Duration
@@ -151,14 +162,29 @@ func (q *Queue) runOnce(ctx context.Context) (bool, error) {
 	}
 	q.mu.Unlock()
 
+	disabled, err := q.disabledPlugins(ctx)
+	if err != nil {
+		return false, err
+	}
 	var (
 		id                 int64
 		kind, payload      string
 		attempts, partials int
 	)
-	err := q.db.QueryRowContext(ctx, `UPDATE jobs SET state='running' WHERE id = (
-		SELECT id FROM jobs WHERE state='pending' AND run_after <= ? ORDER BY run_after, id LIMIT 1)
-		RETURNING id, kind, payload_json, attempts, partials`, q.stamp(now)).
+	// One atomic statement. The disabled plugin ids are bound parameters; a
+	// job without plugin_id (NULL or empty) is never excluded.
+	args := []any{q.stamp(now)}
+	gateSQL := ""
+	if len(disabled) > 0 {
+		gateSQL = ` AND COALESCE(json_extract(payload_json, '$.plugin_id'), '') NOT IN (?` +
+			strings.Repeat(",?", len(disabled)-1) + `)`
+		for _, id := range disabled {
+			args = append(args, id)
+		}
+	}
+	err = q.db.QueryRowContext(ctx, `UPDATE jobs SET state='running' WHERE id = (
+		SELECT id FROM jobs WHERE state='pending' AND run_after <= ?`+gateSQL+` ORDER BY run_after, id LIMIT 1)
+		RETURNING id, kind, payload_json, attempts, partials`, args...).
 		Scan(&id, &kind, &payload, &attempts, &partials)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil
@@ -177,6 +203,43 @@ func (q *Queue) runOnce(ctx context.Context) (bool, error) {
 	}
 	herr := q.call(ctx, h, json.RawMessage(payload))
 	return true, q.finish(id, kind, attempts, partials, herr, ctx.Err() != nil)
+}
+
+// disabledPlugins returns the plugin ids of pending jobs that the gate refuses.
+// A plugin whose first job is enqueued between this read and the claim can be
+// claimed once; the gate is a pause for the common case, not a barrier.
+func (q *Queue) disabledPlugins(ctx context.Context) ([]string, error) {
+	if q.gate == nil {
+		return nil, nil
+	}
+	rows, err := q.db.QueryContext(ctx, `SELECT DISTINCT json_extract(payload_json, '$.plugin_id') FROM jobs
+		WHERE state='pending' AND json_extract(payload_json, '$.plugin_id') IS NOT NULL
+		AND json_extract(payload_json, '$.plugin_id') <> ''`)
+	if err != nil {
+		return nil, fmt.Errorf("read plugin ids: %w", err)
+	}
+	var ids []string
+	for rows.Next() {
+		var v any
+		if err := rows.Scan(&v); err != nil {
+			rows.Close()
+			return nil, fmt.Errorf("read plugin ids: %w", err)
+		}
+		if s, ok := v.(string); ok {
+			ids = append(ids, s)
+		}
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("read plugin ids: %w", err)
+	}
+	var disabled []string
+	for _, id := range ids {
+		if !q.gate(id) {
+			disabled = append(disabled, id)
+		}
+	}
+	return disabled, nil
 }
 
 func (q *Queue) call(ctx context.Context, h Handler, payload json.RawMessage) (err error) {

@@ -252,7 +252,7 @@ func (e *env) outcomes(id int64) map[string]string {
 func TestImportSavesEntriesAndEnqueuesSync(t *testing.T) {
 	e := newEnv(t)
 	id := e.submit(csvOf("1|One|Completed|8.0|12", "2|Two|Planning||0", "3|Three|In progress|7.0|4"))
-	if jobsq := e.q.ofKind(KindImport); len(jobsq) != 1 || jobsq[0].Payload.(Payload).ImportID != id {
+	if jobsq := e.q.ofKind(KindImport); len(jobsq) != 1 || jobsq[0].Payload.(Payload) != (Payload{ImportID: id, PluginID: "anime"}) {
 		t.Fatalf("import job not enqueued: %+v", e.q.jobs)
 	}
 	if err := e.run(id); err != nil {
@@ -272,7 +272,7 @@ func TestImportSavesEntriesAndEnqueuesSync(t *testing.T) {
 	if len(syncs) != 3 {
 		t.Fatalf("sync jobs = %d", len(syncs))
 	}
-	if p, ok := syncs[0].Payload.(jobs.SyncPayload); !ok || p.AnimeID != s.ID {
+	if p, ok := syncs[0].Payload.(jobs.SyncPayload); !ok || p.AnimeID != s.ID || p.PluginID != "anime" {
 		t.Errorf("sync payload = %#v", syncs[0].Payload)
 	}
 	r := e.report()
