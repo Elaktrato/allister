@@ -45,7 +45,7 @@ func (s *server) matchTarget(w http.ResponseWriter, r *http.Request) (provider.S
 		}
 	}
 	if saved == nil {
-		s.errorPage(w, http.StatusNotFound, "Not found", "There is no such manual entry to match.", "")
+		s.errorPage(w, r, http.StatusNotFound, "Not found", "There is no such manual entry to match.", "")
 		return "", "", nil
 	}
 	return src, id, saved
@@ -74,7 +74,7 @@ func (s *server) matchResponse(w http.ResponseWriter, r *http.Request, src provi
 	}
 	av := s.buildView(r.Context(), src, id, d)
 	av.Match = &v
-	s.renderStatus(w, status, "anime", av)
+	s.renderStatus(w, r, status, "anime", av)
 }
 
 func (s *server) getMatch(w http.ResponseWriter, r *http.Request) {
@@ -190,7 +190,7 @@ func (s *server) postMatch(w http.ResponseWriter, r *http.Request) {
 		fail(http.StatusUnprocessableEntity, invalidMessage(err))
 		return
 	case errors.Is(err, store.ErrNotFound): // deleted meanwhile
-		s.errorPage(w, http.StatusNotFound, "Not found", "There is no such manual entry to match.", "")
+		s.errorPage(w, r, http.StatusNotFound, "Not found", "There is no such manual entry to match.", "")
 		return
 	default:
 		s.fail(w, r, err, "")

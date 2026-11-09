@@ -17,6 +17,8 @@ import (
 	"github.com/allister/allister/internal/db"
 	"github.com/allister/allister/internal/importer/yamtrack"
 	"github.com/allister/allister/internal/jobs"
+	"github.com/allister/allister/internal/plugin"
+	"github.com/allister/allister/internal/plugins/anime"
 	"github.com/allister/allister/internal/provider"
 	"github.com/allister/allister/internal/provider/anilist"
 	"github.com/allister/allister/internal/settings"
@@ -55,8 +57,16 @@ func run() error {
 	workerCtx, stopWorker := context.WithCancel(context.Background())
 	defer stopWorker()
 
+	settingsStore := settings.New(database)
+	registry := plugin.NewRegistry(settingsStore)
+	if err := registry.Register(anime.New(anime.Options{})); err != nil {
+		log.Printf("startup: %v", err)
+	}
+
 	// One worker, at least 2s between jobs to respect AniList's rate limit.
-	queue := jobs.NewQueue(database, jobs.WithMinInterval(2*time.Second))
+	// Jobs of a disabled plugin stay pending until it is enabled again.
+	queue := jobs.NewQueue(database, jobs.WithMinInterval(2*time.Second),
+		jobs.WithPluginGate(registry.IsEnabled))
 	queue.Register(jobs.KindSyncAnime, jobs.SyncAnime(jobs.SyncDeps{
 		Store:     st,
 		Providers: providers,
@@ -84,7 +94,8 @@ func run() error {
 	srv := &http.Server{
 		Addr: ":" + cfg.Port,
 		Handler: web.NewServer(web.Deps{
-			Settings:      settings.New(database),
+			Settings:      settingsStore,
+			Registry:      registry,
 			Store:         st,
 			Providers:     providers,
 			Jobs:          queue,

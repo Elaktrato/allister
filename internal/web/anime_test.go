@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"github.com/allister/allister/internal/plugin"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -74,9 +75,17 @@ type env struct {
 	covers string
 	// d is the database, for tests that must seed values the store refuses.
 	d *sql.DB
+	// srv is the server behind h (route tables, registry).
+	srv *server
+	// reg is the plugin registry given to the server.
+	reg *plugin.Registry
 }
 
-func newEnv(t *testing.T) *env {
+func newEnv(t *testing.T) *env { return newEnvWith(t, nil) }
+
+// newEnvWith is newEnv with a custom plugin registry (built over the env's
+// settings store). A nil mk gets the default registry holding the real anime plugin.
+func newEnvWith(t *testing.T, mk func(es plugin.EnabledStore) *plugin.Registry) *env {
 	t.Helper()
 	d, err := db.Open(filepath.Join(t.TempDir(), "t.db"))
 	if err != nil {
@@ -87,10 +96,14 @@ func newEnv(t *testing.T) *env {
 		covers: filepath.Join(t.TempDir(), "covers"), d: d}
 	now := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
 	e.now = &now
-	_, e.h = newServer(Deps{
-		Settings: e.set, Store: e.st, Jobs: e.jobs, CoversDir: e.covers,
+	if mk != nil {
+		e.reg = mk(e.set)
+	}
+	e.srv, e.h = newServer(Deps{
+		Settings: e.set, Store: e.st, Jobs: e.jobs, CoversDir: e.covers, Registry: e.reg,
 		Providers: map[provider.Source]provider.Provider{provider.AniList: e.fp},
 	}, func() time.Time { return *e.now })
+	e.reg = e.srv.deps.Registry
 	return e
 }
 
@@ -406,7 +419,7 @@ func TestAddCreatesEntryAndJob(t *testing.T) {
 		en.StartedOn == nil || en.StartedOn.Format("2006-01-02") != "2024-01-02" || en.FinishedOn != nil || en.Comment != "nice" {
 		t.Fatalf("%+v", en)
 	}
-	if len(e.jobs.got) != 1 || e.jobs.got[0].Kind != jobs.KindSyncAnime || e.jobs.got[0].Payload != (jobs.SyncPayload{AnimeID: sv.ID}) {
+	if len(e.jobs.got) != 1 || e.jobs.got[0].Kind != jobs.KindSyncAnime || e.jobs.got[0].Payload != (jobs.SyncPayload{AnimeID: sv.ID, PluginID: "anime"}) {
 		t.Fatalf("jobs %+v", e.jobs.got)
 	}
 }

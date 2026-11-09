@@ -133,7 +133,7 @@ func (s *server) postManualNew(w http.ResponseWriter, r *http.Request) {
 	}
 	fail := func(msg string) {
 		f.Error = msg
-		s.renderStatus(w, http.StatusUnprocessableEntity, "manual_form", f)
+		s.renderStatus(w, r, http.StatusUnprocessableEntity, "manual_form", f)
 	}
 
 	f.Title = strings.TrimSpace(r.PostFormValue("title"))

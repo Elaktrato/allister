@@ -1,0 +1,2 @@
+{{range .}}<a href="{{.Href}}" class="rounded px-2 py-1 hover:bg-slate-800{{if .Right}} ml-auto{{end}}{{if .Active}} bg-slate-800{{end}}"{{if .Active}} aria-current="page"{{end}}>{{.Label}}</a>
+{{end}}

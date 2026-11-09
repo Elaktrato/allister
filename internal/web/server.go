@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/allister/allister/internal/importer/yamtrack"
+	"github.com/allister/allister/internal/plugin"
 	"github.com/allister/allister/internal/provider"
 	"github.com/allister/allister/internal/settings"
 	"github.com/allister/allister/internal/store"
@@ -40,6 +41,10 @@ type Deps struct {
 	// ParseAnimeURL reduces a pasted AniList URL or number to an anime id
 	// (anilist.ParseAnimeURL; injected because web must not import it).
 	ParseAnimeURL func(string) (id string, ok bool)
+	// Registry holds the installed plugins and their enabled flags. Required
+	// in production (cmd/allister builds it); when nil NewServer builds a
+	// default one with the anime plugin on top of Settings.
+	Registry *plugin.Registry
 }
 
 // JobQueue is the part of jobs.Queue the web layer needs.
@@ -51,6 +56,10 @@ type server struct {
 	deps  Deps
 	pages map[string]*template.Template
 	cache *animeCache
+	// pluginRoutes lists the full patterns mounted per plugin id, and
+	// coreGuarded the core routes behind the anime guard (tests walk them).
+	pluginRoutes map[string][]string
+	coreGuarded  []string
 }
 
 // pageNames lists every page template (templates/<name>.html). Add a page by
@@ -60,9 +69,10 @@ var pageNames = []string{"settings", "search", "anime", "list", "person", "manua
 // pagePartials lists extra template files a page needs (also rendered alone
 // for htmx requests).
 var pagePartials = map[string][]string{
-	"search": {"templates/search_results.html"},
-	"anime":  {"templates/add_dialog.html", "templates/match_dialog.html"},
-	"list":   {"templates/list_row.html", "templates/add_dialog.html"},
+	"search":   {"templates/search_results.html"},
+	"settings": {"templates/settings_plugins.html"},
+	"anime":    {"templates/add_dialog.html", "templates/match_dialog.html"},
+	"list":     {"templates/list_row.html", "templates/add_dialog.html"},
 }
 
 // parsePages builds one template set per page, each cloned from base.html plus
@@ -85,6 +95,9 @@ func NewServer(deps Deps) http.Handler {
 
 // newServer is NewServer with an injectable clock (used by the overview cache).
 func newServer(deps Deps, now func() time.Time) (*server, http.Handler) {
+	if deps.Registry == nil {
+		deps.Registry = defaultRegistry(deps)
+	}
 	s := &server{deps: deps, pages: parsePages(), cache: newAnimeCache(now, cacheMaxEntries, cacheTTL)}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
@@ -101,21 +114,8 @@ func newServer(deps Deps, now func() time.Time) (*server, http.Handler) {
 	mux.HandleFunc("POST /settings/import", s.postImport)
 	mux.HandleFunc("POST /settings/import/cancel", s.postImportCancel)
 	mux.HandleFunc("POST /settings/import/resume", s.postImportResume)
-	mux.HandleFunc("GET /anime", s.getList)
-	mux.HandleFunc("POST /list/{id}/increment", s.postIncrement)
-	mux.HandleFunc("GET /list/{id}/edit", s.getEdit)
-	mux.HandleFunc("POST /list/{id}/edit", s.postEdit)
-	mux.HandleFunc("POST /list/{id}/remove", s.postRemove)
-	mux.HandleFunc("GET /people/{id}", s.getPerson)
-	mux.HandleFunc("GET /anime/search", s.search)
-	mux.HandleFunc("GET /anime/manual/new", s.getManualNew)
-	mux.HandleFunc("POST /anime/manual/new", s.postManualNew)
-	mux.HandleFunc("GET /anime/{source}/{id}", s.getOverview)
-	mux.HandleFunc("GET /anime/{source}/{id}/add", s.getAdd)
-	mux.HandleFunc("POST /anime/{source}/{id}/add", s.postAdd)
-	mux.HandleFunc("GET /anime/{source}/{id}/match", s.getMatch)
-	mux.HandleFunc("POST /anime/{source}/{id}/match", s.postMatch)
-	mux.HandleFunc("GET /anime/{source}/{id}/match/search", s.getMatchSearch)
+	mux.HandleFunc("POST /settings/plugins/{id}", s.postPlugin)
+	s.mountPlugins(mux)
 	return s, refuseCrossOrigin(mux)
 }
 
@@ -131,12 +131,12 @@ func isPartialRequest(r *http.Request) bool {
 // render executes the page into a buffer first so a template error yields a
 // clean 500 instead of a half-written response.
 func (s *server) render(w http.ResponseWriter, r *http.Request, page string, data any) {
-	s.execute(w, http.StatusOK, page, "base.html", data)
+	s.executeFor(w, r, http.StatusOK, page, "base.html", data)
 }
 
 // renderStatus is render with an explicit success-path status code.
-func (s *server) renderStatus(w http.ResponseWriter, status int, page string, data any) {
-	s.execute(w, status, page, "base.html", data)
+func (s *server) renderStatus(w http.ResponseWriter, r *http.Request, status int, page string, data any) {
+	s.executeFor(w, r, status, page, "base.html", data)
 }
 
 // renderPartial executes a named template of a page's set without the base layout.
@@ -152,6 +152,12 @@ func (s *server) renderPartialStatus(w http.ResponseWriter, status int, page, na
 // execute buffers the named template of a page's set. Responses vary by
 // HX-Request because the same URL can answer as a partial or a full page.
 func (s *server) execute(w http.ResponseWriter, status int, page, name string, data any) {
+	s.executeFor(w, nil, status, page, name, data)
+}
+
+// executeFor is execute for a request: a full page (base.html) gets the
+// navigation prepared for r. A nil r renders without navigation.
+func (s *server) executeFor(w http.ResponseWriter, r *http.Request, status int, page, name string, data any) {
 	w.Header().Add("Vary", "HX-Request")
 	t, ok := s.pages[page]
 	if !ok {
@@ -165,14 +171,31 @@ func (s *server) execute(w http.ResponseWriter, status int, page, name string, d
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
+	out := buf.Bytes()
+	if r != nil && name == "base.html" {
+		var nav bytes.Buffer
+		if err := navTemplate.ExecuteTemplate(&nav, "nav.html", s.navItems(r)); err != nil {
+			log.Printf("render nav: %v", err)
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+		out = bytes.Replace(out, []byte(navMarker), nav.Bytes(), 1)
+	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(status)
-	buf.WriteTo(w)
+	w.Write(out)
 }
 
-// index redirects the (former stub) home page to the list.
+// index redirects the home page to the first enabled plugin's list, or to
+// Settings when no plugin is enabled.
 func (s *server) index(w http.ResponseWriter, r *http.Request) {
-	http.Redirect(w, r, "/anime", http.StatusSeeOther)
+	for _, m := range s.deps.Registry.Manifests() {
+		if s.deps.Registry.IsEnabled(m.ID) {
+			http.Redirect(w, r, "/"+m.ID, http.StatusSeeOther)
+			return
+		}
+	}
+	http.Redirect(w, r, "/settings", http.StatusSeeOther)
 }
 
 // coversHandler serves files (never directory listings) from dir. Names are

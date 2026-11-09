@@ -184,7 +184,7 @@ func (s *server) showList(w http.ResponseWriter, r *http.Request, status string,
 		return
 	}
 	v.Dialog = dialog
-	s.renderStatus(w, code, "list", v)
+	s.renderStatus(w, r, code, "list", v)
 }
 
 // entryID parses the {id} wildcard; it writes a 404 page and returns false
@@ -192,7 +192,7 @@ func (s *server) showList(w http.ResponseWriter, r *http.Request, status string,
 func (s *server) entryID(w http.ResponseWriter, r *http.Request) (int64, bool) {
 	raw := r.PathValue("id")
 	if !isASCIIDigits(raw, maxIDDigits) {
-		s.errorPage(w, http.StatusNotFound, "Not found", "There is no such anime.", "")
+		s.errorPage(w, r, http.StatusNotFound, "Not found", "There is no such anime.", "")
 		return 0, false
 	}
 	id, _ := strconv.ParseInt(raw, 10, 64)
@@ -208,7 +208,7 @@ func (s *server) entryRow(w http.ResponseWriter, r *http.Request, id int64) (sto
 		return store.ListRow{}, false
 	}
 	if row == nil {
-		s.errorPage(w, http.StatusNotFound, "Not found", "There is no such entry in your list.", "")
+		s.errorPage(w, r, http.StatusNotFound, "Not found", "There is no such entry in your list.", "")
 		return store.ListRow{}, false
 	}
 	return *row, true
@@ -236,7 +236,7 @@ func (s *server) postIncrement(w http.ResponseWriter, r *http.Request) {
 	ret := safeReturn(r.PostFormValue("return"))
 	if err := s.deps.Store.IncrementProgress(r.Context(), id); err != nil {
 		if errors.Is(err, store.ErrNoEntry) {
-			s.errorPage(w, http.StatusNotFound, "Not found", "There is no such entry in your list.", "")
+			s.errorPage(w, r, http.StatusNotFound, "Not found", "There is no such entry in your list.", "")
 			return
 		}
 		s.fail(w, r, err, "")
@@ -338,7 +338,7 @@ func (s *server) postRemove(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := s.deps.Store.DeleteAnime(r.Context(), id); err != nil {
 		if errors.Is(err, store.ErrNoEntry) {
-			s.errorPage(w, http.StatusNotFound, "Not found", "There is no such anime.", "")
+			s.errorPage(w, r, http.StatusNotFound, "Not found", "There is no such anime.", "")
 			return
 		}
 		log.Printf("remove %d: %v", id, err)

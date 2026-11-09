@@ -53,6 +53,8 @@ func (s *server) getSettings(w http.ResponseWriter, r *http.Request) {
 		"Options":  opts,
 		"Selected": s.deps.Settings.TitleLang(r.Context()),
 		"Imports":  s.deps.Imports != nil,
+		"Plugins":  s.pluginRows(),
+		"Problems": s.deps.Registry.Problems(),
 	})
 }
 

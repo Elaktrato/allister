@@ -115,14 +115,14 @@ func (s *server) route(w http.ResponseWriter, r *http.Request) (provider.Source,
 	case src == provider.AniList && isASCIIDigits(id, maxIDDigits):
 	case src == provider.Manual && id != "" && len(id) <= 64:
 	default:
-		s.errorPage(w, http.StatusNotFound, "Not found", "There is no such anime.", "")
+		s.errorPage(w, r, http.StatusNotFound, "Not found", "There is no such anime.", "")
 		return "", "", false
 	}
 	return src, id, true
 }
 
-func (s *server) errorPage(w http.ResponseWriter, status int, title, msg, retry string) {
-	s.renderStatus(w, status, "error", errorView{Title: title, Message: msg, RetryURL: retry})
+func (s *server) errorPage(w http.ResponseWriter, r *http.Request, status int, title, msg, retry string) {
+	s.renderStatus(w, r, status, "error", errorView{Title: title, Message: msg, RetryURL: retry})
 }
 
 func providerMessage(err error) string {
@@ -136,10 +136,10 @@ func providerMessage(err error) string {
 func (s *server) fail(w http.ResponseWriter, r *http.Request, err error, retry string) {
 	switch {
 	case errors.Is(err, errNoSuchAnime), errors.Is(err, provider.ErrNotFound):
-		s.errorPage(w, http.StatusNotFound, "Not found", "There is no such anime.", "")
+		s.errorPage(w, r, http.StatusNotFound, "Not found", "There is no such anime.", "")
 	case errors.Is(err, provider.ErrRateLimited), errors.Is(err, provider.ErrUnavailable):
 		log.Printf("%s %s: %v", r.Method, r.URL.Path, err)
-		s.errorPage(w, http.StatusServiceUnavailable, "Temporarily unavailable", providerMessage(err), retry)
+		s.errorPage(w, r, http.StatusServiceUnavailable, "Temporarily unavailable", providerMessage(err), retry)
 	default:
 		log.Printf("%s %s: %v", r.Method, r.URL.Path, err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
@@ -332,7 +332,7 @@ func (s *server) showOverview(w http.ResponseWriter, r *http.Request, src provid
 		f = f.withStatuses()
 		v.Dialog = &f
 	}
-	s.renderStatus(w, status, "anime", v)
+	s.renderStatus(w, r, status, "anime", v)
 }
 
 // resolveAnime returns the anime for the add flow: saved row, fresh cache
@@ -375,7 +375,7 @@ func (s *server) resolveFailure(w http.ResponseWriter, r *http.Request, src prov
 			s.renderPartialStatus(w, http.StatusServiceUnavailable, "anime", "add_dialog", f.withStatuses())
 			return
 		}
-		s.errorPage(w, http.StatusServiceUnavailable, "Temporarily unavailable", f.Error, animeURL(string(src), id))
+		s.errorPage(w, r, http.StatusServiceUnavailable, "Temporarily unavailable", f.Error, animeURL(string(src), id))
 		return
 	}
 	s.fail(w, r, err, animeURL(string(src), id))
@@ -497,7 +497,7 @@ func (s *server) enqueueSync(ctx context.Context, animeID int64) {
 		log.Printf("enqueue sync for anime %d: no job queue", animeID)
 		return
 	}
-	if err := s.deps.Jobs.Enqueue(ctx, jobs.KindSyncAnime, jobs.SyncPayload{AnimeID: animeID}); err != nil {
+	if err := s.deps.Jobs.Enqueue(ctx, jobs.KindSyncAnime, jobs.SyncPayload{AnimeID: animeID, PluginID: animePluginID}); err != nil {
 		log.Printf("enqueue sync for anime %d: %v", animeID, err)
 	}
 }

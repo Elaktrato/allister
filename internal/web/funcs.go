@@ -13,6 +13,8 @@ import (
 
 // templateFuncs is the one FuncMap shared by every page template set.
 var templateFuncs = template.FuncMap{
+	// navMarker marks where base.html's navigation goes (see executeFor).
+	"navMarker": func() template.HTML { return template.HTML(navMarker) },
 	// coverSrc maps a stored image value to a URL (see covers.Src).
 	"coverSrc": covers.Src,
 	// title resolves a display title for the preferred language.

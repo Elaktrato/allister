@@ -30,12 +30,12 @@ type personPageView struct {
 func (s *server) getPerson(w http.ResponseWriter, r *http.Request) {
 	raw := r.PathValue("id")
 	if !isASCIIDigits(raw, maxIDDigits) {
-		s.personNotFound(w)
+		s.personNotFound(w, r)
 		return
 	}
 	id, err := strconv.ParseInt(raw, 10, 64)
 	if err != nil {
-		s.personNotFound(w)
+		s.personNotFound(w, r)
 		return
 	}
 	ctx := r.Context()
@@ -46,7 +46,7 @@ func (s *server) getPerson(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if p == nil {
-		s.personNotFound(w)
+		s.personNotFound(w, r)
 		return
 	}
 	apps, err := s.deps.Store.PersonAnime(ctx, id)
@@ -91,6 +91,6 @@ func (s *server) getPerson(w http.ResponseWriter, r *http.Request) {
 	s.render(w, r, "person", v)
 }
 
-func (s *server) personNotFound(w http.ResponseWriter) {
-	s.errorPage(w, http.StatusNotFound, "Not found", "There is no such person.", "")
+func (s *server) personNotFound(w http.ResponseWriter, r *http.Request) {
+	s.errorPage(w, r, http.StatusNotFound, "Not found", "There is no such person.", "")
 }

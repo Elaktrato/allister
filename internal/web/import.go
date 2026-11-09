@@ -135,7 +135,7 @@ func (s *server) postImport(w http.ResponseWriter, r *http.Request) {
 			s.fail(w, r, lerr, "")
 			return
 		}
-		s.renderStatus(w, status, "import", p)
+		s.renderStatus(w, r, status, "import", p)
 	}
 	fh := firstFile(r, "file")
 	if fh == nil {
@@ -202,7 +202,7 @@ func (s *server) postImportResume(w http.ResponseWriter, r *http.Request) {
 			s.fail(w, r, lerr, "")
 			return
 		}
-		s.renderStatus(w, status, "import", p)
+		s.renderStatus(w, r, status, "import", p)
 	}
 	switch {
 	case err == nil:
