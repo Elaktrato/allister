@@ -36,7 +36,7 @@ This document covers the shared foundation and the first media type, **anime**. 
 
 1. **Search**: query box, source switch (AniList / MyAnimeList), results with cover, title, type, episodes, year, studio, short synopsis, and an Add button. A "Can't find it? Add manually" entry point.
 2. **Overview page**: cover and "Add to list" button; info (type, episodes, aired dates, studio, source material); titles in multiple languages; synopsis; related entries (source material, prequels, sequels) ; characters with voice actors; a **Recommendations** row.
-3. **Add to list dialog** (over the overview): status (watching, plan to watch, paused, completed, dropped), rating, current episode (of total), start date, finish date, optional comment.
+3. **Add to list dialog** (over the overview): status (watching, plan to watch, paused, completed, dropped), rating (optional: empty means unrated; 0 to 10, where 0 is a valid rating the user can set), current episode (of total), start date, finish date, optional comment.
 4. **List page**: status tabs, rows with title, progress (with +1 episode button), score, status.
 5. **Character / voice actor local pages**: photo, name, and the anime in the user's list they appear in (voice actors also show the character played). Every character and voice actor shown on an overview also links to their AniList / MyAnimeList page; both links are shown (local and external).
 6. **Settings**: title language, import.
@@ -50,6 +50,7 @@ This document covers the shared foundation and the first media type, **anime**. 
 - Characters/voice actors get a local page and an external link.
 - Single user, no accounts.
 - Dashboards excluded; recommendations wanted (as light, on-demand references).
+- Ratings: unrated (no value) is distinct from a rating of 0; 0 to 10 are all valid ratings. Yamtrack scores of 0.0 import as unrated.
 - Yamtrack import wanted: roughly 800-900 anime, the general Yamtrack CSV export (contains other media types too; non-anime rows are skipped).
 
 ## Decisions made by me (the builder-side calls, to be checked)

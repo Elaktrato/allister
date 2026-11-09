@@ -27,7 +27,7 @@
 - Empty or whitespace-only search query: no provider request, neutral empty state.
 - Provider returns 429, 5xx or times out: the page shows a readable error with a retry, never a crash or blank page; Jikan 429 is retried with backoff.
 - AniList synopses contain HTML (`<br>`, `<i>`): shown as safe plain text with line breaks, never as raw tags or unescaped markup.
-- Progress above the known episode total, rating outside 1 to 10, finish date before start date: rejected with a validation message, nothing saved.
+- Progress above the known episode total, rating outside 0 to 10 (blank means unrated, 0 is a valid rating), finish date before start date: rejected with a validation message, nothing saved.
 - Yamtrack CSV with a UTF-8 BOM, unknown status values, non-anime rows, or re-imported twice: no crash, unknown rows reported, no duplicates created.
 
 ## File Structure
@@ -152,10 +152,10 @@ Dockerfile, docker-compose.yml, tailwind.config.js, README.md
   - `(*Store) SaveAnime(ctx, a provider.Anime) (int64, error)` (stores anime, all titles, relations; sets `sync_state='pending'`; returns `ErrAlreadySaved` for the same `(source, source_id)`).
   - `(*Store) FindBySource(ctx, source provider.Source, id string) (*Saved, error)` returning `nil, nil` when absent; `(*Store) SameMALEntry(ctx, a provider.Anime) (*Saved, error)` (matches a saved `mal`-source entry whose `source_id == a.MALID`).
   - `(*Store) SaveCast(ctx, animeID int64, cast []provider.CastMember) error`; `(*Store) PersonAnime(ctx, personID int64) ([]PersonAppearance, error)`.
-  - `(*Store) UpsertListEntry(ctx, e ListEntry) error` returning `ErrInvalid` (wrapping a message) when: rating outside 1 to 10, progress below 0 or above a known episode total, `FinishedOn` before `StartedOn`.
+  - `(*Store) UpsertListEntry(ctx, e ListEntry) error` returning `ErrInvalid` (wrapping a message) when: rating outside 0 to 10 (nil means unrated; 0 is valid), progress below 0 or above a known episode total, `FinishedOn` before `StartedOn`.
   - `(*Store) List(ctx, status *Status) ([]ListRow, error)`; `(*Store) IncrementProgress(ctx, animeID int64) error` (stops at the known total, no change when already there).
 
-- [ ] **Step 1: Write failing tests**: `TestSaveAnimeBlocksDuplicate`, `TestSameAnimeFromTwoSourcesAllowed`, `TestSameMALEntryFindsImportedEntry`, `TestUpsertRejectsRatingOutOfRange` (0 and 11), `TestUpsertRejectsProgressAboveTotal`, `TestUpsertRejectsFinishBeforeStart`, `TestIncrementStopsAtTotal`, `TestIncrementUnknownTotalKeepsCounting`, `TestSaveCastLinksVoiceActors`, `TestPersonAnimeOnlyReturnsSavedAnime`.
+- [ ] **Step 1: Write failing tests**: `TestSaveAnimeBlocksDuplicate`, `TestSameAnimeFromTwoSourcesAllowed`, `TestSameMALEntryFindsImportedEntry`, `TestUpsertRejectsRatingOutOfRange` (-1 and 11), `TestUpsertAcceptsZeroRating`, `TestUpsertAcceptsNilRating`, `TestUpsertRejectsProgressAboveTotal`, `TestUpsertRejectsFinishBeforeStart`, `TestIncrementStopsAtTotal`, `TestIncrementUnknownTotalKeepsCounting`, `TestSaveCastLinksVoiceActors`, `TestPersonAnimeOnlyReturnsSavedAnime`.
 - [ ] **Step 2:** Run `go test ./internal/store/...`. Expected: FAIL.
 - [ ] **Step 3:** Implement with plain `database/sql`.
 - [ ] **Step 4:** Run the tests. Expected: PASS.
@@ -186,7 +186,7 @@ Dockerfile, docker-compose.yml, tailwind.config.js, README.md
 
 **Interfaces:**
 - Consumes: Tasks 4 to 7. 
-- Produces: `GET /anime/{source}/{id}` (saved entry rendered from the database, otherwise live from the provider; recommendations and cast fetched live only when not saved); `GET /anime/{source}/{id}/add` (dialog partial); `POST /anime/{source}/{id}/add` (fields `status`, `rating`, `progress`, `started_on`, `finished_on`, `comment`) which saves the anime, enqueues job kind `sync_anime` with payload `{"anime_id": int}`, upserts the list entry, then redirects to `/anime`; validation errors re-render the dialog with the message and status 422; if `SameMALEntry` matches, the dialog first shows a warning with a "Add anyway" button (`confirm=1`). Person rows link to the provider page (`Person.URL`) and, when saved locally, also `/people/{id}`.
+- Produces: `GET /anime/{source}/{id}` (saved entry rendered from the database, otherwise live from the provider; recommendations and cast fetched live only when not saved); `GET /anime/{source}/{id}/add` (dialog partial); `POST /anime/{source}/{id}/add` (fields `status`, `rating` (blank = unrated, 0 to 10), `progress`, `started_on`, `finished_on`, `comment`) which saves the anime, enqueues job kind `sync_anime` with payload `{"anime_id": int}`, upserts the list entry, then redirects to `/anime`; validation errors re-render the dialog with the message and status 422; if `SameMALEntry` matches, the dialog first shows a warning with a "Add anyway" button (`confirm=1`). Person rows link to the provider page (`Person.URL`) and, when saved locally, also `/people/{id}`.
 
 - [ ] **Step 1: Write failing tests**: `TestOverviewLiveForUnsaved`, `TestOverviewFromDatabaseForSaved`, `TestOverviewShowsAllTitleLanguages`, `TestOverviewSynopsisHasNoRawHTML`, `TestAddCreatesEntryAndJob`, `TestAddRejectsInvalidRating` (422, nothing saved), `TestAddDuplicateIsBlocked`, `TestAddWarnsOnSameMALEntry`, `TestAddWithProviderDownUsesAlreadyFetchedDetails` (the overview data was fetched, the add succeeds without another provider call), `TestPersonLinksExternalOnlyWhenUnsaved`.
 - [ ] **Step 2:** Run `go test ./internal/web/...`. Expected: FAIL.
