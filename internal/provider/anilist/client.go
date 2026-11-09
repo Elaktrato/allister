@@ -24,6 +24,9 @@ const (
 	// first) are plenty for a detail page and keep the response small.
 	castPageSize = 25
 	recsPageSize = 10
+	// maxBodyBytes bounds how much of a response is read, so a misbehaving
+	// server or wrong base URL cannot exhaust memory.
+	maxBodyBytes = 8 << 20
 )
 
 const titleFields = `title { romaji english native }`
@@ -67,6 +70,7 @@ const castQuery = `query ($id: Int, $perPage: Int) {
 type Client struct {
 	baseURL string
 	hc      *http.Client
+	maxBody int64
 }
 
 var _ provider.Provider = (*Client)(nil)
@@ -77,7 +81,7 @@ func New(baseURL string, hc *http.Client) *Client {
 	if hc == nil {
 		hc = &http.Client{Timeout: 15 * time.Second}
 	}
-	return &Client{baseURL: baseURL, hc: hc}
+	return &Client{baseURL: baseURL, hc: hc, maxBody: maxBodyBytes}
 }
 
 // Name implements provider.Provider.
@@ -113,9 +117,12 @@ func (c *Client) do(ctx context.Context, query string, vars map[string]any, out 
 		return fmt.Errorf("anilist: request failed: %w: %v", provider.ErrUnavailable, err)
 	}
 	defer resp.Body.Close()
-	body, err := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(io.LimitReader(resp.Body, c.maxBody+1))
 	if err != nil {
 		return fmt.Errorf("anilist: read response: %w: %v", provider.ErrUnavailable, err)
+	}
+	if int64(len(body)) > c.maxBody {
+		return fmt.Errorf("anilist: response exceeds %d bytes: %w", c.maxBody, provider.ErrUnavailable)
 	}
 
 	var r gqlResponse

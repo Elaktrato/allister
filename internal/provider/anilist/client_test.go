@@ -118,18 +118,39 @@ func TestSearchCapsAtTwenty(t *testing.T) {
 	if _, err := c.Search(context.Background(), "x"); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(body, "perPage") && !strings.Contains(body, "20") {
-		t.Errorf("request does not cap at 20: %s", body)
+	var req struct {
+		Variables map[string]any `json:"variables"`
+	}
+	if err := json.Unmarshal([]byte(body), &req); err != nil {
+		t.Fatal(err)
+	}
+	if req.Variables["perPage"] != float64(20) {
+		t.Errorf("perPage = %v, want 20", req.Variables["perPage"])
 	}
 	// also cap client-side if the server over-delivers
 	var items []string
 	for i := 1; i <= 25; i++ {
-		items = append(items, `{"id":`+strings.Repeat("1", 1)+`,"title":{"romaji":"t"}}`)
+		items = append(items, `{"id":1,"title":{"romaji":"t"}}`)
 	}
 	c = serve(t, 200, []byte(`{"data":{"Page":{"media":[`+strings.Join(items, ",")+`]}}}`), nil)
 	res, err := c.Search(context.Background(), "x")
 	if err != nil || len(res) != 20 {
 		t.Fatalf("len=%d err=%v, want 20", len(res), err)
+	}
+}
+
+func TestOversizedResponseMapsUnavailable(t *testing.T) {
+	c := serve(t, 200, []byte(`{"data":{"Page":{"media":[]}}}`+strings.Repeat(" ", 100)), nil)
+	c.maxBody = 64
+	if _, err := c.Search(context.Background(), "x"); !errors.Is(err, provider.ErrUnavailable) {
+		t.Fatalf("err = %v", err)
+	}
+	// a body of exactly the limit is still accepted
+	body := `{"data":{"Page":{"media":[]}}}`
+	c = serve(t, 200, []byte(body), nil)
+	c.maxBody = int64(len(body))
+	if _, err := c.Search(context.Background(), "x"); err != nil {
+		t.Fatalf("body at limit: %v", err)
 	}
 }
 
@@ -288,7 +309,7 @@ func TestContextCancelled(t *testing.T) {
 	c := serve(t, 200, fixture(t, "search.json"), nil)
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if _, err := c.Search(ctx, "x"); err == nil {
-		t.Fatal("want error on cancelled ctx")
+	if _, err := c.Search(ctx, "x"); !errors.Is(err, context.Canceled) {
+		t.Fatalf("err = %v, want context.Canceled", err)
 	}
 }
