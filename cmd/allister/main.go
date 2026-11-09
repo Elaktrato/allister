@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -44,8 +45,12 @@ func run() error {
 		provider.AniList: anilist.New(anilist.DefaultURL, nil),
 	}
 
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	sigCtx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
+	// The worker outlives the HTTP drain: an in-flight request may still
+	// enqueue a job.
+	workerCtx, stopWorker := context.WithCancel(context.Background())
+	defer stopWorker()
 
 	// One worker, at least 2s between jobs to respect AniList's rate limit.
 	queue := jobs.NewQueue(database, jobs.WithMinInterval(2*time.Second))
@@ -58,9 +63,10 @@ func run() error {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		queue.Run(ctx)
+		queue.Run(workerCtx)
 	}()
 
+	// No Read/WriteTimeout: uploads and slow responses must not be cut off.
 	srv := &http.Server{
 		Addr: ":" + cfg.Port,
 		Handler: web.NewServer(web.Deps{
@@ -69,19 +75,43 @@ func run() error {
 			Jobs:      queue,
 			CoversDir: coversDir,
 		}),
+		ReadHeaderTimeout: 10 * time.Second,
+		IdleTimeout:       120 * time.Second,
 	}
-	go func() {
-		<-ctx.Done()
-		shutCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		srv.Shutdown(shutCtx)
-	}()
 	log.Printf("listening on %s (data dir %s)", srv.Addr, cfg.DataDir)
-	err = srv.ListenAndServe()
-	stop()
+	err = serve(sigCtx, srv, 10*time.Second)
+	// HTTP is drained (or failed to start): now stop the worker, then the DB closes.
+	stopWorker()
 	wg.Wait()
-	if errors.Is(err, http.ErrServerClosed) {
-		return nil
-	}
 	return err
+}
+
+// serve listens on srv.Addr and runs srv until ctx is cancelled, then shuts it
+// down gracefully and returns only after Shutdown has finished. A normal
+// shutdown returns nil; a listen/serve failure is returned.
+func serve(ctx context.Context, srv *http.Server, shutdownTimeout time.Duration) error {
+	ln, err := net.Listen("tcp", srv.Addr)
+	if err != nil {
+		return err
+	}
+	return serveListener(ctx, srv, ln, shutdownTimeout)
+}
+
+func serveListener(ctx context.Context, srv *http.Server, ln net.Listener, shutdownTimeout time.Duration) error {
+	errc := make(chan error, 1)
+	go func() { errc <- srv.Serve(ln) }()
+	select {
+	case err := <-errc:
+		return err
+	case <-ctx.Done():
+	}
+	shutCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
+	defer cancel()
+	if err := srv.Shutdown(shutCtx); err != nil {
+		log.Printf("http shutdown: %v", err)
+	}
+	if err := <-errc; err != nil && !errors.Is(err, http.ErrServerClosed) {
+		return err
+	}
+	return nil
 }
