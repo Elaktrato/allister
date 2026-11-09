@@ -2,8 +2,9 @@ package plugin_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
-	"reflect"
+	"math"
 	"strings"
 	"sync"
 	"testing"
@@ -179,9 +180,21 @@ func TestManifestSnapshotIsImmutable(t *testing.T) {
 	if err := r.Register(p); err != nil {
 		t.Fatal(err)
 	}
-	want, ok := r.Manifest("book")
+	first, ok := r.Manifest("book")
 	if !ok {
 		t.Fatal("manifest missing")
+	}
+	// independent reference: serialised bytes cannot alias registry state
+	wantJSON, err := json.Marshal(first)
+	if err != nil {
+		t.Fatal(err)
+	}
+	same := func(what string, m plugin.Manifest) {
+		t.Helper()
+		b, _ := json.Marshal(m)
+		if string(b) != string(wantJSON) {
+			t.Fatalf("%s changed what the registry serves:\n got %s\nwant %s", what, b, wantJSON)
+		}
 	}
 	// mutate the plugin's own manifest after registration, including nested data
 	p.M.Name = "changed"
@@ -192,9 +205,8 @@ func TestManifestSnapshotIsImmutable(t *testing.T) {
 	p.M.Kinds[0].Progress.Combinations[0][0] = "changed"
 	p.M.Sources[0].URLPatterns[0] = "changed"
 	p.M.DefaultEnabled = false
-	if got, _ := r.Manifest("book"); !reflect.DeepEqual(got, want) {
-		t.Fatalf("plugin mutation leaked into the registry:\n got %+v\nwant %+v", got, want)
-	}
+	got0, _ := r.Manifest("book")
+	same("mutating the plugin's manifest", got0)
 	// mutate a manifest handed out by the registry
 	got, _ := r.Manifest("book")
 	got.Name = "changed"
@@ -203,15 +215,13 @@ func TestManifestSnapshotIsImmutable(t *testing.T) {
 	*got.Kinds[0].Fields[1].Min = 77
 	got.Kinds[0].Progress.Defaults[0] = "changed"
 	got.Sources[0].URLPatterns[0] = "changed"
-	if again, _ := r.Manifest("book"); !reflect.DeepEqual(again, want) {
-		t.Fatalf("returned manifest shares state with the registry:\n got %+v\nwant %+v", again, want)
-	}
+	again, _ := r.Manifest("book")
+	same("mutating a returned manifest", again)
 	all := r.Manifests()
 	all[0].Kinds[0].Fields[1].Label = "changed"
-	if again, _ := r.Manifest("book"); !reflect.DeepEqual(again, want) {
-		t.Fatal("Manifests() shares state with the registry")
-	}
-	if err := plugin.Validate(want); err != nil {
+	again, _ = r.Manifest("book")
+	same("mutating Manifests()", again)
+	if err := plugin.Validate(again); err != nil {
 		t.Fatalf("snapshot must be valid: %v", err)
 	}
 }
@@ -276,5 +286,16 @@ func TestDateOnlyNormalisesToUTCMidnight(t *testing.T) {
 	got := plugin.DateOnly(time.Date(2024, 3, 5, 23, 30, 0, 0, loc))
 	if want := time.Date(2024, 3, 5, 0, 0, 0, 0, time.UTC); !got.Equal(want) {
 		t.Fatalf("got %v want %v", got, want)
+	}
+}
+
+func TestRegisterExplainsNonFiniteBound(t *testing.T) {
+	r := plugin.NewRegistry(plugintest.NewMemEnabled())
+	p := plugintest.BookPlugin()
+	n := math.NaN()
+	p.M.Kinds[0].Fields[1].Min = &n
+	err := r.Register(p)
+	if err == nil || !strings.Contains(err.Error(), "fields[1].min: must be a finite number") {
+		t.Fatalf("got %v", err)
 	}
 }

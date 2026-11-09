@@ -5,8 +5,10 @@ import "time"
 // Dates in this contract (FieldValue.Date, ParsedEntry.StartedOn/FinishedOn,
 // ExportEntry.StartedOn/FinishedOn) are CALENDAR DAYS: the value is the UTC
 // midnight of that day and only the date part is meaningful. The type stays
-// *time.Time (JSON RFC 3339, e.g. 2024-03-05T00:00:00Z); producers must pass
-// DateOnly values and the core normalises with DateOnly.
+// *time.Time (JSON RFC 3339, e.g. 2024-03-05T00:00:00Z). Nothing in this
+// package enforces the convention: producers (plugins, importers) should
+// supply UTC-midnight values, and consumers that persist dates (the library,
+// added in a later task) should normalise them with DateOnly.
 
 // DateOnly returns the UTC midnight of t's calendar date (in t's own zone).
 func DateOnly(t time.Time) time.Time {
@@ -25,7 +27,7 @@ type Title struct {
 type FieldValue struct {
 	Text string     `json:"text,omitempty"`
 	Num  *float64   `json:"num,omitempty"`
-	Date *time.Time `json:"date,omitempty"` // calendar day, UTC midnight
+	Date *time.Time `json:"date,omitempty"` // calendar day, UTC midnight by convention (see DateOnly)
 	List []string   `json:"list,omitempty"`
 }
 
@@ -87,8 +89,8 @@ type ParsedEntry struct {
 	Status      StatusClass        `json:"status,omitempty"`
 	Rating      *int               `json:"rating,omitempty"`
 	Progress    map[string]float64 `json:"progress,omitempty"`
-	StartedOn   *time.Time         `json:"started_on,omitempty"`  // calendar day, UTC midnight
-	FinishedOn  *time.Time         `json:"finished_on,omitempty"` // calendar day, UTC midnight
+	StartedOn   *time.Time         `json:"started_on,omitempty"`  // calendar day, UTC midnight by convention (see DateOnly)
+	FinishedOn  *time.Time         `json:"finished_on,omitempty"` // calendar day, UTC midnight by convention (see DateOnly)
 	Comment     string             `json:"comment,omitempty"`
 	CoverURL    string             `json:"cover_url,omitempty"`
 	Notes       []string           `json:"notes,omitempty"`
@@ -115,7 +117,7 @@ type ExportEntry struct {
 	Status      StatusClass        `json:"status,omitempty"`
 	Rating      *int               `json:"rating,omitempty"`
 	Progress    map[string]float64 `json:"progress,omitempty"`
-	StartedOn   *time.Time         `json:"started_on,omitempty"`  // calendar day, UTC midnight
-	FinishedOn  *time.Time         `json:"finished_on,omitempty"` // calendar day, UTC midnight
+	StartedOn   *time.Time         `json:"started_on,omitempty"`  // calendar day, UTC midnight by convention (see DateOnly)
+	FinishedOn  *time.Time         `json:"finished_on,omitempty"` // calendar day, UTC midnight by convention (see DateOnly)
 	Comment     string             `json:"comment,omitempty"`
 }

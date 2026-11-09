@@ -3,6 +3,7 @@ package plugin
 import (
 	"errors"
 	"fmt"
+	"math"
 	"regexp"
 	"strings"
 )
@@ -170,6 +171,12 @@ func validateKind(p *problems, path string, k KindDef) {
 		if f.Type != FieldEnum && len(f.EnumValues) > 0 {
 			p.add(fp+".enum_values", "only enum fields take values")
 		}
+		if f.Min != nil && !finite(*f.Min) {
+			p.add(fp+".min", "must be a finite number")
+		}
+		if f.Max != nil && !finite(*f.Max) {
+			p.add(fp+".max", "must be a finite number")
+		}
 		if f.Min != nil && f.Max != nil && *f.Min > *f.Max {
 			p.add(fp, "min %v is above max %v", *f.Min, *f.Max)
 		}
@@ -289,3 +296,5 @@ func sameSet(a, b []string) bool {
 	}
 	return true
 }
+
+func finite(f float64) bool { return !math.IsNaN(f) && !math.IsInf(f, 0) }

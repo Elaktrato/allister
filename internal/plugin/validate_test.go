@@ -1,6 +1,7 @@
 package plugin_test
 
 import (
+	"math"
 	"strings"
 	"testing"
 
@@ -90,6 +91,14 @@ func TestValidateRejects(t *testing.T) {
 		{"duplicate kind", tv, func(m *plugin.Manifest) { m.Kinds = append(m.Kinds, m.Kinds[0]) }, `kinds[1].key: duplicate "show"`},
 		{"missing status label", tv, func(m *plugin.Manifest) { m.Kinds[0].Statuses.Paused = "" }, `kinds[0].statuses.paused: label required`},
 		{"unknown field type", tv, func(m *plugin.Manifest) { m.Kinds[0].Fields[1].Type = "blob" }, `kinds[0].fields[1].type: unknown field type "blob"`},
+		{"min is NaN", tv, func(m *plugin.Manifest) {
+			n := math.NaN()
+			m.Kinds[0].Fields[1].Min = &n
+		}, `kinds[0].fields[1].min: must be a finite number`},
+		{"max is Inf", tv, func(m *plugin.Manifest) {
+			n := math.Inf(1)
+			m.Kinds[0].Fields[1].Max = &n
+		}, `kinds[0].fields[1].max: must be a finite number`},
 		{"min above max", tv, func(m *plugin.Manifest) {
 			lo, hi := 5.0, 1.0
 			m.Kinds[0].Fields[1].Min, m.Kinds[0].Fields[1].Max = &lo, &hi

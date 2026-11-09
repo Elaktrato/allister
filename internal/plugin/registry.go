@@ -21,7 +21,9 @@ type entry struct {
 }
 
 // cloneManifest deep-copies m through its JSON form, which also exercises the
-// contract's serialisable guarantee.
+// contract's serialisable guarantee. Observable effects: empty non-nil slices
+// come back nil, and a manifest that cannot be marshalled (for example a NaN or
+// Inf bound) yields an error, which Register reports as "not serialisable".
 func cloneManifest(m Manifest) (Manifest, error) {
 	b, err := json.Marshal(m)
 	if err != nil {
@@ -75,6 +77,10 @@ func (r *Registry) Register(p Plugin) (err error) {
 	id = raw.ID
 	m, cerr := cloneManifest(raw)
 	if cerr != nil {
+		// prefer the precise validation reasons when there are any
+		if verr := Validate(raw); verr != nil {
+			return fmt.Errorf("plugin %q: refused, invalid manifest: %s", id, strings.ReplaceAll(verr.Error(), "\n", "; "))
+		}
 		return fmt.Errorf("plugin %q: refused, manifest is not serialisable: %v", id, cerr)
 	}
 	if verr := Validate(m); verr != nil {
