@@ -2,6 +2,7 @@ package plugin
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"sync"
@@ -16,7 +17,21 @@ type EnabledStore interface {
 
 type entry struct {
 	p Plugin
-	m Manifest // snapshot taken at registration
+	m Manifest // validated deep copy taken at registration; the only manifest data the registry reads
+}
+
+// cloneManifest deep-copies m through its JSON form, which also exercises the
+// contract's serialisable guarantee.
+func cloneManifest(m Manifest) (Manifest, error) {
+	b, err := json.Marshal(m)
+	if err != nil {
+		return Manifest{}, err
+	}
+	var out Manifest
+	if err := json.Unmarshal(b, &out); err != nil {
+		return Manifest{}, err
+	}
+	return out, nil
 }
 
 // Registry holds the installed plugins in registration order. It is safe for
@@ -36,7 +51,9 @@ func NewRegistry(store EnabledStore) *Registry {
 	return &Registry{store: store, byID: map[string]entry{}}
 }
 
-// Register validates p and adds it. It refuses nil or panicking
+// Register validates p and adds it. It calls p.Manifest() exactly once, deep
+// copies the result, validates the copy and keeps only that snapshot: later
+// changes to the plugin's manifest have no effect on the registry. It refuses nil or panicking
 // implementations, invalid manifests (see Validate), reserved ids and ids that
 // are already registered. Every refusal is recorded in Problems and returned.
 func (r *Registry) Register(p Plugin) (err error) {
@@ -54,8 +71,12 @@ func (r *Registry) Register(p Plugin) (err error) {
 	if p == nil {
 		return fmt.Errorf("plugin %q: refused, implementation is nil", id)
 	}
-	m := p.Manifest() // a nil pointer implementation panics here and is recovered
-	id = m.ID
+	raw := p.Manifest() // called once; a nil pointer implementation panics here and is recovered
+	id = raw.ID
+	m, cerr := cloneManifest(raw)
+	if cerr != nil {
+		return fmt.Errorf("plugin %q: refused, manifest is not serialisable: %v", id, cerr)
+	}
 	if verr := Validate(m); verr != nil {
 		return fmt.Errorf("plugin %q: refused, invalid manifest: %s", id, strings.ReplaceAll(verr.Error(), "\n", "; "))
 	}
@@ -68,6 +89,40 @@ func (r *Registry) Register(p Plugin) (err error) {
 	r.entries = append(r.entries, e)
 	r.byID[m.ID] = e
 	return nil
+}
+
+// Manifest returns a deep copy of the validated manifest snapshot of the
+// installed plugin (enabled or not); callers cannot modify registry state.
+func (r *Registry) Manifest(id string) (Manifest, bool) {
+	r.mu.RLock()
+	e, ok := r.byID[id]
+	r.mu.RUnlock()
+	if !ok {
+		return Manifest{}, false
+	}
+	return mustClone(e.m), true
+}
+
+// Manifests returns deep copies of every installed manifest in registration order.
+func (r *Registry) Manifests() []Manifest {
+	r.mu.RLock()
+	entries := append([]entry(nil), r.entries...)
+	r.mu.RUnlock()
+	out := make([]Manifest, len(entries))
+	for i, e := range entries {
+		out[i] = mustClone(e.m)
+	}
+	return out
+}
+
+// mustClone copies a manifest that already survived cloneManifest once, so it
+// cannot fail.
+func mustClone(m Manifest) Manifest {
+	c, err := cloneManifest(m)
+	if err != nil {
+		panic("plugin: snapshot no longer serialisable: " + err.Error())
+	}
+	return c
 }
 
 // Problems lists the refused plugins with their reasons, in the order they

@@ -253,7 +253,8 @@ func (f *FakeImporter) Parse(ctx context.Context, r io.Reader) (plugin.ParseResu
 	return f.Result, nil
 }
 
-// MemEnabled is an in-memory plugin.EnabledStore, safe for concurrent use.
+// MemEnabled is an in-memory plugin.EnabledStore, safe for concurrent use. The
+// zero value is ready to use.
 type MemEnabled struct {
 	mu  sync.Mutex
 	m   map[string]bool
@@ -287,6 +288,9 @@ func (s *MemEnabled) SetEnabled(ctx context.Context, id string, on bool) error {
 	defer s.mu.Unlock()
 	if s.err != nil {
 		return s.err
+	}
+	if s.m == nil {
+		s.m = map[string]bool{}
 	}
 	s.m[id] = on
 	return nil

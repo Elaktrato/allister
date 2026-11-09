@@ -15,7 +15,9 @@ var (
 	ErrUnavailable = errors.New("plugin: unavailable")
 )
 
-// Plugin is a compiled-in or (later) loaded plugin. Source, Importer and
+// Plugin is a compiled-in or (later) loaded plugin. Manifest is called once,
+// when the plugin is registered; the registry validates and keeps a deep copy,
+// so later changes to what Manifest would return have no effect. Source, Importer and
 // Exporter return nil for ids the manifest does not declare.
 type Plugin interface {
 	Manifest() Manifest

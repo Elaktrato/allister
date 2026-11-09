@@ -2,6 +2,18 @@ package plugin
 
 import "time"
 
+// Dates in this contract (FieldValue.Date, ParsedEntry.StartedOn/FinishedOn,
+// ExportEntry.StartedOn/FinishedOn) are CALENDAR DAYS: the value is the UTC
+// midnight of that day and only the date part is meaningful. The type stays
+// *time.Time (JSON RFC 3339, e.g. 2024-03-05T00:00:00Z); producers must pass
+// DateOnly values and the core normalises with DateOnly.
+
+// DateOnly returns the UTC midnight of t's calendar date (in t's own zone).
+func DateOnly(t time.Time) time.Time {
+	y, m, d := t.Date()
+	return time.Date(y, m, d, 0, 0, 0, 0, time.UTC)
+}
+
 // Title is one title of an item in one language.
 type Title struct {
 	Lang string `json:"lang"`
@@ -13,7 +25,7 @@ type Title struct {
 type FieldValue struct {
 	Text string     `json:"text,omitempty"`
 	Num  *float64   `json:"num,omitempty"`
-	Date *time.Time `json:"date,omitempty"`
+	Date *time.Time `json:"date,omitempty"` // calendar day, UTC midnight
 	List []string   `json:"list,omitempty"`
 }
 
@@ -75,8 +87,8 @@ type ParsedEntry struct {
 	Status      StatusClass        `json:"status,omitempty"`
 	Rating      *int               `json:"rating,omitempty"`
 	Progress    map[string]float64 `json:"progress,omitempty"`
-	StartedOn   *time.Time         `json:"started_on,omitempty"`
-	FinishedOn  *time.Time         `json:"finished_on,omitempty"`
+	StartedOn   *time.Time         `json:"started_on,omitempty"`  // calendar day, UTC midnight
+	FinishedOn  *time.Time         `json:"finished_on,omitempty"` // calendar day, UTC midnight
 	Comment     string             `json:"comment,omitempty"`
 	CoverURL    string             `json:"cover_url,omitempty"`
 	Notes       []string           `json:"notes,omitempty"`
@@ -103,7 +115,7 @@ type ExportEntry struct {
 	Status      StatusClass        `json:"status,omitempty"`
 	Rating      *int               `json:"rating,omitempty"`
 	Progress    map[string]float64 `json:"progress,omitempty"`
-	StartedOn   *time.Time         `json:"started_on,omitempty"`
-	FinishedOn  *time.Time         `json:"finished_on,omitempty"`
+	StartedOn   *time.Time         `json:"started_on,omitempty"`  // calendar day, UTC midnight
+	FinishedOn  *time.Time         `json:"finished_on,omitempty"` // calendar day, UTC midnight
 	Comment     string             `json:"comment,omitempty"`
 }

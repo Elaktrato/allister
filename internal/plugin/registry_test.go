@@ -3,9 +3,11 @@ package plugin_test
 import (
 	"context"
 	"errors"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/allister/allister/internal/plugin"
 	"github.com/allister/allister/internal/plugin/plugintest"
@@ -168,5 +170,111 @@ func TestRegistryConcurrentUse(t *testing.T) {
 	wg.Wait()
 	if n := len(r.Plugins()); n != 20 {
 		t.Fatalf("plugins: %d", n)
+	}
+}
+
+func TestManifestSnapshotIsImmutable(t *testing.T) {
+	r := plugin.NewRegistry(plugintest.NewMemEnabled())
+	p := plugintest.BookPlugin()
+	if err := r.Register(p); err != nil {
+		t.Fatal(err)
+	}
+	want, ok := r.Manifest("book")
+	if !ok {
+		t.Fatal("manifest missing")
+	}
+	// mutate the plugin's own manifest after registration, including nested data
+	p.M.Name = "changed"
+	p.M.Kinds[0].Label = "changed"
+	p.M.Kinds[0].TitleLanguages[0] = "xx"
+	*p.M.Kinds[0].Fields[1].Min = 99
+	p.M.Kinds[0].Progress.Eligible[0].TotalField = "changed"
+	p.M.Kinds[0].Progress.Combinations[0][0] = "changed"
+	p.M.Sources[0].URLPatterns[0] = "changed"
+	p.M.DefaultEnabled = false
+	if got, _ := r.Manifest("book"); !reflect.DeepEqual(got, want) {
+		t.Fatalf("plugin mutation leaked into the registry:\n got %+v\nwant %+v", got, want)
+	}
+	// mutate a manifest handed out by the registry
+	got, _ := r.Manifest("book")
+	got.Name = "changed"
+	got.Kinds[0].Label = "changed"
+	got.Kinds[0].TitleLanguages[0] = "xx"
+	*got.Kinds[0].Fields[1].Min = 77
+	got.Kinds[0].Progress.Defaults[0] = "changed"
+	got.Sources[0].URLPatterns[0] = "changed"
+	if again, _ := r.Manifest("book"); !reflect.DeepEqual(again, want) {
+		t.Fatalf("returned manifest shares state with the registry:\n got %+v\nwant %+v", again, want)
+	}
+	all := r.Manifests()
+	all[0].Kinds[0].Fields[1].Label = "changed"
+	if again, _ := r.Manifest("book"); !reflect.DeepEqual(again, want) {
+		t.Fatal("Manifests() shares state with the registry")
+	}
+	if err := plugin.Validate(want); err != nil {
+		t.Fatalf("snapshot must be valid: %v", err)
+	}
+}
+
+func TestRegistryManifestsInRegistrationOrder(t *testing.T) {
+	r := plugin.NewRegistry(plugintest.NewMemEnabled())
+	for _, id := range []string{"zeta", "alpha", "mid"} {
+		if err := r.Register(plugintest.TVPlugin(plugintest.WithID(id))); err != nil {
+			t.Fatal(err)
+		}
+	}
+	_ = r.Register(plugintest.TVPlugin(plugintest.WithID("api"))) // refused, absent
+	var got []string
+	for _, m := range r.Manifests() {
+		got = append(got, m.ID)
+	}
+	if !eq(got, []string{"zeta", "alpha", "mid"}) {
+		t.Fatalf("got %v", got)
+	}
+}
+
+func TestManifestUnknownID(t *testing.T) {
+	r := plugin.NewRegistry(plugintest.NewMemEnabled())
+	_ = r.Register(plugintest.BookPlugin())
+	if m, ok := r.Manifest("ghost"); ok || m.ID != "" {
+		t.Fatalf("got %+v %v", m, ok)
+	}
+}
+
+func TestDefaultEnabledComesFromSnapshot(t *testing.T) {
+	r := plugin.NewRegistry(plugintest.NewMemEnabled())
+	p := plugintest.BookPlugin()
+	_ = r.Register(p)
+	p.M.DefaultEnabled = false // after registration: must have no effect
+	if !r.IsEnabled("book") || len(r.Enabled()) != 1 {
+		t.Fatal("default flag was read from the live plugin")
+	}
+	q := plugintest.BookPlugin(plugintest.WithID("late"), plugintest.WithDefaultEnabled(false))
+	_ = r.Register(q)
+	q.M.DefaultEnabled = true
+	if r.IsEnabled("late") {
+		t.Fatal("default flag was read from the live plugin")
+	}
+}
+
+func TestMemEnabledZeroValue(t *testing.T) {
+	var s plugintest.MemEnabled
+	ctx := context.Background()
+	if v, err := s.IsEnabled(ctx, "x", true); err != nil || !v {
+		t.Fatal(v, err)
+	}
+	if err := s.SetEnabled(ctx, "x", false); err != nil {
+		t.Fatal(err)
+	}
+	if v, _ := s.IsEnabled(ctx, "x", true); v {
+		t.Fatal("not stored")
+	}
+}
+
+func TestDateOnlyNormalisesToUTCMidnight(t *testing.T) {
+	loc := time.FixedZone("x", 5*3600)
+	got := plugin.DateOnly(time.Date(2024, 3, 5, 23, 30, 0, 0, loc))
+	if want := time.Date(2024, 3, 5, 0, 0, 0, 0, time.UTC); !got.Equal(want) {
+		t.Fatalf("got %v want %v", got, want)
 	}
 }
