@@ -226,3 +226,52 @@ func TestSearchOmitsNilFields(t *testing.T) {
 		}
 	}
 }
+
+func TestIsPartialRequest(t *testing.T) {
+	cases := []struct {
+		hx, restore string
+		want        bool
+	}{
+		{"", "", false},
+		{"true", "", true},
+		{"true", "true", false},
+		{"", "true", false},
+		{"false", "", false},
+	}
+	for _, c := range cases {
+		r := httptest.NewRequest(http.MethodGet, "/", nil)
+		if c.hx != "" {
+			r.Header.Set("HX-Request", c.hx)
+		}
+		if c.restore != "" {
+			r.Header.Set("HX-History-Restore-Request", c.restore)
+		}
+		if got := isPartialRequest(r); got != c.want {
+			t.Errorf("hx=%q restore=%q got %v", c.hx, c.restore, got)
+		}
+	}
+}
+
+func TestSearchHistoryRestoreGetsFullPage(t *testing.T) {
+	fp := &fakeProvider{results: []provider.SearchResult{sampleResult()}}
+	h, _ := searchServer(t, fp)
+	req := httptest.NewRequest(http.MethodGet, "/anime/search?q=x", nil)
+	req.Header.Set("HX-Request", "true")
+	req.Header.Set("HX-History-Restore-Request", "true")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if !strings.Contains(rec.Body.String(), "<html") {
+		t.Fatal("history restore got partial")
+	}
+}
+
+func TestSearchVaryHXRequest(t *testing.T) {
+	fp := &fakeProvider{}
+	h, _ := searchServer(t, fp)
+	for _, htmx := range []bool{false, true} {
+		vary := strings.Join(doSearch(h, "x", htmx).Header().Values("Vary"), ",")
+		if !strings.Contains(vary, "HX-Request") {
+			t.Fatalf("htmx=%v Vary=%q", htmx, vary)
+		}
+	}
+}

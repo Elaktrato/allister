@@ -66,9 +66,30 @@ func NewServer(deps Deps) http.Handler {
 	return mux
 }
 
+// isPartialRequest reports whether r is an htmx request that wants only a
+// fragment. htmx also sends HX-Request on a history cache miss (together with
+// HX-History-Restore-Request) and then swaps the response into the body, so
+// that case needs the full page.
+func isPartialRequest(r *http.Request) bool {
+	return r.Header.Get("HX-Request") == "true" &&
+		r.Header.Get("HX-History-Restore-Request") != "true"
+}
+
 // render executes the page into a buffer first so a template error yields a
 // clean 500 instead of a half-written response.
 func (s *server) render(w http.ResponseWriter, r *http.Request, page string, data any) {
+	s.execute(w, page, "base.html", data)
+}
+
+// renderPartial executes a named template of a page's set without the base layout.
+func (s *server) renderPartial(w http.ResponseWriter, page, name string, data any) {
+	s.execute(w, page, name, data)
+}
+
+// execute buffers the named template of a page's set. Responses vary by
+// HX-Request because the same URL can answer as a partial or a full page.
+func (s *server) execute(w http.ResponseWriter, page, name string, data any) {
+	w.Header().Add("Vary", "HX-Request")
 	t, ok := s.pages[page]
 	if !ok {
 		log.Printf("render: unknown page %q", page)
@@ -76,8 +97,8 @@ func (s *server) render(w http.ResponseWriter, r *http.Request, page string, dat
 		return
 	}
 	var buf bytes.Buffer
-	if err := t.ExecuteTemplate(&buf, "base.html", data); err != nil {
-		log.Printf("render %s: %v", page, err)
+	if err := t.ExecuteTemplate(&buf, name, data); err != nil {
+		log.Printf("render %s/%s: %v", page, name, err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
@@ -87,22 +108,4 @@ func (s *server) render(w http.ResponseWriter, r *http.Request, page string, dat
 
 func (s *server) index(w http.ResponseWriter, r *http.Request) {
 	s.render(w, r, "index", nil)
-}
-
-// renderPartial executes a named template of a page's set without the base layout.
-func (s *server) renderPartial(w http.ResponseWriter, page, name string, data any) {
-	t, ok := s.pages[page]
-	if !ok {
-		log.Printf("renderPartial: unknown page %q", page)
-		http.Error(w, "internal error", http.StatusInternalServerError)
-		return
-	}
-	var buf bytes.Buffer
-	if err := t.ExecuteTemplate(&buf, name, data); err != nil {
-		log.Printf("renderPartial %s/%s: %v", page, name, err)
-		http.Error(w, "internal error", http.StatusInternalServerError)
-		return
-	}
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	buf.WriteTo(w)
 }

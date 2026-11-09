@@ -48,7 +48,7 @@ func (s *server) search(w http.ResponseWriter, r *http.Request) {
 	if q != "" {
 		s.runSearch(r, q, &v)
 	}
-	if r.Header.Get("HX-Request") == "true" {
+	if isPartialRequest(r) {
 		s.renderPartial(w, "search", "search_results", v)
 		return
 	}
