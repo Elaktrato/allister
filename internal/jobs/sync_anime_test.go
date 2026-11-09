@@ -221,7 +221,7 @@ func TestSyncAnimeCastFailureLeavesPartial(t *testing.T) {
 		id := e.save(t, provider.AniList, e.srv.URL+"/ok/cover")
 		e.prov.err = perr
 		err := e.run(id)
-		if !errors.Is(err, perr) || errors.Is(err, ErrRetryLater) {
+		if !errors.Is(err, perr) || !errors.Is(err, ErrRetryLater) {
 			t.Fatalf("err = %v", err)
 		}
 		if s := e.saved(t, id); s.SyncState != "partial" || !isLocal(s.CoverPath) {

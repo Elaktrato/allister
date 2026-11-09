@@ -109,8 +109,8 @@ func (q *Queue) stamp(t time.Time) string { return t.UTC().Format(timeLayout) }
 // Run processes jobs until ctx is cancelled. Jobs left in state running by a
 // crash are reset to pending first.
 func (q *Queue) Run(ctx context.Context) {
-	if _, err := q.db.ExecContext(ctx, `UPDATE jobs SET state='pending' WHERE state='running'`); err != nil {
-		log.Printf("jobs: reset running jobs: %v", err)
+	if err := q.Recover(ctx); err != nil {
+		log.Printf("jobs: %v", err)
 	}
 	for ctx.Err() == nil {
 		ran, err := q.runOnce(ctx)
@@ -125,6 +125,16 @@ func (q *Queue) Run(ctx context.Context) {
 		case <-time.After(q.poll):
 		}
 	}
+}
+
+// Recover resets jobs left in state running by a crash to pending. Run does
+// this itself; call it earlier (before SweepSync) when startup work needs the
+// reset to have happened. It is idempotent.
+func (q *Queue) Recover(ctx context.Context) error {
+	if _, err := q.db.ExecContext(ctx, `UPDATE jobs SET state='pending' WHERE state='running'`); err != nil {
+		return fmt.Errorf("reset running jobs: %w", err)
+	}
+	return nil
 }
 
 // runOnce claims and runs one due job. It reports false when nothing was run

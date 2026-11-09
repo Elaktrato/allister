@@ -224,3 +224,27 @@ func (s *Store) CoverReferenced(ctx context.Context, name string) (bool, error) 
 	}
 	return n > 0, nil
 }
+
+// NeedsSync returns the ids of anime whose sync_state is pending or partial
+// and that have no job of the given kind in state pending or running (jobs
+// match by payload anime_id). Failed and done jobs do not count as live.
+func (s *Store) NeedsSync(ctx context.Context, jobKind string) ([]int64, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT a.id FROM anime a
+		WHERE a.sync_state IN ('pending','partial')
+		AND NOT EXISTS (SELECT 1 FROM jobs j WHERE j.kind = ? AND j.state IN ('pending','running')
+			AND json_extract(j.payload_json, '$.anime_id') = a.id)
+		ORDER BY a.id`, jobKind)
+	if err != nil {
+		return nil, fmt.Errorf("needs sync: %w", err)
+	}
+	defer rows.Close()
+	var ids []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("needs sync: %w", err)
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}

@@ -37,7 +37,8 @@ func isRemote(p string) bool {
 // SyncAnime downloads the cover, fetches and stores the cast and downloads
 // person images. It ends with sync_state done, or partial plus a wrapped
 // ErrRetryLater when only images failed, or partial plus the provider's error
-// when the cast could not be fetched.
+// when the cast could not be fetched (wrapped with ErrRetryLater for rate
+// limits and unavailability, a plain error otherwise).
 func SyncAnime(deps SyncDeps) Handler {
 	return func(ctx context.Context, raw json.RawMessage) error {
 		var p SyncPayload
@@ -79,6 +80,11 @@ func SyncAnime(deps SyncDeps) Handler {
 		case err != nil:
 			if serr := setState(ctx, st, saved.ID, "partial"); serr != nil {
 				log.Printf("sync anime %d: %v", saved.ID, serr)
+			}
+			if errors.Is(err, provider.ErrRateLimited) || errors.Is(err, provider.ErrUnavailable) {
+				// Short provider trouble: retry on the bounded partial path
+				// instead of burning attempts (the cause stays in the chain).
+				return fmt.Errorf("sync anime %d: cast: %w: %w", saved.ID, err, ErrRetryLater)
 			}
 			return fmt.Errorf("sync anime %d: cast: %w", saved.ID, err)
 		}

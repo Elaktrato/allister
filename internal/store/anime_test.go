@@ -168,3 +168,23 @@ func TestCoverReferenced(t *testing.T) {
 		t.Fatalf("%v %v", ok, err)
 	}
 }
+
+func TestNeedsSyncIgnoresLiveJobsAndDone(t *testing.T) {
+	s := newStore(t)
+	ctx := context.Background()
+	a := mustSave(t, s, sample(provider.AniList, "1", nil), WithSyncState("pending"))
+	b := mustSave(t, s, sample(provider.AniList, "2", nil), WithSyncState("partial"))
+	mustSave(t, s, sample(provider.AniList, "3", nil), WithSyncState("done"))
+	c := mustSave(t, s, sample(provider.AniList, "4", nil), WithSyncState("partial"))
+	ins := func(id int64, state string) {
+		if _, err := s.db.Exec(`INSERT INTO jobs(kind, payload_json, state) VALUES ('sync_anime', json_object('anime_id', ?), ?)`, id, state); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ins(b, "running")
+	ins(c, "failed")
+	got, err := s.NeedsSync(ctx, "sync_anime")
+	if err != nil || !reflect.DeepEqual(got, []int64{a, c}) {
+		t.Fatalf("got %v err %v", got, err)
+	}
+}

@@ -64,6 +64,15 @@ func run() error {
 	}))
 	importer := yamtrack.New(database, st, aniClient, queue)
 	queue.Register(yamtrack.KindImport, importer.Handler())
+	// Reset crashed jobs first, then re-queue anime whose sync never finished
+	// (jobs that gave up, or were lost) so the "partially synced" state heals.
+	if err := queue.Recover(workerCtx); err != nil {
+		log.Printf("startup: %v", err)
+	} else if n, err := queue.SweepSync(workerCtx, st); err != nil {
+		log.Printf("startup: %v", err)
+	} else if n > 0 {
+		log.Printf("startup: queued %d unfinished anime syncs", n)
+	}
 	var wg sync.WaitGroup
 	wg.Add(1)
 	go func() {
