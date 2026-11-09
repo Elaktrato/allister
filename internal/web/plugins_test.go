@@ -314,12 +314,15 @@ func TestFixturePluginsGetOnlyCoreRoutes(t *testing.T) {
 	}
 	for i, full := range got {
 		method, path, _ := strings.Cut(rec.patterns[i], " ")
+		if path == "/" { // "/" is the prefix itself
+			path = ""
+		}
 		if full != method+" /book"+path {
 			t.Errorf("route %q is not the core route %q under /book", full, rec.patterns[i])
 		}
 	}
-	// no list page yet
-	if c := e.get("/book").Code; c != 404 {
+	// the generic list page is a core route
+	if c := e.get("/book").Code; c != 200 {
 		t.Fatalf("/book: %d", c)
 	}
 }

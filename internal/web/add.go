@@ -144,7 +144,7 @@ func parseProgress(def plugin.ProgressDef, raw string) (float64, string) {
 	return 0, def.Label + " must be a whole number, 0 or more."
 }
 
-// parseEntryForm is THE entry form parser (add, and later edit and manual).
+// parseEntryForm is THE entry form parser (add and edit, later manual).
 // It is SYNTACTIC: it needs only the kind and the item's active progress
 // keys (a saved item's keys, else the kind's defaults), never the item's
 // data, so it runs before any source call. It checks the status class, the
@@ -261,11 +261,21 @@ func newEntryForm(m plugin.Manifest, k plugin.KindDef, source, id string, pc pro
 	for _, st := range library.Statuses() {
 		f.Statuses = append(f.Statuses, statusOpt{Value: string(st), Label: statusLabel(k, st), Selected: string(st) == v.Status})
 	}
+	f.Progress = progressInputs(k, pc, v.Progress)
+	return f
+}
+
+// progressInputs builds one input per progress track of k that is active in
+// pc (in the kind's order), prefilled from values (keyed by progress key):
+// percent gets max 100, a known total of a count or pages track gets max and
+// "/ total", a duration total is shown as h:mm:ss.
+func progressInputs(k plugin.KindDef, pc progressContext, values map[string]string) []progressInput {
+	var out []progressInput
 	for _, def := range k.Progress.Eligible {
 		if !slices.Contains(pc.Keys, def.Key) {
 			continue
 		}
-		in := progressInput{Name: progressField + def.Key, Label: def.Label, Value: v.Progress[def.Key],
+		in := progressInput{Name: progressField + def.Key, Label: def.Label, Value: values[def.Key],
 			Duration: def.Type == plugin.Duration, Percent: def.Type == plugin.Percent}
 		if in.Percent {
 			in.Max = "100"
@@ -276,9 +286,9 @@ func newEntryForm(m plugin.Manifest, k plugin.KindDef, source, id string, pc pro
 				in.Max, in.Total = fmtNum(total), fmtNum(total)
 			}
 		}
-		f.Progress = append(f.Progress, in)
+		out = append(out, in)
 	}
-	return f
+	return out
 }
 
 // progressTotal is the known total (> 0) of a bounded count, pages or

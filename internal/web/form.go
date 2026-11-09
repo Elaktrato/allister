@@ -11,8 +11,8 @@ import (
 )
 
 // Shared form handling. The generic entry form parser is parseEntryForm
-// (add.go); the legacy anime-shaped one below is kept for the edit dialog
-// (list.go) and the manual form (manual.go) until they become generic.
+// (add.go, used by add and edit); the legacy anime-shaped one below is kept
+// only for the manual form (manual.go) until it becomes generic.
 
 const maxFormBytes = 64 << 10
 
@@ -32,13 +32,17 @@ func parseForm(w http.ResponseWriter, r *http.Request) bool {
 	return true
 }
 
-// safeReturn returns raw when it is a same-site path below /anime (exactly
-// "/anime", or "/anime" followed by "?" or "/"), else "/anime". It rejects
-// schemes, "//", backslashes, fragments, percent escapes and control characters or spaces.
-func safeReturn(raw string) string {
-	const def = "/anime"
-	rest, ok := strings.CutPrefix(raw, "/anime")
-	if !ok || (rest != "" && rest[0] != '?' && rest[0] != '/') {
+// safeReturn returns raw when it is a same-site path below the plugin's
+// prefix /{pluginID} (exactly "/{pluginID}", or followed by "?" or "/": the
+// plugin's list with its filters and its item pages), else "/{pluginID}".
+// Every other first segment is rejected, including other plugins, /list
+// (the entry routes are never a return target), /people and /settings. It
+// also rejects schemes, "//", backslashes, fragments, percent escapes and
+// control characters or spaces.
+func safeReturn(raw, pluginID string) string {
+	def := "/" + pluginID
+	rest, ok := strings.CutPrefix(raw, def)
+	if pluginID == "" || !ok || (rest != "" && rest[0] != '?' && rest[0] != '/') {
 		return def
 	}
 	if strings.Contains(raw, "//") || strings.ContainsAny(raw, "\\#%") {
@@ -57,20 +61,15 @@ type statusOpt struct {
 	Selected     bool
 }
 
-// legacyEntryForm is the legacy edit dialog's data (and part of the manual
-// form); the string fields echo the user's input.
+// legacyEntryForm is the list entry part of the legacy manual form; the
+// string fields echo the user's input.
 //
-// TODO(Task 9/10): remove when edit and manual use parseEntryForm.
+// TODO(Task 10): remove when the manual form uses parseEntryForm.
 type legacyEntryForm struct {
-	Action, CancelURL              string
 	Status, Rating, Progress       string
 	StartedOn, FinishedOn, Comment string
-	Episodes                       *int
 	Statuses                       []statusOpt
-	Error, ExistingURL             string
-	// Heading and Submit label the dialog; Return is the hidden return path
-	// (edit dialog only, already validated by safeReturn).
-	Heading, Submit, Return string
+	Error                          string
 }
 
 func (f legacyEntryForm) withStatuses() legacyEntryForm {
@@ -84,7 +83,7 @@ func (f legacyEntryForm) withStatuses() legacyEntryForm {
 // parseLegacyEntryForm reads and validates the legacy (anime-shaped) form
 // fields; msg is a user-facing message and non-empty on error.
 //
-// TODO(Task 9/10): remove when edit and manual use parseEntryForm.
+// TODO(Task 10): remove when the manual form uses parseEntryForm.
 func parseLegacyEntryForm(r *http.Request, f legacyEntryForm) (legacyEntryForm, store.ListEntry, string) {
 	f.Status = strings.TrimSpace(r.PostFormValue("status"))
 	f.Rating = strings.TrimSpace(r.PostFormValue("rating"))

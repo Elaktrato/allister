@@ -7,6 +7,7 @@ package web
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"slices"
 	"strconv"
 	"strings"
@@ -81,7 +82,9 @@ type progressView struct{ Label, Value string }
 // entryView is the list summary of an item in the list.
 type entryView struct {
 	Status, Rating, Comment, EditURL string
-	Progress                         []progressView
+	// EditHXURL loads the edit dialog into the overview and returns to it.
+	EditHXURL string
+	Progress  []progressView
 }
 
 type itemView struct {
@@ -115,6 +118,7 @@ func (s *server) itemView(ctx context.Context, li *loadedItem) itemView {
 		}
 		if li.entry != nil {
 			v.Entry = entrySummary(k, it, li.entry)
+			v.Entry.EditHXURL = v.Entry.EditURL + "?" + url.Values{"return": {itemURL(m, d.Source, d.ID, d.Kind)}}.Encode()
 		}
 	} else {
 		v.Cover = httpURL(d.CoverURL)

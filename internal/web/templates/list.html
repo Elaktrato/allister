@@ -1,13 +1,20 @@
-{{define "title"}}Anime list - Allister{{end}}
+{{define "title"}}{{.Heading}} list - Allister{{end}}
 {{define "content"}}
-<h1 class="mb-4 text-3xl font-semibold">Anime</h1>
+<h1 class="mb-4 text-3xl font-semibold">{{.Heading}}</h1>
+{{if .Kinds}}
+<nav aria-label="Kinds" class="mb-3 flex flex-wrap gap-2">
+  {{range .Kinds}}
+  <a href="{{.Href}}"{{if .Current}} aria-current="true"{{end}} class="rounded px-3 py-1 text-sm {{if .Current}}bg-slate-700 font-medium{{else}}bg-slate-900 hover:bg-slate-800{{end}}">{{.Label}}</a>
+  {{end}}
+</nav>
+{{end}}
 <nav aria-label="List status" class="mb-4 flex flex-wrap gap-2">
   {{range .Tabs}}
   <a href="{{.Href}}"{{if .Current}} aria-current="page"{{end}} class="rounded px-3 py-1 text-sm {{if .Current}}bg-indigo-600 font-medium{{else}}bg-slate-800 hover:bg-slate-700{{end}}">{{.Label}} ({{.Count}})</a>
   {{end}}
 </nav>
 {{if not .AnyEntries}}
-<p class="rounded border border-slate-800 bg-slate-900 p-4 text-slate-300">Your list is empty. <a href="/anime/search" class="text-indigo-300 underline">Search for anime to add</a> or <a href="/anime/manual/new" class="text-indigo-300 underline">add one manually</a>.</p>
+<p class="rounded border border-slate-800 bg-slate-900 p-4 text-slate-300">Your list is empty. <a href="{{.SearchURL}}" class="text-indigo-300 underline">Search for {{.EmptyNoun}} to add</a>{{if .ManualURL}} or <a href="{{.ManualURL}}" class="text-indigo-300 underline">add one manually</a>{{end}}.</p>
 {{else if not .Rows}}
 <p class="rounded border border-slate-800 bg-slate-900 p-4 text-slate-300">Nothing here yet.</p>
 {{else}}
@@ -17,7 +24,7 @@
       <tr class="border-b border-slate-800">
         <th class="py-2 pr-3"><span class="sr-only">Cover</span></th>
         <th class="py-2 pr-3 font-medium">Title</th>
-        <th class="hidden py-2 pr-3 font-medium sm:table-cell">Type</th>
+        {{if .TypeHeader}}<th class="hidden py-2 pr-3 font-medium sm:table-cell">{{.TypeHeader}}</th>{{end}}
         <th class="py-2 pr-3 font-medium">Progress</th>
         <th class="py-2 pr-3 font-medium">Score</th>
         <th class="py-2 pr-3 font-medium">Status</th>
@@ -37,5 +44,5 @@
   </p>
 </div>
 {{end}}
-<div id="dialog-slot" hx-on::before-swap="var s=event.detail.xhr.status;if(s===422||s===409||s===503){event.detail.shouldSwap=true;event.detail.isError=false}">{{with .Dialog}}{{template "legacy_entry_dialog" .}}{{end}}</div>
+<div id="dialog-slot" hx-on::before-swap="var s=event.detail.xhr.status;if(s===422||s===409||s===503){event.detail.shouldSwap=true;event.detail.isError=false}">{{with .Dialog}}{{template "entry_dialog" .}}{{end}}</div>
 {{end}}

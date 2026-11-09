@@ -66,7 +66,8 @@ type server struct {
 	pages map[string]*template.Template
 	cache *animeCache
 	// pluginRoutes lists the full patterns mounted per plugin id, and
-	// coreGuarded the core routes behind the anime guard (tests walk them).
+	// coreGuarded the entry routes behind the item's plugin guard (tests
+	// walk them).
 	pluginRoutes map[string][]string
 	coreGuarded  []string
 }
@@ -81,7 +82,7 @@ var pagePartials = map[string][]string{
 	"search":   {"templates/search_results.html"},
 	"settings": {"templates/settings_plugins.html"},
 	"item":     {"templates/sections.html", "templates/add_dialog.html", "templates/progress_inputs.html", "templates/match_dialog.html"},
-	"list":     {"templates/list_row.html", "templates/legacy_entry_dialog.html"},
+	"list":     {"templates/list_row.html", "templates/entry_dialog.html", "templates/progress_inputs.html"},
 }
 
 // parsePages builds one template set per page, each cloned from base.html plus

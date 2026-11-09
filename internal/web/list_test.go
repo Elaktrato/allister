@@ -10,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/allister/allister/internal/library"
+	"github.com/allister/allister/internal/plugin"
 	"github.com/allister/allister/internal/provider"
 	"github.com/allister/allister/internal/settings"
 	"github.com/allister/allister/internal/store"
@@ -45,7 +47,7 @@ func TestListFiltersByStatus(t *testing.T) {
 	e.addEntry(t, provider.AniList, "2", nil, store.Completed, 0, provider.Title{Lang: "en", Text: "Beta Show"})
 	all := e.get("/anime").Body.String()
 	mustContain(t, all, "Alpha Show", "Beta Show")
-	w := e.get("/anime?status=watching")
+	w := e.get("/anime?status=active")
 	if w.Code != 200 {
 		t.Fatal(w.Code)
 	}
@@ -61,9 +63,9 @@ func TestListTabsShowCountsAndCurrent(t *testing.T) {
 	e.addEntry(t, provider.AniList, "1", nil, store.Watching, 0)
 	e.addEntry(t, provider.AniList, "2", nil, store.Watching, 0)
 	e.addEntry(t, provider.AniList, "3", nil, store.Dropped, 0)
-	b := e.get("/anime?status=watching").Body.String()
-	mustContain(t, b, `href="/anime"`, `href="/anime?status=watching"`, `href="/anime?status=completed"`,
-		`href="/anime?status=plan_to_watch"`, `href="/anime?status=paused"`, `href="/anime?status=dropped"`,
+	b := e.get("/anime?status=active").Body.String()
+	mustContain(t, b, `href="/anime"`, `href="/anime?status=active"`, `href="/anime?status=completed"`,
+		`href="/anime?status=planned"`, `href="/anime?status=paused"`, `href="/anime?status=dropped"`,
 		"All (3)", "Watching (2)", "Dropped (1)", "Completed (0)", "Plan to watch (0)", "Paused (0)")
 	// the header nav marks the plugin itself; the tabs live in the main content
 	b = b[strings.Index(b, "</header>"):]
@@ -220,7 +222,7 @@ func TestListPagination(t *testing.T) {
 	}
 	mustContain(t, e.get("/anime?page=99").Body.String(), "Showing 101–101 of 101")
 	// filter kept
-	d := e.get("/anime?status=watching").Body.String()
+	d := e.get("/anime?status=active").Body.String()
 	mustContain(t, d, "Showing 1–90 of 90")
 	mustNotContain(t, d, "Next")
 	// 101 rows of one status paginate with the filter in links
@@ -228,10 +230,10 @@ func TestListPagination(t *testing.T) {
 	for i := 0; i < 101; i++ {
 		e2.addEntry(t, provider.AniList, fmt.Sprint(i+1), nil, store.Watching, 0)
 	}
-	f := e2.get("/anime?status=watching").Body.String()
-	mustContain(t, f, `href="/anime?page=2&amp;status=watching"`)
-	f2 := e2.get("/anime?status=watching&page=2").Body.String()
-	mustContain(t, f2, `href="/anime?status=watching"`, "Showing 101–101 of 101")
+	f := e2.get("/anime?status=active").Body.String()
+	mustContain(t, f, `href="/anime?page=2&amp;status=active"`)
+	f2 := e2.get("/anime?status=active&page=2").Body.String()
+	mustContain(t, f2, `href="/anime?status=active"`, "Showing 101–101 of 101")
 }
 
 func TestIncrementReturnsUpdatedRow(t *testing.T) {
@@ -377,15 +379,15 @@ func TestEditValidationReturns422(t *testing.T) {
 	}{
 		{"rating high", func(v url.Values) { v.Set("rating", "11") }, "Rating must be"},
 		{"rating text", func(v url.Values) { v.Set("rating", "x") }, "Rating must be"},
-		{"progress negative", func(v url.Values) { v.Set("progress", "-1") }, "Progress must be"},
-		{"progress above total", func(v url.Values) { v.Set("progress", "13") }, "above the episode total"},
+		{"progress negative", func(v url.Values) { v.Set("progress", "-1") }, "Episode must be a whole number"},
+		{"progress above total", func(v url.Values) { v.Set("progress", "13") }, "above the total of 12"},
 		{"bad date", func(v url.Values) { v.Set("started_on", "01/02/2024") }, "Start date must be"},
-		{"finish before start", func(v url.Values) { v.Set("started_on", "2024-05-02"); v.Set("finished_on", "2024-05-01") }, "before start"},
+		{"finish before start", func(v url.Values) { v.Set("started_on", "2024-05-02"); v.Set("finished_on", "2024-05-01") }, "before the start date"},
 		{"bad status", func(v url.Values) { v.Set("status", "nope") }, "choose a status"},
 	}
 	for _, c := range cases {
 		for _, htmx := range []bool{true, false} {
-			form := url.Values{"status": {"watching"}, "rating": {"7"}, "progress": {"2"}, "comment": {"keepme"}, "return": {"/anime?status=watching"}}
+			form := url.Values{"status": {"active"}, "rating": {"7"}, "progress": {"2"}, "comment": {"keepme"}, "return": {"/anime?status=watching"}}
 			c.mod(form)
 			rec := e.do("POST", "/list/"+idStr(id)+"/edit", form, htmx)
 			if rec.Code != 422 {
@@ -447,7 +449,7 @@ func TestSafeReturn(t *testing.T) {
 		"/anime?x=%00":             "/anime",
 		"/anime?status=watching#x": "/anime",
 	} {
-		if got := safeReturn(in); got != want {
+		if got := safeReturn(in, "anime"); got != want {
 			t.Errorf("safeReturn(%q) = %q, want %q", in, got, want)
 		}
 	}
@@ -457,7 +459,7 @@ func TestEditReturnHostileRedirectsToList(t *testing.T) {
 	e := newEnv(t)
 	id := e.addEntry(t, provider.AniList, "1", nil, store.Watching, 0)
 	for _, h := range []string{"//evil.com", "https://evil.com", "/anime@evil", `/\evil`, "/animex"} {
-		form := okForm()
+		form := okAddForm()
 		form.Set("return", h)
 		rec := e.do("POST", "/list/"+idStr(id)+"/edit", form, false)
 		if rec.Code != 303 || rec.Header().Get("Location") != "/anime" {
@@ -520,8 +522,8 @@ func TestRemoveCascadesCastTitles(t *testing.T) {
 func TestListRowsRenderedWithRemoveFormForNoJS(t *testing.T) {
 	e := newEnv(t)
 	id := e.addEntry(t, provider.AniList, "1", nil, store.Watching, 0)
-	b := e.get("/anime?status=watching&page=1").Body.String()
-	mustContain(t, b, `method="post" action="/list/`+idStr(id)+`/remove"`, `name="return" value="/anime?status=watching"`,
+	b := e.get("/anime?status=active&page=1").Body.String()
+	mustContain(t, b, `method="post" action="/list/`+idStr(id)+`/remove"`, `name="return" value="/anime?status=active"`,
 		`hx-confirm=`, `method="post" action="/list/`+idStr(id)+`/increment"`)
 }
 
@@ -545,7 +547,7 @@ func TestMalformedReturnDoesNotPanic(t *testing.T) {
 		t.Fatalf("GET: %d", rec.Code)
 	}
 	mustContain(t, rec.Body.String(), "Showing 1–1 of 1", `name="return" value="/anime"`)
-	form := url.Values{"status": {"watching"}, "rating": {"11"}, "return": {"/anime/%zz"}}
+	form := url.Values{"status": {"active"}, "rating": {"11"}, "return": {"/anime/%zz"}}
 	rec = e.do("POST", "/list/"+idStr(id)+"/edit", form, false)
 	if rec.Code != 422 {
 		t.Fatalf("POST: %d", rec.Code)
@@ -567,4 +569,260 @@ func TestListPageParamClamping(t *testing.T) {
 	} {
 		mustContain(t, e.get("/anime?page="+q).Body.String(), want)
 	}
+}
+
+// --- generic list page (fixture plugins) ---
+
+func TestSafeReturnPerPlugin(t *testing.T) {
+	for in, want := range map[string]string{
+		"":                        "/book",
+		"/book":                   "/book",
+		"/book?status=active":     "/book?status=active",
+		"/book/books/1":           "/book/books/1",
+		"/book?kind=comic&page=2": "/book?kind=comic&page=2",
+		"/anime":                  "/book", // another plugin's prefix
+		"/tv":                     "/book",
+		"/bookx":                  "/book",
+		"/books":                  "/book",
+		"/list":                   "/book", // the entry routes are never a return target
+		"/list/1/edit":            "/book",
+		"/people/1":               "/book",
+		"/settings":               "/book",
+		"//evil.com":              "/book",
+		"/book//evil.com":         "/book",
+		"/book\\evil":             "/book",
+		"/book#x":                 "/book",
+		"/book/%2f":               "/book",
+		"https://evil.com/book":   "/book",
+		"/book\r\nX: y":           "/book",
+	} {
+		if got := safeReturn(in, "book"); got != want {
+			t.Errorf("safeReturn(%q, book) = %q, want %q", in, got, want)
+		}
+	}
+	// an empty or odd plugin id never widens what is accepted
+	for _, id := range []string{"", "/", "a/b"} {
+		if got := safeReturn("//evil.com", id); strings.Contains(got, "evil") {
+			t.Errorf("plugin %q: %q", id, got)
+		}
+	}
+}
+
+// rowOf returns the <tr data-row ...>...</tr> of the row whose html contains marker.
+func rowOf(t *testing.T, body, marker string) string {
+	t.Helper()
+	for _, part := range strings.Split(body, "<tr data-row")[1:] {
+		end := strings.Index(part, "</tr>")
+		if end < 0 {
+			continue
+		}
+		if row := "<tr data-row" + part[:end+5]; strings.Contains(row, marker) {
+			return row
+		}
+	}
+	t.Fatalf("no row containing %q", marker)
+	return ""
+}
+
+func TestListShowsPluginStatusLabels(t *testing.T) {
+	e := newFixtureEnv(t)
+	e.addFixture(t, "book", "book", bookItem("1", "Reading One"), library.Entry{Status: library.Active})
+	e.addFixture(t, "book", "book", bookItem("2", "Read One"), library.Entry{Status: library.Completed})
+	e.addFixture(t, "book", "book", bookItem("3", "Wanted One"), library.Entry{Status: library.Planned})
+	rec := e.get("/book")
+	if rec.Code != 200 {
+		t.Fatal(rec.Code)
+	}
+	b := rec.Body.String()
+	main := b[strings.Index(b, "</header>"):]
+	mustContain(t, main, "All (3)", "Reading (1)", "Read (1)", "Want to read (1)", "Paused (0)", "Dropped (0)",
+		`href="/book?status=active"`, `href="/book?status=completed"`, `href="/book?status=planned"`, `href="/book"`)
+	mustContain(t, rowOf(t, b, "Reading One"), ">Reading<")
+	mustContain(t, rowOf(t, b, "Read One"), ">Read<")
+	mustNotContain(t, main, "Watching", "Plan to watch")
+	// the status filter uses core classes; labels are not values
+	r := e.get("/book?status=active").Body.String()
+	mustContain(t, r, "Reading One")
+	mustNotContain(t, r, "Read One", "Wanted One")
+	for _, q := range []string{"?status=reading", "?status=Reading", "?status=watching", "?status=%00"} {
+		mustContain(t, e.get("/book"+q).Body.String(), "Reading One", "Read One", "Wanted One")
+	}
+}
+
+func TestListScopedToPlugin(t *testing.T) {
+	e := newFixtureEnv(t)
+	e.addFixture(t, "book", "book", bookItem("1", "Book Title"), library.Entry{Status: library.Active})
+	e.addFixture(t, "tv", "show", tvShow("1", "Show Title"), library.Entry{Status: library.Active})
+	e.addFixture(t, "tv", "show", tvShow("2", "Other Show"), library.Entry{Status: library.Dropped})
+	e.addEntry(t, provider.AniList, "9", nil, store.Watching, 0, provider.Title{Lang: "en", Text: "Anime Title"})
+	b := e.get("/book").Body.String()
+	mustContain(t, b, "Book Title", "All (1)", "Reading (1)", "Dropped (0)", "Showing 1–1 of 1", `href="/book/books/1"`)
+	mustNotContain(t, b, "Show Title", "Other Show", "Anime Title")
+	tv := e.get("/tv").Body.String()
+	mustContain(t, tv, "Show Title", "Other Show", "All (2)", "Watching (1)", "Dropped (1)", `href="/tv/tvdata/1"`)
+	mustNotContain(t, tv, "Book Title", "Anime Title")
+	a := e.get("/anime").Body.String()
+	mustContain(t, a, "Anime Title", "All (1)")
+	mustNotContain(t, a, "Book Title", "Show Title")
+}
+
+func TestListRowRendersEachProgressType(t *testing.T) {
+	e := newFixtureEnv(t)
+	paged := bookItem("1", "Paged Book")
+	paged.Fields["pages"] = plugin.FieldValue{Num: num(300)}
+	e.addFixture(t, "book", "book", paged, library.Entry{Status: library.Active, Progress: map[string]float64{"pages": 12}})
+	e.addFixture(t, "book", "book", bookItem("2", "Unknown Pages"), library.Entry{Status: library.Active, Progress: map[string]float64{"pages": 5}})
+	e.addFixture(t, "book", "book", bookItem("3", "Percent Book"), library.Entry{Status: library.Active, Progress: map[string]float64{"percent": 40}},
+		library.WithProgressKeys([]string{"percent"}))
+	b := e.get("/book").Body.String()
+	mustContain(t, rowOf(t, b, "Paged Book"), "12 / 300", "Page")
+	mustContain(t, rowOf(t, b, "Unknown Pages"), "5 / ?")
+	pr := rowOf(t, b, "Percent Book")
+	mustContain(t, pr, "40%", "Percent")
+	mustNotContain(t, pr, "/increment") // the primary key (pages) is not active
+
+	counted := tvShow("1", "Counted Show")
+	counted.Fields["episodes"] = plugin.FieldValue{Num: num(10)}
+	e.addFixture(t, "tv", "show", counted, library.Entry{Status: library.Active, Progress: map[string]float64{"season": 2, "episode": 5}},
+		library.WithProgressKeys([]string{"season", "episode"}))
+	e.addFixture(t, "tv", "show", tvShow("2", "Positioned Show"), library.Entry{Status: library.Active, Progress: map[string]float64{"episode": 3, "position": 3725}},
+		library.WithProgressKeys([]string{"episode", "position"}))
+	tv := e.get("/tv").Body.String()
+	cr := rowOf(t, tv, "Counted Show")
+	mustContain(t, cr, "Season", ">2<", "Episode", "5 / 10")
+	mustNotContain(t, cr, "2 / ", "Position")
+	pos := rowOf(t, tv, "Positioned Show")
+	mustContain(t, pos, "3 / ?", "Position", "1:02:05", `/increment"`)
+	mustNotContain(t, pos, "Season")
+}
+
+func TestListTypeColumnAndScore(t *testing.T) {
+	e := newFixtureEnv(t)
+	e.addFixture(t, "tv", "show", tvShow("1", "Rated Zero"), library.Entry{Status: library.Completed, Rating: ip(0)})
+	e.addFixture(t, "tv", "show", tvShow("2", "Unrated"), library.Entry{Status: library.Completed})
+	tv := e.get("/tv").Body.String()
+	// the first Show enum field (type) is the type column
+	mustContain(t, tv, ">Type<", "series")
+	mustContain(t, rowOf(t, tv, "Rated Zero"), `data-score="0"`, ">0<")
+	mustContain(t, rowOf(t, tv, "Unrated"), `data-score="none"`, "–")
+	// no Show enum: the first Show text field (author)
+	e.addFixture(t, "book", "book", bookItem("1", "Earthsea"), library.Entry{Status: library.Active})
+	b := e.get("/book").Body.String()
+	mustContain(t, b, ">Author<", "Ursula K. Le Guin")
+}
+
+func TestListKindSwitchOnlyForMultiKindPlugins(t *testing.T) {
+	e := newFixtureEnv(t, withComicKind)
+	e.addFixture(t, "book", "book", bookItem("1", "The Novel"), library.Entry{Status: library.Active})
+	cd := bookItem("2", "The Comic")
+	cd.Kind = "comic"
+	e.addFixture(t, "book", "comic", cd, library.Entry{Status: library.Active})
+	b := e.get("/book").Body.String()
+	// the first kind by default, with a switch to the others
+	mustContain(t, b, "The Novel", `href="/book/books/1?kind=book"`, `href="/book?kind=comic"`, ">Comics<", ">Books<", "All (1)")
+	mustNotContain(t, b, "The Comic")
+	c := e.get("/book?kind=comic").Body.String()
+	mustContain(t, c, "The Comic", `href="/book/books/2?kind=comic"`, `href="/book?kind=comic&amp;status=active"`, "All (1)")
+	mustNotContain(t, c, "The Novel")
+	// an unknown kind is ignored (first kind)
+	mustContain(t, e.get("/book?kind=nope").Body.String(), "The Novel")
+	// a single-kind plugin has no switch and ignores ?kind=
+	e.addFixture(t, "tv", "show", tvShow("1", "Dark"), library.Entry{Status: library.Active})
+	tv := e.get("/tv?kind=comic").Body.String()
+	mustContain(t, tv, "Dark", `href="/tv/tvdata/1"`, `href="/tv?status=active"`)
+	mustNotContain(t, tv, "kind=")
+}
+
+func TestListPaginationViaLibrary(t *testing.T) {
+	e := newFixtureEnv(t)
+	for i := 0; i < 101; i++ {
+		st := library.Active
+		if i >= 90 {
+			st = library.Dropped
+		}
+		e.addFixture(t, "tv", "show", tvShow(fmt.Sprint(i+1), fmt.Sprintf("Show %03d", i+1)), library.Entry{Status: st})
+	}
+	p1 := e.get("/tv").Body.String()
+	if n := strings.Count(p1, "data-row"); n != 100 {
+		t.Fatalf("page 1 rows %d", n)
+	}
+	mustContain(t, p1, "Showing 1–100 of 101", `href="/tv?page=2"`, "All (101)", "Watching (90)", "Dropped (11)")
+	mustNotContain(t, p1, "Previous")
+	p2 := e.get("/tv?page=2").Body.String()
+	if n := strings.Count(p2, "data-row"); n != 1 {
+		t.Fatalf("page 2 rows %d", n)
+	}
+	mustContain(t, p2, "Showing 101–101 of 101", `href="/tv"`, "Previous")
+	for q, want := range map[string]string{
+		"9999999999999999999999": "Showing 101–101 of 101",
+		"2147483648":             "Showing 101–101 of 101",
+		"0":                      "Showing 1–100 of 101",
+		"-1":                     "Showing 1–100 of 101",
+		"x":                      "Showing 1–100 of 101",
+	} {
+		mustContain(t, e.get("/tv?page="+q).Body.String(), want)
+	}
+	d := e.get("/tv?status=dropped&page=5").Body.String()
+	mustContain(t, d, "Showing 1–11 of 11", `aria-current="page"`)
+	mustNotContain(t, d, "Next", "Previous")
+}
+
+func TestListHostileTitleEscaped(t *testing.T) {
+	e := newFixtureEnv(t)
+	d := tvShow("1", `<script>alert(1)</script>`)
+	d.Fields["type"] = plugin.FieldValue{Text: "series"}
+	e.addFixture(t, "tv", "show", d, library.Entry{Status: library.Active, Comment: "<b>x</b>"})
+	b := e.get("/tv").Body.String()
+	mustContain(t, b, "&lt;script&gt;alert(1)&lt;/script&gt;")
+	mustNotContain(t, b, "<script>alert(1)")
+	id := e.savedItems(t, "tv", "tvdata", "1")[0].ID
+	rec := e.do("POST", "/list/"+idStr(id)+"/increment", url.Values{}, true)
+	mustContain(t, rec.Body.String(), "&lt;script&gt;alert(1)&lt;/script&gt;")
+	mustNotContain(t, rec.Body.String(), "<script>alert(1)")
+	ed := e.do("GET", "/list/"+idStr(id)+"/edit", nil, true).Body.String()
+	mustContain(t, ed, "&lt;b&gt;x&lt;/b&gt;")
+	mustNotContain(t, ed, "<b>x</b>", "<script>alert(1)")
+}
+
+func TestListGenericWording(t *testing.T) {
+	e := newFixtureEnv(t)
+	main := func(b string) string { return strings.ToLower(b[strings.Index(b, "</header>"):]) }
+	empty := main(e.get("/book").Body.String())
+	mustContain(t, empty, "your list is empty", `href="/book/search"`, "search for books")
+	mustNotContain(t, empty, "anime", "episode", "watch")
+	e.addFixture(t, "book", "book", bookItem("1", "Earthsea"), library.Entry{Status: library.Active})
+	id := e.savedItems(t, "book", "books", "1")[0].ID
+	for _, b := range []string{
+		main(e.get("/book").Body.String()),
+		e.do("GET", "/list/"+idStr(id)+"/edit", nil, true).Body.String(),
+		e.do("POST", "/list/"+idStr(id)+"/increment", url.Values{}, true).Body.String(),
+	} {
+		b = strings.ToLower(b)
+		mustNotContain(t, b, "anime", "episode", "watch")
+	}
+	mustContain(t, strings.ToLower(e.get("/book").Body.String()), "remove this book", "add one page to earthsea")
+}
+
+func TestListGetIsFullPageWithVary(t *testing.T) {
+	e := newFixtureEnv(t)
+	e.addFixture(t, "book", "book", bookItem("1", "Earthsea"), library.Entry{Status: library.Active})
+	for _, htmx := range []bool{false, true} {
+		rec := e.do("GET", "/book", nil, htmx)
+		if rec.Code != 200 || !strings.Contains(rec.Header().Get("Vary"), "HX-Request") {
+			t.Fatalf("htmx=%v: %d %q", htmx, rec.Code, rec.Header().Get("Vary"))
+		}
+		mustContain(t, rec.Body.String(), "<html", "Earthsea", `id="dialog-slot"`)
+	}
+}
+
+func TestEmptyListHintLinksManualOnlyWhenMounted(t *testing.T) {
+	e := newFixtureEnv(t)
+	b := e.get("/tv").Body.String()
+	mustContain(t, b, "Your list is empty", `href="/tv/search"`)
+	mustNotContain(t, b, `href="/tv/manual/new"`) // no manual route for this plugin yet
+	mustContain(t, e.get("/anime").Body.String(), `href="/anime/manual/new"`, `href="/anime/search"`)
+	e.addFixture(t, "tv", "show", tvShow("1", "Dark"), library.Entry{Status: library.Active})
+	d := e.get("/tv?status=dropped").Body.String()
+	mustContain(t, d, "Nothing here yet")
+	mustNotContain(t, d, "Your list is empty")
 }

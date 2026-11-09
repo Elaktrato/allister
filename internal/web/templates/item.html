@@ -10,7 +10,7 @@
       <p class="text-slate-300">Rating: {{.Rating}}</p>
       {{range .Progress}}<p class="text-slate-300">{{.Label}}: {{.Value}}</p>{{end}}
       {{if .Comment}}<p class="mt-1 whitespace-pre-line break-words text-slate-400">{{.Comment}}</p>{{end}}
-      <a href="{{.EditURL}}" class="mt-2 inline-block text-indigo-300 hover:underline">Edit</a>
+      <a href="{{.EditURL}}" hx-get="{{.EditHXURL}}" hx-target="#dialog-slot" hx-swap="innerHTML" class="mt-2 inline-block text-indigo-300 hover:underline">Edit</a>
     </div>
     {{else}}
     <a href="{{.AddURL}}" hx-get="{{.AddURL}}" hx-target="#dialog-slot" hx-swap="innerHTML"
