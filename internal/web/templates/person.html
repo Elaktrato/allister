@@ -1,0 +1,32 @@
+{{define "title"}}{{.Name}} - Allister{{end}}
+{{define "content"}}
+<div class="flex flex-col gap-6 sm:flex-row">
+  <div class="shrink-0">
+    {{if .Photo}}<img src="{{.Photo}}" alt="" class="h-64 w-44 rounded object-cover">
+    {{else}}<span class="block h-64 w-44 rounded bg-slate-800" aria-hidden="true"></span>{{end}}
+  </div>
+  <div class="min-w-0 flex-1">
+    <h1 class="text-2xl font-semibold break-words">{{.Name}}</h1>
+    {{if .ExtURL}}<a href="{{.ExtURL}}" rel="noopener noreferrer" class="text-sm text-indigo-300 hover:underline">View on AniList</a>{{end}}
+    <h2 class="mt-6 mb-3 text-lg font-semibold">In your list</h2>
+    {{if .Appearances}}
+    <ul class="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+      {{range .Appearances}}
+      <li class="flex gap-3 rounded border border-slate-800 p-2">
+        <a href="{{.Href}}" class="shrink-0">
+          {{if .Cover}}<img src="{{.Cover}}" alt="" loading="lazy" class="h-24 w-16 rounded object-cover">
+          {{else}}<span class="block h-24 w-16 rounded bg-slate-800" aria-hidden="true"></span>{{end}}
+        </a>
+        <div class="min-w-0">
+          <a href="{{.Href}}" class="font-medium text-indigo-300 hover:underline">{{.Title}}</a>
+          {{if .VoicedCharacter}}<p class="mt-1 text-sm text-slate-300">as {{.VoicedCharacter}}</p>{{end}}
+        </div>
+      </li>
+      {{end}}
+    </ul>
+    {{else}}
+    <p class="text-slate-400">Not in any anime in your list.</p>
+    {{end}}
+  </div>
+</div>
+{{end}}

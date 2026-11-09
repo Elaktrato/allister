@@ -138,3 +138,49 @@ func TestAnimePeople(t *testing.T) {
 		t.Fatalf("empty: %v %v", ppl, err)
 	}
 }
+
+func TestPersonAnimeSourceAndRole(t *testing.T) {
+	s := newStore(t)
+	ctx := context.Background()
+	a := mustSave(t, s, sample(provider.AniList, "10", nil))
+	b := mustSave(t, s, sample(provider.AniList, "20", nil))
+	// actor v1 voices two characters in a; character c1 appears in a and b
+	s.SaveCast(ctx, a, []provider.CastMember{cast("1", "1"), cast("2", "1"), cast("2", "1")})
+	s.SaveCast(ctx, b, []provider.CastMember{cast("1", "3")})
+
+	apps, err := s.PersonAnime(ctx, personID(t, s, "anilist", "v1"))
+	if err != nil || len(apps) != 2 {
+		t.Fatalf("%+v %v", apps, err)
+	}
+	for i, ch := range []string{"Char 1", "Char 2"} {
+		x := apps[i]
+		if x.AnimeID != a || x.Source != provider.AniList || x.SourceID != "10" || !x.AsActor || x.Character != ch {
+			t.Fatalf("row %d: %+v", i, x)
+		}
+	}
+	apps, _ = s.PersonAnime(ctx, personID(t, s, "anilist", "c1"))
+	if len(apps) != 2 || apps[0].AsActor || apps[1].AsActor || apps[0].Character != "Char 1" ||
+		apps[0].SourceID != "10" || apps[1].SourceID != "20" || apps[1].Source != provider.AniList {
+		t.Fatalf("%+v", apps)
+	}
+}
+
+func TestPersonAnimeActorAndCharacterBothKinds(t *testing.T) {
+	s := newStore(t)
+	ctx := context.Background()
+	a := mustSave(t, s, sample(provider.AniList, "10", nil))
+	self := provider.Person{Source: provider.AniList, ID: "dual", Name: "Dual"}
+	other := provider.Person{Source: provider.AniList, ID: "o", Name: "Other"}
+	s.SaveCast(ctx, a, []provider.CastMember{
+		{Character: self, Actor: &other},
+		{Character: other, Actor: &self},
+	})
+	apps, err := s.PersonAnime(ctx, personID(t, s, "anilist", "dual"))
+	if err != nil || len(apps) != 2 {
+		t.Fatalf("%+v %v", apps, err)
+	}
+	// ordered by character name: "Dual" (as character) then "Other" (as actor)
+	if apps[0].AsActor || apps[0].Character != "Dual" || !apps[1].AsActor || apps[1].Character != "Other" {
+		t.Fatalf("%+v", apps)
+	}
+}

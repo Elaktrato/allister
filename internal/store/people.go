@@ -85,27 +85,39 @@ func (s *Store) Person(ctx context.Context, id int64) (*Person, error) {
 	return &p, nil
 }
 
-// PersonAnime returns the saved anime the person appears in, as voice actor
-// or as character, ordered by anime id. Character is always the name of the
-// character in that role (for a character page: the character itself). An
-// anime appears once per distinct (anime, character) pair.
+// PersonAnime returns the saved anime the person appears in, ordered by anime
+// id, then character name, with voice-actor rows before character rows.
+// When the person is the voice actor of a character, the row has AsActor set
+// and Character is the voiced character's name. When the person is itself a
+// character, AsActor is false and Character is the person's own name. An
+// anime appears once per distinct (anime, character, role) triple; a person
+// who is both actor and character in the data gets both kinds of rows.
 func (s *Store) PersonAnime(ctx context.Context, personID int64) ([]PersonAppearance, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT DISTINCT a.id, a.cover_path, c.name
+	rows, err := s.db.QueryContext(ctx, `SELECT id, source, source_id, cover_path, name, as_actor FROM (
+		SELECT a.id, a.source, a.source_id, a.cover_path, c.name, 1 AS as_actor
 		FROM anime_cast ac
 		JOIN anime a ON a.id = ac.anime_id
 		JOIN people c ON c.id = ac.character_person_id
-		WHERE ac.actor_person_id = ?1 OR ac.character_person_id = ?1
-		ORDER BY a.id, c.name`, personID)
+		WHERE ac.actor_person_id = ?1
+		UNION
+		SELECT a.id, a.source, a.source_id, a.cover_path, c.name, 0
+		FROM anime_cast ac
+		JOIN anime a ON a.id = ac.anime_id
+		JOIN people c ON c.id = ac.character_person_id
+		WHERE ac.character_person_id = ?1)
+		ORDER BY id, name, as_actor DESC`, personID)
 	if err != nil {
 		return nil, fmt.Errorf("person anime: %w", err)
 	}
 	var out []PersonAppearance
 	for rows.Next() {
 		var pa PersonAppearance
-		if err := rows.Scan(&pa.AnimeID, &pa.CoverPath, &pa.Character); err != nil {
+		var src string
+		if err := rows.Scan(&pa.AnimeID, &src, &pa.SourceID, &pa.CoverPath, &pa.Character, &pa.AsActor); err != nil {
 			rows.Close()
 			return nil, fmt.Errorf("person anime: %w", err)
 		}
+		pa.Source = provider.Source(src)
 		out = append(out, pa)
 	}
 	err = rows.Err()

@@ -91,10 +91,17 @@ type Person struct {
 
 // PersonAppearance is a saved anime a person appears in.
 type PersonAppearance struct {
-	AnimeID   int64
+	AnimeID int64
+	// Source and SourceID identify the anime at its provider.
+	Source    provider.Source
+	SourceID  string
 	Titles    []provider.Title
 	CoverPath string
+	// Character is the voiced character's name when AsActor, else the
+	// person's own name (the person is the character).
 	Character string
+	// AsActor is true when the person is the voice actor of Character.
+	AsActor bool
 }
 
 // Store is the persistence layer over *sql.DB.
