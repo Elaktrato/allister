@@ -284,15 +284,28 @@ func (l *Library) SaveItem(ctx context.Context, pluginID, kind string, d plugin.
 	if err != nil {
 		return 0, err
 	}
-	pk, err := json.Marshal(p.progress)
-	if err != nil {
-		return 0, fmt.Errorf("save item: %w", err)
-	}
 	tx, err := l.db.BeginTx(ctx, nil)
 	if err != nil {
 		return 0, fmt.Errorf("save item: %w", err)
 	}
 	defer tx.Rollback()
+	id, err := insertItem(ctx, tx, pluginID, kind, d, o.syncState, p)
+	if err != nil {
+		return 0, err
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, fmt.Errorf("save item: %w", err)
+	}
+	return id, nil
+}
+
+// insertItem stores the prepared item inside tx. It returns an
+// *AlreadySavedError when the identity exists.
+func insertItem(ctx context.Context, tx *sql.Tx, pluginID, kind string, d plugin.ItemData, syncState string, p *prepared) (int64, error) {
+	pk, err := json.Marshal(p.progress)
+	if err != nil {
+		return 0, fmt.Errorf("save item: %w", err)
+	}
 	var existing int64
 	err = tx.QueryRowContext(ctx, `SELECT id FROM items WHERE plugin_id = ? AND kind = ? AND source = ? AND source_id = ?`,
 		pluginID, kind, p.source, p.sourceID).Scan(&existing)
@@ -305,7 +318,7 @@ func (l *Library) SaveItem(ctx context.Context, pluginID, kind string, d plugin.
 	res, err := tx.ExecContext(ctx, `INSERT INTO items
 		(plugin_id, kind, source, source_id, cover_path, external_url, sync_state, progress_keys)
 		VALUES (?,?,?,?,?,?,?,?)`,
-		pluginID, kind, p.source, p.sourceID, d.CoverURL, d.ExternalURL, o.syncState, string(pk))
+		pluginID, kind, p.source, p.sourceID, d.CoverURL, d.ExternalURL, syncState, string(pk))
 	if err != nil {
 		return 0, fmt.Errorf("save item: %w", err)
 	}
@@ -315,9 +328,6 @@ func (l *Library) SaveItem(ctx context.Context, pluginID, kind string, d plugin.
 	}
 	if err := insertParts(ctx, tx, id, p); err != nil {
 		return 0, err
-	}
-	if err := tx.Commit(); err != nil {
-		return 0, fmt.Errorf("save item: %w", err)
 	}
 	return id, nil
 }

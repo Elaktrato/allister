@@ -136,6 +136,15 @@ func TestGenericCoreMigratesDBAtVersion4AndDownWorks(t *testing.T) {
 	if _, err := d.Exec(`INSERT INTO anime(id, source, source_id, type) VALUES(1,'anilist','1','tv')`); err != nil {
 		t.Fatal(err)
 	}
+	// 00006 (entries) sits on top of 00005: down it first
+	if err := goose.Down(d, "migrations"); err != nil {
+		t.Fatal(err)
+	}
+	for _, tbl := range []string{"entries", "entry_progress"} {
+		if tableCount(t, d, tbl) != 0 {
+			t.Errorf("table %s still exists after down of 00006", tbl)
+		}
+	}
 	if err := goose.Down(d, "migrations"); err != nil {
 		t.Fatal(err)
 	}
@@ -150,7 +159,7 @@ func TestGenericCoreMigratesDBAtVersion4AndDownWorks(t *testing.T) {
 	if err := goose.Up(d, "migrations"); err != nil {
 		t.Fatal(err)
 	}
-	for _, tbl := range genericTables {
+	for _, tbl := range append([]string{"entries", "entry_progress"}, genericTables...) {
 		if tableCount(t, d, tbl) != 1 {
 			t.Errorf("table %s missing after up", tbl)
 		}

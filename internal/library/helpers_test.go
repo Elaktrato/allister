@@ -23,12 +23,13 @@ func richBook(opts ...plugintest.Option) *plugintest.Plugin {
 	k := &p.M.Kinds[0]
 	k.Fields[0].Required = true // author
 	k.Fields = append(k.Fields,
-		plugin.FieldDef{Key: "released", Label: "Released", Type: plugin.FieldDate, Editable: true},
-		plugin.FieldDef{Key: "translators", Label: "Translators", Type: plugin.FieldList, Editable: true},
+		plugin.FieldDef{Key: "released", Label: "Released", Type: plugin.FieldDate, Editable: true, Filterable: true, Sortable: true},
+		plugin.FieldDef{Key: "translators", Label: "Translators", Type: plugin.FieldList, Editable: true, Filterable: true},
 		plugin.FieldDef{Key: "homepage", Label: "Homepage", Type: plugin.FieldURL, Editable: true},
-		plugin.FieldDef{Key: "format", Label: "Format", Type: plugin.FieldEnum, EnumValues: []string{"hardcover", "paperback"}, Editable: true},
-		plugin.FieldDef{Key: "score", Label: "Score", Type: plugin.FieldNumber, Min: fp(0), Max: fp(10), Editable: true},
+		plugin.FieldDef{Key: "format", Label: "Format", Type: plugin.FieldEnum, EnumValues: []string{"hardcover", "paperback"}, Editable: true, Filterable: true},
+		plugin.FieldDef{Key: "score", Label: "Score", Type: plugin.FieldNumber, Min: fp(0), Max: fp(10), Editable: true, Filterable: true, Sortable: true},
 	)
+	k.Fields[1].Sortable = true // pages
 	return p
 }
 
@@ -46,7 +47,9 @@ func newEnv(t *testing.T) *env {
 	}
 	t.Cleanup(func() { d.Close() })
 	reg := plugin.NewRegistry(plugintest.NewMemEnabled())
-	for _, p := range []plugin.Plugin{richBook(), richBook(plugintest.WithID("book2")), plugintest.TVPlugin()} {
+	nop := richBook(plugintest.WithID("nop")) // a kind without a primary progress key
+	nop.M.Kinds[0].Progress.PrimaryKey = ""
+	for _, p := range []plugin.Plugin{richBook(), richBook(plugintest.WithID("book2")), plugintest.TVPlugin(), nop} {
 		if err := reg.Register(p); err != nil {
 			t.Fatal(err)
 		}
