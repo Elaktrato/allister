@@ -75,29 +75,91 @@ func Download(ctx context.Context, hc *http.Client, dir, rawURL string) (string,
 	if !ok {
 		return "", fmt.Errorf("download cover: unsupported content type %q", mt)
 	}
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	name, err := writeHashed(dir, resp.Body, func([]byte) (string, error) { return ext, nil })
+	if err != nil {
 		return "", fmt.Errorf("download cover: %w", err)
+	}
+	return name, nil
+}
+
+// uploadTypes are the sniffed content types Save accepts. avif is absent
+// because http.DetectContentType cannot recognise it; svg is deliberately
+// excluded (scriptable).
+var uploadTypes = map[string]string{
+	"image/jpeg": ".jpg",
+	"image/png":  ".png",
+	"image/webp": ".webp",
+	"image/gif":  ".gif",
+}
+
+// ErrNotImage is returned by Save when the content is not an accepted image.
+var ErrNotImage = errors.New("not a supported image (jpeg, png, webp or gif)")
+
+// ErrTooLarge is returned by Save for content over 10 MiB.
+var ErrTooLarge = errors.New("image larger than 10 MiB")
+
+// Save stores an uploaded image into dir and returns its file name
+// (<sha256 hex><ext>). The type is decided by sniffing the first 512 bytes,
+// never by client-supplied metadata. At most 10 MiB are accepted. No partial
+// file is left on error.
+func Save(dir string, r io.Reader) (string, error) {
+	name, err := writeHashed(dir, r, func(head []byte) (string, error) {
+		ext, ok := uploadTypes[http.DetectContentType(head)]
+		if !ok {
+			return "", ErrNotImage
+		}
+		return ext, nil
+	})
+	if err != nil {
+		return "", fmt.Errorf("save cover: %w", err)
+	}
+	return name, nil
+}
+
+// writeHashed reads r (at most maxBytes), asks pick for the extension given
+// the first 512 bytes, and stores the content as <sha256><ext> in dir through
+// a temp file and rename. Nothing is left behind on error.
+func writeHashed(dir string, r io.Reader, pick func(head []byte) (string, error)) (string, error) {
+	r = io.LimitReader(r, maxBytes+1)
+	head := make([]byte, 512)
+	n, err := io.ReadFull(r, head)
+	if err != nil && !errors.Is(err, io.EOF) && !errors.Is(err, io.ErrUnexpectedEOF) {
+		return "", err
+	}
+	head = head[:n]
+	ext, err := pick(head)
+	if err != nil {
+		return "", err
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", err
 	}
 	tmp, err := os.CreateTemp(dir, ".download-*")
 	if err != nil {
-		return "", fmt.Errorf("download cover: %w", err)
+		return "", err
 	}
 	tmpName := tmp.Name()
 	defer os.Remove(tmpName) // no-op after a successful rename
 	h := sha256.New()
-	n, err := io.Copy(io.MultiWriter(tmp, h), io.LimitReader(resp.Body, maxBytes+1))
+	total := int64(len(head))
+	_, err = io.MultiWriter(tmp, h).Write(head)
+	if err == nil {
+		var m int64
+		m, err = io.Copy(io.MultiWriter(tmp, h), r)
+		total += m
+	}
 	if cerr := tmp.Close(); err == nil {
 		err = cerr
 	}
 	if err != nil {
-		return "", fmt.Errorf("download cover: %w", err)
+		return "", err
 	}
-	if n > maxBytes {
-		return "", errors.New("download cover: image larger than 10 MiB")
+	if total > maxBytes {
+		return "", ErrTooLarge
 	}
 	name := hex.EncodeToString(h.Sum(nil)) + ext
 	if err := os.Rename(tmpName, filepath.Join(dir, name)); err != nil {
-		return "", fmt.Errorf("download cover: %w", err)
+		return "", err
 	}
 	return name, nil
 }

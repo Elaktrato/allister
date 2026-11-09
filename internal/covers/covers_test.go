@@ -141,3 +141,75 @@ func TestSrc(t *testing.T) {
 		}
 	}
 }
+
+func pngBytes(extra string) []byte {
+	return append([]byte("\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00"), extra...)
+}
+
+func TestSaveAcceptsSniffedImages(t *testing.T) {
+	cases := map[string][]byte{
+		".png":  pngBytes("a"),
+		".jpg":  append([]byte("\xff\xd8\xff\xe0\x00\x10JFIF"), "a"...),
+		".gif":  []byte("GIF89a\x01\x00\x01\x00"),
+		".webp": []byte("RIFF\x24\x00\x00\x00WEBPVP8 \x18\x00\x00\x00"),
+	}
+	for ext, body := range cases {
+		dir := t.TempDir()
+		rel, err := Save(dir, bytes.NewReader(body))
+		if err != nil || !strings.HasSuffix(rel, ext) || len(rel) != 64+len(ext) {
+			t.Errorf("%s: %q %v", ext, rel, err)
+			continue
+		}
+		if got, _ := os.ReadFile(filepath.Join(dir, rel)); !bytes.Equal(got, body) {
+			t.Errorf("%s: content differs", ext)
+		}
+	}
+}
+
+func TestSaveRejectsOtherContent(t *testing.T) {
+	cases := map[string][]byte{
+		"html as png": []byte("<!DOCTYPE html><html><script>alert(1)</script>"),
+		"svg":         []byte(`<?xml version="1.0"?><svg xmlns="http://www.w3.org/2000/svg"></svg>`),
+		"svg bare":    []byte(`<svg xmlns="http://www.w3.org/2000/svg"/>`),
+		"empty":       nil,
+		"binary":      {0, 1, 2, 3, 4, 5},
+		"text":        []byte("hello"),
+	}
+	for name, body := range cases {
+		dir := t.TempDir()
+		if rel, err := Save(dir, bytes.NewReader(body)); err == nil {
+			t.Errorf("%s accepted as %q", name, rel)
+		}
+		if f := files(t, dir); len(f) != 0 {
+			t.Errorf("%s left files %v", name, f)
+		}
+	}
+}
+
+func TestSaveRejectsOversize(t *testing.T) {
+	dir := t.TempDir()
+	body := pngBytes(strings.Repeat("a", maxBytes))
+	if _, err := Save(dir, bytes.NewReader(body)); err == nil {
+		t.Fatal("expected error")
+	}
+	if f := files(t, dir); len(f) != 0 {
+		t.Fatalf("files = %v", f)
+	}
+	// exactly the limit is fine
+	ok := pngBytes(strings.Repeat("a", maxBytes-len(pngBytes(""))))
+	if _, err := Save(dir, bytes.NewReader(ok)); err != nil {
+		t.Fatalf("at limit: %v", err)
+	}
+}
+
+func TestSaveSameBytesOneFile(t *testing.T) {
+	dir := t.TempDir()
+	a, err1 := Save(dir, bytes.NewReader(pngBytes("x")))
+	b, err2 := Save(dir, bytes.NewReader(pngBytes("x")))
+	if err1 != nil || err2 != nil || a != b {
+		t.Fatalf("%q %q %v %v", a, b, err1, err2)
+	}
+	if f := files(t, dir); len(f) != 1 {
+		t.Fatalf("files = %v", f)
+	}
+}

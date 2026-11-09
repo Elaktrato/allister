@@ -152,3 +152,19 @@ func TestGetByID(t *testing.T) {
 		t.Fatalf("missing: %+v, %v", got, err)
 	}
 }
+
+func TestCoverReferenced(t *testing.T) {
+	s := newStore(t)
+	ctx := context.Background()
+	a := sample(provider.Manual, "m1", nil)
+	a.CoverURL = "abc.png"
+	if _, err := s.SaveAnime(ctx, a); err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := s.CoverReferenced(ctx, "abc.png"); err != nil || !ok {
+		t.Fatalf("%v %v", ok, err)
+	}
+	if ok, err := s.CoverReferenced(ctx, "other.png"); err != nil || ok {
+		t.Fatalf("%v %v", ok, err)
+	}
+}

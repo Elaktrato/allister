@@ -201,3 +201,17 @@ func (s *Store) SetSyncState(ctx context.Context, animeID int64, state string) e
 	_, err := s.db.ExecContext(ctx, `UPDATE anime SET sync_state = ? WHERE id = ?`, state, animeID)
 	return err
 }
+
+// CoverReferenced reports whether any anime cover or person image uses the
+// stored value (a covers-dir file name). Content-hash file names are shared,
+// so callers check this before deleting a file.
+func (s *Store) CoverReferenced(ctx context.Context, name string) (bool, error) {
+	var n int
+	err := s.db.QueryRowContext(ctx, `SELECT
+		(SELECT COUNT(*) FROM anime WHERE cover_path = ?) +
+		(SELECT COUNT(*) FROM people WHERE image_path = ?)`, name, name).Scan(&n)
+	if err != nil {
+		return false, fmt.Errorf("cover referenced: %w", err)
+	}
+	return n > 0, nil
+}

@@ -49,7 +49,7 @@ type server struct {
 
 // pageNames lists every page template (templates/<name>.html). Add a page by
 // dropping its file in templates/ and listing it here.
-var pageNames = []string{"index", "settings", "search", "anime", "list", "person", "error"}
+var pageNames = []string{"index", "settings", "search", "anime", "list", "person", "manual_form", "error"}
 
 // pagePartials lists extra template files a page needs (also rendered alone
 // for htmx requests).
@@ -98,6 +98,8 @@ func newServer(deps Deps, now func() time.Time) (*server, http.Handler) {
 	mux.HandleFunc("POST /list/{id}/remove", s.postRemove)
 	mux.HandleFunc("GET /people/{id}", s.getPerson)
 	mux.HandleFunc("GET /anime/search", s.search)
+	mux.HandleFunc("GET /anime/manual/new", s.getManualNew)
+	mux.HandleFunc("POST /anime/manual/new", s.postManualNew)
 	mux.HandleFunc("GET /anime/{source}/{id}", s.getOverview)
 	mux.HandleFunc("GET /anime/{source}/{id}/add", s.getAdd)
 	mux.HandleFunc("POST /anime/{source}/{id}/add", s.postAdd)

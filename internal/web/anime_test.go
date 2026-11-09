@@ -69,6 +69,8 @@ type env struct {
 	st   *store.Store
 	set  *settings.Store
 	now  *time.Time
+	// covers is the temp covers dir configured as Deps.CoversDir.
+	covers string
 }
 
 func newEnv(t *testing.T) *env {
@@ -78,11 +80,12 @@ func newEnv(t *testing.T) *env {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { d.Close() })
-	e := &env{fp: sampleAnimeProvider(), jobs: &fakeJobs{}, st: store.New(d), set: settings.New(d)}
+	e := &env{fp: sampleAnimeProvider(), jobs: &fakeJobs{}, st: store.New(d), set: settings.New(d),
+		covers: filepath.Join(t.TempDir(), "covers")}
 	now := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
 	e.now = &now
 	_, e.h = newServer(Deps{
-		Settings: e.set, Store: e.st, Jobs: e.jobs,
+		Settings: e.set, Store: e.st, Jobs: e.jobs, CoversDir: e.covers,
 		Providers: map[provider.Source]provider.Provider{provider.AniList: e.fp},
 	}, func() time.Time { return *e.now })
 	return e
