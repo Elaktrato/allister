@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -76,6 +77,15 @@ func listID(t *testing.T, body string) string {
 	return m[1]
 }
 
+func mustID(t *testing.T, s string) int64 {
+	t.Helper()
+	n, err := strconv.ParseInt(s, 10, 64)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return n
+}
+
 var personRe = regexp.MustCompile(`href="(/people/\d+)"`)
 
 func TestManualEntryAndPersonFlow(t *testing.T) {
@@ -133,11 +143,11 @@ func TestManualEntryAndPersonFlow(t *testing.T) {
 		}
 	}
 	edit("0")
-	if en, _ := e.st.GetListEntry(context.Background(), mustAtoi(t, id)); en == nil || en.Rating == nil || *en.Rating != 0 {
+	if en, _ := e.st.GetListEntry(context.Background(), mustID(t, id)); en == nil || en.Rating == nil || *en.Rating != 0 {
 		t.Fatalf("rating 0 not stored: %+v", en)
 	}
 	edit("")
-	if en, _ := e.st.GetListEntry(context.Background(), mustAtoi(t, id)); en == nil || en.Rating != nil {
+	if en, _ := e.st.GetListEntry(context.Background(), mustID(t, id)); en == nil || en.Rating != nil {
 		t.Fatalf("blank rating must be unrated: %+v", en)
 	}
 
@@ -152,15 +162,6 @@ func TestManualEntryAndPersonFlow(t *testing.T) {
 	}
 	mustContain(t, rec.Body.String(), "Not in any anime in your list")
 	mustNotContain(t, rec.Body.String(), "as Light Yagami")
-}
-
-func mustAtoi(t *testing.T, s string) int64 {
-	t.Helper()
-	var n int64
-	for _, c := range s {
-		n = n*10 + int64(c-'0')
-	}
-	return n
 }
 
 func TestImportFlow(t *testing.T) {

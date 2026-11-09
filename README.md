@@ -34,7 +34,7 @@ All data lives in the named volume `allister-data`, mounted at `/data`. It holds
 
 ## Title language
 
-Settings has a title language: Japanese (default), romaji or English. Other languages are shown too when they are stored for an entry. If the chosen language is missing, Allister falls back to another title.
+Settings has a title language: Japanese (default), romaji or English. Further languages (for example German, French, Spanish) appear in the dropdown once a saved entry has a title in them. If the chosen language is missing for an entry, Allister falls back to Japanese, romaji, English, then any title.
 
 ## Importing from Yamtrack
 
@@ -45,9 +45,31 @@ Only anime rows with MyAnimeList ids are used. Each id is looked up on AniList a
 
 The page shows progress. You can cancel an import and resume it later. Entries AniList cannot match are kept as manual entries marked "unmatched". Importing the same file again never creates duplicates.
 
+## Updating and stopping
+
+After `git pull`, run `docker compose up -d --build`. `docker compose down` stops and removes the container but keeps the data volume. **`docker compose down -v` deletes the volume and all your data.**
+
 ## Data and backups
 
-Stop the container (`docker compose stop`) and copy the volume, or back up while running. The database uses WAL, so copy `allister.db*` (including the `-wal` and `-shm` files) together, or use `sqlite3 allister.db ".backup backup.db"`. Copy `covers/` as well.
+Compose prefixes the volume with the project name, usually `<project>_allister-data`. Find the exact name with `docker volume ls | grep allister-data` and use it below as `VOLUME`.
+
+Cold backup (recommended). The archive contains `allister.db` (plus `-wal` and `-shm` if present) and `covers/`:
+
+```
+docker compose stop
+docker run --rm -v VOLUME:/data -v "$PWD":/backup alpine tar czf /backup/allister-backup.tgz -C /data .
+docker compose start
+```
+
+To restore, run `docker compose stop`, extract into the volume with `docker run --rm -v VOLUME:/data -v "$PWD":/backup alpine tar xzf /backup/allister-backup.tgz -C /data`, then `docker compose start`.
+
+Live backup (optional, database only). Copying the database files of a running instance is not safe, so use SQLite's `.backup` from a helper container (the Allister image has no `sqlite3`):
+
+```
+docker run --rm --user root -v VOLUME:/data -v "$PWD":/backup keinos/sqlite3 sqlite3 /data/allister.db ".backup '/backup/allister.db'"
+```
+
+Copy `covers/` separately in that case.
 
 ## Security
 
