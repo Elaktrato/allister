@@ -1,10 +1,12 @@
 package library
 
 import (
+	"errors"
 	"fmt"
 	"slices"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/allister/allister/internal/plugin"
 )
@@ -253,7 +255,7 @@ func TestProgressStateFiltersAgreeWithHelpers(t *testing.T) {
 	var specs []spec
 	choices := []*float64{nil, fp(0), fp(2), fp(3), fp(100)}
 	for _, keys := range [][]string{{"pages"}, {"percent"}} {
-		for _, total := range []*float64{nil, fp(3)} {
+		for _, total := range []*float64{nil, fp(3), fp(0), fp(-1)} {
 			for _, a := range choices {
 				for _, b := range choices {
 					specs = append(specs, spec{"book", "book", keys, total, map[string]*float64{"pages": a, "percent": b}})
@@ -263,7 +265,7 @@ func TestProgressStateFiltersAgreeWithHelpers(t *testing.T) {
 	}
 	vals3 := choices[:4]
 	for _, keys := range [][]string{{"episode"}, {"season", "episode"}, {"episode", "position"}} {
-		for _, total := range []*float64{nil, fp(3)} {
+		for _, total := range []*float64{nil, fp(3), fp(0), fp(-1)} {
 			for _, a := range vals3 {
 				for _, b := range vals3 {
 					for _, c := range vals3 {
@@ -280,12 +282,17 @@ func TestProgressStateFiltersAgreeWithHelpers(t *testing.T) {
 	fixtures := map[string]map[int64]fixture{"book": {}, "tv": {}}
 	for i, s := range specs {
 		d := bookData(fmt.Sprint(i))
+		totalKey := "pages"
 		if s.pluginID == "tv" {
-			d = tvData(fmt.Sprint(i), s.total)
-		} else if s.total != nil {
-			d = bookWith(fmt.Sprint(i), s.total)
+			d, totalKey = tvData(fmt.Sprint(i), nil), "episodes"
 		}
 		id := mustSave(t, l, s.pluginID, s.kind, d, WithProgressKeys(s.keys))
+		if s.total != nil {
+			// direct insert: zero and negative totals bypass validation
+			if _, err := e.db.Exec(`INSERT INTO item_fields(item_id,key,vtype,num) VALUES (?,?,'number',?)`, id, totalKey, *s.total); err != nil {
+				t.Fatal(err)
+			}
+		}
 		if err := l.UpsertEntry(bg, Entry{ItemID: id, Status: Active}); err != nil {
 			t.Fatal(err)
 		}
@@ -305,9 +312,20 @@ func TestProgressStateFiltersAgreeWithHelpers(t *testing.T) {
 		en := Entry{ItemID: id, Status: Active, Progress: all}
 		f := fixture{id: id, fin: Finished(def, it, en), not: NotStarted(def, it, en)}
 		f.in = !f.fin && !f.not
+		if f.fin && f.not {
+			t.Errorf("item %d (%s %v total %v vals %v) is both finished and not started", id, s.pluginID, s.keys, s.total, all)
+		}
 		fixtures[s.pluginID][id] = f
 	}
 	for pluginID, kind := range map[string]string{"book": "book", "tv": "show"} {
+		member := map[int64]int{}
+		defer func(pluginID string) {
+			for id := range fixtures[pluginID] {
+				if member[id] != 1 {
+					t.Errorf("%s item %d is in %d progress states, want exactly 1", pluginID, id, member[id])
+				}
+			}
+		}(pluginID)
 		for _, st := range []ProgressState{ProgressNotStarted, ProgressInProgress, ProgressFinished} {
 			got := map[int64]bool{}
 			for page := 1; ; page++ {
@@ -317,6 +335,7 @@ func TestProgressStateFiltersAgreeWithHelpers(t *testing.T) {
 				}
 				for _, r := range pg.Rows {
 					got[r.Item.ID] = true
+					member[r.Item.ID]++
 				}
 				if page >= pg.Pages {
 					break
@@ -340,5 +359,68 @@ func TestProgressStateFiltersAgreeWithHelpers(t *testing.T) {
 		if err != nil || pg.Total != len(fixtures[pluginID]) {
 			t.Fatalf("any: %d, %v", pg.Total, err)
 		}
+	}
+}
+
+func TestZeroTotalIsUnbounded(t *testing.T) {
+	e := newEnv(t)
+	l := e.lib
+	tv := kindOf(t, l, "tv", "show")
+	id := addShow(t, l, "z0", fp(0), Entry{Status: Active})
+	it := mustItem(t, l, id)
+	if !NotStarted(tv, it, Entry{}) || Finished(tv, it, Entry{}) {
+		t.Fatal("total 0 without progress must be not started and not finished")
+	}
+	states := func() (n, p, f int) {
+		for st, c := range map[ProgressState]*int{ProgressNotStarted: &n, ProgressInProgress: &p, ProgressFinished: &f} {
+			pg := mustList(t, l, Query{PluginID: "tv", Kind: "show", Progress: st})
+			*c = pg.Total
+		}
+		return
+	}
+	if n, p, f := states(); n != 1 || p != 0 || f != 0 {
+		t.Fatalf("states = %d/%d/%d", n, p, f)
+	}
+	if err := l.UpsertEntry(bg, Entry{ItemID: id, Status: Active, Progress: map[string]float64{"episode": 5}}); err != nil {
+		t.Fatalf("progress above a total of 0: %v", err)
+	}
+	if n, p, f := states(); n != 0 || p != 1 || f != 0 {
+		t.Fatalf("states = %d/%d/%d", n, p, f)
+	}
+	for range 3 {
+		if err := l.Increment(bg, id); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := progressOf(t, l, id)["episode"]; got != 8 {
+		t.Fatalf("episode = %v, want 8 (no cap)", got)
+	}
+	// a negative stored total is unbounded too
+	if _, err := e.db.Exec(`UPDATE item_fields SET num = -4 WHERE item_id = ? AND key = 'episodes'`, id); err != nil {
+		t.Fatal(err)
+	}
+	if err := l.Increment(bg, id); err != nil || progressOf(t, l, id)["episode"] != 9 {
+		t.Fatalf("increment with negative total: %v", err)
+	}
+	it = mustItem(t, l, id)
+	if err := l.ValidateEntry(tv, it, Entry{Status: Active, Progress: map[string]float64{"episode": 1000}}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestHugeTermListFailsFast(t *testing.T) {
+	l := newLib(t)
+	q := Query{PluginID: "tv", Kind: "show"}
+	for i := 0; i < 100000; i++ {
+		q.Genres = append(q.Genres, fmt.Sprint("genre-", i))
+	}
+	start := time.Now()
+	_, err := l.List(bg, q, "en")
+	var fe *FilterError
+	if !errors.As(err, &fe) {
+		t.Fatalf("err = %v", err)
+	}
+	if d := time.Since(start); d > time.Second {
+		t.Fatalf("took %v", d)
 	}
 }

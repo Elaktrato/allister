@@ -190,25 +190,20 @@ func (l *Library) AddToList(ctx context.Context, pluginID, kind string, d plugin
 // other keys are left untouched (see ClearProgress). It returns ErrNoEntry for
 // an unknown item.
 func (l *Library) UpsertEntry(ctx context.Context, e Entry) error {
-	it, err := l.Item(ctx, e.ItemID)
+	tx, err := l.db.BeginTx(ctx, nil)
 	if err != nil {
-		return err
+		return fmt.Errorf("save entry: %w", err)
 	}
-	if it == nil {
-		return ErrNoEntry
-	}
-	def, err := l.kindDef(it.PluginID, it.Kind)
+	defer tx.Rollback()
+	// the active keys and totals are read inside the (write-locking)
+	// transaction, so a concurrent change cannot slip in before the write
+	it, def, err := l.txItem(ctx, tx, e.ItemID)
 	if err != nil {
 		return err
 	}
 	if err := l.ValidateEntry(def, it, e); err != nil {
 		return err
 	}
-	tx, err := l.db.BeginTx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("save entry: %w", err)
-	}
-	defer tx.Rollback()
 	if err := writeEntry(ctx, tx, e.ItemID, e); err != nil {
 		return err
 	}

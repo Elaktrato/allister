@@ -11,6 +11,7 @@ CREATE TABLE entries (
     updated_at  TEXT NOT NULL
 );
 CREATE INDEX idx_entries_status ON entries(status);
+CREATE INDEX idx_entries_updated ON entries(updated_at);
 
 CREATE TABLE entry_progress (
     item_id INTEGER NOT NULL REFERENCES items(id) ON DELETE CASCADE,

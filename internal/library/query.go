@@ -82,6 +82,15 @@ const (
 
 // Query selects entries of ONE plugin kind (PluginID and Kind are required).
 //
+// Case handling: text search and the "contains" operator fold ASCII only
+// (SQLite lower()); term filters (genres, tags) fold Unicode; list "in" and
+// enum values are case-sensitive exact matches. Filter values over 200 runes
+// are a FilterError, while Text and term values over 200 runes are truncated.
+//
+// Sort: the zero Sort{} means newest first and ignores Desc, whereas an
+// explicit Sort{Kind: SortUpdated} honours Desc, so a caller that wants
+// newest first with an explicit kind must set Desc: true.
+//
 // Text is a case-insensitive substring over all stored titles (longer than 200
 // runes is truncated); % _ and \ are literal. Case-insensitivity is ASCII
 // only (SQLite lower()); other scripts match by exact case.
@@ -367,6 +376,7 @@ func unmatchedClause(man plugin.Manifest) clause {
 
 func compileTerms(name, kind string, vals []string, all bool, td plugin.TermDef) (clause, bool, error) {
 	var keys []string
+	seen := map[string]bool{}
 	nul := false
 	for _, v := range vals {
 		k := strings.ToLower(strings.TrimSpace(truncateRunes(v, maxFilterRunes)))
@@ -374,8 +384,12 @@ func compileTerms(name, kind string, vals []string, all bool, td plugin.TermDef)
 		case k == "":
 		case strings.ContainsRune(k, 0):
 			nul = true // a NUL would end the bound string early; no stored term has one
-		case !slices.Contains(keys, k):
+		case !seen[k]:
+			seen[k] = true
 			keys = append(keys, k)
+			if len(keys) > maxFilterValues { // fail fast, before looking at the rest
+				return clause{}, false, filterErr(name, "more than %d %s values", maxFilterValues, kind)
+			}
 		}
 	}
 	if len(keys) == 0 && !nul {
@@ -619,7 +633,7 @@ func totalSQL(d plugin.ProgressDef) (total, bounded string, args []any) {
 	case d.Type == plugin.Percent:
 		return `100`, `1`, nil
 	case d.TotalField != "":
-		t := `(SELECT f.num FROM item_fields f WHERE f.item_id = items.id AND f.key = ? AND f.num IS NOT NULL ORDER BY f.seq LIMIT 1)`
+		t := `(SELECT f.num FROM item_fields f WHERE f.item_id = items.id AND f.key = ? AND f.num > 0 ORDER BY f.seq LIMIT 1)`
 		return t, t + ` IS NOT NULL`, []any{d.TotalField}
 	}
 	return `NULL`, `0`, nil
@@ -898,7 +912,8 @@ func (l *Library) Counts(ctx context.Context, q Query) (map[Status]int, error) {
 // those matching q WITHOUT that term type's own filter (genre counts ignore
 // the genre filter, tag counts the tag filter). Ordered by count descending,
 // then by the lower-cased term; the display spelling is the first stored
-// spelling in binary order (MIN). Spoiler tags count like any other. A kind
+// spelling in binary order (MIN). At most 1000 rows are returned (LIMIT).
+// Spoiler tags count like any other. A kind
 // that does not enable the term type yields no rows.
 func (l *Library) Terms(ctx context.Context, q Query, kind string) ([]TermCount, error) {
 	var skip string

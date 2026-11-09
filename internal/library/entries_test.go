@@ -77,6 +77,7 @@ func TestValidateEntryRules(t *testing.T) {
 	tv := kindOf(t, l, "tv", "show")
 	pagesItem := &Item{ProgressKeys: []string{"pages"}, Fields: map[string]plugin.FieldValue{"pages": {Num: fp(300)}}}
 	noTotal := &Item{ProgressKeys: []string{"pages"}}
+	zeroTotal := &Item{ProgressKeys: []string{"pages"}, Fields: map[string]plugin.FieldValue{"pages": {Num: fp(0)}}}
 	percentItem := &Item{ProgressKeys: []string{"percent"}}
 	tvItem := &Item{ProgressKeys: []string{"season", "episode", "position"}, Fields: map[string]plugin.FieldValue{"episodes": {Num: fp(12)}}}
 	jst := time.FixedZone("JST", 9*3600)
@@ -117,6 +118,7 @@ func TestValidateEntryRules(t *testing.T) {
 		{"at total", book, pagesItem, Entry{Status: Active, Progress: map[string]float64{"pages": 300}}, ""},
 		{"above total", book, pagesItem, Entry{Status: Active, Progress: map[string]float64{"pages": 301}}, "total"},
 		{"above total episodes", tv, tvItem, Entry{Status: Active, Progress: map[string]float64{"episode": 13}}, "total"},
+		{"zero total is unbounded", book, zeroTotal, Entry{Status: Active, Progress: map[string]float64{"pages": 500}}, ""},
 		{"no total is unbounded", book, noTotal, Entry{Status: Active, Progress: map[string]float64{"pages": 1e6}}, ""},
 		{"unbounded duration", tv, tvItem, Entry{Status: Active, Progress: map[string]float64{"position": 1e6}}, ""},
 		{"finish before start", book, pagesItem, Entry{Status: Active, StartedOn: at(2024, 3, 5, 0, 0, time.UTC), FinishedOn: at(2024, 3, 4, 0, 0, time.UTC)}, "finish"},

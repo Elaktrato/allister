@@ -34,8 +34,8 @@ func progressDef(kind plugin.KindDef, key string) (plugin.ProgressDef, bool) {
 
 // progressBound returns the total of a bounded track. Percent is always
 // bounded at 100. Count, pages and duration are bounded only when the track
-// names a total field and the item has a numeric value for it (a total of 0
-// is a value like any other); otherwise they are unbounded.
+// names a total field and the item has a total greater than 0 there; a missing,
+// zero or negative total means unbounded (sources report 0 for "unknown").
 func progressBound(def plugin.ProgressDef, item *Item) (total float64, bounded bool) {
 	if def.Type == plugin.Percent {
 		return 100, true
@@ -43,7 +43,7 @@ func progressBound(def plugin.ProgressDef, item *Item) (total float64, bounded b
 	if def.TotalField == "" {
 		return 0, false
 	}
-	if v, ok := item.Fields[def.TotalField]; ok && v.Num != nil {
+	if v, ok := item.Fields[def.TotalField]; ok && v.Num != nil && *v.Num > 0 {
 		return *v.Num, true
 	}
 	return 0, false
@@ -167,7 +167,7 @@ func (l *Library) Increment(ctx context.Context, itemID int64) error {
 	if key == "" || !ok || !slices.Contains(active, key) || (pd.Type != plugin.Count && pd.Type != plugin.Pages) {
 		return nil
 	}
-	const total = `(SELECT f.num FROM item_fields f WHERE f.item_id = ?1 AND f.key = ?3 AND f.num IS NOT NULL ORDER BY f.seq LIMIT 1)`
+	const total = `(SELECT f.num FROM item_fields f WHERE f.item_id = ?1 AND f.key = ?3 AND f.num > 0 ORDER BY f.seq LIMIT 1)`
 	res, err := tx.ExecContext(ctx, `INSERT INTO `+tableEntryProgress+`(item_id, key, value)
 		SELECT ?1, ?2, 1 WHERE `+total+` IS NULL OR `+total+` >= 1
 		ON CONFLICT(item_id, key) DO UPDATE SET value = value + 1
@@ -186,10 +186,45 @@ func (l *Library) Increment(ctx context.Context, itemID int64) error {
 	return nil
 }
 
+// txItem builds the Item that entry validation needs (active keys and the
+// numeric total fields) from reads inside tx, and returns its KindDef.
+func (l *Library) txItem(ctx context.Context, tx *sql.Tx, itemID int64) (*Item, plugin.KindDef, error) {
+	pluginID, kindKey, active, _, err := itemMeta(ctx, tx, itemID)
+	if err != nil {
+		return nil, plugin.KindDef{}, err
+	}
+	def, err := l.kindDef(pluginID, kindKey)
+	if err != nil {
+		return nil, def, err
+	}
+	it := &Item{ID: itemID, PluginID: pluginID, Kind: kindKey, ProgressKeys: active}
+	for _, d := range def.Progress.Eligible {
+		if d.TotalField == "" || !slices.Contains(active, d.Key) {
+			continue
+		}
+		var n float64
+		err := tx.QueryRowContext(ctx, `SELECT num FROM item_fields WHERE item_id = ? AND key = ? AND num IS NOT NULL ORDER BY seq LIMIT 1`,
+			itemID, d.TotalField).Scan(&n)
+		if errors.Is(err, sql.ErrNoRows) {
+			continue
+		}
+		if err != nil {
+			return nil, def, fmt.Errorf("load total: %w", err)
+		}
+		if it.Fields == nil {
+			it.Fields = map[string]plugin.FieldValue{}
+		}
+		it.Fields[d.TotalField] = plugin.FieldValue{Num: &n}
+	}
+	return it, def, nil
+}
+
 // SetActiveProgress sets the item's active progress keys. keys must equal
 // (as a set) one of the kind's allowed combinations. Values of keys that stop
 // being active are retained and reappear when the key is activated again.
-// It returns ErrNoEntry for an unknown item.
+// It returns ErrNoEntry for an unknown item. It bumps items.updated_at but
+// not entries.updated_at: the entry's own data did not change, and the list
+// order ("recently updated") should follow what the user did to the entry.
 func (l *Library) SetActiveProgress(ctx context.Context, itemID int64, keys []string) error {
 	tx, err := l.db.BeginTx(ctx, nil)
 	if err != nil {
