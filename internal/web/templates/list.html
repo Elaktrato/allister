@@ -1,0 +1,41 @@
+{{define "title"}}Anime list - Allister{{end}}
+{{define "content"}}
+<h1 class="mb-4 text-3xl font-semibold">Anime</h1>
+<nav aria-label="List status" class="mb-4 flex flex-wrap gap-2">
+  {{range .Tabs}}
+  <a href="{{.Href}}"{{if .Current}} aria-current="page"{{end}} class="rounded px-3 py-1 text-sm {{if .Current}}bg-indigo-600 font-medium{{else}}bg-slate-800 hover:bg-slate-700{{end}}">{{.Label}} ({{.Count}})</a>
+  {{end}}
+</nav>
+{{if not .AnyEntries}}
+<p class="rounded border border-slate-800 bg-slate-900 p-4 text-slate-300">Your list is empty. <a href="/anime/search" class="text-indigo-300 underline">Search for anime to add</a>.</p>
+{{else if not .Rows}}
+<p class="rounded border border-slate-800 bg-slate-900 p-4 text-slate-300">Nothing here yet.</p>
+{{else}}
+<div class="overflow-x-auto">
+  <table class="w-full text-left text-sm">
+    <thead class="text-slate-400">
+      <tr class="border-b border-slate-800">
+        <th class="py-2 pr-3"><span class="sr-only">Cover</span></th>
+        <th class="py-2 pr-3 font-medium">Title</th>
+        <th class="hidden py-2 pr-3 font-medium sm:table-cell">Type</th>
+        <th class="py-2 pr-3 font-medium">Progress</th>
+        <th class="py-2 pr-3 font-medium">Score</th>
+        <th class="py-2 pr-3 font-medium">Status</th>
+        <th class="py-2 text-right font-medium"><span class="sr-only">Actions</span></th>
+      </tr>
+    </thead>
+    <tbody>
+      {{range .Rows}}{{template "list_row" .}}{{end}}
+    </tbody>
+  </table>
+</div>
+<div class="mt-4 flex items-center justify-between text-sm text-slate-400">
+  <p>Showing {{.From}}–{{.To}} of {{.Total}}</p>
+  <p class="flex gap-4">
+    {{if .PrevURL}}<a href="{{.PrevURL}}" class="text-indigo-300 hover:underline">Previous</a>{{end}}
+    {{if .NextURL}}<a href="{{.NextURL}}" class="text-indigo-300 hover:underline">Next</a>{{end}}
+  </p>
+</div>
+{{end}}
+<div id="dialog-slot" hx-on::before-swap="var s=event.detail.xhr.status;if(s===422||s===409||s===503){event.detail.shouldSwap=true;event.detail.isError=false}">{{with .Dialog}}{{template "add_dialog" .}}{{end}}</div>
+{{end}}

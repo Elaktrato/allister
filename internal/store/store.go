@@ -76,6 +76,10 @@ type ListRow struct {
 	Episodes  *int
 	Entry     ListEntry
 	SyncState string
+	// Source and SourceID identify the anime; MALID is "" when unknown.
+	Source   provider.Source
+	SourceID string
+	MALID    string
 }
 
 // Person is a stored character or voice actor.

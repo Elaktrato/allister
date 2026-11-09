@@ -2,7 +2,8 @@
 <div data-dialog class="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-black/70 p-4" role="dialog" aria-modal="true" aria-labelledby="add-dialog-title">
   <form method="post" action="{{.Action}}" hx-post="{{.Action}}" hx-target="#dialog-slot" hx-swap="innerHTML"
     class="w-full max-w-md space-y-4 rounded border border-slate-700 bg-slate-900 p-5">
-    <h2 id="add-dialog-title" class="text-xl font-semibold">Add to list</h2>
+    {{if .Return}}<input type="hidden" name="return" value="{{.Return}}">{{end}}
+    <h2 id="add-dialog-title" class="text-xl font-semibold">{{.Heading}}</h2>
     {{if .Error}}
     <div class="rounded border border-amber-700 bg-amber-950 p-3 text-amber-200" role="alert">
       <p>{{.Error}}</p>
@@ -40,7 +41,7 @@
     </label>
     <div class="flex justify-end gap-3">
       <a href="{{.CancelURL}}" hx-on:click="event.preventDefault();this.closest('[data-dialog]').remove()" class="rounded px-4 py-2 hover:bg-slate-800">Cancel</a>
-      <button type="submit" class="rounded bg-indigo-600 px-4 py-2 font-medium hover:bg-indigo-500">Add</button>
+      <button type="submit" class="rounded bg-indigo-600 px-4 py-2 font-medium hover:bg-indigo-500">{{.Submit}}</button>
     </div>
   </form>
 </div>

@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strconv"
 
 	"github.com/allister/allister/internal/provider"
 )
@@ -152,17 +153,53 @@ func (s *Store) IncrementProgress(ctx context.Context, animeID int64) error {
 	return nil // at the total already
 }
 
-// List returns list rows, newest updated first, optionally filtered by status.
+// List returns all list rows, newest updated first, optionally filtered by status.
 func (s *Store) List(ctx context.Context, status *Status) ([]ListRow, error) {
-	q := `SELECT a.id, a.cover_path, a.type, a.episodes, a.sync_state,
-		l.status, l.rating, l.progress, l.started_on, l.finished_on, l.comment
-		FROM list_entries l JOIN anime a ON a.id = l.anime_id`
+	return s.ListPage(ctx, status, -1, 0)
+}
+
+// ListPage is List restricted to limit rows starting at offset (limit < 0
+// means no limit). The order is stable: updated_at, then id, newest first.
+func (s *Store) ListPage(ctx context.Context, status *Status, limit, offset int) ([]ListRow, error) {
+	var where string
 	var args []any
 	if status != nil {
-		q += ` WHERE l.status = ?`
+		where = ` WHERE l.status = ?`
 		args = append(args, string(*status))
 	}
-	q += ` ORDER BY l.updated_at DESC, a.id DESC`
+	args = append(args, limit, offset)
+	return s.listRows(ctx, where+` ORDER BY l.updated_at DESC, a.id DESC LIMIT ? OFFSET ?`, args...)
+}
+
+// GetListRow returns the list row of one anime, or nil, nil when it has no
+// list entry.
+func (s *Store) GetListRow(ctx context.Context, animeID int64) (*ListRow, error) {
+	rows, err := s.listRows(ctx, ` WHERE a.id = ?`, animeID)
+	if err != nil || len(rows) == 0 {
+		return nil, err
+	}
+	return &rows[0], nil
+}
+
+// DeleteAnime removes the anime with its titles, relations, cast rows and
+// list entry (foreign key cascades). People rows and cover files stay. It
+// returns ErrNoEntry when the id does not exist.
+func (s *Store) DeleteAnime(ctx context.Context, animeID int64) error {
+	res, err := s.db.ExecContext(ctx, `DELETE FROM anime WHERE id = ?`, animeID)
+	if err != nil {
+		return fmt.Errorf("delete anime: %w", err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNoEntry
+	}
+	return nil
+}
+
+// listRows runs the list query with the given trailing SQL (WHERE/ORDER/LIMIT).
+func (s *Store) listRows(ctx context.Context, tail string, args ...any) ([]ListRow, error) {
+	q := `SELECT a.id, a.cover_path, a.type, a.episodes, a.sync_state, a.source, a.source_id, a.mal_id,
+		l.status, l.rating, l.progress, l.started_on, l.finished_on, l.comment
+		FROM list_entries l JOIN anime a ON a.id = l.anime_id` + tail
 	rows, err := s.db.QueryContext(ctx, q, args...)
 	if err != nil {
 		return nil, fmt.Errorf("list: %w", err)
@@ -172,13 +209,18 @@ func (s *Store) List(ctx context.Context, status *Status) ([]ListRow, error) {
 		var (
 			r          ListRow
 			eps, rat   sql.NullInt64
-			st         string
+			mal        sql.NullInt64
+			src, st    string
 			start, end sql.NullString
 		)
-		if err := rows.Scan(&r.AnimeID, &r.CoverPath, &r.Type, &eps, &r.SyncState,
+		if err := rows.Scan(&r.AnimeID, &r.CoverPath, &r.Type, &eps, &r.SyncState, &src, &r.SourceID, &mal,
 			&st, &rat, &r.Entry.Progress, &start, &end, &r.Entry.Comment); err != nil {
 			rows.Close()
 			return nil, fmt.Errorf("list: %w", err)
+		}
+		r.Source = provider.Source(src)
+		if mal.Valid {
+			r.MALID = strconv.FormatInt(mal.Int64, 10)
 		}
 		r.Episodes = nullInt(eps)
 		r.Entry.AnimeID, r.Entry.Status, r.Entry.Rating = r.AnimeID, Status(st), nullInt(rat)

@@ -49,13 +49,14 @@ type server struct {
 
 // pageNames lists every page template (templates/<name>.html). Add a page by
 // dropping its file in templates/ and listing it here.
-var pageNames = []string{"index", "settings", "search", "anime", "error"}
+var pageNames = []string{"index", "settings", "search", "anime", "list", "error"}
 
 // pagePartials lists extra template files a page needs (also rendered alone
 // for htmx requests).
 var pagePartials = map[string][]string{
 	"search": {"templates/search_results.html"},
 	"anime":  {"templates/add_dialog.html"},
+	"list":   {"templates/list_row.html", "templates/add_dialog.html"},
 }
 
 // parsePages builds one template set per page, each cloned from base.html plus
@@ -90,6 +91,11 @@ func newServer(deps Deps, now func() time.Time) (*server, http.Handler) {
 	mux.HandleFunc("GET /{$}", s.index)
 	mux.HandleFunc("GET /settings", s.getSettings)
 	mux.HandleFunc("POST /settings", s.postSettings)
+	mux.HandleFunc("GET /anime", s.getList)
+	mux.HandleFunc("POST /list/{id}/increment", s.postIncrement)
+	mux.HandleFunc("GET /list/{id}/edit", s.getEdit)
+	mux.HandleFunc("POST /list/{id}/edit", s.postEdit)
+	mux.HandleFunc("POST /list/{id}/remove", s.postRemove)
 	mux.HandleFunc("GET /anime/search", s.search)
 	mux.HandleFunc("GET /anime/{source}/{id}", s.getOverview)
 	mux.HandleFunc("GET /anime/{source}/{id}/add", s.getAdd)

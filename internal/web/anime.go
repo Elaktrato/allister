@@ -18,8 +18,6 @@ import (
 	"github.com/allister/allister/internal/titles"
 )
 
-const maxCommentRunes = 2000
-
 var (
 	errNoSuchAnime = errors.New("anime not found")
 	errNoProvider  = fmt.Errorf("%w: no provider configured", provider.ErrUnavailable)
@@ -50,37 +48,6 @@ type titleRow struct{ Label, Text string }
 type linkCard struct {
 	Title, Type, Href, Cover string
 	External                 bool
-}
-
-type statusOpt struct {
-	Value, Label string
-	Selected     bool
-}
-
-// addForm is the add dialog's data; the string fields echo the user's input.
-type addForm struct {
-	Action, CancelURL              string
-	Status, Rating, Progress       string
-	StartedOn, FinishedOn, Comment string
-	Episodes                       *int
-	Statuses                       []statusOpt
-	Error, ExistingURL             string
-}
-
-func newAddForm(source, id string) addForm {
-	return addForm{
-		Action:    addURL(source, id),
-		CancelURL: animeURL(source, id),
-		Status:    string(store.PlanToWatch),
-	}
-}
-
-func (f addForm) withStatuses() addForm {
-	f.Statuses = nil
-	for _, st := range statusOrder {
-		f.Statuses = append(f.Statuses, statusOpt{string(st), statusLabels[st], string(st) == f.Status})
-	}
-	return f
 }
 
 type animeView struct {
@@ -429,76 +396,16 @@ func (s *server) getAdd(w http.ResponseWriter, r *http.Request) {
 	s.renderPartial(w, "anime", "add_dialog", f.withStatuses())
 }
 
-// parseAddForm reads and validates the form fields; msg is a user-facing
-// message and non-empty on error.
-func parseAddForm(r *http.Request, f addForm) (addForm, store.ListEntry, string) {
-	f.Status = strings.TrimSpace(r.PostFormValue("status"))
-	f.Rating = strings.TrimSpace(r.PostFormValue("rating"))
-	f.Progress = strings.TrimSpace(r.PostFormValue("progress"))
-	f.StartedOn = strings.TrimSpace(r.PostFormValue("started_on"))
-	f.FinishedOn = strings.TrimSpace(r.PostFormValue("finished_on"))
-	f.Comment = strings.TrimSpace(r.PostFormValue("comment"))
-	if rs := []rune(f.Comment); len(rs) > maxCommentRunes {
-		f.Comment = string(rs[:maxCommentRunes])
-	}
-	e := store.ListEntry{Status: store.Status(f.Status), Comment: f.Comment}
-	if _, ok := statusLabels[e.Status]; !ok {
-		return f, e, "Please choose a status."
-	}
-	if f.Rating != "" {
-		n, err := strconv.Atoi(f.Rating)
-		if err != nil || n < 0 || n > 10 {
-			return f, e, "Rating must be a whole number from 0 to 10, or blank for unrated."
-		}
-		e.Rating = &n
-	}
-	if f.Progress != "" {
-		n, err := strconv.Atoi(f.Progress)
-		if err != nil || n < 0 {
-			return f, e, "Progress must be a whole number, 0 or more."
-		}
-		e.Progress = n
-	}
-	var msg string
-	if e.StartedOn, msg = parseDay(f.StartedOn, "Start date"); msg != "" {
-		return f, e, msg
-	}
-	if e.FinishedOn, msg = parseDay(f.FinishedOn, "Finish date"); msg != "" {
-		return f, e, msg
-	}
-	return f, e, ""
-}
-
-func parseDay(v, label string) (*time.Time, string) {
-	if v == "" {
-		return nil, ""
-	}
-	t, err := time.Parse("2006-01-02", v)
-	if err != nil {
-		return nil, label + " must be a date like 2024-01-31."
-	}
-	return &t, ""
-}
-
-func invalidMessage(err error) string {
-	m := strings.TrimPrefix(err.Error(), "invalid: ")
-	if m == "" {
-		return "Invalid input."
-	}
-	return strings.ToUpper(m[:1]) + m[1:] + "."
-}
-
 func (s *server) postAdd(w http.ResponseWriter, r *http.Request) {
 	src, id, ok := s.route(w, r)
 	if !ok {
 		return
 	}
-	if err := r.ParseForm(); err != nil {
-		http.Error(w, "bad request", http.StatusBadRequest)
+	if !parseForm(w, r) {
 		return
 	}
 	ctx := r.Context()
-	f, entry, msg := parseAddForm(r, newAddForm(string(src), id))
+	f, entry, msg := parseEntryForm(r, newAddForm(string(src), id))
 	// Show the known episode total (no provider call) on validation errors.
 	if msg != "" {
 		f.Episodes, f.Error = s.peekEpisodes(ctx, src, id), msg
