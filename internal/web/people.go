@@ -29,7 +29,7 @@ type personPageView struct {
 // is deterministic.
 func (s *server) getPerson(w http.ResponseWriter, r *http.Request) {
 	raw := r.PathValue("id")
-	if !isDigits(raw) {
+	if !isASCIIDigits(raw, maxIDDigits) {
 		s.personNotFound(w)
 		return
 	}

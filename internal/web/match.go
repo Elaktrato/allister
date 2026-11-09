@@ -108,7 +108,7 @@ func (s *server) getMatchSearch(w http.ResponseWriter, r *http.Request) {
 
 // plainAnimeID accepts a search pick: 1 to 9 digits, no leading zero.
 func plainAnimeID(s string) bool {
-	return len(s) <= 9 && s != "" && s[0] != '0' && isDigits(s)
+	return len(s) <= 9 && s != "" && s[0] != '0' && isASCIIDigits(s, maxIDDigits)
 }
 
 func (s *server) parseAniListInput(raw string) (string, bool) {

@@ -27,12 +27,16 @@ func (e *AlreadySavedError) Is(target error) bool { return target == ErrAlreadyS
 
 // ConvertToSource turns the manual entry animeID into the saved anime a, in
 // place and in one transaction: the anime row keeps its id (so the list entry,
-// which is not touched at all, and cast links stay attached) while source,
+// which is only touched to clamp progress, see below, and cast links stay attached) while source,
 // source_id, type, episodes, year, studio, synopsis, cover, external URL,
 // source material and dates are replaced, titles and relations are replaced
 // (same insertion code as SaveAnime), mal_id is set when a.MALID is non-empty
 // (else kept) and sync_state becomes "pending" so the sync job fetches the
 // cast and downloads the cover.
+//
+// When a.Episodes is known and the entry's progress exceeds it, progress is
+// clamped to a.Episodes (updated_at then changes too; otherwise the list entry
+// is untouched).
 //
 // The cover is replaced by the remote a.CoverURL; a previously uploaded cover
 // file stays on disk (content-addressed, possibly shared) and is simply no
@@ -93,6 +97,15 @@ func (s *Store) ConvertToSource(ctx context.Context, animeID int64, a provider.A
 	}
 	if err := insertTitlesAndRelations(ctx, tx, animeID, a); err != nil {
 		return err
+	}
+	// A known episode count below the entry's progress would show 30/12, hide
+	// +1 and make every edit fail validation: clamp (and only then touch
+	// updated_at).
+	if a.Episodes != nil {
+		if _, err := tx.ExecContext(ctx, `UPDATE list_entries SET progress = ?, updated_at = `+nowSQL+`
+			WHERE anime_id = ? AND progress > ?`, *a.Episodes, animeID, *a.Episodes); err != nil {
+			return fmt.Errorf("convert anime: %w", err)
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("convert anime: %w", err)

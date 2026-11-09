@@ -171,7 +171,8 @@ func Parse(r io.Reader) (rows []Row, skipped []SkippedRow, err error) {
 
 // parseScore maps a Yamtrack score. Empty or exactly zero is unrated; a
 // negative or non-numeric score is unrated with a note; anything else is
-// rounded half up and clamped to 0..10 (so 0.4 is an explicit 0).
+// rounded half up (with a note when it was not an integer) and clamped to
+// 0..10 (so 0.4 is an explicit 0).
 func parseScore(sc string, notes *[]string) *int {
 	if sc == "" {
 		return nil
@@ -184,7 +185,11 @@ func parseScore(sc string, notes *[]string) *int {
 	if f == 0 {
 		return nil
 	}
-	n := min(10, int(math.Floor(f+0.5)))
+	f = min(f, 10) // clamp before converting so huge values cannot overflow int
+	n := int(math.Floor(f + 0.5))
+	if f != math.Trunc(f) {
+		*notes = append(*notes, fmt.Sprintf("score %s rounded to %d", strconv.FormatFloat(f, 'f', -1, 64), n))
+	}
 	return &n
 }
 

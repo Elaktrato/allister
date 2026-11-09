@@ -184,8 +184,9 @@ func TestParseScoreMapping(t *testing.T) {
 		want  int // -1 = nil
 		note  bool
 	}{
-		{"", -1, false}, {"0.0", -1, false}, {"0", -1, false}, {"0.4", 0, false}, {"0.5", 1, false},
-		{"8.0", 8, false}, {"7.5", 8, false}, {"7.4", 7, false}, {"10.0", 10, false},
+		{"", -1, false}, {"0.0", -1, false}, {"0", -1, false}, {"0.4", 0, true}, {"0.5", 1, true},
+		{"8.0", 8, false}, {"7.5", 8, true}, {"7.4", 7, true}, {"5.5", 6, true}, {"8.5", 9, true},
+		{"1e30", 10, false}, {"-1e30", -1, true}, {"Inf", -1, true}, {"-Inf", -1, true}, {"10.0", 10, false},
 		{"11", 10, false}, {"1", 1, false}, {" 9.0 ", 9, false},
 		{"-1", -1, true}, {"abc", -1, true}, {"NaN", -1, true},
 	}
@@ -289,5 +290,17 @@ func TestParseBadDatesKeepRowWithNotes(t *testing.T) {
 	}
 	if r, _ := parseOne(t, `1,mal,anime,T,,,Completed,,,nonsense,1`); r.FinishedOn != nil || !hasNote(r, "end date") {
 		t.Errorf("garbage end: %+v", r)
+	}
+}
+
+func TestParseScoreRoundingNoteText(t *testing.T) {
+	for score, want := range map[string]string{"7.5": "score 7.5 rounded to 8", "0.5": "score 0.5 rounded to 1", "8.5": "score 8.5 rounded to 9"} {
+		r, _ := parseOne(t, `1,mal,anime,T,,"`+score+`",Completed,,,,1`)
+		if !hasNote(r, want) {
+			t.Errorf("%s: notes %v lack %q", score, r.Notes, want)
+		}
+	}
+	if r, _ := parseOne(t, `1,mal,anime,T,,"8.0",Completed,,,,1`); len(r.Notes) != 0 {
+		t.Errorf("8.0 has notes %v", r.Notes)
 	}
 }

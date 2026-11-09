@@ -55,7 +55,7 @@ type server struct {
 
 // pageNames lists every page template (templates/<name>.html). Add a page by
 // dropping its file in templates/ and listing it here.
-var pageNames = []string{"index", "settings", "search", "anime", "list", "person", "manual_form", "import", "error"}
+var pageNames = []string{"settings", "search", "anime", "list", "person", "manual_form", "import", "error"}
 
 // pagePartials lists extra template files a page needs (also rendered alone
 // for htmx requests).
@@ -170,8 +170,9 @@ func (s *server) execute(w http.ResponseWriter, status int, page, name string, d
 	buf.WriteTo(w)
 }
 
+// index redirects the (former stub) home page to the list.
 func (s *server) index(w http.ResponseWriter, r *http.Request) {
-	s.render(w, r, "index", nil)
+	http.Redirect(w, r, "/anime", http.StatusSeeOther)
 }
 
 // coversHandler serves files (never directory listings) from dir. Names are
@@ -188,7 +189,8 @@ func coversHandler(dir string) http.Handler {
 	})
 }
 
-// coverWriter adds the immutable cache header to successful responses only.
+// coverWriter adds X-Content-Type-Options: nosniff to every response and the
+// immutable cache header to successful ones only.
 type coverWriter struct {
 	http.ResponseWriter
 	wrote bool
@@ -197,6 +199,7 @@ type coverWriter struct {
 func (c *coverWriter) WriteHeader(code int) {
 	if !c.wrote {
 		c.wrote = true
+		c.Header().Set("X-Content-Type-Options", "nosniff")
 		if code == http.StatusOK || code == http.StatusNotModified {
 			c.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
 		}

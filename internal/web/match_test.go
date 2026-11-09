@@ -35,13 +35,13 @@ func (m *matchProvider) Search(ctx context.Context, q string) ([]provider.Search
 // localParse is a tiny stand-in for anilist.ParseAnimeURL (the web package must not import it).
 func localParse(s string) (string, bool) {
 	s = strings.TrimSpace(s)
-	if isDigits(s) {
+	if isASCIIDigits(s, maxIDDigits) {
 		return s, true
 	}
 	for _, p := range []string{"https://anilist.co/anime/", "anilist.co/anime/"} {
 		if rest, ok := strings.CutPrefix(s, p); ok {
 			id, _, _ := strings.Cut(rest, "/")
-			if isDigits(id) {
+			if isASCIIDigits(id, maxIDDigits) {
 				return id, true
 			}
 		}

@@ -12,7 +12,6 @@ type Source string
 
 const (
 	AniList Source = "anilist"
-	MAL     Source = "mal"
 	Manual  Source = "manual"
 )
 

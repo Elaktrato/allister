@@ -90,8 +90,13 @@ func animeURL(source, id string) string {
 }
 func addURL(source, id string) string { return animeURL(source, id) + "/add" }
 
-func isDigits(s string) bool {
-	if s == "" || len(s) > 12 {
+// maxIDDigits is the longest numeric id accepted in a URL or form field.
+const maxIDDigits = 12
+
+// isASCIIDigits reports whether s is a non-empty run of ASCII digits no longer
+// than maxLen; maxLen <= 0 means any length.
+func isASCIIDigits(s string, maxLen int) bool {
+	if s == "" || (maxLen > 0 && len(s) > maxLen) {
 		return false
 	}
 	for _, c := range s {
@@ -107,7 +112,7 @@ func isDigits(s string) bool {
 func (s *server) route(w http.ResponseWriter, r *http.Request) (provider.Source, string, bool) {
 	src, id := provider.Source(r.PathValue("source")), r.PathValue("id")
 	switch {
-	case src == provider.AniList && isDigits(id):
+	case src == provider.AniList && isASCIIDigits(id, maxIDDigits):
 	case src == provider.Manual && id != "" && len(id) <= 64:
 	default:
 		s.errorPage(w, http.StatusNotFound, "Not found", "There is no such anime.", "")
@@ -276,7 +281,7 @@ func (s *server) buildView(ctx context.Context, src provider.Source, id string, 
 		v.Aired = "until " + end
 	}
 	for _, r := range a.Relations {
-		if r.Source != provider.AniList || !isDigits(r.ID) {
+		if r.Source != provider.AniList || !isASCIIDigits(r.ID, maxIDDigits) {
 			continue
 		}
 		c := linkCard{Title: titles.Resolve(r.Titles, lang), Type: r.Type}
@@ -288,7 +293,7 @@ func (s *server) buildView(ctx context.Context, src provider.Source, id string, 
 		v.Related = append(v.Related, c)
 	}
 	for _, r := range d.Recs {
-		if r.Source != provider.AniList || !isDigits(r.ID) {
+		if r.Source != provider.AniList || !isASCIIDigits(r.ID, maxIDDigits) {
 			continue
 		}
 		v.Recs = append(v.Recs, linkCard{Title: titles.Resolve(r.Titles, lang), Href: "/anime/anilist/" + r.ID, Cover: httpURL(r.CoverURL)})

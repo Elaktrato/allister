@@ -76,19 +76,6 @@ func listURL(status string, page int) string {
 	return "/anime?" + q.Encode()
 }
 
-// isDigits12 reports whether s is a non-empty run of ASCII digits (any length).
-func isDigits12(s string) bool {
-	if s == "" {
-		return false
-	}
-	for _, c := range s {
-		if c < '0' || c > '9' {
-			return false
-		}
-	}
-	return true
-}
-
 // parseListQuery reads the status filter (unknown values mean All) and the
 // requested page (invalid values mean 1) from a query.
 func parseListQuery(q url.Values) (string, int) {
@@ -99,7 +86,7 @@ func parseListQuery(q url.Values) (string, int) {
 	raw := q.Get("page")
 	page, err := strconv.Atoi(raw)
 	switch {
-	case errors.Is(err, strconv.ErrRange) && isDigits12(raw):
+	case errors.Is(err, strconv.ErrRange) && isASCIIDigits(raw, 0):
 		page = math.MaxInt32 // overflow: clamped to the last page by the caller
 	case err != nil || page < 1:
 		page = 1
@@ -204,7 +191,7 @@ func (s *server) showList(w http.ResponseWriter, r *http.Request, status string,
 // for a non-numeric id.
 func (s *server) entryID(w http.ResponseWriter, r *http.Request) (int64, bool) {
 	raw := r.PathValue("id")
-	if !isDigits(raw) {
+	if !isASCIIDigits(raw, maxIDDigits) {
 		s.errorPage(w, http.StatusNotFound, "Not found", "There is no such anime.", "")
 		return 0, false
 	}

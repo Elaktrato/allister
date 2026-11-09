@@ -43,7 +43,7 @@ Settings has a title language: Japanese (default), romaji or English. Further la
 
 Only anime rows with MyAnimeList ids are used. Each id is looked up on AniList at 30 requests per minute, so about 830 entries take about 30 minutes. Cast and cover downloads then continue in the background for another hour or two.
 
-The page shows progress. You can cancel an import and resume it later. Entries AniList cannot match are kept as manual entries marked "unmatched". Importing the same file again never creates duplicates.
+The page shows progress. You can cancel an import and resume it later. Entries AniList cannot match are kept as manual entries marked "unmatched". Importing the same file again skips rows already saved, matched by MyAnimeList id. The one exception is rare: if you matched an unmatched entry to an AniList page whose MyAnimeList id differs from the one in the export, a re-import can bring that row back as a new unmatched entry.
 
 ## Matching manual entries to AniList
 
@@ -77,14 +77,18 @@ docker run --rm -v <volume>:/data -v "$PWD":/backup alpine tar xzf /backup/allis
 docker compose start
 ```
 
-Live backup (optional). Copying the database files of a running instance is not safe, so use SQLite's `.backup` from a helper container (the Allister image has no `sqlite3`). `--user root` is needed because the data files belong to root (the app runs as root in its image) while the sqlite image runs as another user; the backup file in `$PWD` is therefore owned by root. Do not mount the volume read-only (SQLite needs the `-shm` file).
+Live backup (optional). Copying the database files of a running instance is not safe, so use SQLite's `.backup` from a helper container (the Allister image has no `sqlite3`). `--user root` is needed because the data files belong to root (the app runs as root in its image) while the sqlite image runs as another user; the backup file in `$PWD` is therefore owned by root. Do not mount the volume read-only for the sqlite helper (SQLite needs the `-shm` file). The covers command below only reads, so `:ro` is fine there.
 
 ```
-docker run --rm --user root -v <volume>:/data -v "$PWD":/backup keinos/sqlite3:3.54.1 sqlite3 /data/allister.db ".backup '/backup/allister.db'"
+docker run --rm --user root -v <volume>:/data -v "$PWD":/backup keinos/sqlite3:3.54.1 sqlite3 /data/allister.db ".backup '/backup/allister-$(date +%F).db'"
 docker run --rm -v <volume>:/data:ro -v "$PWD":/backup alpine tar czf /backup/allister-covers.tgz -C /data covers
 ```
 
-This saves the database and the covers separately.
+This saves the database and the covers separately. The database file is named with today's date; if a file of the same name already exists, it is overwritten.
+
+## Disk use
+
+Covers and person images are stored locally in `covers/` inside the data volume. Expect roughly a few hundred MB for an import of around 800 entries. Files of removed or re-matched entries are not deleted automatically, and the app does not prune them; if you ever need the space, you can clean up `covers/` by hand.
 
 ## Security
 

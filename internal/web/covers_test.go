@@ -35,6 +35,12 @@ func TestCoversServedWithCacheHeader(t *testing.T) {
 	if cc := rec.Header().Get("Cache-Control"); cc != "public, max-age=31536000, immutable" {
 		t.Fatalf("Cache-Control = %q", cc)
 	}
+	if v := rec.Header().Get("X-Content-Type-Options"); v != "nosniff" {
+		t.Fatalf("X-Content-Type-Options = %q", v)
+	}
+	if v := serve(h, "/covers/missing.jpg").Header().Get("X-Content-Type-Options"); v != "nosniff" {
+		t.Fatalf("404: X-Content-Type-Options = %q", v)
+	}
 	for _, p := range []string{"/covers/", "/covers", "/covers/sub", "/covers/sub/", "/covers/missing.jpg",
 		"/covers/../secret.txt", "/covers/%2e%2e/secret.txt", "/covers/..%2fsecret.txt",
 		"/covers/%2e%2e%2fsecret.txt", "/covers/sub/../../secret.txt", "/covers//secret.txt"} {

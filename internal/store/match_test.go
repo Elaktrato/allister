@@ -195,3 +195,48 @@ func TestConvertIsAtomicOnFailure(t *testing.T) {
 		t.Fatalf("%+v", after)
 	}
 }
+
+func TestConvertClampsProgressToNewTotal(t *testing.T) {
+	for _, c := range []struct {
+		name     string
+		episodes *int
+		clamped  bool
+		progress int
+	}{
+		{"above total", intp(2), true, 2},
+		{"unknown total", nil, false, 3},
+		{"within total", intp(3), false, 3},
+		{"far within total", intp(28), false, 3},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			s := newStore(t)
+			ctx := context.Background()
+			id, want := manualEntry(t, s)
+			const old = "2001-02-03T04:05:06Z"
+			if _, err := s.db.Exec(`UPDATE list_entries SET updated_at = ? WHERE anime_id = ?`, old, id); err != nil {
+				t.Fatal(err)
+			}
+			a := matched("700")
+			a.Episodes = c.episodes
+			if err := s.ConvertToSource(ctx, id, a); err != nil {
+				t.Fatal(err)
+			}
+			got, err := s.GetListEntry(ctx, id)
+			if err != nil || got == nil {
+				t.Fatal(got, err)
+			}
+			if got.Progress != c.progress {
+				t.Fatalf("progress %d, want %d", got.Progress, c.progress)
+			}
+			want.Progress = c.progress // every other field unchanged
+			if !reflect.DeepEqual(*got, want) {
+				t.Fatalf("entry %+v, want %+v", *got, want)
+			}
+			var after string
+			s.db.QueryRow(`SELECT updated_at FROM list_entries WHERE anime_id = ?`, id).Scan(&after)
+			if c.clamped == (after == old) {
+				t.Fatalf("updated_at %q (clamped=%v)", after, c.clamped)
+			}
+		})
+	}
+}
