@@ -14,7 +14,7 @@ This document covers the shared foundation and the first media type, **anime**. 
 - Runs in Docker (single container plus a volume), stack: **Go + htmx + Tailwind**.
 - Anime flow modelled on MyAnimeList: search, overview page, add to list with status/rating/progress/dates/comment, a list page.
 - Preferred **title language is a setting** (Japanese native, romaji, English, other languages where the source has them). Default for the owner: Japanese. It must be a real setting, since the project may be open-sourced.
-- Two metadata sources: **AniList (default)** and **MyAnimeList via Jikan**, switchable on the search page. Plus **manual entry** when neither has the title.
+- One metadata source: **AniList**. Plus **manual entry** when AniList does not have the title.
 - Local copy of everything needed to render a saved entry, so the list works offline or when a source is down.
 - Local person pages for characters and voice actors, showing which anime *in the user's list* they appear in.
 - **Import from Yamtrack** CSV export (anime rows only).
@@ -26,6 +26,7 @@ This document covers the shared foundation and the first media type, **anime**. 
 - No personalised "recommended for you" feed.
 - No merging or de-duplication across sources.
 - Other media types (manga, movies, TV, games, books).
+- MyAnimeList / Jikan source (dropped by the owner; can be added later behind the same provider interface).
 
 ## Anti-goals
 
@@ -34,18 +35,18 @@ This document covers the shared foundation and the first media type, **anime**. 
 
 ## Screens (agreed in mockups)
 
-1. **Search**: query box, source switch (AniList / MyAnimeList), results with cover, title, type, episodes, year, studio, short synopsis, and an Add button. A "Can't find it? Add manually" entry point.
+1. **Search**: query box, results with cover, title, type, episodes, year, studio, short synopsis, and an Add button. A "Can't find it? Add manually" entry point.
 2. **Overview page**: cover and "Add to list" button; info (type, episodes, aired dates, studio, source material); titles in multiple languages; synopsis; related entries (source material, prequels, sequels) ; characters with voice actors; a **Recommendations** row.
 3. **Add to list dialog** (over the overview): status (watching, plan to watch, paused, completed, dropped), rating (optional: empty means unrated; 0 to 10, where 0 is a valid rating the user can set), current episode (of total), start date, finish date, optional comment.
 4. **List page**: status tabs, rows with title, progress (with +1 episode button), score, status.
-5. **Character / voice actor local pages**: photo, name, and the anime in the user's list they appear in (voice actors also show the character played). Every character and voice actor shown on an overview also links to their AniList / MyAnimeList page; both links are shown (local and external).
+5. **Character / voice actor local pages**: photo, name, and the anime in the user's list they appear in (voice actors also show the character played). Every character and voice actor shown on an overview also links to their AniList page; both links are shown (local and external).
 6. **Settings**: title language, import.
 7. **Import**: upload Yamtrack CSV, progress page.
 
 ## Decisions made by the owner
 
-- Source: AniList by default, MyAnimeList selectable per search; not queried simultaneously.
-- Manual entry when no source has the title.
+- AniList is the only metadata source.
+- Manual entry when AniList does not have the title.
 - Cover images are stored locally at add time.
 - Characters/voice actors get a local page and an external link.
 - Single user, no accounts.
@@ -56,20 +57,19 @@ This document covers the shared foundation and the first media type, **anime**. 
 ## Decisions made by me (the builder-side calls, to be checked)
 
 - **Storage**: SQLite in a Docker volume (simple to back up).
-- **MyAnimeList access via Jikan** (unofficial, no API key), because the official API needs each self-hoster to register a client ID.
 - **Recommendations** are fetched live from the source when an overview is opened, shown as title/cover/ID references, never stored unless the user adds one.
 - **Characters and voice actors are persisted when an entry is added**, not when merely viewed; the local person pages therefore only know about anime in the list.
 - **Overview pages for entries not in the list** are fetched live (not stored).
 - **Responsive layout** (Tailwind), not a separate mobile design.
-- **Yamtrack import** is a resumable background job with a progress page. Yamtrack anime rows are keyed by MyAnimeList ID, so details are fetched through Jikan; Jikan's rate limit (about 60 requests/minute) means an import of ~900 entries takes roughly an hour. Entries already imported are not redone on resume.
+- **Yamtrack import** is a resumable background job with a progress page. Yamtrack rows are keyed by MyAnimeList ID; the importer resolves each MAL ID through AniList (`Media(idMal:, type: ANIME)`) and saves entries with source `anilist`. Rows already saved (matched by the stored `mal_id`) are skipped before any request is made, so a resume or re-run redoes nothing. Rows AniList cannot match are listed as "unmatched" in the import result instead of being silently dropped. The import is paced to AniList's rate limit (assume 30 requests per minute, the currently degraded limit, as a constant); an import of ~830 entries therefore takes on the order of an hour or two (about 2 requests per anime for details plus cast).
 
 ### Further calls (from the builder check; mine, not the owner's)
 
-- **Identity**: an entry is identified by `(source, source_id)`, where source is `anilist`, `mal` or `manual`. A saved entry belongs to the source it was saved from; its recommendations, related entries and character links are fetched from that source. Adding the same `(source, source_id)` twice is blocked. The same anime saved once from each source is allowed (no merging was the owner's decision). AniList exposes the MAL ID, so adding an AniList entry whose MAL ID matches a saved MAL entry (such as a Yamtrack import) shows a warning before saving.
+- **Identity**: an entry is identified by `(source, source_id)`, where source is `anilist` or `manual`. A saved entry belongs to the source it was saved from; its recommendations, related entries and character links are fetched from that source. Adding the same `(source, source_id)` twice is blocked.
 - **Titles**: all titles an entry has are stored with a language tag. The settings dropdown offers Japanese (native), romaji and English, plus any other languages found in stored data. Fallback chain when the preferred language is missing: native, romaji, English, then any available title. Manual entries record the language of the title typed in (default: the preferred language).
-- **People**: characters and voice actors are identified by `(source, source_id)` and are not merged across sources. The same person saved from both sources has two local pages.
-- **Links on overview pages**: for an entry not in the list (live-fetched), people link only to the external AniList / MAL page. Once the entry is saved and its people are stored, each person also gets the local link. This corrects "both links are shown" in the screens list: both links appear wherever the person exists locally.
-- **Import depth**: imported entries are stored like any added entry (details, titles, related entries, cover, characters and voice actors), because the local person pages need the cast. With Jikan's detail and character endpoints that is about two requests per anime, so roughly 30 to 45 minutes for ~900 entries at 60 requests per minute (an estimate). The import mapping can be planned now; the CSV mapping step waits for the sample export.
+- **People**: characters and voice actors are identified by `(source, source_id)` and are not merged across sources.
+- **Links on overview pages**: for an entry not in the list (live-fetched), people link only to the external AniList page. Once the entry is saved and its people are stored, each person also gets the local link. This corrects "both links are shown" in the screens list: both links appear wherever the person exists locally.
+- **Import depth**: imported entries are stored like any added entry (details, titles, related entries, cover, characters and voice actors), because the local person pages need the cast. With AniList's detail and character queries that is about two requests per anime, so roughly one to two hours for ~830 entries at 30 requests per minute (an estimate). The import mapping can be planned now; the CSV mapping step waits for the sample export.
 - **Manual entries**: required fields are title and type; optional are episode count, release year, studio, synopsis, and a cover image upload. They have an overview page with those fields, no characters, and are never linked to a source later.
 - **Adding while a source is flaky**: adding saves the core details already fetched for the overview right away. Cover download and cast fetch run as background jobs, are retried, and the entry shows a "partially synced" marker until they finish. The list works throughout.
 - **Deployment**: assumed private network only (no authentication), one configurable port, and a single volume holding the SQLite file and cover images.
@@ -77,7 +77,7 @@ This document covers the shared foundation and the first media type, **anime**. 
 ## Constraints
 
 - Self-hosters should need no accounts or API keys to get started.
-- Respect source rate limits (Jikan especially); handle source errors gracefully in the UI.
+- Respect source rate limits (AniList); handle source errors gracefully in the UI.
 - Titles must be stored per language so the display language can change without refetching.
 
 ## Left to the builder
