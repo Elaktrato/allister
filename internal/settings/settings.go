@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"log"
 )
 
 const (
@@ -66,4 +67,36 @@ func (s *Store) KnownLanguages(ctx context.Context) ([]string, error) {
 		out = append(out, l)
 	}
 	return out, rows.Err()
+}
+
+// enabledKey is the settings key holding a plugin's enabled flag.
+func enabledKey(id string) string { return "plugin." + id + ".enabled" }
+
+// IsEnabled reports whether plugin id is switched on. A missing (or
+// unrecognised) value means "use def", the manifest default. It implements
+// plugin.EnabledStore.
+func (s *Store) IsEnabled(ctx context.Context, id string, def bool) (bool, error) {
+	v, ok, err := s.Get(ctx, enabledKey(id))
+	if err != nil {
+		log.Printf("settings: read %s: %v (using default %v)", enabledKey(id), err, def)
+		return def, err
+	}
+	switch {
+	case !ok:
+		return def, nil
+	case v == "1":
+		return true, nil
+	case v == "0":
+		return false, nil
+	}
+	return def, nil
+}
+
+// SetEnabled stores the plugin's enabled flag as "1" or "0".
+func (s *Store) SetEnabled(ctx context.Context, id string, on bool) error {
+	v := "0"
+	if on {
+		v = "1"
+	}
+	return s.Set(ctx, enabledKey(id), v)
 }
