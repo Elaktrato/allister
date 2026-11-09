@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+
+	"github.com/allister/allister/internal/provider"
 )
 
 const nowSQL = `strftime('%Y-%m-%dT%H:%M:%SZ','now')`
@@ -14,6 +16,24 @@ const nowSQL = `strftime('%Y-%m-%dT%H:%M:%SZ','now')`
 // or anime, rating outside 0 to 10, negative progress, progress above a known
 // episode total, or FinishedOn before StartedOn.
 func (s *Store) UpsertListEntry(ctx context.Context, e ListEntry) error {
+	var eps sql.NullInt64
+	err := s.db.QueryRowContext(ctx, `SELECT episodes FROM anime WHERE id = ?`, e.AnimeID).Scan(&eps)
+	if errors.Is(err, sql.ErrNoRows) {
+		return invalid("anime %d does not exist", e.AnimeID)
+	}
+	if err != nil {
+		return fmt.Errorf("upsert list entry: %w", err)
+	}
+	if err := ValidateListEntry(e, nullInt(eps)); err != nil {
+		return err
+	}
+	return upsertListEntry(ctx, s.db, e)
+}
+
+// ValidateListEntry checks e without touching the database: known status,
+// rating 0 to 10 or nil, progress between 0 and the episode total (when
+// episodes is non-nil), FinishedOn not before StartedOn. Errors wrap ErrInvalid.
+func ValidateListEntry(e ListEntry, episodes *int) error {
 	if !e.Status.valid() {
 		return invalid("unknown status %q", e.Status)
 	}
@@ -26,18 +46,18 @@ func (s *Store) UpsertListEntry(ctx context.Context, e ListEntry) error {
 	if e.StartedOn != nil && e.FinishedOn != nil && fmtDate(e.FinishedOn).(string) < fmtDate(e.StartedOn).(string) {
 		return invalid("finish date is before start date")
 	}
-	var eps sql.NullInt64
-	err := s.db.QueryRowContext(ctx, `SELECT episodes FROM anime WHERE id = ?`, e.AnimeID).Scan(&eps)
-	if errors.Is(err, sql.ErrNoRows) {
-		return invalid("anime %d does not exist", e.AnimeID)
+	if episodes != nil && e.Progress > *episodes {
+		return invalid("progress %d is above the episode total %d", e.Progress, *episodes)
 	}
-	if err != nil {
-		return fmt.Errorf("upsert list entry: %w", err)
-	}
-	if eps.Valid && int64(e.Progress) > eps.Int64 {
-		return invalid("progress %d is above the episode total %d", e.Progress, eps.Int64)
-	}
-	_, err = s.db.ExecContext(ctx, `INSERT INTO list_entries
+	return nil
+}
+
+type execer interface {
+	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+}
+
+func upsertListEntry(ctx context.Context, x execer, e ListEntry) error {
+	_, err := x.ExecContext(ctx, `INSERT INTO list_entries
 		(anime_id, status, rating, progress, started_on, finished_on, comment, updated_at)
 		VALUES (?,?,?,?,?,?,?,`+nowSQL+`)
 		ON CONFLICT(anime_id) DO UPDATE SET status=excluded.status, rating=excluded.rating,
@@ -48,6 +68,37 @@ func (s *Store) UpsertListEntry(ctx context.Context, e ListEntry) error {
 		return fmt.Errorf("upsert list entry: %w", err)
 	}
 	return nil
+}
+
+// AddToList saves the anime and its list entry in one transaction and returns
+// the new anime id. e.AnimeID is ignored. An invalid entry (see
+// ValidateListEntry, checked against a.Episodes) wraps ErrInvalid and saves
+// nothing; an existing (source, source_id) returns ErrAlreadySaved.
+func (s *Store) AddToList(ctx context.Context, a provider.Anime, e ListEntry, opts ...SaveOption) (int64, error) {
+	o := saveOpts{syncState: "pending"}
+	for _, f := range opts {
+		f(&o)
+	}
+	if err := ValidateListEntry(e, a.Episodes); err != nil {
+		return 0, err
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, fmt.Errorf("add to list: %w", err)
+	}
+	defer tx.Rollback()
+	id, err := saveAnimeTx(ctx, tx, a, o)
+	if err != nil {
+		return 0, err
+	}
+	e.AnimeID = id
+	if err := upsertListEntry(ctx, tx, e); err != nil {
+		return 0, err
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, fmt.Errorf("add to list: %w", err)
+	}
+	return id, nil
 }
 
 // GetListEntry returns the list entry or nil, nil when absent.

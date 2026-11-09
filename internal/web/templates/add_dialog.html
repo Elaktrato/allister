@@ -1,0 +1,47 @@
+{{define "add_dialog"}}
+<div data-dialog class="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-black/70 p-4" role="dialog" aria-modal="true" aria-labelledby="add-dialog-title">
+  <form method="post" action="{{.Action}}" hx-post="{{.Action}}" hx-target="#dialog-slot" hx-swap="innerHTML"
+    class="w-full max-w-md space-y-4 rounded border border-slate-700 bg-slate-900 p-5">
+    <h2 id="add-dialog-title" class="text-xl font-semibold">Add to list</h2>
+    {{if .Error}}
+    <div class="rounded border border-amber-700 bg-amber-950 p-3 text-amber-200" role="alert">
+      <p>{{.Error}}</p>
+      {{if .ExistingURL}}<p class="mt-1"><a href="{{.ExistingURL}}" class="text-indigo-300 underline">Go to its page</a></p>{{end}}
+    </div>
+    {{end}}
+    <label class="block text-sm">Status
+      <select name="status" required class="mt-1 w-full rounded border border-slate-700 bg-slate-950 px-3 py-2">
+        {{range .Statuses}}<option value="{{.Value}}"{{if .Selected}} selected{{end}}>{{.Label}}</option>{{end}}
+      </select>
+    </label>
+    <div class="grid grid-cols-2 gap-3">
+      <label class="block text-sm">Rating
+        <input type="number" min="0" max="10" step="1" name="rating" value="{{.Rating}}" placeholder="0–10"
+          class="mt-1 w-full rounded border border-slate-700 bg-slate-950 px-3 py-2">
+      </label>
+      <label class="block text-sm">Progress
+        <span class="mt-1 flex items-center gap-2">
+          <input type="number" min="0"{{if .Episodes}} max="{{.Episodes}}"{{end}} step="1" name="progress" value="{{.Progress}}" placeholder="0"
+            class="w-full rounded border border-slate-700 bg-slate-950 px-3 py-2">
+          {{if .Episodes}}<span class="whitespace-nowrap text-slate-400">/ {{.Episodes}}</span>{{end}}
+        </span>
+      </label>
+    </div>
+    <div class="grid grid-cols-2 gap-3">
+      <label class="block text-sm">Started
+        <input type="date" name="started_on" value="{{.StartedOn}}" class="mt-1 w-full rounded border border-slate-700 bg-slate-950 px-3 py-2">
+      </label>
+      <label class="block text-sm">Finished
+        <input type="date" name="finished_on" value="{{.FinishedOn}}" class="mt-1 w-full rounded border border-slate-700 bg-slate-950 px-3 py-2">
+      </label>
+    </div>
+    <label class="block text-sm">Comment
+      <textarea name="comment" rows="3" maxlength="2000" class="mt-1 w-full rounded border border-slate-700 bg-slate-950 px-3 py-2">{{.Comment}}</textarea>
+    </label>
+    <div class="flex justify-end gap-3">
+      <a href="{{.CancelURL}}" hx-on:click="event.preventDefault();this.closest('[data-dialog]').remove()" class="rounded px-4 py-2 hover:bg-slate-800">Cancel</a>
+      <button type="submit" class="rounded bg-indigo-600 px-4 py-2 font-medium hover:bg-indigo-500">Add</button>
+    </div>
+  </form>
+</div>
+{{end}}

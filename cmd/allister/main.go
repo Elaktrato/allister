@@ -41,6 +41,7 @@ func run() error {
 	}
 	defer database.Close()
 
+	st := store.New(database)
 	providers := map[provider.Source]provider.Provider{
 		provider.AniList: anilist.New(anilist.DefaultURL, nil),
 	}
@@ -55,7 +56,7 @@ func run() error {
 	// One worker, at least 2s between jobs to respect AniList's rate limit.
 	queue := jobs.NewQueue(database, jobs.WithMinInterval(2*time.Second))
 	queue.Register(jobs.KindSyncAnime, jobs.SyncAnime(jobs.SyncDeps{
-		Store:     store.New(database),
+		Store:     st,
 		Providers: providers,
 		CoversDir: coversDir,
 	}))
@@ -71,6 +72,7 @@ func run() error {
 		Addr: ":" + cfg.Port,
 		Handler: web.NewServer(web.Deps{
 			Settings:  settings.New(database),
+			Store:     st,
 			Providers: providers,
 			Jobs:      queue,
 			CoversDir: coversDir,

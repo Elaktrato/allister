@@ -10,9 +10,11 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/allister/allister/internal/provider"
 	"github.com/allister/allister/internal/settings"
+	"github.com/allister/allister/internal/store"
 )
 
 // app.css is built by the Tailwind stage in the Dockerfile and is not committed.
@@ -26,6 +28,7 @@ var templateFS embed.FS
 // Deps holds server dependencies; it grows in later tasks.
 type Deps struct {
 	Settings  *settings.Store
+	Store     *store.Store
 	Providers map[provider.Source]provider.Provider
 	// Jobs enqueues background jobs (see package jobs).
 	Jobs JobQueue
@@ -41,20 +44,24 @@ type JobQueue interface {
 type server struct {
 	deps  Deps
 	pages map[string]*template.Template
+	cache *animeCache
 }
 
 // pageNames lists every page template (templates/<name>.html). Add a page by
 // dropping its file in templates/ and listing it here.
-var pageNames = []string{"index", "settings", "search"}
+var pageNames = []string{"index", "settings", "search", "anime", "error"}
 
 // pagePartials lists extra template files a page needs (also rendered alone
 // for htmx requests).
-var pagePartials = map[string][]string{"search": {"templates/search_results.html"}}
+var pagePartials = map[string][]string{
+	"search": {"templates/search_results.html"},
+	"anime":  {"templates/add_dialog.html"},
+}
 
 // parsePages builds one template set per page, each cloned from base.html plus
 // the page file, so pages can all define "title" and "content" without colliding.
 func parsePages() map[string]*template.Template {
-	base := template.Must(template.ParseFS(templateFS, "templates/base.html"))
+	base := template.Must(template.New("base.html").Funcs(templateFuncs).ParseFS(templateFS, "templates/base.html"))
 	pages := make(map[string]*template.Template, len(pageNames))
 	for _, name := range pageNames {
 		t := template.Must(base.Clone())
@@ -65,7 +72,13 @@ func parsePages() map[string]*template.Template {
 }
 
 func NewServer(deps Deps) http.Handler {
-	s := &server{deps: deps, pages: parsePages()}
+	_, h := newServer(deps, time.Now)
+	return h
+}
+
+// newServer is NewServer with an injectable clock (used by the overview cache).
+func newServer(deps Deps, now func() time.Time) (*server, http.Handler) {
+	s := &server{deps: deps, pages: parsePages(), cache: newAnimeCache(now, cacheMaxEntries, cacheTTL)}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("ok"))
@@ -78,7 +91,10 @@ func NewServer(deps Deps) http.Handler {
 	mux.HandleFunc("GET /settings", s.getSettings)
 	mux.HandleFunc("POST /settings", s.postSettings)
 	mux.HandleFunc("GET /anime/search", s.search)
-	return mux
+	mux.HandleFunc("GET /anime/{source}/{id}", s.getOverview)
+	mux.HandleFunc("GET /anime/{source}/{id}/add", s.getAdd)
+	mux.HandleFunc("POST /anime/{source}/{id}/add", s.postAdd)
+	return s, mux
 }
 
 // isPartialRequest reports whether r is an htmx request that wants only a
@@ -93,17 +109,27 @@ func isPartialRequest(r *http.Request) bool {
 // render executes the page into a buffer first so a template error yields a
 // clean 500 instead of a half-written response.
 func (s *server) render(w http.ResponseWriter, r *http.Request, page string, data any) {
-	s.execute(w, page, "base.html", data)
+	s.execute(w, http.StatusOK, page, "base.html", data)
+}
+
+// renderStatus is render with an explicit success-path status code.
+func (s *server) renderStatus(w http.ResponseWriter, status int, page string, data any) {
+	s.execute(w, status, page, "base.html", data)
 }
 
 // renderPartial executes a named template of a page's set without the base layout.
 func (s *server) renderPartial(w http.ResponseWriter, page, name string, data any) {
-	s.execute(w, page, name, data)
+	s.execute(w, http.StatusOK, page, name, data)
+}
+
+// renderPartialStatus is renderPartial with an explicit status code.
+func (s *server) renderPartialStatus(w http.ResponseWriter, status int, page, name string, data any) {
+	s.execute(w, status, page, name, data)
 }
 
 // execute buffers the named template of a page's set. Responses vary by
 // HX-Request because the same URL can answer as a partial or a full page.
-func (s *server) execute(w http.ResponseWriter, page, name string, data any) {
+func (s *server) execute(w http.ResponseWriter, status int, page, name string, data any) {
 	w.Header().Add("Vary", "HX-Request")
 	t, ok := s.pages[page]
 	if !ok {
@@ -118,6 +144,7 @@ func (s *server) execute(w http.ResponseWriter, page, name string, data any) {
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(status)
 	buf.WriteTo(w)
 }
 

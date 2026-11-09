@@ -32,6 +32,23 @@ func (s *Store) SaveAnime(ctx context.Context, a provider.Anime, opts ...SaveOpt
 	for _, f := range opts {
 		f(&o)
 	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, fmt.Errorf("save anime: %w", err)
+	}
+	defer tx.Rollback()
+	id, err := saveAnimeTx(ctx, tx, a, o)
+	if err != nil {
+		return 0, err
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, fmt.Errorf("save anime: %w", err)
+	}
+	return id, nil
+}
+
+// saveAnimeTx does the work of SaveAnime inside the caller's transaction.
+func saveAnimeTx(ctx context.Context, tx *sql.Tx, a provider.Anime, o saveOpts) (int64, error) {
 	var mal any
 	if a.MALID != "" {
 		n, err := strconv.ParseInt(a.MALID, 10, 64)
@@ -40,14 +57,8 @@ func (s *Store) SaveAnime(ctx context.Context, a provider.Anime, opts ...SaveOpt
 		}
 		mal = n
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return 0, fmt.Errorf("save anime: %w", err)
-	}
-	defer tx.Rollback()
-
 	var existing int64
-	err = tx.QueryRowContext(ctx, `SELECT id FROM anime WHERE source = ? AND source_id = ?`, string(a.Source), a.ID).Scan(&existing)
+	err := tx.QueryRowContext(ctx, `SELECT id FROM anime WHERE source = ? AND source_id = ?`, string(a.Source), a.ID).Scan(&existing)
 	if err == nil {
 		return 0, ErrAlreadySaved
 	}
@@ -82,9 +93,6 @@ func (s *Store) SaveAnime(ctx context.Context, a provider.Anime, opts ...SaveOpt
 			id, r.Kind, string(r.Source), r.ID, string(tj), r.Type); err != nil {
 			return 0, fmt.Errorf("save relations: %w", err)
 		}
-	}
-	if err := tx.Commit(); err != nil {
-		return 0, fmt.Errorf("save anime: %w", err)
 	}
 	return id, nil
 }

@@ -149,3 +149,50 @@ func (s *Store) AnimePeople(ctx context.Context, animeID int64) ([]Person, error
 	}
 	return out, nil
 }
+
+// SavedCast is one cast row with local person ids.
+type SavedCast struct {
+	Character Person
+	Actor     *Person
+	Role      string
+}
+
+// Cast returns the stored cast of animeID in insertion order.
+func (s *Store) Cast(ctx context.Context, animeID int64) ([]SavedCast, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT ac.role,
+		c.id, c.source, c.source_id, c.name, c.image_path, c.external_url,
+		a.id, a.source, a.source_id, a.name, a.image_path, a.external_url
+		FROM anime_cast ac
+		JOIN people c ON c.id = ac.character_person_id
+		LEFT JOIN people a ON a.id = ac.actor_person_id
+		WHERE ac.anime_id = ? ORDER BY ac.rowid`, animeID)
+	if err != nil {
+		return nil, fmt.Errorf("cast: %w", err)
+	}
+	defer rows.Close()
+	var out []SavedCast
+	for rows.Next() {
+		var (
+			sc          SavedCast
+			cs          string
+			aid         sql.NullInt64
+			asrc, asid  sql.NullString
+			aname, aimg sql.NullString
+			aurl        sql.NullString
+		)
+		if err := rows.Scan(&sc.Role, &sc.Character.ID, &cs, &sc.Character.SourceID, &sc.Character.Name,
+			&sc.Character.ImagePath, &sc.Character.ExternalURL, &aid, &asrc, &asid, &aname, &aimg, &aurl); err != nil {
+			return nil, fmt.Errorf("cast: %w", err)
+		}
+		sc.Character.Source = provider.Source(cs)
+		if aid.Valid {
+			sc.Actor = &Person{ID: aid.Int64, Source: provider.Source(asrc.String), SourceID: asid.String,
+				Name: aname.String, ImagePath: aimg.String, ExternalURL: aurl.String}
+		}
+		out = append(out, sc)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("cast: %w", err)
+	}
+	return out, nil
+}
