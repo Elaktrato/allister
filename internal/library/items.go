@@ -345,17 +345,31 @@ func insertItem(ctx context.Context, tx *sql.Tx, pluginID, kind string, d plugin
 	return id, nil
 }
 
-func insertParts(ctx context.Context, tx *sql.Tx, id int64, p *prepared) error {
-	for _, t := range p.titles {
+func insertTitles(ctx context.Context, tx *sql.Tx, id int64, titles []plugin.Title) error {
+	for _, t := range titles {
 		if _, err := tx.ExecContext(ctx, `INSERT INTO item_titles(item_id, lang, text) VALUES (?,?,?)`, id, t.Lang, t.Text); err != nil {
 			return fmt.Errorf("save titles: %w", err)
 		}
 	}
-	for _, f := range p.fields {
+	return nil
+}
+
+func insertFields(ctx context.Context, tx *sql.Tx, id int64, rows []fieldRow) error {
+	for _, f := range rows {
 		if _, err := tx.ExecContext(ctx, `INSERT INTO item_fields(item_id, key, vtype, text, num, date, seq) VALUES (?,?,?,?,?,?,?)`,
 			id, f.key, string(f.vtype), f.text, f.num, f.date, f.seq); err != nil {
 			return fmt.Errorf("save fields: %w", err)
 		}
+	}
+	return nil
+}
+
+func insertParts(ctx context.Context, tx *sql.Tx, id int64, p *prepared) error {
+	if err := insertTitles(ctx, tx, id, p.titles); err != nil {
+		return err
+	}
+	if err := insertFields(ctx, tx, id, p.fields); err != nil {
+		return err
 	}
 	for _, e := range p.extIDs {
 		if _, err := tx.ExecContext(ctx, `INSERT INTO external_ids(item_id, type, value) VALUES (?,?,?)`, id, e[0], e[1]); err != nil {
