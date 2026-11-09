@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/allister/allister/internal/importer/yamtrack"
+	"github.com/allister/allister/internal/library"
 	"github.com/allister/allister/internal/plugin"
 	"github.com/allister/allister/internal/provider"
 	"github.com/allister/allister/internal/settings"
@@ -45,6 +46,9 @@ type Deps struct {
 	// in production (cmd/allister builds it); when nil NewServer builds a
 	// default one with the anime plugin on top of Settings.
 	Registry *plugin.Registry
+	// Library is the generic library over the registry's manifests. When nil
+	// NewServer builds one over Store's database.
+	Library *library.Library
 }
 
 // JobQueue is the part of jobs.Queue the web layer needs.
@@ -64,14 +68,14 @@ type server struct {
 
 // pageNames lists every page template (templates/<name>.html). Add a page by
 // dropping its file in templates/ and listing it here.
-var pageNames = []string{"settings", "search", "anime", "list", "person", "manual_form", "import", "error"}
+var pageNames = []string{"settings", "search", "item", "list", "person", "manual_form", "import", "error"}
 
 // pagePartials lists extra template files a page needs (also rendered alone
 // for htmx requests).
 var pagePartials = map[string][]string{
 	"search":   {"templates/search_results.html"},
 	"settings": {"templates/settings_plugins.html"},
-	"anime":    {"templates/add_dialog.html", "templates/match_dialog.html"},
+	"item":     {"templates/sections.html", "templates/add_dialog.html", "templates/match_dialog.html"},
 	"list":     {"templates/list_row.html", "templates/add_dialog.html"},
 }
 
@@ -97,6 +101,9 @@ func NewServer(deps Deps) http.Handler {
 func newServer(deps Deps, now func() time.Time) (*server, http.Handler) {
 	if deps.Registry == nil {
 		deps.Registry = defaultRegistry(deps)
+	}
+	if deps.Library == nil && deps.Store != nil {
+		deps.Library = library.New(deps.Store.DB(), deps.Registry)
 	}
 	s := &server{deps: deps, pages: parsePages(), cache: newAnimeCache(now, cacheMaxEntries, cacheTTL)}
 	mux := http.NewServeMux()

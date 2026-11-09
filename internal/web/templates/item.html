@@ -1,0 +1,34 @@
+{{define "title"}}{{.Title}} - Allister{{end}}
+{{define "content"}}
+<div class="grid gap-6 md:grid-cols-[14rem_1fr]">
+  <aside class="space-y-4">
+    {{if .Cover}}<img src="{{.Cover}}" alt="{{.Title}}" class="w-48 rounded md:w-full">
+    {{else}}<div class="h-64 w-48 rounded bg-slate-800 md:w-full" aria-hidden="true"></div>{{end}}
+    {{with .Entry}}
+    <div class="rounded border border-slate-800 bg-slate-900 p-3 text-sm">
+      <p class="font-semibold">{{.Status}}</p>
+      <p class="text-slate-300">Rating: {{.Rating}}</p>
+      {{range .Progress}}<p class="text-slate-300">{{.Label}}: {{.Value}}</p>{{end}}
+      {{if .Comment}}<p class="mt-1 whitespace-pre-line break-words text-slate-400">{{.Comment}}</p>{{end}}
+      <a href="{{.EditURL}}" class="mt-2 inline-block text-indigo-300 hover:underline">Edit</a>
+    </div>
+    {{else}}
+    <a href="{{.AddURL}}" hx-get="{{.AddURL}}" hx-target="#dialog-slot" hx-swap="innerHTML"
+      class="block rounded bg-indigo-600 px-4 py-2 text-center font-medium hover:bg-indigo-500">Add to list</a>
+    {{end}}
+    {{if .MatchURL}}
+    <a href="{{.MatchURL}}" hx-get="{{.MatchURL}}" hx-target="#dialog-slot" hx-swap="innerHTML"
+      class="block rounded border border-indigo-500 px-4 py-2 text-center font-medium text-indigo-200 hover:bg-slate-800">{{.MatchLabel}}</a>
+    {{if .UnmatchedHint}}<p class="text-xs text-slate-400">{{.UnmatchedHint}}</p>{{end}}
+    {{end}}
+  </aside>
+  <div class="min-w-0 space-y-6">
+    <div>
+      <h1 class="text-3xl font-semibold">{{.Title}}</h1>
+      {{if .PartialSync}}<span title="Some details (cast, images) are still being fetched in the background" class="mt-2 inline-block rounded bg-slate-800 px-2 py-0.5 text-xs text-amber-300">partially synced</span>{{end}}
+    </div>
+    {{range .Sections}}{{template "section" .}}{{end}}
+  </div>
+</div>
+<div id="dialog-slot" hx-on::before-swap="var s=event.detail.xhr.status;if(s===422||s===409||s===503){event.detail.shouldSwap=true;event.detail.isError=false}">{{with .Dialog}}{{template "add_dialog" .}}{{end}}{{with .Match}}{{template "match_dialog" .}}{{end}}</div>
+{{end}}

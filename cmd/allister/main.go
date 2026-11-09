@@ -59,7 +59,7 @@ func run() error {
 
 	settingsStore := settings.New(database)
 	registry := plugin.NewRegistry(settingsStore)
-	if err := registry.Register(anime.New(anime.Options{})); err != nil {
+	if err := registry.Register(anime.New(anime.Options{Provider: aniClient})); err != nil {
 		log.Printf("startup: %v", err)
 	}
 

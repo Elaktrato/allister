@@ -1,7 +1,9 @@
 package animemap
 
 import (
+	"reflect"
 	"testing"
+	"time"
 
 	"github.com/allister/allister/internal/provider"
 )
@@ -83,5 +85,26 @@ func TestItemDataRelationURLs(t *testing.T) {
 		if got := d.Relations[i].Item.URL; got != w {
 			t.Errorf("relation %d url = %q, want %q", i, got, w)
 		}
+	}
+}
+
+func TestLegacyAnimeRoundTrip(t *testing.T) {
+	start := time.Date(2006, 10, 4, 0, 0, 0, 0, time.UTC)
+	eps, year, rank := 37, 2006, 80
+	a := provider.Anime{
+		SearchResult: provider.SearchResult{Source: provider.AniList, ID: "1535", Titles: []provider.Title{{Lang: "ja", Text: "デスノート"}},
+			Type: "TV", Episodes: &eps, Year: &year, Studio: "Madhouse", Synopsis: "a\nb", CoverURL: "https://img.example/c.jpg"},
+		StartDate: &start, SourceMaterial: "MANGA", ExternalURL: "https://anilist.co/anime/1535", MALID: "1535",
+		Relations: []provider.Relation{{Kind: "source", Source: provider.AniList, ID: "2", Titles: []provider.Title{{Lang: "en", Text: "M"}}, Type: "MANGA"}},
+		Genres:    []string{"Thriller"},
+		Tags:      []provider.Tag{{Name: "Detective", Rank: &rank, Spoiler: true}},
+	}
+	d := ItemData(a)
+	back := LegacyAnime(d)
+	if !reflect.DeepEqual(ItemData(back), d) {
+		t.Fatalf("round trip:\n%+v\n%+v", ItemData(back), d)
+	}
+	if back.Source != provider.AniList || back.ID != "1535" || *back.Episodes != 37 || back.MALID != "1535" || back.Relations[0].Type != "MANGA" {
+		t.Fatalf("legacy %+v", back)
 	}
 }

@@ -4,11 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
+	"time"
 
 	"github.com/allister/allister/internal/plugin"
 	"github.com/allister/allister/internal/plugins/anime/animemap"
 	"github.com/allister/allister/internal/provider"
-	"github.com/allister/allister/internal/provider/anilist"
 )
 
 // Limits of the importer (the source's limits live in animemap).
@@ -22,8 +23,65 @@ const (
 // source adapts the legacy AniList client to plugin.Source. Everything it
 // returns goes through animemap, which sanitises it, so a quirk of the
 // AniList data can never make an item unsaveable in the library.
+//
+// Details and Recommendations read the same legacy Anime call. So that an
+// overview (Details, then Recommendations of the same id) costs one request,
+// Details keeps its response for a moment and the next Recommendations of
+// that id takes it (once; see shared).
 type source struct {
-	c *anilist.Client
+	c provider.Provider
+
+	mu     sync.Mutex
+	shared sharedAnime
+}
+
+// malLookup is the optional MAL id lookup of a provider (anilist.Client).
+type malLookup interface {
+	AnimeByMALID(ctx context.Context, malID string) (provider.Anime, error)
+}
+
+// sharedAnime is the last Details response, kept for sharedTTL.
+type sharedAnime struct {
+	id string
+	a  provider.Anime
+	at time.Time
+}
+
+const sharedTTL = 10 * time.Second
+
+// maxIDDigits is the longest AniList id accepted.
+const maxIDDigits = 12
+
+// checkID refuses an id that is not a run of 1 to 12 ASCII digits without a
+// request: AniList ids are numbers.
+func checkID(id string) error {
+	if id == "" || len(id) > maxIDDigits {
+		return fmt.Errorf("anime: bad id %q: %w", id, plugin.ErrNotFound)
+	}
+	for i := 0; i < len(id); i++ {
+		if id[i] < '0' || id[i] > '9' {
+			return fmt.Errorf("anime: bad id %q: %w", id, plugin.ErrNotFound)
+		}
+	}
+	return nil
+}
+
+func (s *source) keep(id string, a provider.Anime) {
+	s.mu.Lock()
+	s.shared = sharedAnime{id: id, a: a, at: time.Now()}
+	s.mu.Unlock()
+}
+
+// take returns the kept response of id (and forgets it) when it is fresh.
+func (s *source) take(id string) (provider.Anime, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	sh := s.shared
+	if sh.id != id || time.Since(sh.at) >= sharedTTL {
+		return provider.Anime{}, false
+	}
+	s.shared = sharedAnime{}
+	return sh.a, true
 }
 
 func checkKind(kind string) error {
@@ -72,23 +130,33 @@ func (s *source) Details(ctx context.Context, kind, id string) (plugin.ItemData,
 	if err := checkKind(kind); err != nil {
 		return plugin.ItemData{}, err
 	}
+	if err := checkID(id); err != nil {
+		return plugin.ItemData{}, err
+	}
 	a, err := s.c.Anime(ctx, id)
 	if err != nil {
 		return plugin.ItemData{}, mapErr(err)
 	}
+	s.keep(id, a)
 	return animemap.ItemData(a), nil
 }
 
 // Recommendations reads the recommendations of the legacy Anime call, so it
 // costs the same single request as Details until a later task splits the
-// query.
+// query; right after Details of the same id it costs none (see source).
 func (s *source) Recommendations(ctx context.Context, kind, id string) ([]plugin.ItemSummary, error) {
 	if err := checkKind(kind); err != nil {
 		return nil, err
 	}
-	a, err := s.c.Anime(ctx, id)
-	if err != nil {
-		return nil, mapErr(err)
+	if err := checkID(id); err != nil {
+		return nil, err
+	}
+	a, ok := s.take(id)
+	if !ok {
+		var err error
+		if a, err = s.c.Anime(ctx, id); err != nil {
+			return nil, mapErr(err)
+		}
 	}
 	return animemap.Recommendations(a.Recommendations), nil
 }
@@ -96,6 +164,9 @@ func (s *source) Recommendations(ctx context.Context, kind, id string) ([]plugin
 // People returns the characters with their first Japanese voice actor.
 func (s *source) People(ctx context.Context, kind, id string) ([]plugin.Credit, error) {
 	if err := checkKind(kind); err != nil {
+		return nil, err
+	}
+	if err := checkID(id); err != nil {
 		return nil, err
 	}
 	cast, err := s.c.Cast(ctx, id)
@@ -114,7 +185,11 @@ func (s *source) Lookup(ctx context.Context, kind, idType, value string) (plugin
 	if idType != "mal" {
 		return plugin.ItemData{}, fmt.Errorf("anime: cannot look up by %q: %w", idType, plugin.ErrNotFound)
 	}
-	a, err := s.c.AnimeByMALID(ctx, value)
+	ml, ok := s.c.(malLookup)
+	if !ok {
+		return plugin.ItemData{}, fmt.Errorf("anime: the provider cannot look up MAL ids: %w", plugin.ErrUnavailable)
+	}
+	a, err := ml.AnimeByMALID(ctx, value)
 	if err != nil {
 		return plugin.ItemData{}, mapErr(err)
 	}

@@ -121,4 +121,8 @@ type Store struct {
 // holds the anime plugin's manifest (see adapter.go).
 func New(db *sql.DB) *Store { return &Store{db: db, lib: library.New(db, animeRegistry)} }
 
+// DB returns the database the store works on (the web layer builds its
+// generic library over the same database).
+func (s *Store) DB() *sql.DB { return s.db }
+
 const dateLayout = "2006-01-02"

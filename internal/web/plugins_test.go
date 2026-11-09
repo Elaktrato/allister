@@ -304,11 +304,21 @@ func TestSettingsEscapesHostileManifestText(t *testing.T) {
 	}
 }
 
-func TestFixturePluginsHaveNoRoutes(t *testing.T) {
+func TestFixturePluginsGetOnlyCoreRoutes(t *testing.T) {
 	e := newEnvWith(t, withPlugins(plugintest.BookPlugin()))
-	if _, ok := e.srv.pluginRoutes["book"]; ok {
-		t.Fatal("fixture has routes")
+	var rec recordRoutes
+	e.srv.coreRoutes("book")(&rec)
+	got := e.srv.pluginRoutes["book"]
+	if len(rec.patterns) == 0 || len(got) != len(rec.patterns) {
+		t.Fatalf("fixture routes %v, core routes %v", got, rec.patterns)
 	}
+	for i, full := range got {
+		method, path, _ := strings.Cut(rec.patterns[i], " ")
+		if full != method+" /book"+path {
+			t.Errorf("route %q is not the core route %q under /book", full, rec.patterns[i])
+		}
+	}
+	// no list page yet
 	if c := e.get("/book").Code; c != 404 {
 		t.Fatalf("/book: %d", c)
 	}

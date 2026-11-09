@@ -1,10 +1,11 @@
 package web
 
 import (
+	"net/url"
 	"sync"
 	"time"
 
-	"github.com/allister/allister/internal/provider"
+	"github.com/allister/allister/internal/plugin"
 )
 
 const (
@@ -12,11 +13,14 @@ const (
 	cacheMaxEntries = 100
 )
 
-// cachedDetail is what an unsaved overview fetched from the provider.
+// cachedDetail is what the overview of an unsaved item fetched from its
+// plugin's source: the details, the credits (CreditsFailed when People
+// failed) and the recommendations (nil when not fetched or failed).
 type cachedDetail struct {
-	Anime      provider.Anime
-	Cast       []provider.CastMember
-	CastFailed bool
+	Data          plugin.ItemData
+	Credits       []plugin.Credit
+	CreditsFailed bool
+	Recs          []plugin.ItemSummary
 }
 
 type cacheItem struct {
@@ -24,14 +28,21 @@ type cacheItem struct {
 	at time.Time
 }
 
-// animeCache is a small TTL cache, bounded in size, so that the add handler
-// can save what the overview already fetched without another provider call.
+// animeCache is a small TTL cache of live item data keyed by liveKey,
+// bounded in size, so that the add handler can save what the overview
+// already fetched without another source call.
 type animeCache struct {
 	mu  sync.Mutex
 	now func() time.Time
 	max int
 	ttl time.Duration
 	m   map[string]cacheItem
+}
+
+// liveKey is the cache key of an unsaved item's live data. Every part is
+// path escaped, so the "/" separators cannot collide.
+func liveKey(pluginID, source, kind, id string) string {
+	return url.PathEscape(pluginID) + "/" + url.PathEscape(source) + "/" + url.PathEscape(kind) + "/" + url.PathEscape(id)
 }
 
 func newAnimeCache(now func() time.Time, max int, ttl time.Duration) *animeCache {

@@ -16,6 +16,7 @@ import (
 
 	"github.com/allister/allister/internal/db"
 	"github.com/allister/allister/internal/jobs"
+	"github.com/allister/allister/internal/library"
 	"github.com/allister/allister/internal/provider"
 	"github.com/allister/allister/internal/settings"
 	"github.com/allister/allister/internal/store"
@@ -79,6 +80,8 @@ type env struct {
 	srv *server
 	// reg is the plugin registry given to the server.
 	reg *plugin.Registry
+	// lib is the server's library (for seeding items of any plugin).
+	lib *library.Library
 }
 
 func newEnv(t *testing.T) *env { return newEnvWith(t, nil) }
@@ -104,6 +107,7 @@ func newEnvWith(t *testing.T, mk func(es plugin.EnabledStore) *plugin.Registry) 
 		Providers: map[provider.Source]provider.Provider{provider.AniList: e.fp},
 	}, func() time.Time { return *e.now })
 	e.reg = e.srv.deps.Registry
+	e.lib = e.srv.deps.Library
 	return e
 }
 
@@ -185,202 +189,6 @@ func (e *env) saved(t *testing.T) int64 {
 		t.Fatal(err)
 	}
 	return id
-}
-
-func TestOverviewLiveForUnsaved(t *testing.T) {
-	e := newEnv(t)
-	rec := e.get("/anime/anilist/1535")
-	if rec.Code != 200 {
-		t.Fatalf("got %d", rec.Code)
-	}
-	b := rec.Body.String()
-	mustContain(t, b, "デスノート", "Line one.", "Line two.", "Madhouse", "2006-10-04", "2007-06-27", "MANGA", "37",
-		"Light Yagami", "Mamoru Miyano", "Sequel Title", `href="/anime/anilist/2000"`, `href="https://anilist.co/manga/30021"`,
-		"Rec Title", `href="/anime/anilist/3000"`, "https://img.example/r.jpg", "https://img.example/c.jpg", "https://img.example/l.jpg",
-		"View on AniList", `href="https://anilist.co/anime/1535"`, "Add to list", `hx-get="/anime/anilist/1535/add"`)
-	mustNotContain(t, b, "Cast unavailable", "partially synced")
-	if e.fp.animeCalls != 1 || e.fp.castCall != 1 {
-		t.Fatalf("calls %d %d", e.fp.animeCalls, e.fp.castCall)
-	}
-	if ar, _ := e.st.FindBySource(context.Background(), provider.AniList, "1535"); ar != nil {
-		t.Fatal("overview must not save")
-	}
-}
-
-func TestOverviewUsesPreferredLanguage(t *testing.T) {
-	e := newEnv(t)
-	if err := e.set.Set(context.Background(), settings.KeyTitleLang, "en"); err != nil {
-		t.Fatal(err)
-	}
-	b := e.get("/anime/anilist/1535").Body.String()
-	mustContain(t, b, "<h1", "Death Note EN</h1>")
-}
-
-func TestOverviewFromDatabaseForSaved(t *testing.T) {
-	e := newEnv(t)
-	e.saved(t)
-	e.fp.anime.Synopsis = "LIVE CHANGED"
-	e.fp.castErr = provider.ErrUnavailable
-	rec := e.get("/anime/anilist/1535")
-	if rec.Code != 200 {
-		t.Fatalf("got %d", rec.Code)
-	}
-	b := rec.Body.String()
-	mustContain(t, b, "Madhouse", "Sequel Title", "partially synced")
-	mustNotContain(t, b, "LIVE CHANGED")
-	if e.fp.castCall != 0 {
-		t.Fatal("cast fetched live for a saved entry")
-	}
-	// recommendations come live, failures are ignored
-	mustContain(t, b, "Rec Title")
-	e.fp.animeErr = provider.ErrUnavailable
-	rec = e.get("/anime/anilist/1535")
-	if rec.Code != 200 {
-		t.Fatalf("got %d", rec.Code)
-	}
-	mustNotContain(t, rec.Body.String(), "Rec Title")
-}
-
-func TestOverviewShowsAllTitleLanguages(t *testing.T) {
-	e := newEnv(t)
-	for _, saved := range []bool{false, true} {
-		if saved {
-			e.saved(t)
-		}
-		b := e.get("/anime/anilist/1535").Body.String()
-		mustContain(t, b, "Japanese (native)", "デスノート", "Romaji", "Death Note", "English", "Death Note EN", "Deutsch", "Todesnotiz")
-	}
-}
-
-func TestOverviewSynopsisHasNoRawHTML(t *testing.T) {
-	e := newEnv(t)
-	e.fp.anime.Synopsis = "<script>alert(1)</script>\n<b>bold</b> & more"
-	b := e.get("/anime/anilist/1535").Body.String()
-	mustNotContain(t, b, "<script>alert", "<b>bold</b>")
-	mustContain(t, b, "&lt;script&gt;alert(1)&lt;/script&gt;", "&amp; more")
-	if strings.Count(b, "<p class=\"synopsis\"") != 2 {
-		t.Fatalf("want 2 synopsis paragraphs")
-	}
-}
-
-func TestOverviewCastFailureStillRenders(t *testing.T) {
-	e := newEnv(t)
-	e.fp.castErr = provider.ErrUnavailable
-	rec := e.get("/anime/anilist/1535")
-	if rec.Code != 200 {
-		t.Fatalf("got %d", rec.Code)
-	}
-	mustContain(t, rec.Body.String(), "Cast unavailable right now", "Sequel Title")
-}
-
-func TestOverviewProviderErrors(t *testing.T) {
-	for _, tc := range []struct {
-		err  error
-		code int
-	}{{provider.ErrNotFound, 404}, {provider.ErrUnavailable, 503}, {provider.ErrRateLimited, 503}} {
-		e := newEnv(t)
-		e.fp.animeErr = tc.err
-		rec := e.get("/anime/anilist/1535")
-		if rec.Code != tc.code {
-			t.Fatalf("%v: got %d", tc.err, rec.Code)
-		}
-		b := rec.Body.String()
-		mustNotContain(t, b, "goroutine", "panic")
-		if tc.code == 503 {
-			mustContain(t, b, `href="/anime/anilist/1535"`, "Try again")
-		}
-	}
-}
-
-func TestOverviewNilProviderIs503(t *testing.T) {
-	d, _ := db.Open(filepath.Join(t.TempDir(), "t.db"))
-	t.Cleanup(func() { d.Close() })
-	h := NewServer(Deps{Settings: settings.New(d), Store: store.New(d), Providers: map[provider.Source]provider.Provider{}})
-	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, httptest.NewRequest("GET", "/anime/anilist/1535", nil))
-	if rec.Code != 503 {
-		t.Fatalf("got %d", rec.Code)
-	}
-}
-
-func TestOverviewUnknownSourceAndBadID(t *testing.T) {
-	e := newEnv(t)
-	for _, p := range []string{"/anime/mal/1", "/anime/anilist/abc", "/anime/foo/1/add"} {
-		if rec := e.get(p); rec.Code != 404 {
-			t.Errorf("%s: got %d", p, rec.Code)
-		}
-	}
-	if e.fp.animeCalls != 0 {
-		t.Fatal("provider called")
-	}
-}
-
-func TestOverviewManualFromDatabaseOnly(t *testing.T) {
-	e := newEnv(t)
-	if rec := e.get("/anime/manual/77"); rec.Code != 404 {
-		t.Fatalf("got %d", rec.Code)
-	}
-	m := provider.Anime{SearchResult: provider.SearchResult{Source: provider.Manual, ID: "77", Type: "OVA",
-		Titles: []provider.Title{{Lang: "en", Text: "My Manual Show"}}}}
-	if _, err := e.st.SaveAnime(context.Background(), m, store.WithSyncState("done")); err != nil {
-		t.Fatal(err)
-	}
-	rec := e.get("/anime/manual/77")
-	if rec.Code != 200 {
-		t.Fatalf("got %d", rec.Code)
-	}
-	mustContain(t, rec.Body.String(), "My Manual Show")
-	mustNotContain(t, rec.Body.String(), "partially synced", "View on AniList")
-	if e.fp.animeCalls != 0 {
-		t.Fatal("provider called for manual entry")
-	}
-}
-
-func TestExternalLinksOnlyHTTPS(t *testing.T) {
-	e := newEnv(t)
-	e.fp.anime.ExternalURL = "http://anilist.co/anime/1535"
-	e.fp.cast[0].Character.URL = "javascript:alert(1)"
-	e.fp.cast[0].Actor.URL = "http://anilist.co/staff/a1"
-	b := e.get("/anime/anilist/1535").Body.String()
-	mustNotContain(t, b, "View on AniList", "javascript:", `href="http://anilist.co`)
-}
-
-func TestPartialSyncBadge(t *testing.T) {
-	e := newEnv(t)
-	id := e.saved(t)
-	for _, st := range []string{"pending", "partial"} {
-		if err := e.st.SetSyncState(context.Background(), id, st); err != nil {
-			t.Fatal(err)
-		}
-		mustContain(t, e.get("/anime/anilist/1535").Body.String(), "partially synced")
-	}
-	e.st.SetSyncState(context.Background(), id, "done")
-	mustNotContain(t, e.get("/anime/anilist/1535").Body.String(), "partially synced")
-}
-
-func TestPersonLinksExternalOnlyWhenUnsaved(t *testing.T) {
-	e := newEnv(t)
-	b := e.get("/anime/anilist/1535").Body.String()
-	mustContain(t, b, `href="https://anilist.co/character/c1"`, `href="https://anilist.co/staff/a1"`)
-	mustNotContain(t, b, "/people/")
-
-	id := e.saved(t)
-	if err := e.st.SaveCast(context.Background(), id, e.fp.cast); err != nil {
-		t.Fatal(err)
-	}
-	b = e.get("/anime/anilist/1535").Body.String()
-	mustContain(t, b, `href="https://anilist.co/character/c1"`, `href="https://anilist.co/staff/a1"`, `href="/people/1"`, `href="/people/2"`)
-}
-
-func TestSavedWithEntryShowsSummaryInsteadOfButton(t *testing.T) {
-	e := newEnv(t)
-	id := e.saved(t)
-	if err := e.st.UpsertListEntry(context.Background(), store.ListEntry{AnimeID: id, Status: store.Watching, Rating: ip(9), Progress: 5}); err != nil {
-		t.Fatal(err)
-	}
-	b := e.get("/anime/anilist/1535").Body.String()
-	mustContain(t, b, "Watching", "9", "5 / 37", `href="/list/1/edit"`)
-	mustNotContain(t, b, "Add to list")
 }
 
 func TestAddDialogPartialVsFull(t *testing.T) {

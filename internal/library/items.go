@@ -372,6 +372,40 @@ func (l *Library) ItemBySource(ctx context.Context, pluginID, kind, source, sour
 	return l.loadItem(ctx, `plugin_id = ? AND kind = ? AND source = ? AND source_id = ?`, pluginID, kind, source, sourceID)
 }
 
+// ItemByPluginSource returns the plugin's items of every kind with the given
+// source identity, ordered by id (several only for a plugin with several
+// kinds); none is an empty result, not an error.
+func (l *Library) ItemByPluginSource(ctx context.Context, pluginID, source, sourceID string) ([]Item, error) {
+	rows, err := l.db.QueryContext(ctx, `SELECT id FROM items WHERE plugin_id = ? AND source = ? AND source_id = ? ORDER BY id`,
+		pluginID, source, sourceID)
+	if err != nil {
+		return nil, fmt.Errorf("items by source: %w", err)
+	}
+	var ids []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return nil, fmt.Errorf("items by source: %w", err)
+		}
+		ids = append(ids, id)
+	}
+	if err := closeRows(rows); err != nil {
+		return nil, fmt.Errorf("items by source: %w", err)
+	}
+	var out []Item
+	for _, id := range ids {
+		it, err := l.Item(ctx, id)
+		if err != nil {
+			return nil, err
+		}
+		if it != nil { // deleted meanwhile
+			out = append(out, *it)
+		}
+	}
+	return out, nil
+}
+
 // ItemByExternalID returns the (oldest) item of the plugin kind that carries
 // the external id, or nil, nil.
 func (l *Library) ItemByExternalID(ctx context.Context, pluginID, kind, idType, value string) (*Item, error) {

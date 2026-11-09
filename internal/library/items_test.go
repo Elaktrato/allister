@@ -3,13 +3,16 @@ package library
 import (
 	"context"
 	"errors"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/allister/allister/internal/db"
 	"github.com/allister/allister/internal/plugin"
+	"github.com/allister/allister/internal/plugin/plugintest"
 )
 
 var ctx = context.Background()
@@ -550,5 +553,38 @@ func TestFieldIndexesExist(t *testing.T) {
 		if count(t, e.db, q) == 0 {
 			t.Errorf("missing index: %s", q)
 		}
+	}
+}
+
+func TestItemByPluginSourceAcrossKinds(t *testing.T) {
+	d, err := db.Open(filepath.Join(t.TempDir(), "t.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { d.Close() })
+	two := plugintest.BookPlugin()
+	comic := two.M.Kinds[0]
+	comic.Key, comic.Label, comic.LabelPlural = "comic", "Comic", "Comics"
+	two.M.Kinds = append(two.M.Kinds, comic)
+	reg := plugin.NewRegistry(plugintest.NewMemEnabled())
+	for _, p := range []plugin.Plugin{two, plugintest.BookPlugin(plugintest.WithID("book2"))} {
+		if err := reg.Register(p); err != nil {
+			t.Fatal(err)
+		}
+	}
+	l := New(d, reg)
+	book := mustSave(t, l, "book", "book", bookData("7"))
+	cd := bookData("7")
+	cd.Kind = "comic"
+	com := mustSave(t, l, "book", "comic", cd)
+	mustSave(t, l, "book2", "book", bookData("7")) // other plugin: never returned
+	mustSave(t, l, "book", "book", bookData("8"))  // other id
+	got, err := l.ItemByPluginSource(ctx, "book", "books", "7")
+	if err != nil || len(got) != 2 || got[0].ID != book || got[1].ID != com || got[1].Kind != "comic" ||
+		len(got[0].Titles) == 0 {
+		t.Fatalf("got %+v %v", got, err)
+	}
+	if got, err := l.ItemByPluginSource(ctx, "book", "other", "7"); err != nil || len(got) != 0 {
+		t.Fatalf("other source %+v %v", got, err)
 	}
 }

@@ -9,6 +9,7 @@ import (
 
 	"github.com/allister/allister/internal/plugin"
 	"github.com/allister/allister/internal/plugins/anime"
+	"github.com/allister/allister/internal/provider"
 )
 
 // animePluginID is the id of the built-in anime plugin.
@@ -26,20 +27,22 @@ type routeRegistrar interface {
 // enabled guard, so a route cannot be added without being guarded.
 type routeSet func(reg routeRegistrar)
 
-// routeSets returns the route sets by plugin id. A plugin without an entry
-// (the test fixtures) has no pages yet but still appears in navigation and
-// Settings. Later tasks replace the anime entry by generic handlers.
+// routeSets returns the route sets of plugins that have more than the
+// generic core routes. Every other plugin (the test fixtures) gets
+// coreRoutes only. Later tasks port the anime-only handlers to generic ones
+// and delete this override.
 func (s *server) routeSets() map[string]routeSet {
 	return map[string]routeSet{animePluginID: s.animeRoutes}
 }
 
-// animeRoutes is the legacy anime-shaped page set.
+// animeRoutes is the core route set plus the legacy anime-shaped handlers
+// that are not generic yet.
 func (s *server) animeRoutes(reg routeRegistrar) {
+	s.coreRoutes(animePluginID)(reg)
 	reg.Handle("GET /", s.getList)
 	reg.Handle("GET /search", s.search)
 	reg.Handle("GET /manual/new", s.getManualNew)
 	reg.Handle("POST /manual/new", s.postManualNew)
-	reg.Handle("GET /{source}/{id}", s.getOverview)
 	reg.Handle("GET /{source}/{id}/add", s.getAdd)
 	reg.Handle("POST /{source}/{id}/add", s.postAdd)
 	reg.Handle("GET /{source}/{id}/match", s.getMatch)
@@ -47,14 +50,13 @@ func (s *server) animeRoutes(reg routeRegistrar) {
 	reg.Handle("GET /{source}/{id}/match/search", s.getMatchSearch)
 }
 
-// coreRoutes registers the generic item routes. They still act on anime items
+// listRoutes registers the list entry routes. They still act on anime items
 // only (through the adapter store), so they are guarded by the anime plugin's
 // enabled flag.
 //
-// TEMPORARY COUPLING: Task 9 (generic list routes) and Task 7 (people) make
-// these plugin-aware (the owning plugin of the item decides) and delete the
-// anime guard here.
-func (s *server) coreRoutes(reg routeRegistrar) {
+// TEMPORARY COUPLING: Task 9 (generic list routes) and the generic people
+// page make these plugin-aware and delete the anime guard here.
+func (s *server) listRoutes(reg routeRegistrar) {
 	reg.Handle("POST /list/{id}/increment", s.postIncrement)
 	reg.Handle("GET /list/{id}/edit", s.getEdit)
 	reg.Handle("POST /list/{id}/edit", s.postEdit)
@@ -103,38 +105,59 @@ func (s *server) pluginGuard(id string) func(http.HandlerFunc) http.Handler {
 	}
 }
 
-// mountPlugins registers the routes of every installed plugin under the
-// literal prefix /{plugin-id} (never a wildcard first segment: the mux would
-// panic on overlap with the core routes) and the guarded core routes. The
-// registry has already refused ids that collide with core first segments.
+// mountPlugins registers the routes of every installed plugin (its own set,
+// else coreRoutes) under the literal prefix /{plugin-id} (never a wildcard
+// first segment: the mux would panic on overlap with the core routes), the
+// guarded list routes. The registry has already refused ids that collide
+// with core first segments.
 func (s *server) mountPlugins(mux *http.ServeMux) {
 	s.pluginRoutes = map[string][]string{}
 	sets := s.routeSets()
 	for _, m := range s.deps.Registry.Manifests() {
 		set, ok := sets[m.ID]
 		if !ok {
-			continue
+			set = s.coreRoutes(m.ID)
 		}
 		routes := []string{}
 		set(muxRegistrar{mux: mux, prefix: "/" + m.ID, guard: s.pluginGuard(m.ID), routes: &routes})
 		s.pluginRoutes[m.ID] = routes
 	}
 	s.coreGuarded = []string{}
-	s.coreRoutes(muxRegistrar{mux: mux, guard: s.pluginGuard(animePluginID), routes: &s.coreGuarded})
+	s.listRoutes(muxRegistrar{mux: mux, guard: s.pluginGuard(animePluginID), routes: &s.coreGuarded})
 }
 
 // defaultRegistry is the registry used when Deps.Registry is nil: the anime
-// plugin on top of the settings store.
+// plugin on top of the settings store. Its AniList source is the configured
+// AniList provider (never a network client of its own); without one every
+// source call is unavailable.
 func defaultRegistry(deps Deps) *plugin.Registry {
 	var store plugin.EnabledStore = defaultEnabled{}
 	if deps.Settings != nil {
 		store = deps.Settings
 	}
 	reg := plugin.NewRegistry(store)
-	if err := reg.Register(anime.New(anime.Options{})); err != nil {
+	var p provider.Provider = unavailableProvider{}
+	if ap := deps.Providers[provider.AniList]; ap != nil {
+		p = ap
+	}
+	if err := reg.Register(anime.New(anime.Options{Provider: p})); err != nil {
 		log.Printf("plugins: %v", err)
 	}
 	return reg
+}
+
+// unavailableProvider answers every call with provider.ErrUnavailable.
+type unavailableProvider struct{}
+
+func (unavailableProvider) Name() provider.Source { return provider.AniList }
+func (unavailableProvider) Search(context.Context, string) ([]provider.SearchResult, error) {
+	return nil, errNoProvider
+}
+func (unavailableProvider) Anime(context.Context, string) (provider.Anime, error) {
+	return provider.Anime{}, errNoProvider
+}
+func (unavailableProvider) Cast(context.Context, string) ([]provider.CastMember, error) {
+	return nil, errNoProvider
 }
 
 // defaultEnabled keeps nothing and answers with the manifest default.

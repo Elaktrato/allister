@@ -73,3 +73,11 @@ func httpURL(raw string) string {
 	}
 	return raw
 }
+
+// fmtDay formats a calendar day as 2006-01-02 ("" for nil).
+func fmtDay(t *time.Time) string {
+	if t == nil {
+		return ""
+	}
+	return t.Format("2006-01-02")
+}

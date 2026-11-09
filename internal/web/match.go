@@ -7,6 +7,8 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/allister/allister/internal/library"
+	"github.com/allister/allister/internal/plugin"
 	"github.com/allister/allister/internal/provider"
 	"github.com/allister/allister/internal/store"
 	"github.com/allister/allister/internal/titles"
@@ -64,17 +66,30 @@ func (s *server) newMatchView(r *http.Request, src provider.Source, id string, s
 // open (no JavaScript).
 func (s *server) matchResponse(w http.ResponseWriter, r *http.Request, src provider.Source, id string, v matchView, status int) {
 	if isPartialRequest(r) {
-		s.renderPartialStatus(w, status, "anime", "match_dialog", v)
+		s.renderPartialStatus(w, status, "item", "match_dialog", v)
 		return
 	}
-	d, err := s.loadDetail(r.Context(), src, id, false)
-	if err != nil {
-		s.fail(w, r, err, animeURL(string(src), id))
-		return
+	s.showItem(w, r, itemRef{Plugin: animePluginID, Source: string(src), ID: id}, itemExtras{Match: &v}, status)
+}
+
+// unmatchedHint explains an imported manual item that its importer's
+// external id did not resolve ("" when the item carries no such id).
+//
+// TEMPORARY: the anime plugin keeps the legacy sentence (asserted by the
+// match tests) until matching becomes generic; other plugins get a neutral
+// one built from the importer's ExternalIDType.
+func unmatchedHint(m plugin.Manifest, it *library.Item) string {
+	for _, imp := range m.Importers {
+		v := it.ExternalIDs[imp.ExternalIDType]
+		if imp.ExternalIDType == "" || v == "" {
+			continue
+		}
+		if m.ID == animePluginID {
+			return "Imported from Yamtrack; AniList had no match for MyAnimeList #" + v + "."
+		}
+		return "Imported without a match; " + imp.ExternalIDType + " " + v
 	}
-	av := s.buildView(r.Context(), src, id, d)
-	av.Match = &v
-	s.renderStatus(w, r, status, "anime", av)
+	return ""
 }
 
 func (s *server) getMatch(w http.ResponseWriter, r *http.Request) {
@@ -100,7 +115,7 @@ func (s *server) getMatchSearch(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if isPartialRequest(r) {
-		s.renderPartial(w, "anime", "match_results", v)
+		s.renderPartial(w, "item", "match_results", v)
 		return
 	}
 	s.matchResponse(w, r, src, id, v, http.StatusOK)

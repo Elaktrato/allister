@@ -252,3 +252,43 @@ func Credits(cast []provider.CastMember) []plugin.Credit {
 	}
 	return out
 }
+
+// LegacyAnime maps item data of the anime kind back to the legacy provider
+// type (the reverse of ItemData; recommendations are not part of it). The
+// legacy add flow uses it to save what the generic overview fetched.
+func LegacyAnime(d plugin.ItemData) provider.Anime {
+	a := provider.Anime{
+		SearchResult: provider.SearchResult{
+			Source: provider.Source(d.Source), ID: d.ID, Titles: legacyTitles(d.Titles),
+			Type: d.Fields["type"].Text, Episodes: intOf(d.Fields["episodes"]), Year: intOf(d.Fields["year"]),
+			Studio: d.Fields["studio"].Text, Synopsis: d.Fields["synopsis"].Text, CoverURL: d.CoverURL,
+		},
+		SourceMaterial: d.Fields["source_material"].Text, ExternalURL: d.ExternalURL, MALID: d.ExternalIDs["mal"],
+		StartDate: d.Fields["started_on"].Date, EndDate: d.Fields["ended_on"].Date,
+		Genres: append([]string(nil), d.Genres...),
+	}
+	for _, r := range d.Relations {
+		a.Relations = append(a.Relations, provider.Relation{Kind: r.Kind, Source: provider.Source(r.Item.Source), ID: r.Item.ID,
+			Titles: legacyTitles(r.Item.Titles), Type: r.Item.Fields["type"].Text})
+	}
+	for _, t := range d.Tags {
+		a.Tags = append(a.Tags, provider.Tag{Name: t.Name, Rank: t.Rank, Spoiler: t.Spoiler})
+	}
+	return a
+}
+
+func legacyTitles(ts []plugin.Title) []provider.Title {
+	var out []provider.Title
+	for _, t := range ts {
+		out = append(out, provider.Title{Lang: t.Lang, Text: t.Text})
+	}
+	return out
+}
+
+func intOf(v plugin.FieldValue) *int {
+	if v.Num == nil {
+		return nil
+	}
+	n := int(*v.Num)
+	return &n
+}

@@ -1,0 +1,130 @@
+{{/* The fixed building blocks of the item overview: one template per
+     section type, each rendered from a plain sectionView (never from
+     plugin-supplied markup). "section" dispatches on the type. */}}
+{{define "section"}}
+{{- if eq .Type "info"}}{{template "section_info" .}}
+{{- else if eq .Type "text"}}{{template "section_text" .}}
+{{- else if eq .Type "titles"}}{{template "section_titles" .}}
+{{- else if eq .Type "related"}}{{template "section_related" .}}
+{{- else if eq .Type "people"}}{{template "section_people" .}}
+{{- else if eq .Type "genres"}}{{template "section_genres" .}}
+{{- else if eq .Type "tags"}}{{template "section_tags" .}}
+{{- else if eq .Type "recommendations"}}{{template "section_recommendations" .}}
+{{- else if eq .Type "links"}}{{template "section_links" .}}
+{{- end}}
+{{end}}
+
+{{define "section_heading"}}{{if .}}<h2 class="mb-1 text-lg font-semibold">{{.}}</h2>{{end}}{{end}}
+
+{{define "section_info"}}
+<section>
+  {{template "section_heading" .Heading}}
+  {{if .Info}}
+  <dl class="space-y-1 text-sm">
+    {{range .Info}}<div><dt class="inline text-slate-400">{{.Label}}:</dt> <dd class="inline">{{if .Href}}<a href="{{.Href}}" rel="noopener noreferrer" class="text-indigo-300 hover:underline">{{.Text}}</a>{{else}}{{.Text}}{{end}}</dd></div>{{end}}
+  </dl>
+  {{end}}
+  {{range .Links}}<a href="{{.Href}}" rel="noopener noreferrer" class="mt-1 inline-block text-sm text-indigo-300 hover:underline">{{.Label}}</a>{{end}}
+</section>
+{{end}}
+
+{{define "section_text"}}
+<section>
+  {{template "section_heading" .Heading}}
+  <div class="space-y-2 text-slate-200">
+    {{range .Paragraphs}}<p class="synopsis">{{.}}</p>{{end}}
+  </div>
+</section>
+{{end}}
+
+{{define "section_titles"}}
+<section>
+  {{template "section_heading" .Heading}}
+  <ul class="space-y-0.5 text-sm">
+    {{range .Titles}}<li><span class="text-slate-400">{{.Label}}:</span> {{.Text}}</li>{{end}}
+  </ul>
+</section>
+{{end}}
+
+{{define "section_related"}}
+<section>
+  {{template "section_heading" .Heading}}
+  <ul class="space-y-0.5 text-sm">
+    {{range .Related}}<li><span class="text-slate-400">{{.Kind}}:</span> {{if .Href}}<a href="{{.Href}}"{{if .External}} rel="noopener noreferrer"{{end}} class="text-indigo-300 hover:underline">{{.Title}}</a>{{else}}{{.Title}}{{end}}{{if .Type}} <span class="text-slate-400">({{.Type}})</span>{{end}}</li>{{end}}
+  </ul>
+</section>
+{{end}}
+
+{{define "person"}}
+<span class="flex items-center gap-2">
+  {{if .Image}}<img src="{{.Image}}" alt="" loading="lazy" class="h-12 w-12 shrink-0 rounded object-cover">
+  {{else}}<span class="h-12 w-12 shrink-0 rounded bg-slate-800" aria-hidden="true"></span>{{end}}
+  <span class="min-w-0">
+    {{if .ExtURL}}<a href="{{.ExtURL}}" rel="noopener noreferrer" class="font-medium text-indigo-300 hover:underline">{{.Name}}</a>{{else}}<span class="font-medium">{{.Name}}</span>{{end}}
+    {{if .LocalURL}}<a href="{{.LocalURL}}" class="ml-1 text-xs text-slate-400 hover:underline">details</a>{{end}}
+  </span>
+</span>
+{{end}}
+
+{{define "section_people"}}
+<section>
+  {{template "section_heading" .Heading}}
+  {{if .CreditsFailed}}<p class="text-sm text-amber-300">Cast unavailable right now</p>{{end}}
+  {{if .Credits}}
+  <ul class="grid gap-3 sm:grid-cols-2">
+    {{range $c := .Credits}}
+    <li class="flex items-center justify-between gap-3 rounded border border-slate-800 bg-slate-900 p-2">
+      <div>{{template "person" $c.Person}}{{if $c.Detail}}<span class="text-xs text-slate-400">{{$c.Detail}}</span>{{end}}</div>
+      {{with $c.With}}<div class="text-right">{{if $c.WithRole}}<span class="block text-xs text-slate-400">{{$c.WithRole}}</span>{{end}}{{template "person" .}}</div>{{end}}
+    </li>
+    {{end}}
+  </ul>
+  {{end}}
+</section>
+{{end}}
+
+{{define "chip"}}<li class="rounded bg-slate-800 px-2 py-0.5 text-sm">{{.Name}}{{if .Rank}} <span class="text-xs text-slate-400">{{.Rank}}</span>{{end}}</li>{{end}}
+
+{{define "section_genres"}}
+<section>
+  {{template "section_heading" .Heading}}
+  <ul class="flex flex-wrap gap-2">{{range .Chips}}{{template "chip" .}}{{end}}</ul>
+</section>
+{{end}}
+
+{{define "section_tags"}}
+<section>
+  {{template "section_heading" .Heading}}
+  {{if .Chips}}<ul class="flex flex-wrap gap-2">{{range .Chips}}{{template "chip" .}}{{end}}</ul>{{end}}
+  {{if .Spoilers}}
+  <details class="mt-2">
+    <summary class="cursor-pointer text-sm text-slate-400">Show spoiler tags</summary>
+    <ul class="mt-2 flex flex-wrap gap-2">{{range .Spoilers}}{{template "chip" .}}{{end}}</ul>
+  </details>
+  {{end}}
+</section>
+{{end}}
+
+{{define "section_recommendations"}}
+<section>
+  {{template "section_heading" .Heading}}
+  <ul class="flex gap-3 overflow-x-auto pb-2">
+    {{range .Cards}}
+    <li class="w-28 shrink-0">
+      <a href="{{.Href}}" class="block text-sm hover:underline">
+        {{if .Cover}}<img src="{{.Cover}}" alt="" loading="lazy" class="mb-1 h-40 w-28 rounded object-cover">
+        {{else}}<span class="mb-1 block h-40 w-28 rounded bg-slate-800" aria-hidden="true"></span>{{end}}
+        {{.Title}}
+      </a>
+    </li>
+    {{end}}
+  </ul>
+</section>
+{{end}}
+
+{{define "section_links"}}
+<section>
+  {{template "section_heading" .Heading}}
+  {{range .Links}}<a href="{{.Href}}" rel="noopener noreferrer" class="text-sm text-indigo-300 hover:underline">{{.Label}}</a>{{end}}
+</section>
+{{end}}

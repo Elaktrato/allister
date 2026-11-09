@@ -9,6 +9,7 @@ import (
 
 	"github.com/allister/allister/internal/plugin"
 	"github.com/allister/allister/internal/plugins/anime/animedef"
+	"github.com/allister/allister/internal/provider"
 	"github.com/allister/allister/internal/provider/anilist"
 )
 
@@ -27,6 +28,10 @@ type Options struct {
 	AniListURL string
 	// HTTP is the client used for AniList; nil gets the client's default.
 	HTTP *http.Client
+	// Provider, when set, replaces the AniList client (AniListURL and HTTP
+	// are then ignored): the server shares its one client this way, and tests
+	// inject a fake. Lookup needs a provider with an AnimeByMALID method.
+	Provider provider.Provider
 }
 
 type animePlugin struct {
@@ -35,6 +40,9 @@ type animePlugin struct {
 
 // New returns the anime plugin.
 func New(opts Options) plugin.Plugin {
+	if opts.Provider != nil {
+		return &animePlugin{source: &source{c: opts.Provider}}
+	}
 	url := opts.AniListURL
 	if url == "" {
 		url = anilist.DefaultURL

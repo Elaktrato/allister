@@ -17,6 +17,7 @@ import (
 	"github.com/allister/allister/internal/library"
 	"github.com/allister/allister/internal/plugin"
 	"github.com/allister/allister/internal/plugin/plugintest"
+	"github.com/allister/allister/internal/provider"
 )
 
 func fixture(t *testing.T, name string) []byte {
@@ -556,5 +557,84 @@ func TestSourcePeopleCarriesCastRoleAsDetail(t *testing.T) {
 		if cr[i].Detail != want || cr[i].Role != "character" {
 			t.Errorf("credit %d: role %q detail %q, want detail %q", i, cr[i].Role, cr[i].Detail, want)
 		}
+	}
+}
+
+func TestSourceDetailsThenRecommendationsShareOneRequest(t *testing.T) {
+	var queries []string
+	s := newSource(t, nil, 0, &queries)
+	if _, err := s.Details(ctx(), "anime", "154587"); err != nil {
+		t.Fatal(err)
+	}
+	recs, err := s.Recommendations(ctx(), "anime", "154587")
+	if err != nil || len(recs) == 0 {
+		t.Fatalf("recs %v %v", recs, err)
+	}
+	if len(queries) != 1 {
+		t.Fatalf("Details then Recommendations made %d requests, want 1", len(queries))
+	}
+	// the shared response is used once: the next call asks again
+	if _, err := s.Recommendations(ctx(), "anime", "154587"); err != nil {
+		t.Fatal(err)
+	}
+	if len(queries) != 2 {
+		t.Fatalf("second Recommendations made %d requests in total, want 2", len(queries))
+	}
+	// another id never reuses it
+	if _, err := s.Details(ctx(), "anime", "154587"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Recommendations(ctx(), "anime", "1"); err != nil {
+		t.Fatal(err)
+	}
+	if len(queries) != 4 {
+		t.Fatalf("requests %d, want 4", len(queries))
+	}
+}
+
+func TestSourceRejectsNonNumericIDs(t *testing.T) {
+	var queries []string
+	s := newSource(t, nil, 0, &queries)
+	for _, id := range []string{"", "abc", "1x", "-1", "1234567890123", "１"} {
+		if _, err := s.Details(ctx(), "anime", id); !errors.Is(err, plugin.ErrNotFound) {
+			t.Errorf("Details(%q) = %v", id, err)
+		}
+		if _, err := s.People(ctx(), "anime", id); !errors.Is(err, plugin.ErrNotFound) {
+			t.Errorf("People(%q) = %v", id, err)
+		}
+		if _, err := s.Recommendations(ctx(), "anime", id); !errors.Is(err, plugin.ErrNotFound) {
+			t.Errorf("Recommendations(%q) = %v", id, err)
+		}
+	}
+	if len(queries) != 0 {
+		t.Fatalf("made %d requests for invalid ids", len(queries))
+	}
+}
+
+type stubProvider struct {
+	anime provider.Anime
+	calls int
+}
+
+func (p *stubProvider) Name() provider.Source { return provider.AniList }
+func (p *stubProvider) Search(context.Context, string) ([]provider.SearchResult, error) {
+	return nil, nil
+}
+func (p *stubProvider) Anime(context.Context, string) (provider.Anime, error) {
+	p.calls++
+	return p.anime, nil
+}
+func (p *stubProvider) Cast(context.Context, string) ([]provider.CastMember, error) { return nil, nil }
+
+func TestOptionsProviderReplacesTheClient(t *testing.T) {
+	sp := &stubProvider{anime: provider.Anime{SearchResult: provider.SearchResult{ID: "5", Titles: []provider.Title{{Lang: "en", Text: "Stub"}}}}}
+	s := New(Options{Provider: sp}).Source("anilist")
+	d, err := s.Details(ctx(), "anime", "5")
+	if err != nil || sp.calls != 1 || d.Titles[0].Text != "Stub" {
+		t.Fatalf("details %+v %v calls %d", d, err, sp.calls)
+	}
+	// a provider without a MAL lookup cannot look up
+	if _, err := s.Lookup(ctx(), "anime", "mal", "1"); !errors.Is(err, plugin.ErrUnavailable) {
+		t.Fatalf("lookup err = %v", err)
 	}
 }
