@@ -51,25 +51,36 @@ After `git pull`, run `docker compose up -d --build`. `docker compose down` stop
 
 ## Data and backups
 
-Compose prefixes the volume with the project name, usually `<project>_allister-data`. Find the exact name with `docker volume ls | grep allister-data` and use it below as `VOLUME`.
+Compose prefixes the volume with the project name. Replace `<volume>` in every command below with the exact name shown by `docker volume ls | grep allister-data` (a wrong name silently creates an empty volume and the backup is empty).
 
-Cold backup (recommended). The archive contains `allister.db` (plus `-wal` and `-shm` if present) and `covers/`:
+Cold backup (recommended):
 
 ```
 docker compose stop
-docker run --rm -v VOLUME:/data -v "$PWD":/backup alpine tar czf /backup/allister-backup.tgz -C /data .
+docker run --rm -v <volume>:/data -v "$PWD":/backup alpine tar czf /backup/allister-backup.tgz -C /data .
+tar tzf allister-backup.tgz
 docker compose start
 ```
 
-To restore, run `docker compose stop`, extract into the volume with `docker run --rm -v VOLUME:/data -v "$PWD":/backup alpine tar xzf /backup/allister-backup.tgz -C /data`, then `docker compose start`.
+The `tar tzf` check must list `allister.db` and `covers/` (plus `-wal` and `-shm` if present). If it does not, the volume name was wrong.
 
-Live backup (optional, database only). Copying the database files of a running instance is not safe, so use SQLite's `.backup` from a helper container (the Allister image has no `sqlite3`):
+Restore: extracting overwrites `allister.db` and `covers/` in the volume. Stop the container, remove the old database files so a stale WAL is not replayed against the restored database, extract, then start:
 
 ```
-docker run --rm --user root -v VOLUME:/data -v "$PWD":/backup keinos/sqlite3 sqlite3 /data/allister.db ".backup '/backup/allister.db'"
+docker compose stop
+docker run --rm -v <volume>:/data alpine rm -f /data/allister.db /data/allister.db-wal /data/allister.db-shm
+docker run --rm -v <volume>:/data -v "$PWD":/backup alpine tar xzf /backup/allister-backup.tgz -C /data
+docker compose start
 ```
 
-Copy `covers/` separately in that case.
+Live backup (optional). Copying the database files of a running instance is not safe, so use SQLite's `.backup` from a helper container (the Allister image has no `sqlite3`). `--user root` is needed because the data files belong to root (the app runs as root in its image) while the sqlite image runs as another user; the backup file in `$PWD` is therefore owned by root. Do not mount the volume read-only (SQLite needs the `-shm` file).
+
+```
+docker run --rm --user root -v <volume>:/data -v "$PWD":/backup keinos/sqlite3:3.54.1 sqlite3 /data/allister.db ".backup '/backup/allister.db'"
+docker run --rm -v <volume>:/data:ro -v "$PWD":/backup alpine tar czf /backup/allister-covers.tgz -C /data covers
+```
+
+This saves the database and the covers separately.
 
 ## Security
 
