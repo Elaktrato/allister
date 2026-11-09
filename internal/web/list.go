@@ -3,6 +3,7 @@ package web
 import (
 	"errors"
 	"log"
+	"math"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -75,6 +76,19 @@ func listURL(status string, page int) string {
 	return "/anime?" + q.Encode()
 }
 
+// isDigits12 reports whether s is a non-empty run of ASCII digits (any length).
+func isDigits12(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, c := range s {
+		if c < '0' || c > '9' {
+			return false
+		}
+	}
+	return true
+}
+
 // parseListQuery reads the status filter (unknown values mean All) and the
 // requested page (invalid values mean 1) from a query.
 func parseListQuery(q url.Values) (string, int) {
@@ -82,8 +96,12 @@ func parseListQuery(q url.Values) (string, int) {
 	if _, ok := statusLabels[store.Status(status)]; !ok {
 		status = ""
 	}
-	page, err := strconv.Atoi(q.Get("page"))
-	if err != nil || page < 1 {
+	raw := q.Get("page")
+	page, err := strconv.Atoi(raw)
+	switch {
+	case errors.Is(err, strconv.ErrRange) && isDigits12(raw):
+		page = math.MaxInt32 // overflow: clamped to the last page by the caller
+	case err != nil || page < 1:
 		page = 1
 	}
 	return status, page
@@ -196,11 +214,7 @@ func (s *server) entryID(w http.ResponseWriter, r *http.Request) (int64, bool) {
 
 // entryRow loads the row of {id}; unknown ids and anime without a list entry
 // get a 404 page.
-func (s *server) entryRow(w http.ResponseWriter, r *http.Request) (store.ListRow, bool) {
-	id, ok := s.entryID(w, r)
-	if !ok {
-		return store.ListRow{}, false
-	}
+func (s *server) entryRow(w http.ResponseWriter, r *http.Request, id int64) (store.ListRow, bool) {
 	row, err := s.deps.Store.GetListRow(r.Context(), id)
 	if err != nil {
 		s.fail(w, r, err, "")
@@ -276,13 +290,20 @@ func (s *server) editResponse(w http.ResponseWriter, r *http.Request, f addForm,
 		s.renderPartialStatus(w, code, "list", "add_dialog", f)
 		return
 	}
-	u, _ := url.Parse(f.Return)
-	status, page := parseListQuery(u.Query())
+	var status string
+	page := 1
+	if u, err := url.Parse(f.Return); err == nil {
+		status, page = parseListQuery(u.Query())
+	}
 	s.showList(w, r, status, page, &f, code)
 }
 
 func (s *server) getEdit(w http.ResponseWriter, r *http.Request) {
-	row, ok := s.entryRow(w, r)
+	id, ok := s.entryID(w, r)
+	if !ok {
+		return
+	}
+	row, ok := s.entryRow(w, r, id)
 	if !ok {
 		return
 	}
@@ -297,7 +318,7 @@ func (s *server) postEdit(w http.ResponseWriter, r *http.Request) {
 	if !parseForm(w, r) {
 		return
 	}
-	row, ok := s.entryRow(w, r)
+	row, ok := s.entryRow(w, r, id)
 	if !ok {
 		return
 	}

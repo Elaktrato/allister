@@ -36,14 +36,14 @@ func parseForm(w http.ResponseWriter, r *http.Request) bool {
 
 // safeReturn returns raw when it is a same-site path below /anime (exactly
 // "/anime", or "/anime" followed by "?" or "/"), else "/anime". It rejects
-// schemes, "//", backslashes, fragments and control characters or spaces.
+// schemes, "//", backslashes, fragments, percent escapes and control characters or spaces.
 func safeReturn(raw string) string {
 	const def = "/anime"
 	rest, ok := strings.CutPrefix(raw, "/anime")
 	if !ok || (rest != "" && rest[0] != '?' && rest[0] != '/') {
 		return def
 	}
-	if strings.Contains(raw, "//") || strings.ContainsAny(raw, "\\#") {
+	if strings.Contains(raw, "//") || strings.ContainsAny(raw, "\\#%") {
 		return def
 	}
 	for i := 0; i < len(raw); i++ {

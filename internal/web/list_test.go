@@ -439,6 +439,9 @@ func TestSafeReturn(t *testing.T) {
 		"/ANIME":                   "/anime",
 		"http://localhost/anime":   "/anime",
 		"/anime#frag":              "/anime",
+		"/anime/%zz":               "/anime",
+		"/anime/%2f":               "/anime",
+		"/anime?x=%00":             "/anime",
 		"/anime?status=watching#x": "/anime",
 	} {
 		if got := safeReturn(in); got != want {
@@ -528,5 +531,37 @@ func TestFormBodyTooLarge(t *testing.T) {
 		if rec := e.do("POST", path, big, false); rec.Code != 413 {
 			t.Errorf("%s: %d", path, rec.Code)
 		}
+	}
+}
+
+func TestMalformedReturnDoesNotPanic(t *testing.T) {
+	e := newEnv(t)
+	id := e.addEntry(t, provider.AniList, "1", ip(12), store.Watching, 1)
+	rec := e.get("/list/" + idStr(id) + "/edit?return=" + url.QueryEscape("/anime/%zz"))
+	if rec.Code != 200 {
+		t.Fatalf("GET: %d", rec.Code)
+	}
+	mustContain(t, rec.Body.String(), "Showing 1–1 of 1", `name="return" value="/anime"`)
+	form := url.Values{"status": {"watching"}, "rating": {"11"}, "return": {"/anime/%zz"}}
+	rec = e.do("POST", "/list/"+idStr(id)+"/edit", form, false)
+	if rec.Code != 422 {
+		t.Fatalf("POST: %d", rec.Code)
+	}
+	mustContain(t, rec.Body.String(), "Rating must be", "Showing 1–1 of 1")
+}
+
+func TestListPageParamClamping(t *testing.T) {
+	e := newEnv(t)
+	for i := 0; i < 101; i++ {
+		e.addEntry(t, provider.AniList, fmt.Sprint(i+1), nil, store.Watching, 0)
+	}
+	for q, want := range map[string]string{
+		"9999999999999999999": "Showing 101–101 of 101",
+		"abc":                 "Showing 1–100 of 101",
+		"-3":                  "Showing 1–100 of 101",
+		"0":                   "Showing 1–100 of 101",
+		"":                    "Showing 1–100 of 101",
+	} {
+		mustContain(t, e.get("/anime?page="+q).Body.String(), want)
 	}
 }
