@@ -13,6 +13,8 @@ var (
 	ErrRateLimited = errors.New("plugin: rate limited")
 	// ErrUnavailable: server error, network error, timeout or unreadable response.
 	ErrUnavailable = errors.New("plugin: unavailable")
+	// ErrBadInput: an importer was given a file that is not in its format.
+	ErrBadInput = errors.New("plugin: bad input")
 )
 
 // Plugin is a compiled-in or (later) loaded plugin. Manifest is called once,
