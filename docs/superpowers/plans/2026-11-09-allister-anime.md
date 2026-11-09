@@ -28,6 +28,7 @@
 - AniList synopses contain HTML (`<br>`, `<i>`): shown as safe plain text with line breaks, never as raw tags or unescaped markup.
 - Progress above the known episode total, rating outside 0 to 10 (blank means unrated, 0 is a valid rating), finish date before start date: rejected with a validation message, nothing saved.
 - Yamtrack CSV with a UTF-8 BOM, unknown status values, non-anime rows, or re-imported twice: no crash, unknown rows reported, no duplicates created.
+- Matching with an AniList URL that is malformed, points at manga, or at an anime already in the list: clear message, nothing changed.
 
 ## File Structure
 
@@ -205,9 +206,9 @@ Dropped by the owner: AniList is the only source. Nothing to implement; skip to 
 
 **Interfaces:**
 - Consumes: `store.List`, `store.IncrementProgress`, `store.UpsertListEntry`.
-- Produces: `GET /anime` (all) and `GET /anime?status=watching|...` (tabs with counts); `POST /anime/{id}/increment` (htmx, returns the updated row); `GET /anime/{id}/edit` and `POST /anime/{id}/edit` (the same dialog fields as Task 8, for editing; 422 on validation errors); `POST /anime/{id}/remove`.
+- Produces: `GET /anime` (all) and `GET /anime?status=watching|...` (tabs with counts); `POST /anime/{id}/increment` (htmx, returns the updated row); `GET /anime/{id}/edit` and `POST /anime/{id}/edit` (the same dialog fields as Task 8, for editing; 422 on validation errors); `POST /anime/{id}/remove`; extend `store.ListRow` with `Source provider.Source` and `MALID string`; a row shows a small "unmatched" badge when `Source == manual && MALID != ""`.
 
-- [ ] **Step 1: Write failing tests**: `TestListFiltersByStatus`, `TestListShowsPreferredTitle`, `TestIncrementReturnsUpdatedRow`, `TestIncrementAtTotalDoesNotExceed`, `TestEditValidationReturns422`, `TestRemoveDeletesEntry`, `TestEmptyListShowsHint`.
+- [ ] **Step 1: Write failing tests**: `TestListFiltersByStatus`, `TestListShowsPreferredTitle`, `TestIncrementReturnsUpdatedRow`, `TestIncrementAtTotalDoesNotExceed`, `TestEditValidationReturns422`, `TestRemoveDeletesEntry`, `TestEmptyListShowsHint`, `TestListShowsUnmatchedBadge` (a manual entry with a `mal_id` shows the badge; a manual entry without one and an AniList entry do not).
 - [ ] **Step 2:** Run `go test ./internal/web/...`. Expected: FAIL.
 - [ ] **Step 3:** Implement.
 - [ ] **Step 4:** Run the tests. Expected: PASS.
@@ -237,7 +238,7 @@ Dropped by the owner: AniList is the only source. Nothing to implement; skip to 
 - Test: `internal/web/manual_test.go`
 
 **Interfaces:**
-- Produces: `GET /anime/manual/new` and `POST /anime/manual/new` with fields `title`, `title_lang` (default the preferred language), `type`, `episodes`, `year`, `studio`, `synopsis`, `cover` (file upload, optional, image content type only) plus the list fields from Task 8; saves with `Source=provider.Manual`, `sync_state='done'`, no cast; the overview of a manual entry renders from the database only.
+- Produces: `GET /anime/manual/new` and `POST /anime/manual/new` with fields `title`, `title_lang` (default the preferred language), `type`, `episodes`, `year`, `studio`, `synopsis`, `cover` (file upload, optional, image content type only) plus the list fields from Task 8; saves with `Source=provider.Manual`, `sync_state='done'`, no cast; the overview of a manual entry renders from the database only and offers a "Match to AniList" button (built in Task 15).
 
 - [ ] **Step 1: Write failing tests**: `TestManualRequiresTitleAndType`, `TestManualSavesWithOptionalFieldsEmpty`, `TestManualCoverRejectsNonImage`, `TestManualEntryAppearsInList`, `TestManualOverviewHasNoCast`.
 - [ ] **Step 2:** Run `go test ./internal/web/...`. Expected: FAIL.
@@ -254,11 +255,11 @@ Dropped by the owner: AniList is the only source. Nothing to implement; skip to 
 
 **Interfaces:**
 - Consumes: `anilist.Client`, `store`, `jobs.Queue`.
-- Produces: `(*anilist.Client).AnimeByMALID(ctx, malID string) (provider.Anime, error)` (AniList `Media(idMal:, type: ANIME)`; returns `provider.ErrNotFound` when AniList has no match); `yamtrack.Parse(r io.Reader) (rows []Row, skipped []SkippedRow, err error)` with `Row{MALID string; Status store.Status; Rating *int; Progress int; StartedOn, FinishedOn *time.Time; Comment string}`; non-anime rows and unknown statuses go to `skipped` with a reason; a UTF-8 BOM is tolerated; `POST /settings/import` (multipart `file`) enqueues job kind `import_yamtrack`; `GET /settings/import` shows a progress page (total, done, failed, skipped list, unmatched list) that polls with `hx-trigger="every 3s"`; the job skips rows whose `mal_id` is already saved (`store.FindByMALID`) before making any request, resolves each remaining row with `AnimeByMALID`, saves it with source `anilist`, upserts the list entry, then enqueues `sync_anime`; rows AniList cannot match (`ErrNotFound`) are recorded in the result as `unmatched` and shown on the progress page; requests are paced to AniList's rate limit (a constant of 30 requests per minute, the currently degraded limit), so ~830 entries take on the order of an hour or two; the job is resumable and a re-run creates no duplicates.
+- Produces: `(*anilist.Client).AnimeByMALID(ctx, malID string) (provider.Anime, error)` (AniList `Media(idMal:, type: ANIME)`; returns `provider.ErrNotFound` when AniList has no match); `yamtrack.Parse(r io.Reader) (rows []Row, skipped []SkippedRow, err error)` with `Row{MALID, Title, ImageURL string; Status store.Status; Rating *int; Progress int; StartedOn, FinishedOn *time.Time; Comment string}`; non-anime rows and unknown statuses go to `skipped` with a reason; a UTF-8 BOM is tolerated; `POST /settings/import` (multipart `file`) enqueues job kind `import_yamtrack`; `GET /settings/import` shows a progress page (total, done, failed, skipped list, unmatched list) that polls with `hx-trigger="every 3s"`; the job skips rows whose `mal_id` is already saved (`store.FindByMALID`) before making any request, resolves each remaining row with `AnimeByMALID`, saves it with source `anilist`, upserts the list entry, then enqueues `sync_anime`; rows AniList cannot match (`ErrNotFound`) are not dropped: they are saved as `manual` entries (source id a generated UUID) carrying the Yamtrack data (the CSV `title` as the entry's title with language tag `ja-latn`, the CSV `image` URL kept as the remote cover URL, status, score, progress, start and end dates, `notes` as comment) with `mal_id` set to the Yamtrack `media_id`, with `sync_state='done'` and no cast; they are recorded in the result as `unmatched`, counted, and listed on the progress page, each with a link to its entry (an entry is unmatched when source is `manual` and `mal_id` is not null; re-runs skip them via `FindByMALID`); requests are paced to AniList's rate limit (a constant of 30 requests per minute, the currently degraded limit), so ~830 entries take on the order of an hour or two; the job is resumable and a re-run creates no duplicates.
 - **Column mapping (from the owner's sample export, see the ledger):** columns `media_id`, `source`, `media_type`, `title`, `image`, `season_number`, `episode_number`, `score`, `status`, `notes`, `start_date`, `end_date`, `progress`, `created_at`, `progressed_at`; anime rows only (by `media_type`); `media_id` is the MyAnimeList ID. Statuses: `Completed` to `completed`, `Planning` to `plan_to_watch`, `Dropped` to `dropped`, `Paused` to `paused`, `In progress` to `watching`; anything else is skipped as an unknown status. Score `""` or `"0.0"` is unrated, otherwise the rounded integer. Dates use the layout `2006-01-02 15:04:05-07:00`. `notes` maps to `comment`. Tests use a trimmed hand-made fixture `testdata/sample.csv`; the real export is git-ignored.
 
 - [x] **Step 0:** Obtain the sample export from the owner (done; mapping above).
-- [ ] **Step 1: Write failing tests**: `TestAnimeByMALIDMapsAnime`, `TestAnimeByMALIDNotFound` (fixture with no match gives `provider.ErrNotFound`), `TestParseTakesAnimeRowsOnly`, `TestParseToleratesBOM`, `TestParseReportsUnknownStatus`, `TestImportSavesEntriesAndEnqueuesSync`, `TestImportTwiceCreatesNoDuplicates`, `TestImportResumesAfterInterruption` (second run only fetches the unfinished rows), `TestImportSkipsAlreadySavedByMALID` (no provider request for rows whose `mal_id` is saved), `TestImportReportsUnmatched` (`ErrNotFound` rows appear as `unmatched`, not dropped), `TestImportContinuesAfterOneRowFails`, `TestImportPageShowsProgress`.
+- [ ] **Step 1: Write failing tests**: `TestAnimeByMALIDMapsAnime`, `TestAnimeByMALIDNotFound` (fixture with no match gives `provider.ErrNotFound`), `TestParseTakesAnimeRowsOnly`, `TestParseToleratesBOM`, `TestParseReportsUnknownStatus`, `TestImportSavesEntriesAndEnqueuesSync`, `TestImportTwiceCreatesNoDuplicates`, `TestImportResumesAfterInterruption` (second run only fetches the unfinished rows), `TestImportSkipsAlreadySavedByMALID` (no provider request for rows whose `mal_id` is saved), `TestImportSavesUnmatchedAsManualEntry` (an `ErrNotFound` row is saved with source `manual`, `mal_id` set to the `media_id`, status, score and progress preserved, and the cover URL kept), `TestImportUnmatchedStillCountedAndListed` (the row is counted and listed as `unmatched` with a link to its entry, and a re-run does not duplicate it), `TestImportContinuesAfterOneRowFails`, `TestImportPageShowsProgress`.
 - [ ] **Step 2:** Run the package tests. Expected: FAIL.
 - [ ] **Step 3:** Implement.
 - [ ] **Step 4:** Run the tests. Expected: PASS.
@@ -275,6 +276,31 @@ Dropped by the owner: AniList is the only source. Nothing to implement; skip to 
 
 - [ ] **Step 1: Write failing test** `TestSearchAddListFlow`: with a fake AniList provider, search, open overview, POST add with status `watching` and progress 3, then GET `/anime` shows the title and `3 /`; POST increment and see `4`.
 - [ ] **Step 2:** Run `go test ./...`. Expected: FAIL until all wiring in `main.go` is complete.
-- [ ] **Step 3:** Finish wiring in `cmd/allister/main.go` (providers, store, queue, server). Write the README: what it is, `docker compose up`, port and volume, title language setting, import instructions, source rate-limit note.
+- [ ] **Step 3:** Finish wiring in `cmd/allister/main.go` (providers, store, queue, server). Write the README: what it is, `docker compose up`, port and volume, title language setting, import instructions, matching manual and unmatched entries to AniList, source rate-limit note.
 - [ ] **Step 4:** Run `go test ./...` (PASS), `docker compose up --build -d`, then in a browser search for an anime on AniList, add it, and check the list, the settings language switch and a person page. Expected: all work; then `docker compose down`.
 - [ ] **Step 5: Commit** `docs: readme and end-to-end test`.
+
+### Task 15: Match a manual entry to AniList
+
+Built after the first working version (Tasks 1 to 14).
+
+**Files:**
+- Create: `internal/provider/anilist/url.go`, `internal/store/match.go`, `internal/web/match.go`, `internal/web/templates/match_dialog.html`
+- Modify: `internal/web/templates/anime.html` ("Match to AniList" button, shown for manual entries only), `internal/web/server.go` (register routes)
+- Test: `internal/provider/anilist/url_test.go`, `internal/store/match_test.go`, `internal/web/match_test.go`
+
+**Interfaces:**
+- Consumes: `anilist.Client` (`Search`, `Anime`), `store.FindBySource`, `jobs.Queue`, `titles.Resolve`, the dialog pattern from Task 8.
+- Produces:
+  - `anilist.ParseAnimeURL(s string) (id string, ok bool)`: accepts `https://anilist.co/anime/154587`, `anilist.co/anime/154587/Sousou-no-Frieren`, a trailing slash and a bare number; rejects other paths (`anilist.co/manga/1`), other hosts and garbage.
+  - `(*Store) ConvertToSource(ctx context.Context, animeID int64, a provider.Anime) error`: in one transaction converts the manual entry in place (same `anime.id`, `list_entries` row untouched): source `manual` to `a.Source`, `source_id` to `a.ID`; replaces titles, relations, synopsis, studio, episodes, year, dates, source material, external URL and cover (custom uploaded cover replaced); sets `mal_id` to `a.MALID` if non-empty, else keeps it; sets `sync_state='pending'`. Returns `ErrAlreadySaved` when `(a.Source, a.ID)` belongs to another entry, as `type AlreadySavedError struct{ ExistingID int64 }` that satisfies `errors.Is(err, ErrAlreadySaved)`; returns `ErrInvalid` when the target entry is not a manual entry. Any failure rolls everything back.
+  - Routes: `GET /anime/{source}/{id}/match` (dialog partial with the URL/id field and a search box; 404 unless the entry is saved and manual); `GET /anime/{source}/{id}/match/search?q=` (htmx partial of AniList results to pick from, using the existing search; empty query makes no request); `POST /anime/{source}/{id}/match` (field `anilist` for a URL or id, or `pick` for a chosen AniList id): fetches the details through the provider, calls `ConvertToSource`, enqueues `sync_anime` for the entry, and redirects 303 to `/anime/anilist/{newid}`. Otherwise it re-renders the dialog with status 422 and a message: invalid URL, unknown id (`ErrNotFound`), or the already-saved refusal with a link to the existing entry; a provider outage or rate limit (`ErrUnavailable`, `ErrRateLimited`) shows a retry message and changes nothing.
+
+- [ ] **Step 1: Write failing tests**:
+  - `TestParseAnimeURL` (table: full URL, URL with slug, no scheme, trailing slash, bare number, `anilist.co/manga/1` rejected, garbage rejected, `https://example.com/anime/5` rejected).
+  - Store: `TestConvertKeepsListEntry` (status, rating, progress, dates, comment and `anime.id` unchanged), `TestConvertReplacesTitlesAndSource` (source `anilist`, new `source_id`, old titles gone, new titles, relations and `mal_id` rule applied, `sync_state='pending'`), `TestConvertRefusesDuplicate` (`errors.Is(err, ErrAlreadySaved)`, existing id carried, nothing changed), `TestConvertRefusesNonManual` (`ErrInvalid`), `TestConvertIsAtomicOnFailure` (a forced failure midway leaves the entry exactly as before).
+  - Web, with a fake provider: `TestMatchDialogOnlyForManual` (200 for manual, 404 for AniList entries), `TestMatchByURLConverts` (303 to `/anime/anilist/{newid}`), `TestMatchByPickConverts`, `TestMatchUnknownIDShowsError` (422, message, nothing changed), `TestMatchProviderDownChangesNothing` (retry message, entry unchanged), `TestMatchEnqueuesSync` (one `sync_anime` job for the converted entry).
+- [ ] **Step 2:** Run `go test ./internal/provider/... ./internal/store/... ./internal/web/...`. Expected: FAIL.
+- [ ] **Step 3:** Implement. The handler fetches the AniList details first and only then opens the transaction, so a provider failure never touches the database; the URL field and the pick both reduce to an AniList id before the fetch.
+- [ ] **Step 4:** Run the tests. Expected: PASS. Then in a browser, match an unmatched imported entry by URL and by search, and check that its list data is unchanged and the cast arrives.
+- [ ] **Step 5: Commit** `feat: match manual entries to anilist`.
