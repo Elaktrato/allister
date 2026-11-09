@@ -2,13 +2,18 @@ services:
   allister:
     build: .
     ports:
+      # Host port and listen port are both PORT (default 8080):
+      #   PORT=9000 docker compose up -d
       - "${PORT:-8080}:${PORT:-8080}"
     environment:
       PORT: "${PORT:-8080}"
       DATA_DIR: /data
     volumes:
+      # SQLite database (allister.db) and covers/ live here.
       - allister-data:/data
     restart: unless-stopped
+    # No healthcheck: the runtime image is distroless (no shell, curl or wget).
+    # GET /healthz answers "ok" for an external monitor.
 
 volumes:
   allister-data:
