@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"reflect"
 	"regexp"
 	"strconv"
 	"strings"
@@ -195,4 +196,94 @@ func TestImportFlow(t *testing.T) {
 	if count() != 2 {
 		t.Fatalf("duplicates after re-import: %d rows", count())
 	}
+}
+
+func TestMatchFlowEndToEnd(t *testing.T) {
+	imgs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "image/jpeg")
+		w.Write([]byte("img:" + r.URL.Path))
+	}))
+	t.Cleanup(imgs.Close)
+
+	e := newMatchEnv(t)
+	e.fp.anime.CoverURL = imgs.URL + "/cover.jpg"
+	e.fp.cast[0].Character.ImageURL = imgs.URL + "/c.jpg"
+	e.fp.cast[0].Actor.ImageURL = imgs.URL + "/a.jpg"
+	id := e.unmatched(t) // status completed, rating 0, progress 3, start date, comment "c"
+
+	list := e.get("/anime").Body.String()
+	mustContain(t, list, "Lost Show", "unmatched")
+	_, enBefore := e.snapshot(t, id)
+
+	// the overview offers matching
+	mustContain(t, e.get("/anime/manual/man1").Body.String(), "Match to AniList")
+
+	rec := e.do("POST", "/anime/manual/man1/match", url.Values{"anilist": {"https://anilist.co/anime/1535/Death-Note"}}, true)
+	if rec.Code != 204 || rec.Header().Get("HX-Redirect") != "/anime/anilist/1535" {
+		t.Fatalf("match: %d %q", rec.Code, rec.Header().Get("HX-Redirect"))
+	}
+
+	// the new URL shows the AniList data
+	rec = e.get("/anime/anilist/1535")
+	if rec.Code != 200 {
+		t.Fatalf("overview: %d", rec.Code)
+	}
+	mustContain(t, rec.Body.String(), "デスノート", "Death Note EN", "Completed")
+	mustNotContain(t, rec.Body.String(), "Match to AniList")
+
+	// the list: no badge, same data, same anime id
+	list = e.get("/anime").Body.String()
+	mustContain(t, list, "デスノート")
+	mustNotContain(t, list, "unmatched", "Lost Show")
+	if got := listID(t, list); got != itoa(id) {
+		t.Fatalf("anime id changed: %s != %d", got, id)
+	}
+	sv, en := e.snapshot(t, id)
+	if sv.Source != provider.AniList || !reflect.DeepEqual(en, enBefore) {
+		t.Fatalf("%+v\n%+v\n%+v", sv, en, enBefore)
+	}
+	if en.Rating == nil || *en.Rating != 0 || en.Progress != 3 || en.Comment != "c" || en.StartedOn == nil {
+		t.Fatalf("list data: %+v", en)
+	}
+
+	// one sync job for the entry; running it brings the cast
+	if len(e.jobs.got) != 1 || e.jobs.got[0].Kind != jobs.KindSyncAnime {
+		t.Fatalf("jobs: %+v", e.jobs.got)
+	}
+	raw, _ := json.Marshal(e.jobs.got[0].Payload)
+	sync := jobs.SyncAnime(jobs.SyncDeps{
+		Store: e.st, Providers: map[provider.Source]provider.Provider{provider.AniList: e.fp},
+		HTTP: imgs.Client(), CoversDir: e.covers,
+	})
+	if err := sync(context.Background(), raw); err != nil {
+		t.Fatal(err)
+	}
+	body := e.get("/anime/anilist/1535").Body.String()
+	mustContain(t, body, "Light Yagami", "Mamoru Miyano")
+	rec = e.get(e.personPath(t, "a1"))
+	mustContain(t, rec.Body.String(), "Mamoru Miyano", "as Light Yagami")
+}
+
+func TestMatchRefusesAlreadySavedAnime(t *testing.T) {
+	e := newMatchEnv(t)
+	id := e.unmatched(t)
+	existing := e.saved(t) // anilist 1535 is already tracked
+	before, enBefore := e.snapshot(t, id)
+
+	rec := e.do("POST", "/anime/manual/man1/match", url.Values{"pick": {"1535"}}, true)
+	if rec.Code != 422 {
+		t.Fatalf("status %d", rec.Code)
+	}
+	mustContain(t, rec.Body.String(), "already in your library", `href="/anime/anilist/1535"`)
+	after, enAfter := e.snapshot(t, id)
+	if !reflect.DeepEqual(before, after) || !reflect.DeepEqual(enBefore, enAfter) {
+		t.Fatal("the unmatched entry changed")
+	}
+	if len(e.jobs.got) != 0 {
+		t.Fatalf("jobs: %+v", e.jobs.got)
+	}
+	if sv, _ := e.st.GetByID(context.Background(), existing); sv == nil || sv.Source != provider.AniList {
+		t.Fatal("existing entry touched")
+	}
+	mustContain(t, e.get("/anime").Body.String(), "unmatched")
 }

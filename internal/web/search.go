@@ -39,11 +39,17 @@ func truncateRunes(s string, n int) string {
 	return strings.TrimSpace(string(r[:n])) + "…"
 }
 
-func (s *server) search(w http.ResponseWriter, r *http.Request) {
-	q := strings.TrimSpace(r.URL.Query().Get("q"))
+// cleanQuery trims the search text and caps it at maxQueryRunes.
+func cleanQuery(raw string) string {
+	q := strings.TrimSpace(raw)
 	if rs := []rune(q); len(rs) > maxQueryRunes {
 		q = strings.TrimSpace(string(rs[:maxQueryRunes]))
 	}
+	return q
+}
+
+func (s *server) search(w http.ResponseWriter, r *http.Request) {
+	q := cleanQuery(r.URL.Query().Get("q"))
 	v := searchView{Query: q}
 	if q != "" {
 		s.runSearch(r, q, &v)

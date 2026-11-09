@@ -51,27 +51,33 @@ type linkCard struct {
 }
 
 type animeView struct {
-	Source, ID      string
-	URL             string
-	AnimeID         int64
-	Saved           bool
-	PartialSync     bool
-	Title           string
-	Titles          []titleRow
-	Type, Studio    string
-	SourceMaterial  string
-	Episodes        *int
-	Aired           string
-	Cover           string
-	ExternalURL     string
-	Paragraphs      []string
-	Related         []linkCard
-	Cast            []castRow
-	CastFailed      bool
-	Recs            []linkCard
-	Entry           *store.ListEntry
-	EntryStatus     string
-	Dialog          *addForm
+	Source, ID     string
+	URL            string
+	AnimeID        int64
+	Saved          bool
+	PartialSync    bool
+	Title          string
+	Titles         []titleRow
+	Type, Studio   string
+	SourceMaterial string
+	Episodes       *int
+	Aired          string
+	Cover          string
+	ExternalURL    string
+	Paragraphs     []string
+	Related        []linkCard
+	Cast           []castRow
+	CastFailed     bool
+	Recs           []linkCard
+	Entry          *store.ListEntry
+	EntryStatus    string
+	Dialog         *addForm
+	Match          *matchView
+	// CanMatch: a manual entry that can be matched to AniList; UnmatchedMAL
+	// is the MAL id of an unmatched import ("" otherwise).
+	CanMatch        bool
+	MatchURL        string
+	UnmatchedMAL    string
 	AddURL, EditURL string
 }
 
@@ -241,6 +247,9 @@ func (s *server) buildView(ctx context.Context, src provider.Source, id string, 
 		v.Saved, v.AnimeID = true, d.Saved.ID
 		v.Cover = covers.Src(d.Saved.CoverPath)
 		v.PartialSync = d.Saved.SyncState != "done"
+		if src == provider.Manual {
+			v.CanMatch, v.MatchURL, v.UnmatchedMAL = true, matchPath(string(src), id), d.Saved.MALID
+		}
 	} else {
 		v.Cover = httpURL(a.CoverURL)
 	}

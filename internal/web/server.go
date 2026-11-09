@@ -37,6 +37,9 @@ type Deps struct {
 	CoversDir string
 	// Imports runs the Yamtrack import; when nil the import pages answer 404.
 	Imports *yamtrack.Importer
+	// ParseAnimeURL reduces a pasted AniList URL or number to an anime id
+	// (anilist.ParseAnimeURL; injected because web must not import it).
+	ParseAnimeURL func(string) (id string, ok bool)
 }
 
 // JobQueue is the part of jobs.Queue the web layer needs.
@@ -58,7 +61,7 @@ var pageNames = []string{"index", "settings", "search", "anime", "list", "person
 // for htmx requests).
 var pagePartials = map[string][]string{
 	"search": {"templates/search_results.html"},
-	"anime":  {"templates/add_dialog.html"},
+	"anime":  {"templates/add_dialog.html", "templates/match_dialog.html"},
 	"list":   {"templates/list_row.html", "templates/add_dialog.html"},
 }
 
@@ -110,6 +113,9 @@ func newServer(deps Deps, now func() time.Time) (*server, http.Handler) {
 	mux.HandleFunc("GET /anime/{source}/{id}", s.getOverview)
 	mux.HandleFunc("GET /anime/{source}/{id}/add", s.getAdd)
 	mux.HandleFunc("POST /anime/{source}/{id}/add", s.postAdd)
+	mux.HandleFunc("GET /anime/{source}/{id}/match", s.getMatch)
+	mux.HandleFunc("POST /anime/{source}/{id}/match", s.postMatch)
+	mux.HandleFunc("GET /anime/{source}/{id}/match/search", s.getMatchSearch)
 	return s, mux
 }
 

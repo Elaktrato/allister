@@ -25,6 +25,11 @@
     <a href="{{.AddURL}}" hx-get="{{.AddURL}}" hx-target="#dialog-slot" hx-swap="innerHTML"
       class="block rounded bg-indigo-600 px-4 py-2 text-center font-medium hover:bg-indigo-500">Add to list</a>
     {{end}}
+    {{if .CanMatch}}
+    <a href="{{.MatchURL}}" hx-get="{{.MatchURL}}" hx-target="#dialog-slot" hx-swap="innerHTML"
+      class="block rounded border border-indigo-500 px-4 py-2 text-center font-medium text-indigo-200 hover:bg-slate-800">Match to AniList</a>
+    {{if .UnmatchedMAL}}<p class="text-xs text-slate-400">Imported from Yamtrack; AniList had no match for MyAnimeList #{{.UnmatchedMAL}}.</p>{{end}}
+    {{end}}
     <dl class="space-y-1 text-sm">
       {{if .Type}}<div><dt class="inline text-slate-400">Type:</dt> <dd class="inline">{{.Type}}</dd></div>{{end}}
       {{if .Episodes}}<div><dt class="inline text-slate-400">Episodes:</dt> <dd class="inline">{{.Episodes}}</dd></div>{{end}}
@@ -95,5 +100,5 @@
     {{end}}
   </div>
 </div>
-<div id="dialog-slot" hx-on::before-swap="var s=event.detail.xhr.status;if(s===422||s===409||s===503){event.detail.shouldSwap=true;event.detail.isError=false}">{{with .Dialog}}{{template "add_dialog" .}}{{end}}</div>
+<div id="dialog-slot" hx-on::before-swap="var s=event.detail.xhr.status;if(s===422||s===409||s===503){event.detail.shouldSwap=true;event.detail.isError=false}">{{with .Dialog}}{{template "add_dialog" .}}{{end}}{{with .Match}}{{template "match_dialog" .}}{{end}}</div>
 {{end}}

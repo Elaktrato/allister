@@ -1,0 +1,60 @@
+{{define "match_dialog"}}
+<div data-dialog class="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/70 p-4" role="dialog" aria-modal="true" aria-labelledby="match-dialog-title">
+  <div class="w-full max-w-3xl space-y-4 rounded border border-slate-700 bg-slate-900 p-5">
+    <h2 id="match-dialog-title" class="text-xl font-semibold">Match to AniList</h2>
+    <p class="text-sm text-slate-300">Matching <strong>{{.Title}}</strong>{{if .MALID}} <span class="text-slate-400">(MyAnimeList #{{.MALID}})</span>{{end}}. Your list data (status, rating, progress, dates, comment) stays as it is.</p>
+    {{if .Error}}
+    <div class="rounded border border-amber-700 bg-amber-950 p-3 text-amber-200" role="alert">
+      <p>{{.Error}}</p>
+      {{if .ExistingURL}}<p class="mt-1"><a href="{{.ExistingURL}}" class="text-indigo-300 underline">Go to the existing entry</a></p>{{end}}
+    </div>
+    {{end}}
+    <form method="post" action="{{.Action}}" hx-post="{{.Action}}" hx-target="#dialog-slot" hx-swap="innerHTML" class="flex flex-wrap items-end gap-3">
+      <label class="block min-w-0 flex-1 text-sm">AniList URL or number
+        <input type="text" name="anilist" value="{{.Anilist}}" maxlength="300" placeholder="https://anilist.co/anime/154587" autocomplete="off"
+          class="mt-1 w-full rounded border border-slate-700 bg-slate-950 px-3 py-2">
+      </label>
+      <button type="submit" class="rounded bg-indigo-600 px-4 py-2 font-medium hover:bg-indigo-500">Match</button>
+    </form>
+    <form method="get" action="{{.SearchURL}}" class="space-y-2" hx-on:submit="event.preventDefault()">
+      <label class="block text-sm">Or search AniList
+        <input type="search" name="q" value="{{.Search.Query}}" maxlength="200" placeholder="Title" autocomplete="off"
+          hx-get="{{.SearchURL}}" hx-trigger="keyup changed delay:400ms, search" hx-target="#match-results" hx-swap="innerHTML"
+          class="mt-1 w-full rounded border border-slate-700 bg-slate-950 px-3 py-2">
+      </label>
+      <noscript><button type="submit" class="rounded bg-slate-700 px-3 py-1">Search</button></noscript>
+    </form>
+    <div id="match-results">{{template "match_results" .}}</div>
+    <div class="flex justify-end">
+      <a href="{{.CancelURL}}" hx-on:click="event.preventDefault();this.closest('[data-dialog]').remove()" class="rounded px-4 py-2 hover:bg-slate-800">Cancel</a>
+    </div>
+  </div>
+</div>
+{{end}}
+{{define "match_results"}}
+{{if .Search.Message}}
+<div class="rounded border border-amber-700 bg-amber-950 p-3 text-amber-200" role="alert"><p>{{.Search.Message}}</p></div>
+{{else if .Search.Results}}
+<ul class="grid gap-3 sm:grid-cols-2">
+  {{$action := .Action}}
+  {{range .Search.Results}}
+  <li class="flex gap-3 rounded border border-slate-800 bg-slate-950 p-3">
+    {{if .CoverURL}}<img src="{{.CoverURL}}" alt="" loading="lazy" class="h-28 w-20 shrink-0 rounded object-cover">
+    {{else}}<div class="h-28 w-20 shrink-0 rounded bg-slate-800" aria-hidden="true"></div>{{end}}
+    <div class="flex min-w-0 flex-col gap-1">
+      <h3 class="font-semibold">{{.Title}}</h3>
+      <p class="text-sm text-slate-400">{{.Type}}{{if .Episodes}} · {{.Episodes}} eps{{end}}{{if .Year}} · {{.Year}}{{end}}</p>
+      <form method="post" action="{{$action}}" hx-post="{{$action}}" hx-target="#dialog-slot" hx-swap="innerHTML" class="mt-auto">
+        <input type="hidden" name="pick" value="{{.ID}}">
+        <button type="submit" class="rounded bg-indigo-600 px-3 py-1 text-sm font-medium hover:bg-indigo-500">Match</button>
+      </form>
+    </div>
+  </li>
+  {{end}}
+</ul>
+{{else if .Search.Searched}}
+<p class="text-slate-300">No results for “{{.Search.Query}}”</p>
+{{else}}
+<p class="text-sm text-slate-400">Type a title to search AniList.</p>
+{{end}}
+{{end}}

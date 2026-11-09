@@ -45,6 +45,10 @@ Only anime rows with MyAnimeList ids are used. Each id is looked up on AniList a
 
 The page shows progress. You can cancel an import and resume it later. Entries AniList cannot match are kept as manual entries marked "unmatched". Importing the same file again never creates duplicates.
 
+## Matching manual entries to AniList
+
+Open an unmatched entry (or any manual entry) and press "Match to AniList". Paste its AniList URL (or just the number), or search by title and pick a result. The entry becomes a normal AniList entry in place: your status, rating, progress, dates and comment stay exactly as they are, and cast and cover arrive in the background. If that AniList anime is already in your library, Allister refuses and links to the existing entry. If AniList is not answering, nothing is changed and you can try again.
+
 ## Updating and stopping
 
 After `git pull`, run `docker compose up -d --build`. `docker compose down` stops and removes the container but keeps the data volume. **`docker compose down -v` deletes the volume and all your data.**
@@ -113,5 +117,4 @@ Layout:
 
 ## Roadmap
 
-- Match manual and unmatched entries to AniList (planned, not built yet).
 - Other media types: manga, movies, TV, games, books.
