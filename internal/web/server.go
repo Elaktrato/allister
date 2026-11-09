@@ -3,10 +3,13 @@ package web
 
 import (
 	"bytes"
+	"context"
 	"embed"
 	"html/template"
 	"log"
 	"net/http"
+	"os"
+	"strings"
 
 	"github.com/allister/allister/internal/provider"
 	"github.com/allister/allister/internal/settings"
@@ -24,6 +27,15 @@ var templateFS embed.FS
 type Deps struct {
 	Settings  *settings.Store
 	Providers map[provider.Source]provider.Provider
+	// Jobs enqueues background jobs (see package jobs).
+	Jobs JobQueue
+	// CoversDir is DATA_DIR/covers; when empty /covers/ is not served.
+	CoversDir string
+}
+
+// JobQueue is the part of jobs.Queue the web layer needs.
+type JobQueue interface {
+	Enqueue(ctx context.Context, kind string, payload any) error
 }
 
 type server struct {
@@ -59,6 +71,9 @@ func NewServer(deps Deps) http.Handler {
 		w.Write([]byte("ok"))
 	})
 	mux.Handle("GET /static/", http.FileServerFS(staticFS))
+	if deps.CoversDir != "" {
+		mux.Handle("GET /covers/", coversHandler(deps.CoversDir))
+	}
 	mux.HandleFunc("GET /{$}", s.index)
 	mux.HandleFunc("GET /settings", s.getSettings)
 	mux.HandleFunc("POST /settings", s.postSettings)
@@ -108,4 +123,56 @@ func (s *server) execute(w http.ResponseWriter, page, name string, data any) {
 
 func (s *server) index(w http.ResponseWriter, r *http.Request) {
 	s.render(w, r, "index", nil)
+}
+
+// coversHandler serves files (never directory listings) from dir. Names are
+// content hashes, so responses are cacheable forever. http.Dir rejects ".."
+// path elements, and the mux cleans paths before routing.
+func coversHandler(dir string) http.Handler {
+	fs := http.StripPrefix("/covers/", http.FileServer(noDirFS{http.Dir(dir)}))
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if name := strings.TrimPrefix(r.URL.Path, "/covers/"); name == "" || strings.HasSuffix(name, "/") {
+			http.NotFound(w, r)
+			return
+		}
+		fs.ServeHTTP(&coverWriter{ResponseWriter: w}, r)
+	})
+}
+
+// coverWriter adds the immutable cache header to successful responses only.
+type coverWriter struct {
+	http.ResponseWriter
+	wrote bool
+}
+
+func (c *coverWriter) WriteHeader(code int) {
+	if !c.wrote {
+		c.wrote = true
+		if code == http.StatusOK || code == http.StatusNotModified {
+			c.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+		}
+	}
+	c.ResponseWriter.WriteHeader(code)
+}
+
+func (c *coverWriter) Write(b []byte) (int, error) {
+	if !c.wrote {
+		c.WriteHeader(http.StatusOK)
+	}
+	return c.ResponseWriter.Write(b)
+}
+
+// noDirFS hides directories, so neither listings nor redirects to them occur.
+type noDirFS struct{ fs http.FileSystem }
+
+func (n noDirFS) Open(name string) (http.File, error) {
+	f, err := n.fs.Open(name)
+	if err != nil {
+		return nil, err
+	}
+	if fi, err := f.Stat(); err != nil || fi.IsDir() {
+		f.Close()
+		return nil, os.ErrNotExist
+	}
+	return f, nil
 }

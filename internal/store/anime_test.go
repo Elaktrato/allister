@@ -139,3 +139,16 @@ func TestCascadeOnRemovingAnime(t *testing.T) {
 		}
 	}
 }
+
+func TestGetByID(t *testing.T) {
+	s := newStore(t)
+	ctx := context.Background()
+	id := mustSave(t, s, sample(provider.AniList, "7", intp(12)))
+	got, err := s.GetByID(ctx, id)
+	if err != nil || got == nil || got.ID != id || got.Anime.ID != "7" || got.Source != provider.AniList {
+		t.Fatalf("got %+v, %v", got, err)
+	}
+	if got, err := s.GetByID(ctx, id+100); got != nil || err != nil {
+		t.Fatalf("missing: %+v, %v", got, err)
+	}
+}

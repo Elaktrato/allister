@@ -109,3 +109,32 @@ func TestPersonAnimeOnlyReturnsSavedAnime(t *testing.T) {
 		t.Fatalf("%+v", apps)
 	}
 }
+
+func TestAnimePeople(t *testing.T) {
+	s := newStore(t)
+	ctx := context.Background()
+	a := mustSave(t, s, sample(provider.AniList, "1", nil))
+	b := mustSave(t, s, sample(provider.AniList, "2", nil))
+	if err := s.SaveCast(ctx, a, []provider.CastMember{cast("1", "1"), cast("2", "1")}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SaveCast(ctx, b, []provider.CastMember{cast("9", "9")}); err != nil {
+		t.Fatal(err)
+	}
+	ppl, err := s.AnimePeople(ctx, a)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// characters c1, c2 and one distinct actor v1
+	if len(ppl) != 3 {
+		t.Fatalf("got %+v", ppl)
+	}
+	for _, p := range ppl {
+		if p.ID == 0 || p.ImagePath == "" || p.Name == "" {
+			t.Fatalf("incomplete %+v", p)
+		}
+	}
+	if ppl, err := s.AnimePeople(ctx, 999); err != nil || len(ppl) != 0 {
+		t.Fatalf("empty: %v %v", ppl, err)
+	}
+}

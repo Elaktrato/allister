@@ -120,3 +120,32 @@ func (s *Store) PersonAnime(ctx context.Context, personID int64) ([]PersonAppear
 	}
 	return out, nil
 }
+
+// AnimePeople returns the distinct people (characters and voice actors) in
+// the cast of animeID, ordered by person id.
+func (s *Store) AnimePeople(ctx context.Context, animeID int64) ([]Person, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT p.id, p.source, p.source_id, p.name, p.image_path, p.external_url
+		FROM people p WHERE p.id IN (
+		  SELECT character_person_id FROM anime_cast WHERE anime_id = ?1
+		  UNION
+		  SELECT actor_person_id FROM anime_cast WHERE anime_id = ?1 AND actor_person_id IS NOT NULL)
+		ORDER BY p.id`, animeID)
+	if err != nil {
+		return nil, fmt.Errorf("anime people: %w", err)
+	}
+	defer rows.Close()
+	var out []Person
+	for rows.Next() {
+		var p Person
+		var src string
+		if err := rows.Scan(&p.ID, &src, &p.SourceID, &p.Name, &p.ImagePath, &p.ExternalURL); err != nil {
+			return nil, fmt.Errorf("anime people: %w", err)
+		}
+		p.Source = provider.Source(src)
+		out = append(out, p)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("anime people: %w", err)
+	}
+	return out, nil
+}

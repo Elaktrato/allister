@@ -103,6 +103,11 @@ func (s *Store) FindByMALID(ctx context.Context, malID string) (*Saved, error) {
 	return s.findOne(ctx, `a.mal_id = ?`, n)
 }
 
+// GetByID returns the saved anime with the given row id, or nil, nil.
+func (s *Store) GetByID(ctx context.Context, id int64) (*Saved, error) {
+	return s.findOne(ctx, `a.id = ?`, id)
+}
+
 func (s *Store) findOne(ctx context.Context, where string, args ...any) (*Saved, error) {
 	var (
 		sv             Saved
