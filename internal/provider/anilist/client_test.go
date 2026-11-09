@@ -1,0 +1,294 @@
+package anilist
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"strings"
+	"sync/atomic"
+	"testing"
+
+	"github.com/allister/allister/internal/provider"
+)
+
+func fixture(t *testing.T, name string) []byte {
+	t.Helper()
+	b, err := os.ReadFile("testdata/" + name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return b
+}
+
+// serve returns a client against a test server that always answers with body.
+// The last request body is stored in *got when got is non-nil.
+func serve(t *testing.T, status int, body []byte, got *string) *Client {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Errorf("method = %s, want POST", r.Method)
+		}
+		b, _ := io.ReadAll(r.Body)
+		if got != nil {
+			*got = string(b)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(status)
+		w.Write(body)
+	}))
+	t.Cleanup(srv.Close)
+	return New(srv.URL, srv.Client())
+}
+
+func titleMap(ts []provider.Title) map[string]string {
+	m := map[string]string{}
+	for _, t := range ts {
+		m[t.Lang] = t.Text
+	}
+	return m
+}
+
+func TestName(t *testing.T) {
+	if New("x", nil).Name() != provider.AniList {
+		t.Fatal("Name() must be anilist")
+	}
+}
+
+func TestSearchMapsResults(t *testing.T) {
+	var body string
+	c := serve(t, 200, fixture(t, "search.json"), &body)
+	res, err := c.Search(context.Background(), "  Sousou no Frieren ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res) != 3 {
+		t.Fatalf("len = %d, want 3", len(res))
+	}
+	r := res[0]
+	if r.Source != provider.AniList || r.ID != "154587" || r.Type != "TV" {
+		t.Errorf("bad identity: %+v", r)
+	}
+	tm := titleMap(r.Titles)
+	if tm["ja"] != "葬送のフリーレン" || tm["ja-latn"] != "Sousou no Frieren" || tm["en"] != "Frieren: Beyond Journey’s End" {
+		t.Errorf("titles = %v", r.Titles)
+	}
+	if r.Episodes == nil || *r.Episodes != 28 || r.Year == nil || *r.Year != 2023 {
+		t.Errorf("episodes/year = %v/%v", r.Episodes, r.Year)
+	}
+	if r.Studio != "MADHOUSE" || !strings.HasPrefix(r.CoverURL, "https://") {
+		t.Errorf("studio/cover = %q/%q", r.Studio, r.CoverURL)
+	}
+	if strings.Contains(r.Synopsis, "<") || strings.Contains(r.Synopsis, "&") || !strings.Contains(r.Synopsis, "\n") {
+		t.Errorf("synopsis not plain text: %q", r.Synopsis)
+	}
+	if res[1].Episodes != nil {
+		t.Errorf("unknown episodes must be nil, got %d", *res[1].Episodes)
+	}
+	var req struct {
+		Variables map[string]any `json:"variables"`
+	}
+	if err := json.Unmarshal([]byte(body), &req); err != nil {
+		t.Fatal(err)
+	}
+	if req.Variables["q"] != "Sousou no Frieren" {
+		t.Errorf("q variable = %v, want trimmed", req.Variables["q"])
+	}
+}
+
+func TestSearchEmptyQueryMakesNoRequest(t *testing.T) {
+	var n int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { atomic.AddInt32(&n, 1) }))
+	defer srv.Close()
+	res, err := New(srv.URL, nil).Search(context.Background(), "  \t")
+	if err != nil || res == nil || len(res) != 0 {
+		t.Fatalf("res=%v err=%v, want empty non-nil slice", res, err)
+	}
+	if n != 0 {
+		t.Fatalf("made %d requests", n)
+	}
+}
+
+func TestSearchCapsAtTwenty(t *testing.T) {
+	var body string
+	c := serve(t, 200, []byte(`{"data":{"Page":{"media":[]}}}`), &body)
+	if _, err := c.Search(context.Background(), "x"); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(body, "perPage") && !strings.Contains(body, "20") {
+		t.Errorf("request does not cap at 20: %s", body)
+	}
+	// also cap client-side if the server over-delivers
+	var items []string
+	for i := 1; i <= 25; i++ {
+		items = append(items, `{"id":`+strings.Repeat("1", 1)+`,"title":{"romaji":"t"}}`)
+	}
+	c = serve(t, 200, []byte(`{"data":{"Page":{"media":[`+strings.Join(items, ",")+`]}}}`), nil)
+	res, err := c.Search(context.Background(), "x")
+	if err != nil || len(res) != 20 {
+		t.Fatalf("len=%d err=%v, want 20", len(res), err)
+	}
+}
+
+func TestAnimeMapsTitlesRelationsRecsMALID(t *testing.T) {
+	c := serve(t, 200, fixture(t, "anime.json"), nil)
+	a, err := c.Anime(context.Background(), "154587")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a.ID != "154587" || a.Source != provider.AniList || a.MALID != "52991" {
+		t.Errorf("identity: %+v", a.SearchResult)
+	}
+	if a.ExternalURL != "https://anilist.co/anime/154587" || a.SourceMaterial != "MANGA" {
+		t.Errorf("url/source = %q/%q", a.ExternalURL, a.SourceMaterial)
+	}
+	if tm := titleMap(a.Titles); len(tm) != 3 || tm["ja-latn"] != "Sousou no Frieren" {
+		t.Errorf("titles = %v", a.Titles)
+	}
+	if a.StartDate == nil || a.StartDate.Format("2006-01-02") != "2023-09-29" {
+		t.Errorf("start = %v", a.StartDate)
+	}
+	if a.EndDate == nil || a.EndDate.Format("2006-01-02") != "2024-03-22" {
+		t.Errorf("end = %v", a.EndDate)
+	}
+	if strings.Contains(a.Synopsis, "<") {
+		t.Errorf("synopsis has tags: %q", a.Synopsis)
+	}
+
+	kinds := map[string]provider.Relation{}
+	for _, r := range a.Relations {
+		if r.Source != provider.AniList {
+			t.Errorf("relation source = %s", r.Source)
+		}
+		kinds[r.ID] = r
+	}
+	if r, ok := kinds["118586"]; !ok || r.Kind != "source" || r.Type != "MANGA" {
+		t.Errorf("manga source relation = %+v ok=%v", r, ok)
+	}
+	if r, ok := kinds["182255"]; !ok || r.Kind != "sequel" || r.Type != "TV" || titleMap(r.Titles)["ja-latn"] == "" {
+		t.Errorf("sequel relation = %+v", r)
+	}
+	if r, ok := kinds["170068"]; !ok || r.Kind != "other" {
+		t.Errorf("side story relation = %+v", r)
+	}
+
+	if len(a.Recommendations) == 0 {
+		t.Fatal("no recommendations")
+	}
+	rec := a.Recommendations[0]
+	if rec.Source != provider.AniList || rec.ID != "21827" || rec.CoverURL == "" || titleMap(rec.Titles)["en"] != "Violet Evergarden" {
+		t.Errorf("rec = %+v", rec)
+	}
+}
+
+func TestAnimeRelationsFilterAndRecsSkipNull(t *testing.T) {
+	body := `{"data":{"Media":{"id":1,"title":{"romaji":"A"},
+	 "relations":{"edges":[
+	  {"relationType":"SOURCE","node":{"id":10,"type":"MANGA","format":"NOVEL","title":{"romaji":"N"}}},
+	  {"relationType":"SIDE_STORY","node":{"id":11,"type":"MANGA","format":"MANGA","title":{"romaji":"M"}}},
+	  {"relationType":"PREQUEL","node":{"id":12,"type":"ANIME","format":"TV","title":{"romaji":"P"}}}]},
+	 "recommendations":{"nodes":[{"mediaRecommendation":null},{"mediaRecommendation":{"id":5,"title":{"romaji":"R"},"coverImage":{"large":"u"}}}]}}}}`
+	a, err := serve(t, 200, []byte(body), nil).Anime(context.Background(), "1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a.MALID != "" || a.StartDate != nil || a.EndDate != nil {
+		t.Errorf("absent fields: %q %v %v", a.MALID, a.StartDate, a.EndDate)
+	}
+	if len(a.Relations) != 2 || a.Relations[0].Kind != "source" || a.Relations[0].Type != "NOVEL" || a.Relations[1].Kind != "prequel" {
+		t.Errorf("relations = %+v", a.Relations)
+	}
+	if len(a.Recommendations) != 1 || a.Recommendations[0].ID != "5" {
+		t.Errorf("recs = %+v", a.Recommendations)
+	}
+}
+
+func TestCastMapsVoiceActors(t *testing.T) {
+	var body string
+	c := serve(t, 200, fixture(t, "cast.json"), &body)
+	cast, err := c.Cast(context.Background(), "154587")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cast) != 4 {
+		t.Fatalf("len = %d", len(cast))
+	}
+	m := cast[0]
+	if m.Role != "MAIN" || m.Character.Name != "Frieren" || m.Character.ID != "176754" || m.Character.Source != provider.AniList ||
+		m.Character.URL != "https://anilist.co/character/176754" || m.Character.ImageURL == "" {
+		t.Errorf("character = %+v", m)
+	}
+	if m.Actor == nil || m.Actor.Name != "Atsumi Tanezaki" || m.Actor.URL != "https://anilist.co/staff/112215" {
+		t.Errorf("actor = %+v", m.Actor)
+	}
+	if !strings.Contains(body, "voiceActors(language: JAPANESE)") {
+		t.Errorf("query must request Japanese voice actors: %s", body)
+	}
+	if !strings.Contains(body, "ROLE") {
+		t.Errorf("query must sort by ROLE")
+	}
+}
+
+func TestCastActorNilWhenNone(t *testing.T) {
+	body := `{"data":{"Media":{"characters":{"edges":[{"role":"SUPPORTING","node":{"id":1,"name":{"full":"X"}},"voiceActors":[]}]}}}}`
+	cast, err := serve(t, 200, []byte(body), nil).Cast(context.Background(), "1")
+	if err != nil || len(cast) != 1 || cast[0].Actor != nil {
+		t.Fatalf("cast=%+v err=%v", cast, err)
+	}
+}
+
+func TestRateLimitedMapsError(t *testing.T) {
+	c := serve(t, 429, []byte(`{"errors":[{"message":"Too Many Requests.","status":429}]}`), nil)
+	_, err := c.Search(context.Background(), "x")
+	if !errors.Is(err, provider.ErrRateLimited) {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestServerErrorMapsUnavailable(t *testing.T) {
+	c := serve(t, 500, []byte(`oops`), nil)
+	_, err := c.Anime(context.Background(), "1")
+	if !errors.Is(err, provider.ErrUnavailable) {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestNotFoundMapsErrNotFound(t *testing.T) {
+	// GraphQL-level "Not Found." (AniList answers this with HTTP 404)
+	c := serve(t, 404, fixture(t, "notfound.json"), nil)
+	if _, err := c.Anime(context.Background(), "99999999"); !errors.Is(err, provider.ErrNotFound) {
+		t.Fatalf("404: err = %v", err)
+	}
+	c = serve(t, 200, fixture(t, "notfound.json"), nil)
+	if _, err := c.Cast(context.Background(), "99999999"); !errors.Is(err, provider.ErrNotFound) {
+		t.Fatalf("200+errors: err = %v", err)
+	}
+}
+
+func TestMalformedJSONMapsUnavailable(t *testing.T) {
+	c := serve(t, 200, []byte(`{"data":`), nil)
+	if _, err := c.Search(context.Background(), "x"); !errors.Is(err, provider.ErrUnavailable) {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestNetworkErrorMapsUnavailable(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	url := srv.URL
+	srv.Close()
+	if _, err := New(url, nil).Search(context.Background(), "x"); !errors.Is(err, provider.ErrUnavailable) {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestContextCancelled(t *testing.T) {
+	c := serve(t, 200, fixture(t, "search.json"), nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := c.Search(ctx, "x"); err == nil {
+		t.Fatal("want error on cancelled ctx")
+	}
+}
