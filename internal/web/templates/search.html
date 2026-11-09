@@ -1,12 +1,18 @@
-{{define "title"}}Search - Allister{{end}}
+{{define "title"}}{{.Heading}} - Allister{{end}}
 {{define "content"}}
-<h1 class="mb-6 text-2xl font-semibold">Search anime</h1>
-<form method="get" action="/anime/search" class="mb-6 flex max-w-2xl flex-col gap-2 sm:flex-row">
+<h1 class="mb-6 text-2xl font-semibold">{{.Heading}}</h1>
+<form method="get" action="{{.Action}}" class="mb-6 flex max-w-2xl flex-col gap-2 sm:flex-row">
   <input type="search" name="q" value="{{.Query}}" maxlength="200" autofocus autocomplete="off"
-    placeholder="Search AniList…" aria-label="Search anime"
-    hx-get="/anime/search" hx-trigger="keyup changed delay:400ms, search"
+    placeholder="{{.Placeholder}}" aria-label="{{.Heading}}"
+    hx-get="{{.Action}}" hx-trigger="keyup changed delay:400ms, search" hx-include="closest form"
     hx-target="#results" hx-push-url="true"
     class="w-full rounded border border-slate-700 bg-slate-900 px-3 py-2">
+  {{if .Kinds}}<select name="kind" aria-label="Kind" class="rounded border border-slate-700 bg-slate-900 px-3 py-2">
+    {{range .Kinds}}<option value="{{.Value}}"{{if .Selected}} selected{{end}}>{{.Label}}</option>{{end}}
+  </select>{{end}}
+  {{if .Sources}}<select name="source" aria-label="Source" class="rounded border border-slate-700 bg-slate-900 px-3 py-2">
+    {{range .Sources}}<option value="{{.Value}}"{{if .Selected}} selected{{end}}>{{.Label}}</option>{{end}}
+  </select>{{end}}
   <button type="submit" class="rounded bg-indigo-600 px-4 py-2 font-medium hover:bg-indigo-500">Search</button>
 </form>
 <div id="results" aria-live="polite">{{template "search_results" .}}</div>

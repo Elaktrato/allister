@@ -7,11 +7,14 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
 
 	"github.com/allister/allister/internal/db"
+	"github.com/allister/allister/internal/plugin"
+	"github.com/allister/allister/internal/plugin/plugintest"
 	"github.com/allister/allister/internal/provider"
 	"github.com/allister/allister/internal/settings"
 )
@@ -69,7 +72,7 @@ func sampleResult() provider.SearchResult {
 	}
 }
 
-func TestSearchUsesAniList(t *testing.T) {
+func TestSearchUsesPluginSource(t *testing.T) {
 	fp := &fakeProvider{results: []provider.SearchResult{sampleResult()}}
 	h, _ := searchServer(t, fp)
 	rec := doSearch(h, "death note", false)
@@ -273,5 +276,113 @@ func TestSearchVaryHXRequest(t *testing.T) {
 		if !strings.Contains(vary, "HX-Request") {
 			t.Fatalf("htmx=%v Vary=%q", htmx, vary)
 		}
+	}
+}
+
+func bookSummary(id, title string) plugin.ItemSummary {
+	return plugin.ItemSummary{Source: "books", ID: id, Kind: "book", Titles: ttl(title),
+		Fields: map[string]plugin.FieldValue{"author": {Text: "Ursula K. Le Guin"}, "pages": {Num: num(300)}}}
+}
+
+func TestSearchUsesFixturePluginSource(t *testing.T) {
+	e := newFixtureEnv(t)
+	e.book.Summaries = []plugin.ItemSummary{bookSummary("42", "A Wizard of Earthsea")}
+	rec := e.get("/book/search?q=wizard")
+	if rec.Code != 200 {
+		t.Fatalf("got %d", rec.Code)
+	}
+	if n := e.book.Calls(plugintest.OpSearch); n != 1 {
+		t.Fatalf("search calls %d", n)
+	}
+	b := rec.Body.String()
+	mustContain(t, b, "A Wizard of Earthsea", "Ursula K. Le Guin", `href="/book/books/42"`, "Search books",
+		`action="/book/search"`, `href="/book/manual/new"`, "Can't find it? Add manually", "Search Fake Books")
+	// pages is not a Show field; a single source shows no badge or switch
+	mustNotContain(t, b, "300", `name="source"`, "data-source-badge")
+	mustNotContain(t, b, "AniList")
+	// the empty state names the source too
+	mustContain(t, e.get("/book/search").Body.String(), "Type a title to search Fake Books.")
+	if n := e.book.Calls(plugintest.OpSearch); n != 1 {
+		t.Fatalf("empty query searched: %d", n)
+	}
+}
+
+func TestSearchResultsCappedAt20(t *testing.T) {
+	e := newFixtureEnv(t)
+	for i := 0; i < 30; i++ {
+		e.book.Summaries = append(e.book.Summaries, bookSummary(strconv.Itoa(i), "Book "+strconv.Itoa(i)))
+	}
+	b := e.get("/book/search?q=b").Body.String()
+	if n := strings.Count(b, `href="/book/books/`); n != 20 {
+		t.Fatalf("%d result links, want 20", n)
+	}
+}
+
+func TestSearchSourceSwitchOnlyWithSeveralSources(t *testing.T) {
+	other := &plugintest.FakeSource{Summaries: []plugin.ItemSummary{{Source: "openlib", ID: "OL1", Kind: "book", Titles: ttl("Other Source Book")}}}
+	e := newFixtureEnv(t, func(book, _ *plugintest.Plugin) {
+		book.M.Sources = append(book.M.Sources, plugin.SourceInfo{ID: "openlib", Name: "Open Library", RequestsPerMinute: 60})
+		book.Sources["openlib"] = other
+	})
+	e.book.Summaries = []plugin.ItemSummary{bookSummary("42", "Default Source Book")}
+	b := e.get("/book/search?q=x").Body.String()
+	mustContain(t, b, "Default Source Book", `href="/book/books/42"`, `name="source"`, "Open Library", "data-source-badge")
+	mustNotContain(t, b, "Other Source Book")
+	b = e.get("/book/search?q=x&source=openlib").Body.String()
+	mustContain(t, b, "Other Source Book", `href="/book/openlib/OL1"`, `value="openlib" selected`)
+	if other.Calls(plugintest.OpSearch) != 1 || e.book.Calls(plugintest.OpSearch) != 1 {
+		t.Fatalf("calls default %d other %d", e.book.Calls(plugintest.OpSearch), other.Calls(plugintest.OpSearch))
+	}
+	// the retry control keeps the selected source
+	other.Err = plugin.ErrRateLimited
+	mustContain(t, e.get("/book/search?q=x&source=openlib").Body.String(), `hx-get="/book/search?q=x&amp;source=openlib"`, "Open Library is rate limiting")
+	if c := e.get("/book/search?q=x&source=nope").Code; c != 404 {
+		t.Fatalf("unknown source: %d", c)
+	}
+	// anime has one source: no switch
+	mustNotContain(t, e.get("/anime/search?q=x").Body.String(), `name="source"`)
+}
+
+func TestSearchKindSelection(t *testing.T) {
+	e := newFixtureEnv(t, withComicKind)
+	e.book.Summaries = []plugin.ItemSummary{bookSummary("42", "Some Book")}
+	b := e.get("/book/search?q=x").Body.String()
+	mustContain(t, b, `href="/book/books/42?kind=book"`, `name="kind"`, "Comics")
+	b = e.get("/book/search?q=x&kind=comic").Body.String()
+	mustContain(t, b, `href="/book/books/42?kind=comic"`, `value="comic" selected`, "Search comics")
+	if c := e.get("/book/search?q=x&kind=show").Code; c != 404 {
+		t.Fatalf("unknown kind: %d", c)
+	}
+	// the result link opens a working overview
+	e.book.Data = bookItem("42", "Some Book")
+	if c := e.get("/book/books/42?kind=comic").Code; c != 200 {
+		t.Fatalf("overview from result link: %d", c)
+	}
+}
+
+func TestSearchCardShowsKindFieldsAndTruncatedText(t *testing.T) {
+	e := newFixtureEnv(t, func(_, tv *plugintest.Plugin) {
+		tv.M.Kinds[0].Fields = append(tv.M.Kinds[0].Fields,
+			plugin.FieldDef{Key: "synopsis", Label: "Synopsis", Type: plugin.FieldText, Show: true},
+			plugin.FieldDef{Key: "homepage", Label: "Homepage", Type: plugin.FieldURL, Show: true})
+		tv.M.Kinds[0].Sections[1].Field = "synopsis"
+	})
+	sum := plugin.ItemSummary{Source: "tvdata", ID: "5", Kind: "show", Titles: ttl("The Show"), CoverURL: "",
+		Fields: map[string]plugin.FieldValue{"type": {Text: "series"}, "year": {Num: num(2019)},
+			"synopsis": {Text: strings.Repeat("é", 300)}, "homepage": {Text: "https://tv.example/x"}}}
+	e.tv.Summaries = []plugin.ItemSummary{sum}
+	b := e.get("/tv/search?q=x").Body.String()
+	mustContain(t, b, "series · 2019", strings.Repeat("é", 200)+"…", "data-cover-placeholder")
+	mustNotContain(t, b, strings.Repeat("é", 201), "tv.example/x", "<img")
+}
+
+func TestSearchOfDisabledPlugin404(t *testing.T) {
+	e := newFixtureEnv(t)
+	e.disable(t, "book")
+	if c := e.get("/book/search?q=x").Code; c != 404 {
+		t.Fatalf("got %d", c)
+	}
+	if e.book.Calls(plugintest.OpSearch) != 0 {
+		t.Fatal("searched while disabled")
 	}
 }

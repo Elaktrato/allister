@@ -109,10 +109,8 @@ func (s *server) getMatchSearch(w http.ResponseWriter, r *http.Request) {
 	q := cleanQuery(r.URL.Query().Get("q"))
 	v.Search.Query = q
 	if q != "" { // an empty query makes no AniList request
-		s.runSearch(r, q, &v.Search)
-		for i := range v.Search.Results {
-			v.Search.Results[i].CoverURL = httpURL(v.Search.Results[i].CoverURL)
-		}
+		m, _ := s.deps.Registry.Manifest(animePluginID)
+		s.runSearch(r, m, m.Sources[0], m.Kinds[0], q, &v.Search)
 	}
 	if isPartialRequest(r) {
 		s.renderPartial(w, "item", "match_results", v)

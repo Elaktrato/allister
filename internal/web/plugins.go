@@ -40,7 +40,6 @@ func (s *server) routeSets() map[string]routeSet {
 func (s *server) animeRoutes(reg routeRegistrar) {
 	s.coreRoutes(animePluginID)(reg)
 	reg.Handle("GET /", s.getList)
-	reg.Handle("GET /search", s.search)
 	reg.Handle("GET /manual/new", s.getManualNew)
 	reg.Handle("POST /manual/new", s.postManualNew)
 	reg.Handle("GET /{source}/{id}/add", s.getAdd)

@@ -39,11 +39,11 @@
   {{$action := .Action}}
   {{range .Search.Results}}
   <li class="flex gap-3 rounded border border-slate-800 bg-slate-950 p-3">
-    {{if .CoverURL}}<img src="{{.CoverURL}}" alt="" loading="lazy" class="h-28 w-20 shrink-0 rounded object-cover">
+    {{if .Cover}}<img src="{{.Cover}}" alt="" loading="lazy" class="h-28 w-20 shrink-0 rounded object-cover">
     {{else}}<div class="h-28 w-20 shrink-0 rounded bg-slate-800" aria-hidden="true"></div>{{end}}
     <div class="flex min-w-0 flex-col gap-1">
       <h3 class="font-semibold">{{.Title}}</h3>
-      <p class="text-sm text-slate-400">{{.Type}}{{if .Episodes}} · {{.Episodes}} eps{{end}}{{if .Year}} · {{.Year}}{{end}}</p>
+      {{if .Meta}}<p class="text-sm text-slate-400">{{.Meta}}</p>{{end}}
       <form method="post" action="{{$action}}" hx-post="{{$action}}" hx-target="#dialog-slot" hx-swap="innerHTML" class="mt-auto">
         <input type="hidden" name="pick" value="{{.ID}}">
         <button type="submit" class="rounded bg-indigo-600 px-3 py-1 text-sm font-medium hover:bg-indigo-500">Match</button>

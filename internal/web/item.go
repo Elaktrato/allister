@@ -43,6 +43,7 @@ const maxPathIDBytes = 200
 // literal prefix /{plugin-id} and behind its enabled guard like any route set.
 func (s *server) coreRoutes(pluginID string) routeSet {
 	return func(reg routeRegistrar) {
+		reg.Handle("GET /search", func(w http.ResponseWriter, r *http.Request) { s.search(w, r, pluginID) })
 		reg.Handle("GET /{source}/{id}", func(w http.ResponseWriter, r *http.Request) { s.getItem(w, r, pluginID) })
 	}
 }
