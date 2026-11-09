@@ -3,3 +3,5 @@
 docs
 *.md
 internal/web/static/app.css
+**/yamtrack_*.csv
+**/*:Zone.Identifier
