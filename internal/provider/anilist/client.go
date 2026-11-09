@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"strconv"
 	"strings"
@@ -41,17 +42,23 @@ const searchQuery = `query ($q: String, $perPage: Int) {
   }
 }`
 
-const animeQuery = `query ($id: Int, $recs: Int) {
-  Media(id: $id, type: ANIME) {
-    id idMal ` + titleFields + ` format episodes seasonYear
+// animeFields is the selection shared by Anime and AnimeByMALID, so both are
+// mapped by the same code.
+const animeFields = `id idMal ` + titleFields + ` format episodes seasonYear
     startDate { year month day } endDate { year month day } source
     description(asHtml: true) coverImage { large }
     studios(isMain: true) { nodes { name } } siteUrl
     relations { edges { relationType node { id type format ` + titleFields + ` } } }
     recommendations(perPage: $recs, sort: RATING_DESC) {
       nodes { mediaRecommendation { id ` + titleFields + ` coverImage { large } } }
-    }
-  }
+    }`
+
+const animeQuery = `query ($id: Int, $recs: Int) {
+  Media(id: $id, type: ANIME) { ` + animeFields + ` }
+}`
+
+const animeByMALQuery = `query ($idMal: Int, $recs: Int) {
+  Media(idMal: $idMal, type: ANIME) { ` + animeFields + ` }
 }`
 
 const castQuery = `query ($id: Int, $perPage: Int) {
@@ -321,16 +328,42 @@ func (c *Client) Anime(ctx context.Context, id string) (provider.Anime, error) {
 	if err != nil {
 		return provider.Anime{}, err
 	}
+	return c.fetchAnime(ctx, animeQuery, map[string]any{"id": n, "recs": recsPageSize}, "anime "+strconv.Itoa(n))
+}
+
+// AnimeByMALID looks an anime up by its MyAnimeList id (AniList
+// Media(idMal:, type: ANIME)) and maps it exactly like Anime. A malformed id
+// (anything but 1 to 2147483647 in ASCII digits) is provider.ErrNotFound
+// without a request, as is a response without a media id.
+func (c *Client) AnimeByMALID(ctx context.Context, malID string) (provider.Anime, error) {
+	malID = strings.TrimSpace(malID)
+	n, err := strconv.Atoi(malID)
+	for _, r := range malID {
+		if r < '0' || r > '9' {
+			err = strconv.ErrSyntax
+		}
+	}
+	if err != nil || n <= 0 || n > math.MaxInt32 {
+		return provider.Anime{}, fmt.Errorf("anilist: invalid MAL id %q: %w", malID, provider.ErrNotFound)
+	}
+	return c.fetchAnime(ctx, animeByMALQuery, map[string]any{"idMal": n, "recs": recsPageSize}, "MAL anime "+malID)
+}
+
+// fetchAnime runs a Media query shaped like animeFields and maps the result.
+func (c *Client) fetchAnime(ctx context.Context, query string, vars map[string]any, what string) (provider.Anime, error) {
 	var data struct {
 		Media *apiMedia `json:"Media"`
 	}
-	if err := c.do(ctx, animeQuery, map[string]any{"id": n, "recs": recsPageSize}, &data); err != nil {
+	if err := c.do(ctx, query, vars, &data); err != nil {
 		return provider.Anime{}, err
 	}
-	if data.Media == nil {
-		return provider.Anime{}, fmt.Errorf("anilist: anime %d: %w", n, provider.ErrNotFound)
+	if data.Media == nil || data.Media.ID <= 0 {
+		return provider.Anime{}, fmt.Errorf("anilist: %s: %w", what, provider.ErrNotFound)
 	}
-	m := data.Media
+	return data.Media.anime(), nil
+}
+
+func (m *apiMedia) anime() provider.Anime {
 	a := provider.Anime{
 		SearchResult:   m.searchResult(),
 		StartDate:      m.StartDate.time(),
@@ -365,7 +398,7 @@ func (c *Client) Anime(ctx context.Context, id string) (provider.Anime, error) {
 			CoverURL: r.MediaRecommendation.CoverImage.Large,
 		})
 	}
-	return a, nil
+	return a
 }
 
 type apiPerson struct {

@@ -313,3 +313,61 @@ func TestContextCancelled(t *testing.T) {
 		t.Fatalf("err = %v, want context.Canceled", err)
 	}
 }
+
+func TestAnimeByMALIDMapsAnime(t *testing.T) {
+	var body string
+	c := serve(t, 200, fixture(t, "anime_mal.json"), &body)
+	a, err := c.AnimeByMALID(context.Background(), " 52991 ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a.ID != "154587" || a.Source != provider.AniList || a.MALID != "52991" {
+		t.Errorf("identity: %+v", a.SearchResult)
+	}
+	if tm := titleMap(a.Titles); len(tm) != 3 || tm["ja-latn"] != "Sousou no Frieren" {
+		t.Errorf("titles = %v", a.Titles)
+	}
+	if a.Episodes == nil || *a.Episodes != 28 || a.StartDate == nil || a.ExternalURL == "" {
+		t.Errorf("detail not mapped: %+v", a)
+	}
+	if len(a.Relations) == 0 && len(a.Recommendations) == 0 {
+		t.Error("relations and recommendations not mapped")
+	}
+	if !strings.Contains(body, "idMal: $idMal") || !strings.Contains(body, `"idMal":52991`) {
+		t.Errorf("request does not query by idMal: %s", body)
+	}
+}
+
+func TestAnimeByMALIDNotFound(t *testing.T) {
+	c := serve(t, 404, fixture(t, "notfound_mal.json"), nil)
+	if _, err := c.AnimeByMALID(context.Background(), "99999999"); !errors.Is(err, provider.ErrNotFound) {
+		t.Fatalf("err = %v", err)
+	}
+	// A null Media without errors is not found either.
+	c = serve(t, 200, []byte(`{"data":{"Media":null}}`), nil)
+	if _, err := c.AnimeByMALID(context.Background(), "5"); !errors.Is(err, provider.ErrNotFound) {
+		t.Fatalf("null media: err = %v", err)
+	}
+	// A Media without an id is not found.
+	c = serve(t, 200, []byte(`{"data":{"Media":{"id":0}}}`), nil)
+	if _, err := c.AnimeByMALID(context.Background(), "5"); !errors.Is(err, provider.ErrNotFound) {
+		t.Fatalf("no id: err = %v", err)
+	}
+}
+
+func TestAnimeByMALIDRejectsNonDigitsWithoutRequest(t *testing.T) {
+	var hits int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&hits, 1)
+	}))
+	defer srv.Close()
+	c := New(srv.URL, srv.Client())
+	for _, id := range []string{"", "abc", "12a", "-5", "1.5", "0", "99999999999999999999", "１２"} {
+		if _, err := c.AnimeByMALID(context.Background(), id); !errors.Is(err, provider.ErrNotFound) {
+			t.Errorf("%q: err = %v", id, err)
+		}
+	}
+	if hits != 0 {
+		t.Fatalf("%d requests made", hits)
+	}
+}
