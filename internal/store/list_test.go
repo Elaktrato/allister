@@ -215,3 +215,62 @@ func TestCounts(t *testing.T) {
 		t.Fatalf("%v %v", m, err)
 	}
 }
+
+func zoned(zone *time.Location, y int, m time.Month, d int) *time.Time {
+	t := time.Date(y, m, d, 0, 0, 0, 0, zone)
+	return &t
+}
+
+func TestDatesStoredByCalendarDayAnyZone(t *testing.T) {
+	s := newStore(t)
+	ctx := context.Background()
+	jst, pst := time.FixedZone("JST", 9*3600), time.FixedZone("PST", -8*3600)
+	id := mustSave(t, s, sample(provider.AniList, "1", nil))
+	if err := s.UpsertListEntry(ctx, ListEntry{AnimeID: id, Status: Completed,
+		StartedOn: zoned(jst, 2024, 5, 1), FinishedOn: zoned(pst, 2024, 5, 2)}); err != nil {
+		t.Fatal(err)
+	}
+	e, _ := s.GetListEntry(ctx, id)
+	if e.StartedOn.Format(dateLayout) != "2024-05-01" || e.FinishedOn.Format(dateLayout) != "2024-05-02" ||
+		!e.StartedOn.Equal(*day(2024, 5, 1)) || e.StartedOn.Location() != time.UTC {
+		t.Fatalf("%v %v", e.StartedOn, e.FinishedOn)
+	}
+}
+
+func TestFinishSameCalendarDayMixedZonesAccepted(t *testing.T) {
+	s := newStore(t)
+	id := mustSave(t, s, sample(provider.AniList, "1", nil))
+	jst, pst := time.FixedZone("JST", 9*3600), time.FixedZone("PST", -8*3600)
+	err := s.UpsertListEntry(context.Background(), ListEntry{AnimeID: id, Status: Completed,
+		StartedOn: day(2024, 5, 1), FinishedOn: zoned(jst, 2024, 5, 1)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = s.UpsertListEntry(context.Background(), ListEntry{AnimeID: id, Status: Completed,
+		StartedOn: zoned(jst, 2024, 5, 1), FinishedOn: zoned(pst, 2024, 5, 1)})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestFinishOneDayBeforeStartMixedZonesRejected(t *testing.T) {
+	s := newStore(t)
+	id := mustSave(t, s, sample(provider.AniList, "1", nil))
+	jst, pst := time.FixedZone("JST", 9*3600), time.FixedZone("PST", -8*3600)
+	err := s.UpsertListEntry(context.Background(), ListEntry{AnimeID: id, Status: Completed,
+		StartedOn: zoned(pst, 2024, 5, 2), FinishedOn: zoned(jst, 2024, 5, 1)})
+	if !errors.Is(err, ErrInvalid) {
+		t.Fatal(err)
+	}
+}
+
+func TestAnimeDatesStoredByCalendarDayAnyZone(t *testing.T) {
+	s := newStore(t)
+	a := sample(provider.AniList, "1", nil)
+	a.StartDate = zoned(time.FixedZone("JST", 9*3600), 2020, 4, 5)
+	mustSave(t, s, a)
+	got, _ := s.FindBySource(context.Background(), provider.AniList, "1")
+	if got.StartDate.Format(dateLayout) != "2020-04-05" {
+		t.Fatal(got.StartDate)
+	}
+}

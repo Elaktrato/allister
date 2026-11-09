@@ -104,7 +104,7 @@ func fmtDate(t *time.Time) any {
 	if t == nil {
 		return nil
 	}
-	return t.UTC().Format(dateLayout)
+	return t.Format(dateLayout) // calendar day in the input's own zone
 }
 
 func parseDate(ns sql.NullString) *time.Time {
