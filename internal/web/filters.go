@@ -7,9 +7,10 @@ package web
 // "..b" or one value, with f.<field>.from / f.<field>.to as the form's
 // aliases; text or url: a substring), genre and tag (repeatable, with
 // genre_mode / tag_mode any|all, only when the kind enables them as
-// filterable), rmin / rmax (scores 0..10), unrated=1, zero=1, unmatched=1,
-// partial=1, sort (updated, title, rating, progress or a Sortable field key)
-// with dir asc|desc. kind, status and page belong to parseListQuery.
+// filterable), progress (not_started, in_progress or finished: the state of
+// the item's active progress tracks), rmin / rmax (scores 0..10), unrated=1,
+// zero=1, unmatched=1, partial=1, sort (updated, title, rating, progress or a
+// Sortable field key) with dir asc|desc. kind, status and page belong to parseListQuery.
 //
 // Every parameter is checked against the schema here and the valid ones are
 // handed to the library as typed values (bound there as SQL parameters).
@@ -51,6 +52,7 @@ type listFilters struct {
 	Fields             []fieldFilter // in schema order
 	Genres, Tags       []string
 	GenresAll, TagsAll bool
+	Progress           library.ProgressState // "" = any
 	RatingMin          *int
 	RatingMax          *int
 	Unrated, Zero      bool
@@ -88,6 +90,9 @@ func (f listFilters) values() url.Values {
 				v.Set(t.key+"_mode", "all")
 			}
 		}
+	}
+	if f.Progress != "" {
+		v.Set("progress", string(f.Progress))
 	}
 	if f.RatingMin != nil {
 		v.Set("rmin", strconv.Itoa(*f.RatingMin))
@@ -131,6 +136,7 @@ func (f listFilters) apply(k plugin.KindDef, q *library.Query) {
 		q.Filters = append(q.Filters, library.Filter{Key: ff.Key, Op: filterOp(fd, ff.Values), Values: ff.Values})
 	}
 	q.Genres, q.Tags, q.GenresAll, q.TagsAll = f.Genres, f.Tags, f.GenresAll, f.TagsAll
+	q.Progress = f.Progress
 	q.RatingMin, q.RatingMax, q.Unrated, q.RatingZero = f.RatingMin, f.RatingMax, f.Unrated, f.Zero
 	q.Unmatched, q.PartialSync = f.Unmatched, f.Partial
 	q.Sort = f.sort()
@@ -287,6 +293,13 @@ func parseFilters(k plugin.KindDef, q url.Values) (listFilters, []string) {
 		}
 		*t.vals = keep
 	}
+	switch vals := take("progress"); {
+	case len(vals) == 0:
+	case len(vals) == 1 && slices.Contains(progressStates, library.ProgressState(vals[0])):
+		f.Progress = library.ProgressState(vals[0])
+	default:
+		reject("progress")
+	}
 	f.RatingMin = parseScore(take("rmin"), "rmin", reject)
 	f.RatingMax = parseScore(take("rmax"), "rmax", reject)
 	if f.RatingMin != nil && f.RatingMax != nil && *f.RatingMin > *f.RatingMax {
@@ -318,6 +331,14 @@ func parseFilters(k plugin.KindDef, q url.Values) (listFilters, []string) {
 	}
 	sort.Strings(keys)
 	return f, keys
+}
+
+// progressStates are the values of the progress filter, in the bar's order.
+var progressStates = []library.ProgressState{library.ProgressNotStarted, library.ProgressInProgress, library.ProgressFinished}
+
+// progressStateLabels name the progress filter's choices.
+var progressStateLabels = map[library.ProgressState]string{
+	library.ProgressNotStarted: "Not started", library.ProgressInProgress: "In progress", library.ProgressFinished: "Finished",
 }
 
 // parseScore reads one 0..10 score parameter.
@@ -416,6 +437,7 @@ type filterBar struct {
 	Q             string
 	Fields        []filterField
 	Genres, Tags  *termInput
+	Progress      []option // the progress state select ("" = any)
 	RatingMin     string
 	RatingMax     string
 	Unrated, Zero bool
@@ -486,6 +508,12 @@ func buildFilterBar(m plugin.Manifest, k plugin.KindDef, lq listQuery, genres, t
 	}
 	if k.Tags.Enabled && k.Tags.Filterable {
 		b.Tags = termBar(k.Tags, "tag", f.Tags, f.TagsAll, tags)
+	}
+	if len(k.Progress.Eligible) > 0 {
+		b.Progress = []option{{Value: "", Label: "Any", Selected: f.Progress == ""}}
+		for _, st := range progressStates {
+			b.Progress = append(b.Progress, option{Value: string(st), Label: progressStateLabels[st], Selected: f.Progress == st})
+		}
 	}
 	b.Sorts = []option{{Value: "updated", Label: "Recently updated"}, {Value: "title", Label: "Title"}, {Value: "rating", Label: "Score"}}
 	if k.Progress.PrimaryKey != "" {

@@ -444,6 +444,39 @@ func TestFlagsUnmatchedAndPartial(t *testing.T) {
 	}
 }
 
+// The list filters by the state of the active progress tracks (the
+// library's ProgressState): not started, in progress, finished.
+func TestFilterByProgressState(t *testing.T) {
+	e := newFixtureEnv(t)
+	book := func(id, title string, pages float64) plugin.ItemData {
+		d := bookItem(id, title)
+		d.Fields["pages"] = plugin.FieldValue{Num: num(pages)}
+		return d
+	}
+	e.addFixture(t, "book", "book", book("1", "Unread", 100), library.Entry{Status: library.Planned})
+	e.addFixture(t, "book", "book", book("2", "Halfway", 100), library.Entry{Status: library.Active, Progress: map[string]float64{"pages": 50}})
+	e.addFixture(t, "book", "book", book("3", "Done", 100), library.Entry{Status: library.Completed, Progress: map[string]float64{"pages": 100}})
+	e.addFixture(t, "book", "book", book("4", "Percent Done", 100), library.Entry{Status: library.Completed, Progress: map[string]float64{"percent": 100}},
+		library.WithProgressKeys([]string{"percent"}))
+	b := e.listGet(t, "/book")
+	mustContain(t, b, `<select name="progress"`, `<option value="" selected>Any</option>`, `<option value="not_started">Not started</option>`,
+		`<option value="in_progress">In progress</option>`, `<option value="finished">Finished</option>`)
+	wantRows(t, "not started", e.listGet(t, "/book?progress=not_started"), "Unread")
+	wantRows(t, "in progress", e.listGet(t, "/book?progress=in_progress"), "Halfway")
+	b = e.listGet(t, "/book?progress=finished")
+	wantRows(t, "finished", b, "Done", "Percent Done")
+	mustContain(t, b, `<option value="finished" selected>Finished</option>`, "Clear filters")
+	// the state combines with the other filters
+	wantRows(t, "finished, text", e.listGet(t, "/book?progress=finished&q=percent"), "Percent Done")
+	for _, q := range []string{"progress=any", "progress=FINISHED", "progress=finished&progress=not_started"} {
+		b := e.listGet(t, "/book?"+q)
+		wantRows(t, q, b, "Unread", "Halfway", "Done", "Percent Done")
+		if !strings.Contains(noticeOf(b), "progress") {
+			t.Errorf("%s: notice %q", q, noticeOf(b))
+		}
+	}
+}
+
 func TestSortOptionsAndDirection(t *testing.T) {
 	e := newFixtureEnv(t)
 	add := func(id, title string, year float64, rating *int, ep float64) {
