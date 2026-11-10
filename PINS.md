@@ -6,7 +6,7 @@ Pinned on 2026-11-10.
 
 ## Images
 
-The digest is the multi-architecture index digest of the tag at the time of pinning (amd64 and arm64 both resolve through it). The tag stays in front of the digest for humans; Docker pulls by digest.
+The digest is the multi-architecture index digest of the tag at the time of pinning (amd64 and arm64 both resolve through it). The tag stays in front of the digest for humans; Docker pulls by digest. The distroless runtime image has no version tags upstream (the named tags are `latest`, `debug` and `nonroot`, besides commit hashes), so `latest` with a digest is its canonical pin; switching to `nonroot` would change the runtime user and the data volume's permissions, a deliberate decision not taken here.
 
 | Where | Image |
 |---|---|
