@@ -56,14 +56,26 @@ func (s *Service) Fonts() *FontStore { return s.fonts }
 // Config reads the stored settings as they are; Resolve applies the
 // fallbacks. A read error is logged and the value treated as unset.
 func (s *Service) Config(ctx context.Context) Config {
+	c, _ := s.StoredConfig(ctx)
+	return c
+}
+
+// StoredConfig is Config that also reports a read error (logged; the
+// values read so far are returned). An invalid stored palette is not an
+// error: it is ignored (logged).
+func (s *Service) StoredConfig(ctx context.Context) (Config, error) {
 	var c Config
 	if s.set == nil {
-		return c
+		return c, nil
 	}
+	var first error
 	get := func(key string) string {
 		v, _, err := s.set.Get(ctx, key)
 		if err != nil {
 			log.Printf("appearance: read %s: %v (using the default)", key, err)
+			if first == nil {
+				first = err
+			}
 		}
 		return v
 	}
@@ -76,21 +88,26 @@ func (s *Service) Config(ctx context.Context) Config {
 			c.Palette = p
 		}
 	}
-	return c
+	return c, first
 }
 
 // Uploads lists the uploaded fonts (none when uploads are off or the list
 // cannot be read, which is logged).
 func (s *Service) Uploads(ctx context.Context) []Font {
+	fs, _ := s.uploads(ctx)
+	return fs
+}
+
+func (s *Service) uploads(ctx context.Context) ([]Font, error) {
 	if s.fonts == nil {
-		return nil
+		return nil, nil
 	}
 	fs, err := s.fonts.List(ctx)
 	if err != nil {
 		log.Printf("appearance: list fonts: %v", err)
-		return nil
+		return nil, err
 	}
-	return fs
+	return fs, nil
 }
 
 // AddFont stores an uploaded font (see FontStore.Add).
@@ -126,16 +143,25 @@ func (s *Service) Resolved(ctx context.Context) Resolved {
 }
 
 // Stylesheet returns the CSS and its version (a hash of the content, so
-// the versioned URL changes exactly when the CSS does).
+// the versioned URL changes exactly when the CSS does). It is cached until
+// a change, unless a read failed.
 func (s *Service) Stylesheet(ctx context.Context) (css []byte, version string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.css == nil {
-		s.css = CSS(s.Config(ctx), s.Uploads(ctx))
-		sum := sha256.Sum256(s.css)
-		s.version = hex.EncodeToString(sum[:8])
+	if s.css != nil {
+		return s.css, s.version
 	}
-	return s.css, s.version
+	c, err1 := s.StoredConfig(ctx)
+	fonts, err2 := s.uploads(ctx)
+	css = CSS(c, fonts)
+	sum := sha256.Sum256(css)
+	version = hex.EncodeToString(sum[:8])
+	if err1 == nil && err2 == nil {
+		// kept only when everything was read: after a read error the
+		// defaults are served but the next request reads again
+		s.css, s.version = css, version
+	}
+	return css, version
 }
 
 // Invalidate drops the cached stylesheet (after any change, also one made

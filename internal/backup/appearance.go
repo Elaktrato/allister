@@ -198,7 +198,10 @@ func (rs *restorer) restoreAppearanceSettings(ctx context.Context, app *appearan
 	if m.Preset == "" && m.Palette == nil && m.Font == "" && m.FontScale == "" {
 		return nil
 	}
-	c := app.Config(ctx)
+	c, err := app.StoredConfig(ctx)
+	if err != nil {
+		return err // never overwrite what could not be read
+	}
 	if c.Preset != "" || c.Palette != nil || c.Font != "" || c.Scale != "" {
 		rs.note("Appearance settings kept: this installation has its own.")
 		return nil

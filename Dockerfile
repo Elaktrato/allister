@@ -25,6 +25,9 @@ COPY internal/appearance/tailwind-map.json ./internal/appearance/tailwind-map.js
 COPY internal/web/templates ./internal/web/templates
 COPY internal/web/static/input.css ./internal/web/static/input.css
 RUN tailwindcss -c tailwind.config.js -i internal/web/static/input.css -o app.css --minify
+# the built CSS maps colours to theme tokens and holds no fixed colour
+COPY internal/appearance/css-smoke.sh ./internal/appearance/css-smoke.sh
+RUN sh internal/appearance/css-smoke.sh app.css
 
 # golang:1.27.3-bookworm (keep in step with go.mod's toolchain and scripts/go.sh)
 FROM golang:1.27.3-bookworm@sha256:dc0963f32053e4bc451d24d87e3892d42d01021b61f093e98eb95c0352bb84b0 AS build

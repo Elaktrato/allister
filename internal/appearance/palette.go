@@ -50,7 +50,7 @@ var Tokens = []Token{
 	{"text-secondary", "Secondary text", "Text"},
 	{"text-muted", "Muted text", "Text"},
 	{"text-faint", "Faint text and icons", "Text"},
-	{"border", "Borders and inputs", "Borders"},
+	{"border", "Input and control borders", "Borders"},
 	{"border-muted", "Subtle dividers", "Borders"},
 	{"border-strong", "Strong borders", "Borders"},
 	{"accent", "Accent buttons", "Accent"},
@@ -91,7 +91,7 @@ type Pair struct {
 
 const (
 	reasonNonText = "non-text: icons, focus rings and similar UI parts need 3:1 (WCAG 1.4.11)"
-	reasonFaint   = "faint text marks decorative icons and de-emphasised labels that repeat information shown elsewhere; 3:1 like non-text"
+	reasonInput   = "the border of inputs and selects is their visible boundary: 3:1 against the field (WCAG 1.4.11)"
 	reasonHover   = "hover state only: the resting accent button meets 4.5:1 and keeps the same label"
 )
 
@@ -107,15 +107,20 @@ var Pairs = []Pair{
 	{"text-strong", "control", 4.5, ""},
 	{"text-secondary", "bg", 4.5, ""},
 	{"text-secondary", "surface", 4.5, ""},
+	{"text-secondary", "raised", 4.5, ""},
 	{"text-muted", "bg", 4.5, ""},
 	{"text-muted", "surface", 4.5, ""},
-	{"text-faint", "bg", 3, reasonFaint},
+	{"text-muted", "raised", 4.5, ""},
+	{"text-faint", "bg", 4.5, ""},
+	{"text-faint", "surface", 4.5, ""},
 	{"link", "bg", 4.5, ""},
 	{"link", "surface", 4.5, ""},
 	{"link", "raised", 4.5, ""},
 	{"accent-text", "accent", 4.5, ""},
 	{"accent-text", "accent-hover", 3, reasonHover},
 	{"accent-icon", "bg", 3, reasonNonText},
+	{"border", "bg", 3, reasonInput},
+	{"border", "surface", 3, reasonInput},
 	{"focus", "bg", 3, reasonNonText},
 	{"focus", "surface", 3, reasonNonText},
 	{"warning", "bg", 4.5, ""},
@@ -148,14 +153,42 @@ func label(token string) string {
 	return token
 }
 
-// Warnings lists the pairs of p below their minimum contrast. Missing or
-// invalid colours are skipped (ParsePalette refuses them anyway).
+// Shortfall is a pair whose exact colours stay below the pair's minimum
+// on purpose.
+type Shortfall struct{ Fg, Bg, FgColor, BgColor string }
+
+// Shortfalls are the pairs where Midnight, kept identical to the look
+// before theming, misses the minimum: the old slate-500 faint text (real
+// labels such as "disabled" and column hints, 4.24:1 on the page and
+// 3.75:1 on panels) and the old slate-700 input borders (1.95:1 and
+// 1.72:1). Every other preset meets the minimums; TestPresetsAreReadable
+// pins these ratios. Warnings stays quiet for exactly these colours, so
+// the default does not warn about itself, while any edit is checked.
+var Shortfalls = []Shortfall{
+	{"text-faint", "bg", "#64748b", "#020617"},
+	{"text-faint", "surface", "#64748b", "#0f172a"},
+	{"border", "bg", "#334155", "#020617"},
+	{"border", "surface", "#334155", "#0f172a"},
+}
+
+func knownShortfall(fg, bg, fgColor, bgColor string) bool {
+	for _, sf := range Shortfalls {
+		if sf.Fg == fg && sf.Bg == bg && sf.FgColor == fgColor && sf.BgColor == bgColor {
+			return true
+		}
+	}
+	return false
+}
+
+// Warnings lists the pairs of p below their minimum contrast, except the
+// known Shortfalls. Missing or invalid colours are skipped (ParsePalette
+// refuses them anyway).
 func Warnings(p Palette) []Warning {
 	var out []Warning
 	for _, pr := range Pairs {
 		fg, err1 := NormalizeHex(p[pr.Fg])
 		bg, err2 := NormalizeHex(p[pr.Bg])
-		if err1 != nil || err2 != nil {
+		if err1 != nil || err2 != nil || knownShortfall(pr.Fg, pr.Bg, fg, bg) {
 			continue
 		}
 		if r := Contrast(fg, bg); r < pr.Min {

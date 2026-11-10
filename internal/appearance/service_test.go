@@ -136,3 +136,26 @@ func TestServiceInvalidStoredValuesFallBack(t *testing.T) {
 		t.Error("nil store accepted a write")
 	}
 }
+
+// TestServiceDoesNotCacheAfterAReadError: a stylesheet rendered while the
+// settings could not be read (defaults) is served but not kept, so the
+// next request sees the real settings without waiting for a change.
+func TestServiceDoesNotCacheAfterAReadError(t *testing.T) {
+	ctx := context.Background()
+	st := &mapStore{m: map[string]string{KeyPreset: "paper"}, fail: errors.New("database is locked")}
+	s := NewService(st, nil)
+	css, v := s.Stylesheet(ctx)
+	if string(css) != string(CSS(Config{}, nil)) {
+		t.Fatal("read error did not serve the defaults")
+	}
+	st.fail = nil
+	css2, v2 := s.Stylesheet(ctx)
+	if v2 == v || !strings.Contains(string(css2), "color-scheme: light;") {
+		t.Fatal("the defaults rendered during a read error were cached")
+	}
+	// healthy reads are cached again
+	st.m[KeyPreset] = "forest"
+	if _, v3 := s.Stylesheet(ctx); v3 != v2 {
+		t.Error("a healthy stylesheet was not cached")
+	}
+}

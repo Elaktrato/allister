@@ -2,6 +2,7 @@ package appearance
 
 import (
 	"encoding/json"
+	"math"
 	"os"
 	"regexp"
 	"slices"
@@ -113,19 +114,40 @@ func TestDefaultPresetIsTodaysLook(t *testing.T) {
 	}
 }
 
+// midnightShortfalls are the pairs where the default preset, kept identical
+// to the look before theming, stays below the minimum: pinned to their exact
+// ratios so they can never silently get worse.
+var midnightShortfalls = map[[2]string]float64{
+	{"text-faint", "bg"}: 4.24, {"text-faint", "surface"}: 3.75,
+	{"border", "bg"}: 1.95, {"border", "surface"}: 1.72,
+}
+
 // TestPresetsAreReadable: every shipped preset meets each pair's minimum
 // contrast (4.5:1 for text, 3:1 for the documented non-text and hover
-// pairs), and the high contrast preset 7:1 (WCAG AAA) for every text pair.
+// pairs), the high contrast preset 7:1 (WCAG AAA) for every text pair, and
+// only Midnight has shortfalls: exactly the pinned ones, through Shortfalls.
 func TestPresetsAreReadable(t *testing.T) {
 	if len(Pairs) < 15 {
 		t.Fatalf("only %d checked pairs", len(Pairs))
 	}
+	has := map[[2]string]bool{}
 	for _, pr := range Pairs {
+		has[[2]string{pr.Fg, pr.Bg}] = true
 		if pr.Min != 4.5 && pr.Reason == "" {
 			t.Errorf("pair %s/%s: a minimum below 4.5 needs a documented reason", pr.Fg, pr.Bg)
 		}
 		if !slices.ContainsFunc(Tokens, func(tk Token) bool { return tk.Name == pr.Fg }) || !slices.ContainsFunc(Tokens, func(tk Token) bool { return tk.Name == pr.Bg }) {
 			t.Errorf("pair %s/%s names an unknown token", pr.Fg, pr.Bg)
+		}
+	}
+	for _, want := range [][2]string{{"text-faint", "bg"}, {"text-faint", "surface"}, {"text-muted", "raised"}, {"text-secondary", "raised"}, {"border", "bg"}, {"border", "surface"}} {
+		if !has[want] {
+			t.Errorf("pair %s/%s is not checked", want[0], want[1])
+		}
+	}
+	for _, pr := range Pairs {
+		if pr.Fg == "text-faint" && pr.Min != 4.5 {
+			t.Errorf("text-faint carries real labels: %s/%s needs 4.5:1, not %.1f", pr.Fg, pr.Bg, pr.Min)
 		}
 	}
 	for _, p := range Presets {
@@ -134,13 +156,35 @@ func TestPresetsAreReadable(t *testing.T) {
 			if p.ID == "contrast" && pr.Min == 4.5 {
 				min = 7
 			}
-			if c := Contrast(p.Colors[pr.Fg], p.Colors[pr.Bg]); c < min {
+			c := Contrast(p.Colors[pr.Fg], p.Colors[pr.Bg])
+			if want, ok := midnightShortfalls[[2]string{pr.Fg, pr.Bg}]; ok && p.ID == DefaultPreset {
+				if got := math.Round(c*100) / 100; got != want {
+					t.Errorf("midnight %s/%s = %.2f:1, pinned %.2f", pr.Fg, pr.Bg, got, want)
+				}
+				continue
+			}
+			if c < min {
 				t.Errorf("%s: %s %s on %s %s = %.2f:1, want >= %.1f", p.ID, pr.Fg, p.Colors[pr.Fg], pr.Bg, p.Colors[pr.Bg], c, min)
 			}
 		}
 		if w := Warnings(p.Colors); len(w) != 0 {
 			t.Errorf("%s: warnings %v", p.ID, w)
 		}
+	}
+	if len(Shortfalls) != len(midnightShortfalls) {
+		t.Errorf("%d shortfalls, %d pinned", len(Shortfalls), len(midnightShortfalls))
+	}
+	def, _ := PresetByID(DefaultPreset)
+	for _, sf := range Shortfalls {
+		if _, ok := midnightShortfalls[[2]string{sf.Fg, sf.Bg}]; !ok || def.Colors[sf.Fg] != sf.FgColor || def.Colors[sf.Bg] != sf.BgColor {
+			t.Errorf("shortfall %+v is not one of Midnight's pinned pairs", sf)
+		}
+	}
+	// a palette that changes one colour of a shortfall pair is warned
+	m := full()
+	m["text-faint"] = "#5a6578"
+	if !slices.ContainsFunc(Warnings(m), func(w Warning) bool { return w.Fg == "text-faint" && w.Bg == "bg" }) {
+		t.Error("an edited faint colour below 4.5:1 is not warned")
 	}
 }
 

@@ -565,3 +565,24 @@ func TestLicencesShipWithTheImage(t *testing.T) {
 		}
 	}
 }
+
+// TestDockerfileSmokeChecksTheBuiltCSS: the css stage runs
+// internal/appearance/css-smoke.sh on the built app.css, so a Tailwind
+// config that stops mapping colours to theme tokens fails the build.
+func TestDockerfileSmokeChecksTheBuiltCSS(t *testing.T) {
+	lines, _ := logicalLines(readRoot(t, "Dockerfile"))
+	copied, ran, built := false, false, -1
+	for i, l := range lines {
+		switch {
+		case strings.HasPrefix(l, "COPY internal/appearance/css-smoke.sh "):
+			copied = true
+		case strings.HasPrefix(l, "RUN tailwindcss "):
+			built = i
+		case strings.HasPrefix(l, "RUN sh ") && strings.Contains(l, "css-smoke.sh app.css"):
+			ran = built >= 0 && i > built
+		}
+	}
+	if !copied || !ran {
+		t.Errorf("the css stage does not copy and run css-smoke.sh on app.css after building it (copied %v, ran %v)", copied, ran)
+	}
+}
