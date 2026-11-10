@@ -301,11 +301,11 @@ type execer interface {
 func reconcile(ctx context.Context, x execer) error {
 	_, err := x.ExecContext(ctx, `UPDATE imports SET state=?, finished_at=`+nowSQL+`,
 		note = 'Stopped: ' || COALESCE((SELECT NULLIF(j.last_error, '') FROM jobs j
-			WHERE j.kind = ? AND json_extract(j.payload_json, '$.import_id') = imports.id
+			WHERE j.kind = ? AND CASE WHEN json_valid(j.payload_json) THEN json_extract(j.payload_json, '$.import_id') END = imports.id
 			ORDER BY j.id DESC LIMIT 1), 'the import job is no longer queued')
 		WHERE state IN ('pending','running') AND NOT EXISTS (SELECT 1 FROM jobs j
 			WHERE j.kind = ? AND j.state IN ('pending','running')
-			AND json_extract(j.payload_json, '$.import_id') = imports.id)`, stateFailed, KindRun, KindRun)
+			AND CASE WHEN json_valid(j.payload_json) THEN json_extract(j.payload_json, '$.import_id') END = imports.id)`, stateFailed, KindRun, KindRun)
 	if err != nil {
 		return fmt.Errorf("reconcile imports: %w", err)
 	}

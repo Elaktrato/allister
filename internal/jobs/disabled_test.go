@@ -165,3 +165,41 @@ func TestGatedClaimIsAtomicAcrossWorkers(t *testing.T) {
 		t.Fatalf("ran %d done %d pending %d, want %d each", count.Load(), done, pending, total)
 	}
 }
+
+// TestGateToleratesMalformedPayload: one pending row whose payload is not
+// JSON (written by hand or by an old bug) must not stop the queue: with and
+// without a disabled plugin the other jobs still run, a gated job still
+// waits, and the malformed row fails on its own (here as an unknown kind).
+func TestGateToleratesMalformedPayload(t *testing.T) {
+	d := openDB(t)
+	clk := newClock()
+	g := &gate{}
+	q := testQueue(t, d, clk, WithPluginGate(g.allow))
+	var ran []string
+	q.Register("k", func(ctx context.Context, p json.RawMessage) error {
+		var v pl
+		json.Unmarshal(p, &v)
+		ran = append(ran, fmt.Sprintf("%s/%d", v.PluginID, v.N))
+		return nil
+	})
+	res, err := d.Exec(`INSERT INTO jobs(kind, payload_json, run_after) VALUES ('legacy', 'not json {', ?)`, q.stamp(clk.Now()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	bad, _ := res.LastInsertId()
+	gated := enqueue(t, q, "k", pl{PluginID: "anime", N: 1})
+	free := enqueue(t, q, "k", pl{PluginID: "book", N: 2})
+	g.set("anime", true)
+	for step(t, q) {
+	}
+	if fmt.Sprint(ran) != "[book/2]" {
+		t.Fatalf("ran %v", ran)
+	}
+	if row(t, d, free).State != "done" || row(t, d, gated).State != "pending" || row(t, d, bad).State != "failed" {
+		t.Fatalf("states: free %+v gated %+v bad %+v", row(t, d, free), row(t, d, gated), row(t, d, bad))
+	}
+	g.set("anime", false)
+	if !step(t, q) || row(t, d, gated).State != "done" {
+		t.Fatalf("gated job did not resume: %+v", row(t, d, gated))
+	}
+}

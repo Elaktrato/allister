@@ -777,3 +777,25 @@ func TestDisablingThePluginPausesARunningImport(t *testing.T) {
 		t.Fatalf("%d items after resume", items)
 	}
 }
+
+// TestMalformedJobPayloadDoesNotBlockImports: an import_run job row whose
+// payload is not JSON must not break the check for an active import (which
+// matches jobs to imports by the payload's import_id).
+func TestMalformedJobPayloadDoesNotBlockImports(t *testing.T) {
+	e := newGenEnv(t)
+	e.bookImp.Result = plugin.ParseResult{Entries: []plugin.ParsedEntry{bookEntry("1", "One", plugin.Completed, 300)}}
+	if _, err := e.dbh.Exec(`INSERT INTO jobs(kind, payload_json) VALUES (?, 'not json {')`, KindRun); err != nil {
+		t.Fatal(err)
+	}
+	id := e.submit("book", "books-csv")
+	var active *ActiveError
+	if _, err := e.im.Submit(context.Background(), "book", "books-csv", "again.csv", strings.NewReader("x")); !errors.As(err, &active) {
+		t.Fatalf("second submit while one is pending: %v, want *ActiveError", err)
+	}
+	if err := e.run("book", id); err != nil {
+		t.Fatal(err)
+	}
+	if r := e.report(); r.State != "done" || r.Imported != 1 {
+		t.Fatalf("report: %+v", r)
+	}
+}

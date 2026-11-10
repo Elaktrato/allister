@@ -181,7 +181,7 @@ func (q *Queue) runOnce(ctx context.Context) (bool, error) {
 	args := []any{q.stamp(now)}
 	gateSQL := ""
 	if len(disabled) > 0 {
-		gateSQL = ` AND COALESCE(json_extract(payload_json, '$.plugin_id'), '') NOT IN (?` +
+		gateSQL = ` AND COALESCE(` + pluginIDSQL + `, '') NOT IN (?` +
 			strings.Repeat(",?", len(disabled)-1) + `)`
 		for _, id := range disabled {
 			args = append(args, id)
@@ -210,6 +210,11 @@ func (q *Queue) runOnce(ctx context.Context) (bool, error) {
 	return true, q.finish(id, kind, attempts, partials, herr, ctx.Err() != nil)
 }
 
+// pluginIDSQL is a job row's plugin_id, NULL when the payload is not valid
+// JSON: json_extract raises an error on malformed JSON, and one such row
+// must not stop the queue (it is claimed and fails on its own).
+const pluginIDSQL = `CASE WHEN json_valid(payload_json) THEN json_extract(payload_json, '$.plugin_id') END`
+
 // disabledPlugins returns the plugin ids of pending jobs that the gate refuses.
 // A plugin whose first job is enqueued between this read and the claim can be
 // claimed once; the gate is a pause for the common case, not a barrier.
@@ -217,9 +222,8 @@ func (q *Queue) disabledPlugins(ctx context.Context) ([]string, error) {
 	if q.gate == nil {
 		return nil, nil
 	}
-	rows, err := q.db.QueryContext(ctx, `SELECT DISTINCT json_extract(payload_json, '$.plugin_id') FROM jobs
-		WHERE state='pending' AND json_extract(payload_json, '$.plugin_id') IS NOT NULL
-		AND json_extract(payload_json, '$.plugin_id') <> ''`)
+	rows, err := q.db.QueryContext(ctx, `SELECT DISTINCT `+pluginIDSQL+` FROM jobs
+		WHERE state='pending' AND `+pluginIDSQL+` IS NOT NULL AND `+pluginIDSQL+` <> ''`)
 	if err != nil {
 		return nil, fmt.Errorf("read plugin ids: %w", err)
 	}
