@@ -15,7 +15,9 @@
 // The appearance member (see appearance.go) holds the appearance settings
 // and the list of uploaded fonts; it and the fonts/ entries are ignored by
 // a restore of an older Allister (an unknown member, unread entries), so
-// the format version stays 1.
+// the format version stays 1. The member may come before the header: it is
+// held (within Limits.MaxMemberBytes) and applied only after "format" and
+// "format_version" were accepted, so a refused archive stores nothing.
 //
 // A remote cover URL is not retained once a cover has been downloaded, so
 // every local item cover is included (not only uploaded ones). Person photos
@@ -487,6 +489,17 @@ func (rs *restorer) decode(ctx context.Context, dec *json.Decoder) error {
 		return nil
 	}
 	seen := map[string]bool{}
+	// pending holds appearance members read before the header was checked
+	var pending []json.RawMessage
+	flush := func() error {
+		for _, raw := range pending {
+			if err := rs.restoreAppearance(ctx, raw); err != nil {
+				return err
+			}
+		}
+		pending = nil
+		return nil
+	}
 	for dec.More() {
 		tok, err := dec.Token()
 		if err != nil {
@@ -530,6 +543,9 @@ func (rs *restorer) decode(ctx context.Context, dec *json.Decoder) error {
 			if err := header(); err != nil {
 				return err
 			}
+			if err := flush(); err != nil {
+				return err
+			}
 			if err := rs.items(ctx, dec); err != nil {
 				return err
 			}
@@ -538,8 +554,14 @@ func (rs *restorer) decode(ctx context.Context, dec *json.Decoder) error {
 			if err := rs.member(dec, &raw, seen["items"]); err != nil {
 				return err
 			}
-			if err := rs.restoreAppearance(ctx, raw); err != nil {
-				return err
+			// applied only once the header is known to be acceptable
+			// (before "items", or at the end of an archive without them),
+			// so a refused archive stores nothing
+			pending = append(pending, raw)
+			if seen["items"] {
+				if err := flush(); err != nil {
+					return err
+				}
 			}
 		default:
 			var skip json.RawMessage
@@ -552,6 +574,9 @@ func (rs *restorer) decode(ctx context.Context, dec *json.Decoder) error {
 		return rs.syntax(err)
 	}
 	if err := header(); err != nil {
+		return err
+	}
+	if err := flush(); err != nil {
 		return err
 	}
 	if _, err := dec.Token(); err != io.EOF {

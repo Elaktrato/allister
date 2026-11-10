@@ -1,8 +1,11 @@
 package web
 
 import (
+	"archive/zip"
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"net/url"
 	"strconv"
 	"strings"
@@ -55,3 +58,32 @@ func TestBackupCarriesAppearance(t *testing.T) {
 }
 
 func itoa64(n int64) string { return strconv.FormatInt(n, 10) }
+
+// TestBackupRefusedHeaderStoresNoAppearance: an archive refused for its
+// header shows the refusal and stores no font and no setting, even when
+// its appearance member comes before the header.
+func TestBackupRefusedHeaderStoresNoAppearance(t *testing.T) {
+	font := testWoff2(t)
+	sum := sha256.Sum256(font)
+	file := hex.EncodeToString(sum[:]) + ".woff2"
+	head := `{"appearance":{"preset":"rose","font_scale":"large","fonts":[{"id":1,"name":"Sneaky","file":"` + file + `","format":"woff2"}]},"format":"allister.backup","format_version":2,"items":[]}`
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+	for name, body := range map[string][]byte{"backup.json": []byte(head), "fonts/" + file: font} {
+		w, _ := zw.Create(name)
+		w.Write(body)
+	}
+	zw.Close()
+	e := newEnv(t)
+	rec := e.restoreUpload(t, buf.Bytes())
+	if rec.Code != 422 {
+		t.Fatalf("status %d", rec.Code)
+	}
+	mustContain(t, rec.Body.String(), `role="alert"`, "format version 2")
+	if fs := e.fonts(t); len(fs) != 0 {
+		t.Errorf("fonts stored: %v", fs)
+	}
+	if e.setting(t, appearance.KeyPreset) != "" || e.setting(t, appearance.KeyScale) != "" {
+		t.Error("settings stored")
+	}
+}

@@ -2,7 +2,10 @@ package backup
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -198,7 +201,9 @@ func TestBackupRestoreRevalidatesAppearance(t *testing.T) {
 			{"id": 6, "name": "Good", "file": sha('e') + ".woff2", "format": "woff2"},
 		},
 	}
-	head, _ := json.Marshal(map[string]any{"format": Format, "format_version": FormatVersion, "appearance": member, "items": []any{}})
+	mj, _ := json.Marshal(member)
+	// written by hand in archive order: format, version, appearance, items
+	head := []byte(`{"format":"` + Format + `","format_version":` + strconv.Itoa(FormatVersion) + `,"appearance":` + string(mj) + `,"items":[]}`)
 	data := zipOf(t,
 		entry{name: "backup.json", body: head},
 		entry{name: "fonts/" + sha('a') + ".woff2", body: []byte("<html><script>alert(1)</script></html>")},
@@ -271,5 +276,52 @@ func TestBackupWithoutAppearanceUnchanged(t *testing.T) {
 	rep := a.restore(e.archive())
 	if len(rep.Appearance) != 0 {
 		t.Errorf("notes for an archive without appearance: %v", rep.Appearance)
+	}
+}
+
+// TestBackupRestoreAppliesAppearanceOnlyAfterTheHeader: an archive refused
+// for its header (wrong format, a newer format version, or an appearance
+// member before the header in an otherwise refused file) stores nothing:
+// no font row, no font file, no setting.
+func TestBackupRestoreAppliesAppearanceOnlyAfterTheHeader(t *testing.T) {
+	good := fontBytes(t)
+	sum := sha256.Sum256(good)
+	file := hex.EncodeToString(sum[:]) + ".woff2"
+	look := `{"preset":"forest","palette":null,"font":"upload-1","font_scale":"large","fonts":[{"id":1,"name":"Sneaky","file":"` + file + `","format":"woff2"}]}`
+	for name, head := range map[string]string{
+		"appearance first, newer version": `{"appearance":` + look + `,"format":"` + Format + `","format_version":2,"items":[]}`,
+		"appearance first, wrong format":  `{"appearance":` + look + `,"format":"something.else","format_version":1,"items":[]}`,
+		"appearance first, no items, v2":  `{"appearance":` + look + `,"format":"` + Format + `","format_version":2}`,
+		"header first, newer version":     `{"format":"` + Format + `","format_version":2,"appearance":` + look + `,"items":[]}`,
+		"appearance first, no version":    `{"appearance":` + look + `,"format":"` + Format + `","items":[]}`,
+	} {
+		data := zipOf(t, entry{name: "backup.json", body: []byte(head)}, entry{name: "fonts/" + file, body: good})
+		b := newAppearanceEnv(t)
+		rep, err := Restore(bg, bytes.NewReader(data), int64(len(data)), Options{Library: b.lib, CoversDir: b.covers, Appearance: b.app})
+		var rej *RejectError
+		if !errors.As(err, &rej) {
+			t.Errorf("%s: not refused: %v %+v", name, err, rep)
+		}
+		if fs := b.fonts(); len(fs) != 0 {
+			t.Errorf("%s: fonts stored: %+v", name, fs)
+		}
+		if ents, _ := os.ReadDir(filepath.Join(b.root, "fonts")); len(ents) != 0 {
+			t.Errorf("%s: %d font files written", name, len(ents))
+		}
+		for _, k := range []string{appearance.KeyPreset, appearance.KeyFont, appearance.KeyScale, appearance.KeyPalette} {
+			if v := b.get(k); v != "" {
+				t.Errorf("%s: %s = %q", name, k, v)
+			}
+		}
+		if len(rep.Appearance) != 0 {
+			t.Errorf("%s: notes %v", name, rep.Appearance)
+		}
+	}
+	// a valid header after the appearance member still restores it
+	data := zipOf(t, entry{name: "backup.json", body: []byte(`{"appearance":` + look + `,"format":"` + Format + `","format_version":1,"items":[]}`)}, entry{name: "fonts/" + file, body: good})
+	b := newAppearanceEnv(t)
+	b.restore(data)
+	if fs := b.fonts(); len(fs) != 1 || b.get(appearance.KeyPreset) != "forest" {
+		t.Errorf("appearance before a valid header: %+v %q", fs, b.get(appearance.KeyPreset))
 	}
 }
