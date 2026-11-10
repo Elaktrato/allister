@@ -723,3 +723,57 @@ func TestImporterRefUsable(t *testing.T) {
 		}
 	}
 }
+
+// TestDisablingThePluginPausesARunningImport: the plugin is switched off
+// while its import runs (after the second lookup). The run stops after the
+// current row with jobs.ErrRetryLater (the queue keeps the job, its gate
+// holds it while the plugin is off), the import stays running and nothing
+// more is looked up or saved; enabling the plugin and running the job again
+// imports the remaining rows exactly once.
+func TestDisablingThePluginPausesARunningImport(t *testing.T) {
+	e := newGenEnv(t)
+	e.bookSrc.Fn = func(_ context.Context, _, _, v string, _ int) (plugin.ItemData, error) {
+		if v == "2" {
+			if err := e.reg.SetEnabled(context.Background(), "book", false); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return book(v, 300), nil
+	}
+	e.bookImp.Result = plugin.ParseResult{Entries: []plugin.ParsedEntry{
+		bookEntry("1", "One", plugin.Completed, 300), bookEntry("2", "Two", plugin.Active, 1),
+		bookEntry("3", "Three", plugin.Active, 2), bookEntry("4", "Four", plugin.Planned, 0)}}
+	id := e.submit("book", "books-csv")
+	err := e.run("book", id)
+	if !errors.Is(err, jobs.ErrRetryLater) {
+		t.Fatalf("run with the plugin switched off: %v, want ErrRetryLater", err)
+	}
+	if got := strings.Join(e.bookSrc.Looked(), ","); got != "1,2" {
+		t.Fatalf("looked up %s after the plugin was switched off", got)
+	}
+	if r := e.report(); r.State != "running" || r.Imported != 2 || r.Remaining != 2 || !r.Active {
+		t.Fatalf("paused report: %+v", r)
+	}
+	var items int
+	e.dbh.QueryRow(`SELECT count(*) FROM items`).Scan(&items)
+	if items != 2 {
+		t.Fatalf("%d items saved", items)
+	}
+
+	if err := e.reg.SetEnabled(context.Background(), "book", true); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.run("book", id); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(e.bookSrc.Looked(), ","); got != "1,2,3,4" {
+		t.Fatalf("looked up %s", got)
+	}
+	if r := e.report(); r.State != "done" || r.Imported != 4 || r.Remaining != 0 || r.Skipped != 0 || r.Failed != 0 {
+		t.Fatalf("final report: %+v", r)
+	}
+	e.dbh.QueryRow(`SELECT count(*) FROM items`).Scan(&items)
+	if items != 4 {
+		t.Fatalf("%d items after resume", items)
+	}
+}

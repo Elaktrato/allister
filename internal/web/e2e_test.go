@@ -16,7 +16,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/allister/allister/internal/importer"
 	"github.com/allister/allister/internal/jobs"
+	"github.com/allister/allister/internal/plugin"
+	"github.com/allister/allister/internal/plugin/plugintest"
 	"github.com/allister/allister/internal/plugins/anime/anilist"
 )
 
@@ -659,4 +662,70 @@ func (e *proofEnv) restoreAt(t *testing.T, target string, data []byte, name stri
 	rec := httptest.NewRecorder()
 	e.h.ServeHTTP(rec, req)
 	return rec
+}
+
+// switchOffSource is a book source that switches its plugin off when it is
+// asked to look up value (as if the user pressed Disable at that moment).
+type switchOffSource struct {
+	*plugintest.Catalog
+	value string
+	reg   **plugin.Registry
+}
+
+func (s switchOffSource) Lookup(ctx context.Context, kind, idType, value string) (plugin.ItemData, error) {
+	if value == s.value {
+		if err := (*s.reg).SetEnabled(ctx, "book", false); err != nil {
+			return plugin.ItemData{}, err
+		}
+	}
+	return s.Catalog.Lookup(ctx, kind, idType, value)
+}
+
+func TestDisablingAPluginPausesItsRunningImport(t *testing.T) {
+	var reg *plugin.Registry
+	e := newProofEnv(t, func(book, _ *plugintest.Plugin, bc, _ *plugintest.Catalog) {
+		book.Sources = map[string]plugin.Source{"books": switchOffSource{Catalog: bc, value: "9780000000002", reg: &reg}}
+	})
+	reg = e.reg
+	rec := e.uploadImport(t, "book/books-csv", "books.txt",
+		"9780000000002;Dune;completed;pages=600\n9780000000001;A Wizard of Earthsea;active;pages=10\n9999;Lost Book;planned\n")
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("upload: %d %s", rec.Code, rec.Body.String())
+	}
+	// the plugin goes off during the first row: that row finishes, then the
+	// import pauses with its job pending
+	e.drain(t)
+	if n := e.book.Calls(plugintest.OpLookup); n != 1 {
+		t.Fatalf("lookups after the plugin went off: %d", n)
+	}
+	var importJobs []jobRow
+	for _, j := range e.jobRows(t) {
+		if j.Kind == importer.KindRun {
+			importJobs = append(importJobs, j)
+		}
+	}
+	if len(importJobs) != 1 || importJobs[0].State != "pending" {
+		t.Fatalf("import job: %+v", importJobs)
+	}
+	b := e.page(t, "/settings/import")
+	mustContain(t, b, `data-state="running"`, `data-count="imported">1<`,
+		"This import is paused because the Books plugin is disabled. Enable it in Settings to continue, or cancel the import.")
+	if n := e.itemCount(t); n != 1 {
+		t.Fatalf("%d items saved while paused", n)
+	}
+	// enabled again: the remaining rows import once, nothing twice
+	if rec := e.do("POST", "/settings/plugins/book", url.Values{"enabled": {"1"}}, false); rec.Code != http.StatusSeeOther {
+		t.Fatalf("enable: %d", rec.Code)
+	}
+	e.drain(t)
+	if n := e.book.Calls(plugintest.OpLookup); n != 3 {
+		t.Fatalf("lookups after resume: %d", n)
+	}
+	b = e.page(t, "/settings/import")
+	mustContain(t, b, `data-state="done"`, `data-count="imported">2<`, `data-count="unmatched">1<`, `data-count="failed">0<`)
+	mustNotContain(t, b, "is paused because")
+	mustRows(t, e.page(t, "/book"), "Lost Book", "A Wizard of Earthsea", "Dune")
+	if n := e.itemCount(t); n != 3 {
+		t.Fatalf("%d items after resume", n)
+	}
 }

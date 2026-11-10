@@ -413,7 +413,8 @@ func (r *Runner) fail(ctx context.Context, id int64, note string) error {
 // the import in order, recording each outcome at once, so a re-run (after a
 // crash, shutdown or ErrRetryLater) continues with the unfinished rows. On
 // context cancellation it returns the context's error; when the source stays
-// unavailable it returns an error wrapping jobs.ErrRetryLater. An import of
+// unavailable, or its plugin is disabled while it runs (the import pauses
+// after the current row), it returns an error wrapping jobs.ErrRetryLater. An import of
 // an older version, or of an importer that is no longer installed, is failed
 // with a note.
 func (r *Runner) Handler() jobs.Handler {
@@ -458,6 +459,13 @@ func (r *Runner) Handler() jobs.Handler {
 				return err
 			} else if state != stateRunning {
 				return nil // cancelled
+			}
+			// Switched off mid-run: stop after the current row. The queue
+			// keeps the job pending (its plugin gate holds it while the
+			// plugin is off) and the import stays running, so enabling the
+			// plugin resumes it with the unfinished rows.
+			if !r.d.Registry.IsEnabled(pluginID) {
+				return fmt.Errorf("import %d: plugin %q is disabled, paused: %w", p.ImportID, pluginID, jobs.ErrRetryLater)
 			}
 			row, ok, err := r.nextPending(ctx, p.ImportID)
 			if err != nil {
