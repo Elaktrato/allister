@@ -2,6 +2,7 @@
 
 Date: 2026-11-09
 Status: draft for approval
+Historical: written before the plugin era; the global `title_lang` setting it describes became per-plugin (`plugin.<id>.title_lang`, migration 00011).
 
 ## Intent and why
 

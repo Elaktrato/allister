@@ -2,6 +2,7 @@
 
 Date: 2026-11-09
 Status: draft for approval
+Historical: written before the plugin era; the global `title_lang` setting it describes became per-plugin (`plugin.<id>.title_lang`, migration 00011).
 Builds on: `2026-11-09-allister-anime-design.md` (everything in it stays true unless this document says otherwise). The anime feature set that exists today (search, overview, add to list, paginated list, people pages, manual entries with cover upload, Yamtrack import, unmatched entries and "Match to AniList", title language, local covers, background sync) is the behaviour baseline.
 
 ## Intent and why
