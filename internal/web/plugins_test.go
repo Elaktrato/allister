@@ -229,8 +229,10 @@ func TestSettingsTogglePersistsAndIsCSRFProtected(t *testing.T) {
 	if rec := post(nil, url.Values{"enabled": {"1"}}); rec.Code != 303 || !e.reg.IsEnabled("anime") {
 		t.Fatalf("re-enable: %d", rec.Code)
 	}
-	if rec := e.do("GET", "/settings/plugins/anime", nil, false); rec.Code != 405 {
-		t.Fatalf("GET toggle: %d", rec.Code)
+	// GET of the same path is the plugin's settings page now: read-only, it
+	// never toggles
+	if rec := e.do("GET", "/settings/plugins/anime", nil, false); rec.Code != 200 || !e.reg.IsEnabled("anime") {
+		t.Fatalf("GET toggle: %d enabled=%v", rec.Code, e.reg.IsEnabled("anime"))
 	}
 }
 

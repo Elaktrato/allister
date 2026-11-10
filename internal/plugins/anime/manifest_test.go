@@ -29,6 +29,10 @@ func TestManifestMatchesBaseline(t *testing.T) {
 	if !reflect.DeepEqual(k.TitleLanguages, []string{"ja", "ja-latn", "en"}) {
 		t.Errorf("title languages = %v", k.TitleLanguages)
 	}
+	// the fallback order the core used to hard-code, now declared as data
+	if !reflect.DeepEqual(k.TitleFallback, []string{"ja", "ja-latn", "en"}) {
+		t.Errorf("title fallback = %v", k.TitleFallback)
+	}
 	if want := (plugin.StatusLabels{Planned: "Plan to watch", Active: "Watching", Paused: "Paused", Completed: "Completed", Dropped: "Dropped"}); k.Statuses != want {
 		t.Errorf("statuses = %+v", k.Statuses)
 	}

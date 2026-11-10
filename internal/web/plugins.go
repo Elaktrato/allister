@@ -241,6 +241,7 @@ type pluginRow struct {
 	Kinds, Sources, Importers, Exporters []string
 	Enabled                              bool
 	ListURL                              string // set only while enabled
+	SettingsURL                          string // the plugin's own settings page
 	// ExportLinks links the plugin's exporters, only while it is enabled.
 	ExportLinks []exportLink
 }
@@ -248,7 +249,7 @@ type pluginRow struct {
 func (s *server) pluginRows() []pluginRow {
 	var rows []pluginRow
 	for _, m := range s.deps.Registry.Manifests() {
-		row := pluginRow{ID: m.ID, Name: m.Name, Version: m.Version, Enabled: s.deps.Registry.IsEnabled(m.ID)}
+		row := pluginRow{ID: m.ID, Name: m.Name, Version: m.Version, Enabled: s.deps.Registry.IsEnabled(m.ID), SettingsURL: pluginSettingsURL(m.ID)}
 		for _, k := range m.Kinds {
 			row.Kinds = append(row.Kinds, k.Label)
 		}

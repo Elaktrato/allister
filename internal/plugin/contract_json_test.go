@@ -53,6 +53,7 @@ func TestManifestJSONRoundTrip(t *testing.T) {
 			},
 			Sections:       []plugin.SectionDef{{Type: plugin.SectionPeople, Label: "Cast", Field: "n", Roles: []string{"actor"}}},
 			TitleLanguages: []string{"en", "ja"},
+			TitleFallback:  []string{"ja", "en"},
 		}},
 		Sources:   []plugin.SourceInfo{{ID: "s", Name: "S", RequestsPerMinute: 30, ExternalIDTypes: []string{"s"}, SupportsLookup: true, LinkLabel: "View on S", URLPatterns: []string{"s.example/{id}"}}},
 		Importers: []plugin.ImporterInfo{{ID: "i", Name: "I", FileHint: "csv", Accept: []string{".csv"}, ExternalIDType: "s", ExternalIDLabel: "S id", ResolveVia: "s", FallbackTitleLang: "en", UnmatchedNote: "No S match for #{id}."}},
@@ -190,5 +191,20 @@ func TestManifestIconJSON(t *testing.T) {
 	b, _ = json.Marshal(plugin.Manifest{ID: "x"})
 	if strings.Contains(string(b), `"icon"`) {
 		t.Errorf("empty icon not omitted: %s", b)
+	}
+}
+
+// TestKindTitleFallbackJSON: the fallback order travels as "title_fallback"
+// and is omitted when empty.
+func TestKindTitleFallbackJSON(t *testing.T) {
+	k := plugin.KindDef{Key: "k", TitleLanguages: []string{"en", "ja"}, TitleFallback: []string{"ja", "en"}}
+	b, err := json.Marshal(k)
+	if err != nil || !strings.Contains(string(b), `"title_fallback":["ja","en"]`) {
+		t.Fatalf("json %s %v", b, err)
+	}
+	roundTrip(t, "kind with fallback", k)
+	k.TitleFallback = nil
+	if b, _ = json.Marshal(k); strings.Contains(string(b), "title_fallback") {
+		t.Fatalf("empty fallback not omitted: %s", b)
 	}
 }

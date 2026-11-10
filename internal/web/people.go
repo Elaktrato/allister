@@ -66,7 +66,7 @@ func (s *server) getPerson(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
-	lang := s.deps.Settings.TitleLang(ctx)
+	lang := s.titleLang(ctx, m)
 	v := personPageView{Name: p.Name, Photo: covers.Src(p.ImagePath), ExtURL: httpsURL(p.ExternalURL), Empty: emptyPersonMessage(m)}
 	if v.ExtURL != "" {
 		v.LinkLabel = "External page"
@@ -99,7 +99,7 @@ func (s *server) getPerson(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		seen[k] = true
-		av := appearanceView{Title: library.ResolveTitle(a.Titles, lang), Href: itemURL(m, a.Source, a.SourceID, a.Kind), Cover: covers.Src(a.CoverPath)}
+		av := appearanceView{Title: library.ResolveTitle(a.Titles, lang, titleFallback(m, m.Kinds[0], a.Kind)), Href: itemURL(m, a.Source, a.SourceID, a.Kind), Cover: covers.Src(a.CoverPath)}
 		if av.Title == "" {
 			av.Title = "(untitled)"
 		}

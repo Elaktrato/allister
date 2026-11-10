@@ -7,6 +7,7 @@
       <h2 class="font-semibold">{{.Name}} <span class="text-sm font-normal text-slate-400">v{{.Version}}</span></h2>
       <span class="text-sm {{if .Enabled}}text-emerald-400{{else}}text-slate-500{{end}}">{{if .Enabled}}enabled{{else}}disabled{{end}}</span>
       {{if .ListURL}}<a href="{{.ListURL}}" class="text-sm text-indigo-400 underline hover:text-indigo-300">Open</a>{{end}}
+      <a href="{{.SettingsURL}}" class="text-sm text-indigo-400 underline hover:text-indigo-300">Settings</a>
       {{range .ExportLinks}}<a href="{{.URL}}" class="text-sm text-indigo-400 underline hover:text-indigo-300" download>Export {{.Name}}</a>{{end}}
       <form method="post" action="/settings/plugins/{{.ID}}" class="ml-auto">
         <input type="hidden" name="enabled" value="{{if .Enabled}}0{{else}}1{{end}}">

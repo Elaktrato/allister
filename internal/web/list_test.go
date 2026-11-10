@@ -13,7 +13,6 @@ import (
 	"github.com/allister/allister/internal/library"
 	"github.com/allister/allister/internal/plugin"
 	"github.com/allister/allister/internal/plugins/anime/anilist"
-	"github.com/allister/allister/internal/settings"
 )
 
 // addEntry saves an anime with the given titles and a list entry.
@@ -100,13 +99,13 @@ func TestListShowsPreferredTitle(t *testing.T) {
 	e := newEnv(t)
 	e.addEntry(t, anilist.AniList, "77", nil, library.Active, 0,
 		anilist.Title{Lang: "ja", Text: "デスノート"}, anilist.Title{Lang: "en", Text: "Death Note EN"})
-	if err := e.set.Set(context.Background(), settings.KeyTitleLang, "en"); err != nil {
+	if err := e.set.SetTitleLang(context.Background(), "anime", "en"); err != nil {
 		t.Fatal(err)
 	}
 	b := e.get("/anime").Body.String()
 	mustContain(t, b, "Death Note EN", `href="/anime/anilist/77"`)
 	mustNotContain(t, b, "デスノート")
-	if err := e.set.Set(context.Background(), settings.KeyTitleLang, "ja"); err != nil {
+	if err := e.set.SetTitleLang(context.Background(), "anime", "ja"); err != nil {
 		t.Fatal(err)
 	}
 	mustContain(t, e.get("/anime").Body.String(), "デスノート")

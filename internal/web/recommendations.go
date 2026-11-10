@@ -185,7 +185,7 @@ func (s *server) getRecommendations(w http.ResponseWriter, r *http.Request, plug
 		}
 	}
 	if !v.Failed {
-		v.Cards = recommendationCards(m, k, recs, s.deps.Settings.TitleLang(r.Context()))
+		v.Cards = recommendationCards(m, k, recs, s.titleLang(r.Context(), m))
 	}
 	if isPartialRequest(r) {
 		s.renderPartial(w, "recommendations", "recommendations_block", v)
@@ -267,7 +267,7 @@ func recommendationCards(m plugin.Manifest, k plugin.KindDef, recs []plugin.Item
 		if rc.ID == "" || !hasSource(m, rc.Source) || !hasKind(m, kind) {
 			continue
 		}
-		out = append(out, linkCard{Title: orID(library.ResolveTitle(rc.Titles, lang), rc.ID),
+		out = append(out, linkCard{Title: orID(library.ResolveTitle(rc.Titles, lang, titleFallback(m, k, kind)), rc.ID),
 			Href: itemURL(m, rc.Source, rc.ID, kind), Cover: httpURL(rc.CoverURL)})
 	}
 	return out

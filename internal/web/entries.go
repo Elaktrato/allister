@@ -48,13 +48,17 @@ type entryTarget struct {
 func (s *server) loadEntry(w http.ResponseWriter, r *http.Request) (*entryTarget, bool) {
 	ref := entryOf(r)
 	ctx := r.Context()
-	row, err := s.deps.Library.Row(ctx, ref.ID, s.deps.Settings.TitleLang(ctx))
+	m, ok := s.deps.Registry.Manifest(ref.PluginID)
+	if !ok {
+		s.entryNotFound(w, r)
+		return nil, false
+	}
+	row, err := s.deps.Library.Row(ctx, ref.ID, s.titleLang(ctx, m))
 	if err != nil {
 		s.internalError(w, r, err)
 		return nil, false
 	}
-	m, ok := s.deps.Registry.Manifest(ref.PluginID)
-	if row == nil || !ok {
+	if row == nil {
 		s.entryNotFound(w, r)
 		return nil, false
 	}

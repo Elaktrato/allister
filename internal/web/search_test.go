@@ -113,7 +113,7 @@ func TestSearchEmptyQueryMakesNoRequest(t *testing.T) {
 func TestSearchShowsPreferredTitle(t *testing.T) {
 	fp := &fakeProvider{results: []anilist.SearchResult{sampleResult()}}
 	h, st := searchServer(t, fp)
-	if err := st.Set(context.Background(), settings.KeyTitleLang, "en"); err != nil {
+	if err := st.SetTitleLang(context.Background(), "anime", "en"); err != nil {
 		t.Fatal(err)
 	}
 	body := doSearch(h, "x", false).Body.String()

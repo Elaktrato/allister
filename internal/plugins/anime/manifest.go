@@ -63,6 +63,8 @@ func manifest() plugin.Manifest {
 				{Type: plugin.SectionLinks},
 			},
 			TitleLanguages: []string{"ja", "ja-latn", "en"},
+			// native, romaji, English: the order the core used to hard-code
+			TitleFallback: []string{"ja", "ja-latn", "en"},
 		}},
 		Sources: []plugin.SourceInfo{{
 			ID:                SourceID,

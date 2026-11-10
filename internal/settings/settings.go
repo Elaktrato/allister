@@ -8,13 +8,6 @@ import (
 	"log"
 )
 
-const (
-	// KeyTitleLang is the setting holding the preferred title language tag.
-	KeyTitleLang = "title_lang"
-	// DefaultTitleLang is the display language when none is stored.
-	DefaultTitleLang = "ja"
-)
-
 type Store struct{ db *sql.DB }
 
 func New(db *sql.DB) *Store { return &Store{db: db} }
@@ -39,21 +32,35 @@ func (s *Store) Set(ctx context.Context, key, value string) error {
 	return err
 }
 
-// TitleLang returns the preferred title language, defaulting to "ja" when
-// unset, empty or unreadable.
-func (s *Store) TitleLang(ctx context.Context) string {
-	v, ok, err := s.Get(ctx, KeyTitleLang)
-	if err != nil || !ok || v == "" {
-		return DefaultTitleLang
+// titleLangKey is the settings key holding a plugin's title language.
+func titleLangKey(id string) string { return "plugin." + id + ".title_lang" }
+
+// TitleLang returns the title language chosen for plugin id, or "" when none
+// is stored (or it is unreadable): the caller then uses the plugin's default.
+func (s *Store) TitleLang(ctx context.Context, id string) string {
+	v, ok, err := s.Get(ctx, titleLangKey(id))
+	if err != nil {
+		log.Printf("settings: read %s: %v (using the plugin default)", titleLangKey(id), err)
+		return ""
+	}
+	if !ok {
+		return ""
 	}
 	return v
 }
 
-// KnownLanguages returns the distinct language tags found in stored item
-// titles, sorted. The settings page uses it to offer languages beyond the
-// built-in ja, ja-latn and en.
-func (s *Store) KnownLanguages(ctx context.Context) ([]string, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT DISTINCT lang FROM item_titles ORDER BY lang`)
+// SetTitleLang stores the title language of plugin id. The caller checks it
+// against the languages the plugin offers.
+func (s *Store) SetTitleLang(ctx context.Context, id, lang string) error {
+	return s.Set(ctx, titleLangKey(id), lang)
+}
+
+// KnownLanguages returns the distinct language tags found in the stored
+// titles of plugin id's items, sorted. A plugin's settings page offers them
+// next to the languages its manifest declares.
+func (s *Store) KnownLanguages(ctx context.Context, pluginID string) ([]string, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT DISTINCT t.lang FROM item_titles t JOIN items i ON i.id = t.item_id
+		WHERE i.plugin_id = ? ORDER BY t.lang`, pluginID)
 	if err != nil {
 		return nil, err
 	}

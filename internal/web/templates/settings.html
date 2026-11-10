@@ -3,15 +3,17 @@
 <div class="md:flex md:items-start md:gap-8">
   {{settingsTabsMarker}}
   <div class="min-w-0 flex-1">
-    <h1 class="mb-6 text-2xl font-semibold">General</h1>
-    <form method="post" action="/settings" class="flex max-w-md flex-col gap-4">
-      <label for="title_lang" class="text-sm font-medium text-slate-300">Title language</label>
-      <select id="title_lang" name="title_lang" class="w-full rounded-md border border-slate-700 bg-slate-900 px-3 py-2 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500">
-        {{range .Options}}<option value="{{.Value}}"{{if eq .Value $.Selected}} selected{{end}}>{{.Label}}</option>
-        {{end}}
-      </select>
-      <button type="submit" class="self-start rounded-md bg-indigo-600 px-4 py-2 font-medium hover:bg-indigo-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400">Save</button>
-    </form>
+    <h1 class="mb-2 text-2xl font-semibold">General</h1>
+    <p class="mb-6 max-w-xl text-sm text-slate-400">The title language and the columns of the list table are set per plugin, on each plugin's settings page.</p>
+    {{if .Plugins}}
+    <ul class="flex max-w-md flex-col gap-1">
+      {{range .Plugins}}
+      <li><a href="{{.Href}}" class="group flex items-center gap-2.5 rounded-md px-3 py-2 text-sm text-slate-300 hover:bg-slate-800/60 hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"><span class="icon text-[1.125rem] text-slate-500 group-hover:text-slate-300" aria-hidden="true">tune</span><span>{{.Name}}</span></a></li>
+      {{end}}
+    </ul>
+    {{else}}
+    <p class="text-sm text-slate-400">No plugin is installed.</p>
+    {{end}}
   </div>
 </div>
 {{end}}

@@ -179,7 +179,12 @@ type TermDef struct {
 	Filterable bool   `json:"filterable,omitempty"`
 }
 
-// KindDef is one media kind of a plugin.
+// KindDef is one media kind of a plugin. TitleLanguages are the language
+// tags of its titles; the user picks one of them per plugin. TitleFallback is
+// the optional order of title languages the core tries when an item has no
+// title in the chosen language (each a member of TitleLanguages, listed
+// once); after it, or without it, the item's first stored title is shown.
+// It is omitted from JSON when empty.
 type KindDef struct {
 	Key            string       `json:"key"`
 	Label          string       `json:"label"`
@@ -191,6 +196,7 @@ type KindDef struct {
 	Progress       ProgressSpec `json:"progress"`
 	Sections       []SectionDef `json:"sections,omitempty"`
 	TitleLanguages []string     `json:"title_languages"`
+	TitleFallback  []string     `json:"title_fallback,omitempty"`
 }
 
 // SourceInfo describes a data source. URLPatterns look like

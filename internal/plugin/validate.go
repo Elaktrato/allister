@@ -195,6 +195,17 @@ func validateKind(p *problems, path string, k KindDef) {
 		}
 		seenLang[l] = true
 	}
+	seenFallback := map[string]bool{}
+	for i, l := range k.TitleFallback {
+		at := fmt.Sprintf("%s.title_fallback[%d]", path, i)
+		switch {
+		case !slices.Contains(k.TitleLanguages, l) || l == "":
+			p.add(at, "%q is not one of the title languages", l)
+		case seenFallback[l]:
+			p.add(at, "duplicate %q", l)
+		}
+		seenFallback[l] = true
+	}
 	for _, t := range []struct {
 		name string
 		def  TermDef

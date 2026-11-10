@@ -341,7 +341,7 @@ func (s *server) buildList(r *http.Request, m plugin.Manifest, lq listQuery) (li
 			anyEntries = anyEntries || n > 0
 		}
 	}
-	pg, err := s.deps.Library.List(ctx, q, s.deps.Settings.TitleLang(ctx))
+	pg, err := s.deps.Library.List(ctx, q, s.titleLang(ctx, m))
 	if err != nil {
 		return listView{}, err
 	}

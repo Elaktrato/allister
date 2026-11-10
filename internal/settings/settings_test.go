@@ -44,31 +44,47 @@ func TestGetSetRoundTrip(t *testing.T) {
 	}
 }
 
-func TestTitleLangDefault(t *testing.T) {
+// TestTitleLangPerPlugin: the title language is stored per plugin
+// (plugin.<id>.title_lang); nothing stored is "" (the web layer picks the
+// plugin's default), and plugins never see each other's choice.
+func TestTitleLangPerPlugin(t *testing.T) {
 	s, _ := newStore(t)
 	ctx := context.Background()
-	if got := s.TitleLang(ctx); got != "ja" {
-		t.Fatalf("got %q", got)
+	if got := s.TitleLang(ctx, "anime"); got != "" {
+		t.Fatalf("unset: got %q", got)
 	}
-	if err := s.Set(ctx, KeyTitleLang, "en"); err != nil {
+	if err := s.SetTitleLang(ctx, "anime", "en"); err != nil {
 		t.Fatal(err)
 	}
-	if got := s.TitleLang(ctx); got != "en" {
+	if v, ok, _ := s.Get(ctx, "plugin.anime.title_lang"); !ok || v != "en" {
+		t.Fatalf("stored %q %v", v, ok)
+	}
+	if got := s.TitleLang(ctx, "anime"); got != "en" {
 		t.Fatalf("got %q", got)
+	}
+	if got := s.TitleLang(ctx, "book"); got != "" {
+		t.Fatalf("book sees anime's language: %q", got)
+	}
+	if _, ok, _ := s.Get(ctx, "title_lang"); ok {
+		t.Fatal("the global key must not be written")
 	}
 }
 
-func TestKnownLanguages(t *testing.T) {
+func TestKnownLanguagesOfOnePlugin(t *testing.T) {
 	s, exec := newStore(t)
 	exec(`INSERT INTO items(id, plugin_id, kind, source, source_id) VALUES(1,'anime','anime','x','1')`)
 	exec(`INSERT INTO items(id, plugin_id, kind, source, source_id) VALUES(2,'anime','anime','x','2')`)
-	exec(`INSERT INTO item_titles(item_id, lang, text) VALUES(1,'fr','a'),(1,'en','b'),(2,'fr','c'),(2,'de','d')`)
-	got, err := s.KnownLanguages(context.Background())
+	exec(`INSERT INTO items(id, plugin_id, kind, source, source_id) VALUES(3,'book','book','x','3')`)
+	exec(`INSERT INTO item_titles(item_id, lang, text) VALUES(1,'fr','a'),(1,'en','b'),(2,'fr','c'),(2,'de','d'),(3,'es','e')`)
+	got, err := s.KnownLanguages(context.Background(), "anime")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if want := []string{"de", "en", "fr"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("got %v", got)
+	}
+	if got, _ := s.KnownLanguages(context.Background(), "book"); !reflect.DeepEqual(got, []string{"es"}) {
+		t.Fatalf("book: %v", got)
 	}
 }
 

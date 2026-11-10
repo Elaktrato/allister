@@ -47,8 +47,8 @@ const (
 	SortUpdated SortKind = "updated"
 	// SortTitle sorts by the lower-cased title: the title in the caller's
 	// language when the item has one, else its first stored title. (The
-	// resolved display title, with its ja/ja-latn/en fallbacks, is not available
-	// in SQL.) Lower-casing is ASCII-only.
+	// resolved display title, with the kind's declared fallbacks, is not
+	// available in SQL.) Lower-casing is ASCII-only.
 	SortTitle SortKind = "title"
 	// SortRating sorts by rating, unrated entries last.
 	SortRating SortKind = "rating"
@@ -179,13 +179,12 @@ const (
 	maxTermsListed  = 1000
 )
 
-var titleFallback = []string{"ja", "ja-latn", "en"}
-
-// ResolveTitle returns the title in the preferred language. If it is missing it
-// falls back to native (ja), romaji (ja-latn), English (en), then the first
-// title. It returns "" only for an empty slice.
-func ResolveTitle(ts []plugin.Title, preferred string) string {
-	if i := ResolveTitleIndex(ts, preferred); i >= 0 {
+// ResolveTitle returns the title in the preferred language. If it is missing
+// it tries the languages of fallback in order (the kind's TitleFallback,
+// plugin data), then takes the first stored title. It returns "" only for an
+// empty slice.
+func ResolveTitle(ts []plugin.Title, preferred string, fallback []string) string {
+	if i := ResolveTitleIndex(ts, preferred, fallback); i >= 0 {
 		return ts[i].Text
 	}
 	return ""
@@ -193,8 +192,8 @@ func ResolveTitle(ts []plugin.Title, preferred string) string {
 
 // ResolveTitleIndex returns the index in ts of the title ResolveTitle
 // chooses, or -1 for an empty slice.
-func ResolveTitleIndex(ts []plugin.Title, preferred string) int {
-	for _, lang := range append([]string{preferred}, titleFallback...) {
+func ResolveTitleIndex(ts []plugin.Title, preferred string, fallback []string) int {
+	for _, lang := range append([]string{preferred}, fallback...) {
 		for i, t := range ts {
 			if t.Lang == lang {
 				return i
@@ -205,6 +204,16 @@ func ResolveTitleIndex(ts []plugin.Title, preferred string) int {
 		return 0
 	}
 	return -1
+}
+
+// titleFallback is the TitleFallback of an item's kind (nil when the plugin
+// or kind is not installed).
+func (l *Library) titleFallback(pluginID, kind string) []string {
+	k, err := l.kindDef(pluginID, kind)
+	if err != nil {
+		return nil
+	}
+	return k.TitleFallback
 }
 
 // clause is one WHERE condition with its bound arguments. Only constants and
@@ -848,7 +857,7 @@ func (l *Library) loadRows(ctx context.Context, unmatched clause, whereSQL strin
 		return nil, err
 	}
 	for i := range out {
-		out[i].Title = ResolveTitle(out[i].Item.Titles, lang)
+		out[i].Title = ResolveTitle(out[i].Item.Titles, lang, l.titleFallback(out[i].Item.PluginID, out[i].Item.Kind))
 	}
 	return out, nil
 }

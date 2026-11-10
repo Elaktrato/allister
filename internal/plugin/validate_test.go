@@ -345,3 +345,30 @@ func TestValidateIcon(t *testing.T) {
 		}
 	}
 }
+
+// TestValidateTitleFallback: a kind's optional title fallback order lists
+// declared title languages, each once.
+func TestValidateTitleFallback(t *testing.T) {
+	for _, ok := range [][]string{nil, {"en"}, {"original", "en"}} {
+		m := tv()
+		m.Kinds[0].TitleFallback = ok
+		if err := plugin.Validate(m); err != nil {
+			t.Errorf("fallback %q refused: %v", ok, err)
+		}
+	}
+	for _, c := range []struct {
+		fallback []string
+		want     string
+	}{
+		{[]string{"de"}, `kinds[0].title_fallback[0]: "de" is not one of the title languages`},
+		{[]string{"en", "en"}, `kinds[0].title_fallback[1]: duplicate "en"`},
+		{[]string{""}, `kinds[0].title_fallback[0]: "" is not one of the title languages`},
+	} {
+		m := tv()
+		m.Kinds[0].TitleFallback = c.fallback
+		err := plugin.Validate(m)
+		if err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("fallback %q: err = %v, want %s", c.fallback, err, c.want)
+		}
+	}
+}
