@@ -58,11 +58,11 @@ func isRemote(p string) bool {
 // stores them and downloads the people's images. It ends with sync_state
 // done, or partial plus a wrapped ErrRetryLater when only images failed, or
 // partial plus the source's error when the credits could not be fetched
-// (wrapped with ErrRetryLater for rate limits and unavailability, a plain
-// error otherwise). A deleted item is a success; a payload whose plugin id
-// does not match the item fails at once (ErrPermanent). A manual item, or an
-// item whose plugin does not provide its source, has nothing to fetch: only
-// its remote cover is downloaded.
+// (wrapped with ErrRetryLater for rate limits and unavailability,
+// ErrPermanent for a bad answer, a plain error otherwise). A deleted item is
+// a success; a payload whose plugin id does not match the item fails at once
+// (ErrPermanent). A manual item, or an item whose plugin does not provide
+// its source, has nothing to fetch: only its remote cover is downloaded.
 func SyncItem(deps SyncDeps) Handler {
 	return func(ctx context.Context, raw json.RawMessage) error {
 		var p SyncPayload
@@ -120,6 +120,11 @@ func SyncItem(deps SyncDeps) Handler {
 				// Short source trouble: retry on the bounded partial path
 				// instead of burning attempts (the cause stays in the chain).
 				return fmt.Errorf("sync item %d: people: %w: %w", it.ID, err, ErrRetryLater)
+			}
+			if errors.Is(err, plugin.ErrBadResponse) {
+				// The source answered with unusable data: it will answer the
+				// same way again, so fail at once instead of retrying.
+				return fmt.Errorf("sync item %d: people: %w: %w", it.ID, err, ErrPermanent)
 			}
 			return fmt.Errorf("sync item %d: people: %w", it.ID, err)
 		}

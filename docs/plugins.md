@@ -206,7 +206,7 @@ Source calls return errors wrapping these sentinels:
 | `plugin.ErrBadResponse` | The source answered with data the core cannot use, and a retry would get the same answer. | 502 page. An import records the row as failed and moves on, without retrying it. |
 | `plugin.ErrBadInput` | (Importers only) the file is not in the format. | The upload is refused with the error's text. |
 
-Any other error from a source gives a 500 on the overview, an "unavailable" message on the search page, and a failed row in imports. `jobs.ErrRetryLater` and `jobs.ErrPermanent` belong to the core's job queue. Plugins never return them: the core's sync job and import runner wrap plugin errors with them (rate limits and outages become "retry later", and a job whose plugin id contradicts the stored item fails permanently).
+Any other error from a source gives a 500 on the overview, an "unavailable" message on the search page, and a failed row in imports. `jobs.ErrRetryLater` and `jobs.ErrPermanent` belong to the core's job queue. Plugins never return them: the core's sync job and import runner wrap plugin errors with them (rate limits and outages become "retry later"; a bad answer from People and a job whose plugin id contradicts the stored item fail permanently).
 
 ### Sanitising source text
 

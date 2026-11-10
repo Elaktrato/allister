@@ -20,7 +20,6 @@ State of the project when the work moved from Claude Code to another agent. `mai
 
 ## Known follow-ups (none blocking)
 
-- `sync_item` retries a People `ErrBadResponse` up to 5 times; wrap it in `ErrPermanent`.
 - AVIF detection on restore checks only the major brand (`mif1`/`miaf` files with `avif` as a compatible brand are dropped). Icon name test uses upstream's codepoint list as a proxy for the font's ligatures. Extractor in the icon test can be evaded by attribute order or data-driven names.
 - Match-to-source accepts numeric ids only; title sort ignores the fallback order.
 - Existing inline `hx-on::before-swap` attributes (6 templates) matter if a strict CSP is added.

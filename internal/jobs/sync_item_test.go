@@ -284,6 +284,23 @@ func TestSyncItemRateLimitUsesRetryLater(t *testing.T) {
 	}
 }
 
+// TestSyncItemPeopleBadResponseFailsPermanently: a source that answered
+// with unusable data will answer the same way again, so the job fails at
+// once (ErrPermanent, the cause in the chain) with the item left partial,
+// instead of burning attempts on retries.
+func TestSyncItemPeopleBadResponseFailsPermanently(t *testing.T) {
+	e := newSyncEnv(t)
+	id := e.save(t, "tvdata", e.srv.URL+"/ok/cover")
+	e.src.Errs = map[string]error{plugintest.OpPeople: plugin.ErrBadResponse}
+	err := e.run(id)
+	if !errors.Is(err, plugin.ErrBadResponse) || !errors.Is(err, ErrPermanent) {
+		t.Fatalf("err = %v", err)
+	}
+	if s := e.saved(t, id); s.SyncState != "partial" || !isLocal(s.CoverPath) {
+		t.Fatalf("%+v", s)
+	}
+}
+
 func TestSyncItemPeopleNotFoundIsDone(t *testing.T) {
 	e := newSyncEnv(t)
 	id := e.save(t, "tvdata", e.srv.URL+"/ok/cover")
