@@ -95,7 +95,7 @@ type server struct {
 
 // pageNames lists every page template (templates/<name>.html). Add a page by
 // dropping its file in templates/ and listing it here.
-var pageNames = []string{"settings", "settings_plugins_page", "settings_plugin", "search", "item", "list", "person", "manual_form", "details_form", "import", "error", "recommendations", "backup"}
+var pageNames = []string{"settings", "settings_appearance", "settings_plugins_page", "settings_plugin", "search", "item", "list", "person", "manual_form", "details_form", "import", "error", "recommendations", "backup"}
 
 // pagePartials lists extra template files a page needs (also rendered alone
 // for htmx requests).

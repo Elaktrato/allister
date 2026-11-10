@@ -4,6 +4,7 @@
 <nav aria-label="Settings sections" class="mb-6 md:mb-0 md:w-44 md:shrink-0">
   <ul class="flex flex-wrap gap-1 md:flex-col">
     <li>{{template "settings_tab" (tab "/settings" "General" "tune" .Current)}}</li>
+    <li>{{template "settings_tab" (tab "/settings/appearance" "Appearance" "palette" .Current)}}</li>
     <li>{{template "settings_tab" (tab "/settings/plugins" "Plugins" "extension" .Current)}}</li>
     {{if .Import}}<li>{{template "settings_tab" (tab "/settings/import" "Import" "upload_file" .Current)}}</li>{{end}}
     <li>{{template "settings_tab" (tab "/settings/backup" "Backup" "backup" .Current)}}</li>
