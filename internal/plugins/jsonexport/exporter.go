@@ -1,4 +1,4 @@
-package anime
+package jsonexport
 
 import (
 	"bytes"
@@ -11,16 +11,18 @@ import (
 	"github.com/allister/allister/internal/plugin"
 )
 
-const (
-	exportFormat  = "allister.anime.export"
-	exportVersion = 1
-)
+// exportVersion is the version of the export format.
+const exportVersion = 1
 
-// jsonExporter writes {"format":"allister.anime.export","version":1,"entries":[...]}.
-// Field order is fixed by the structs and map keys are sorted by encoding/json,
-// so the output is deterministic. It streams: the header, each entry and the
-// footer are separate writes.
-type jsonExporter struct{}
+// Exporter writes {"format":<name>,"version":1,"entries":[...]}. Field order
+// is fixed by the structs and map keys are sorted by encoding/json, so the
+// output is deterministic. It streams: the header, each entry and the footer
+// are separate writes.
+type Exporter struct{ format string }
+
+// New returns an exporter whose format field is name (for example
+// "allister.anime.export").
+func New(name string) plugin.Exporter { return Exporter{format: name} }
 
 type exportEntry struct {
 	Kind        string             `json:"kind"`
@@ -52,14 +54,14 @@ func encode(v any) ([]byte, error) {
 	return bytes.TrimRight(b.Bytes(), "\n"), nil
 }
 
-func (jsonExporter) Export(ctx context.Context, entries []plugin.ExportEntry, w io.Writer) error {
+func (e Exporter) Export(ctx context.Context, entries []plugin.ExportEntry, w io.Writer) error {
 	write := func(p string) error {
 		if _, err := io.WriteString(w, p); err != nil {
-			return fmt.Errorf("anime export: write: %w", err)
+			return fmt.Errorf("export: write: %w", err)
 		}
 		return nil
 	}
-	if err := write(fmt.Sprintf("{\"format\":%q,\"version\":%d,\"entries\":[", exportFormat, exportVersion)); err != nil {
+	if err := write(fmt.Sprintf("{\"format\":%q,\"version\":%d,\"entries\":[", e.format, exportVersion)); err != nil {
 		return err
 	}
 	for i, e := range entries {
@@ -81,7 +83,7 @@ func (jsonExporter) Export(ctx context.Context, entries []plugin.ExportEntry, w 
 		}
 		b, err := encode(ee)
 		if err != nil {
-			return fmt.Errorf("anime export: encode entry %d: %w", i, err)
+			return fmt.Errorf("export: encode entry %d: %w", i, err)
 		}
 		sep := "\n"
 		if i > 0 {

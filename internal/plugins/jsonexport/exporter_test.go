@@ -1,4 +1,4 @@
-package anime
+package jsonexport
 
 import (
 	"bytes"
@@ -14,11 +14,7 @@ import (
 
 func exporter(t *testing.T) plugin.Exporter {
 	t.Helper()
-	e := New(Options{}).Exporter("json")
-	if e == nil {
-		t.Fatal("no json exporter")
-	}
-	return e
+	return New("allister.test.export")
 }
 
 func intp(i int) *int { return &i }
@@ -69,7 +65,7 @@ func TestExporterRoundTripsJSON(t *testing.T) {
 	if err := json.Unmarshal(out, &doc); err != nil {
 		t.Fatalf("invalid JSON: %v\n%s", err, out)
 	}
-	if doc.Format != "allister.anime.export" || doc.Version != 1 || len(doc.Entries) != 2 {
+	if doc.Format != "allister.test.export" || doc.Version != 1 || len(doc.Entries) != 2 {
 		t.Fatalf("doc = %+v", doc)
 	}
 	e := doc.Entries[0]

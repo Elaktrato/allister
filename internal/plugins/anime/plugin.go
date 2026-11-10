@@ -9,6 +9,7 @@ import (
 
 	"github.com/allister/allister/internal/plugin"
 	"github.com/allister/allister/internal/plugins/anilist"
+	"github.com/allister/allister/internal/plugins/jsonexport"
 )
 
 // Options configures the plugin. The zero value talks to the real AniList.
@@ -62,7 +63,7 @@ func (p *animePlugin) Importer(id string) plugin.Importer {
 
 func (p *animePlugin) Exporter(id string) plugin.Exporter {
 	if id == ExporterID {
-		return jsonExporter{}
+		return jsonexport.New("allister.anime.export")
 	}
 	return nil
 }
