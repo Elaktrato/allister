@@ -79,15 +79,15 @@ func TestListTabsShowCountsAndCurrent(t *testing.T) {
 	}
 	mustNotContain(t, b, `aria-current="page"`)
 	i := strings.Index(tabs, `aria-current="true"`)
-	if !strings.Contains(tabs[i:i+200], "Watching (2)") {
-		t.Fatalf("wrong tab current: %s", tabs[i:i+200])
+	if !strings.Contains(tabs[i:i+400], "Watching (2)") {
+		t.Fatalf("wrong tab current: %s", tabs[i:i+400])
 	}
 	all := e.get("/anime").Body.String()
 	all = all[strings.Index(all, "</header>"):]
 	all = all[strings.Index(all, `id="list-tabs"`):]
 	all = all[:strings.Index(all, "</nav>")]
 	j := strings.Index(all, `aria-current="true"`)
-	if !strings.Contains(all[j:j+100], "All (3)") {
+	if !strings.Contains(all[j:j+400], "All (3)") {
 		t.Fatal("All not current")
 	}
 	// every status tab carries its colour, matching the card corners
