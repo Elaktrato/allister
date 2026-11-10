@@ -4,6 +4,7 @@ package settings
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"log"
 )
@@ -74,6 +75,50 @@ func (s *Store) KnownLanguages(ctx context.Context, pluginID string) ([]string, 
 		out = append(out, l)
 	}
 	return out, rows.Err()
+}
+
+// columnsKey is the settings key holding the visible table columns of a
+// plugin's kind.
+func columnsKey(id, kind string) string { return "plugin." + id + ".columns." + kind }
+
+// Columns returns the visible table columns chosen for kind of plugin id, in
+// order (stored as a JSON list of column keys). ok is false when nothing is
+// stored or the value is not a JSON list of strings: the kind's defaults
+// apply. The caller checks the keys against the columns the kind offers.
+func (s *Store) Columns(ctx context.Context, id, kind string) (keys []string, ok bool) {
+	v, found, err := s.Get(ctx, columnsKey(id, kind))
+	if err != nil {
+		log.Printf("settings: read %s: %v (using the defaults)", columnsKey(id, kind), err)
+		return nil, false
+	}
+	if !found {
+		return nil, false
+	}
+	if err := json.Unmarshal([]byte(v), &keys); err != nil || keys == nil {
+		log.Printf("settings: %s is not a list of column keys (using the defaults)", columnsKey(id, kind))
+		return nil, false
+	}
+	return keys, true
+}
+
+// SetColumns stores the visible table columns of kind of plugin id (an empty
+// list shows the title only). The caller has checked the keys.
+func (s *Store) SetColumns(ctx context.Context, id, kind string, keys []string) error {
+	if keys == nil {
+		keys = []string{}
+	}
+	b, err := json.Marshal(keys)
+	if err != nil {
+		return err
+	}
+	return s.Set(ctx, columnsKey(id, kind), string(b))
+}
+
+// ResetColumns removes the column choice of kind of plugin id (back to the
+// kind's defaults).
+func (s *Store) ResetColumns(ctx context.Context, id, kind string) error {
+	_, err := s.db.ExecContext(ctx, `DELETE FROM settings WHERE key = ?`, columnsKey(id, kind))
+	return err
 }
 
 // enabledKey is the settings key holding a plugin's enabled flag.

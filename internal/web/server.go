@@ -145,6 +145,7 @@ func newServer(deps Deps, now func() time.Time) (*server, http.Handler) {
 	mux.HandleFunc("POST /settings/plugins/{id}", s.postPlugin)
 	mux.HandleFunc("GET /settings/plugins/{id}", s.getPluginSettings)
 	mux.HandleFunc("POST /settings/plugins/{id}/title-language", s.postTitleLanguage)
+	mux.HandleFunc("POST /settings/plugins/{id}/columns", s.postColumns)
 	mux.HandleFunc("GET /settings/backup", s.getBackup)
 	mux.HandleFunc("GET /settings/backup/download", s.getBackupDownload)
 	mux.HandleFunc("POST /settings/backup/restore", s.postBackupRestore)

@@ -140,3 +140,52 @@ func TestEnabledStoreReportsDBErrors(t *testing.T) {
 }
 
 var _ plugin.EnabledStore = (*Store)(nil)
+
+// TestColumnsRoundTrip: the visible columns of a plugin's kind are stored as
+// a JSON list under plugin.<id>.columns.<kind>; nothing stored (or an
+// unreadable value) means the kind's defaults; Reset removes the choice;
+// plugins and kinds never share it.
+func TestColumnsRoundTrip(t *testing.T) {
+	s, exec := newStore(t)
+	ctx := context.Background()
+	if got, ok := s.Columns(ctx, "anime", "anime"); ok || got != nil {
+		t.Fatalf("unset: %v %v", got, ok)
+	}
+	if err := s.SetColumns(ctx, "anime", "anime", []string{"studio", "rating"}); err != nil {
+		t.Fatal(err)
+	}
+	if v, ok, _ := s.Get(ctx, "plugin.anime.columns.anime"); !ok || v != `["studio","rating"]` {
+		t.Fatalf("stored %q %v", v, ok)
+	}
+	if got, ok := s.Columns(ctx, "anime", "anime"); !ok || !reflect.DeepEqual(got, []string{"studio", "rating"}) {
+		t.Fatalf("got %v %v", got, ok)
+	}
+	for _, other := range [][2]string{{"book", "book"}, {"anime", "other"}} {
+		if got, ok := s.Columns(ctx, other[0], other[1]); ok {
+			t.Fatalf("%v sees anime's choice: %v", other, got)
+		}
+	}
+	// an empty choice (title only) is a choice
+	if err := s.SetColumns(ctx, "book", "book", []string{}); err != nil {
+		t.Fatal(err)
+	}
+	if got, ok := s.Columns(ctx, "book", "book"); !ok || got == nil || len(got) != 0 {
+		t.Fatalf("empty: %v %v", got, ok)
+	}
+	if err := s.ResetColumns(ctx, "anime", "anime"); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := s.Columns(ctx, "anime", "anime"); ok {
+		t.Fatal("reset kept the choice")
+	}
+	if _, ok := s.Columns(ctx, "book", "book"); !ok {
+		t.Fatal("reset of anime removed book's choice")
+	}
+	// garbage is ignored (the defaults apply)
+	for _, bad := range []string{`not json`, `{"a":1}`, `[1,2]`, `null`} {
+		exec(`INSERT INTO settings(key, value) VALUES('plugin.tv.columns.show', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`, bad)
+		if got, ok := s.Columns(ctx, "tv", "show"); ok {
+			t.Errorf("%s: %v %v", bad, got, ok)
+		}
+	}
+}

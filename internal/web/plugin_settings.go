@@ -1,7 +1,9 @@
 package web
 
 // A plugin's own settings page, GET /settings/plugins/{id}: the title
-// language of the plugin's items (POST /settings/plugins/{id}/title-language).
+// language of the plugin's items (POST /settings/plugins/{id}/title-language)
+// and, per kind, the columns of its list table (POST
+// /settings/plugins/{id}/columns).
 // Every choice is validated against what the plugin's manifest declares; the
 // page answers for every installed plugin (enabled or not, like its Enable
 // button), unknown ids get the 404 page and are never echoed.
@@ -12,6 +14,7 @@ import (
 	"net/http"
 	"net/url"
 	"slices"
+	"strings"
 
 	"github.com/allister/allister/internal/library"
 	"github.com/allister/allister/internal/plugin"
@@ -110,6 +113,7 @@ type pluginSettingsView struct {
 	LangAction  string
 	LangOptions []langOption
 	Lang        string
+	Columns     []columnsForm
 }
 
 func (s *server) getPluginSettings(w http.ResponseWriter, r *http.Request) {
@@ -123,7 +127,8 @@ func (s *server) getPluginSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	v := pluginSettingsView{ID: m.ID, Name: m.Name, Enabled: s.deps.Registry.IsEnabled(m.ID),
-		LangAction: pluginSettingsURL(m.ID) + "/title-language", LangOptions: opts, Lang: s.titleLang(r.Context(), m)}
+		LangAction: pluginSettingsURL(m.ID) + "/title-language", LangOptions: opts, Lang: s.titleLang(r.Context(), m),
+		Columns: s.columnsForms(r.Context(), m)}
 	s.render(w, r, "settings_plugin", v)
 }
 
@@ -154,4 +159,139 @@ func (s *server) postTitleLanguage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	http.Redirect(w, r, pluginSettingsURL(m.ID), http.StatusSeeOther)
+}
+
+// columnsForm is the column choice of one kind on the settings page.
+type columnsForm struct {
+	Kind, Heading, Action, Anchor string
+	Rows                          []columnRow
+	Custom                        bool // a choice is stored (Reset applies)
+}
+
+// columnRow is one offered column of a columnsForm: the shown ones first,
+// in their order, then the others in the kind's order.
+type columnRow struct {
+	Key, Label, Width string
+	Shown, Up, Down   bool
+}
+
+// columnWidths describe the screen width a column needs.
+var columnWidths = map[string]string{"sm": "from 640 px wide", "md": "from 768 px wide", "lg": "from 1024 px wide"}
+
+// columnsForms builds the column forms of every kind of m.
+func (s *server) columnsForms(ctx context.Context, m plugin.Manifest) []columnsForm {
+	var out []columnsForm
+	for _, k := range m.Kinds {
+		offered := kindColumns(k)
+		shown := s.visibleColumns(ctx, m, k)
+		_, custom := s.deps.Settings.Columns(ctx, m.ID, k.Key)
+		f := columnsForm{Kind: k.Key, Action: pluginSettingsURL(m.ID) + "/columns", Anchor: "columns-" + k.Key, Custom: custom}
+		if len(m.Kinds) > 1 {
+			f.Heading = k.LabelPlural
+		}
+		row := func(c listColumn, on bool) columnRow {
+			return columnRow{Key: c.Key, Label: c.Label, Width: columnWidths[c.Hide], Shown: on}
+		}
+		for i, c := range shown {
+			r := row(c, true)
+			r.Up, r.Down = i > 0, i < len(shown)-1
+			f.Rows = append(f.Rows, r)
+		}
+		for _, c := range offered {
+			if !slices.ContainsFunc(shown, func(v listColumn) bool { return v.Key == c.Key }) {
+				f.Rows = append(f.Rows, row(c, false))
+			}
+		}
+		out = append(out, f)
+	}
+	return out
+}
+
+// postColumns stores the column choice of one kind (fields kind, order:
+// every offered column key in the order shown, show: the checked ones),
+// optionally moving one shown column (move=up:<key> or down:<key>, the
+// form's arrow buttons), or removes it (reset=1). Every value must be a
+// column the kind offers; anything else is refused with 400.
+func (s *server) postColumns(w http.ResponseWriter, r *http.Request) {
+	m, ok := s.settingsPlugin(w, r)
+	if !ok {
+		return
+	}
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+	kind := r.PostForm.Get("kind")
+	k, ok := kindDef(m, kind)
+	if !ok || kind == "" {
+		http.Error(w, "unknown kind", http.StatusBadRequest)
+		return
+	}
+	done := func() { http.Redirect(w, r, pluginSettingsURL(m.ID)+"#columns-"+k.Key, http.StatusSeeOther) }
+	if r.PostForm.Get("reset") == "1" {
+		if err := s.deps.Settings.ResetColumns(r.Context(), m.ID, k.Key); err != nil {
+			s.internalError(w, r, err)
+			return
+		}
+		done()
+		return
+	}
+	keys, err := chosenColumns(kindColumns(k), r.PostForm["order"], r.PostForm["show"], r.PostForm.Get("move"))
+	if err != "" {
+		http.Error(w, err, http.StatusBadRequest)
+		return
+	}
+	if err := s.deps.Settings.SetColumns(r.Context(), m.ID, k.Key, keys); err != nil {
+		s.internalError(w, r, err)
+		return
+	}
+	done()
+}
+
+// chosenColumns checks a posted column form against the offered columns and
+// returns the shown keys in order, with move applied; a non-empty problem
+// refuses the form.
+func chosenColumns(offered []listColumn, order, show []string, move string) (keys []string, problem string) {
+	isOffered := func(key string) bool {
+		return slices.ContainsFunc(offered, func(c listColumn) bool { return c.Key == key })
+	}
+	seen := map[string]bool{}
+	for _, key := range order {
+		if !isOffered(key) {
+			return nil, "unknown column"
+		}
+		if seen[key] {
+			return nil, "column listed twice"
+		}
+		seen[key] = true
+	}
+	checked := map[string]bool{}
+	for _, key := range show {
+		if !isOffered(key) || !seen[key] || checked[key] {
+			return nil, "unknown column"
+		}
+		checked[key] = true
+	}
+	keys = []string{}
+	for _, key := range order {
+		if checked[key] {
+			keys = append(keys, key)
+		}
+	}
+	if move == "" {
+		return keys, ""
+	}
+	dir, key, _ := strings.Cut(move, ":")
+	if (dir != "up" && dir != "down") || !isOffered(key) {
+		return nil, "unknown move"
+	}
+	i := slices.Index(keys, key)
+	switch {
+	case i < 0: // a hidden column has no place to move
+	case dir == "up" && i > 0:
+		keys[i-1], keys[i] = keys[i], keys[i-1]
+	case dir == "down" && i < len(keys)-1:
+		keys[i+1], keys[i] = keys[i], keys[i+1]
+	}
+	return keys, ""
 }
