@@ -61,6 +61,8 @@ After `git pull`, run `docker compose up -d --build`. `docker compose down` stop
 
 ## Data and backups
 
+Backup from the app: Settings > Backup downloads `allister-backup-YYYY-MM-DD.zip` with every item of every plugin (also disabled ones), your list entries with progress, and every local item cover (a cover's remote URL is not kept once it is downloaded, so the file itself is saved). Settings, plugin choices, jobs, import history and person photos are not included; photos are fetched again by the background sync. To restore, upload the zip on the same page: items you do not have yet are added, items you already have are skipped, nothing is overwritten or deleted, and a backup from a newer Allister is refused. For a full copy of the data volume, use the commands below.
+
 Compose prefixes the volume with the project name. Replace `<volume>` in every command below with the exact name shown by `docker volume ls | grep allister-data` (a wrong name silently creates an empty volume and the backup is empty).
 
 Cold backup (recommended):
@@ -122,6 +124,7 @@ Layout:
 - `internal/store`, `internal/db`: SQLite access and migrations
 - `internal/provider`: provider interface and the AniList client
 - `internal/jobs`: background queue and anime sync
+- `internal/backup`: the universal backup archive (download and merge restore)
 - `internal/importer`: the generic import runner (every plugin's importers); `internal/importer/yamtrack`: the Yamtrack CSV parser
 - `internal/covers`, `internal/settings`, `internal/titles`, `internal/config`: small helpers
 
