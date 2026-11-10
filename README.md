@@ -12,6 +12,7 @@ It is a single Go binary with a SQLite database, server-rendered pages, htmx and
 - Character and voice-actor pages, manual entries with cover upload, and "Match to AniList".
 - Yamtrack CSV import, JSON export, and a universal backup with restore.
 - Plugins you can switch off and on in Settings without losing data; per-plugin title language and list columns; covers and photos stored locally.
+- Appearance: colour presets (light, dark, high contrast or following your system) or every colour by hand, system, bundled or your own fonts, and a text size.
 
 ## Quick start
 
@@ -21,13 +22,13 @@ docker compose up -d
 
 Open http://localhost:8080. To use another port: `PORT=9000 docker compose up -d`.
 
-All data lives in the named volume `allister-data`, mounted at `/data`. It holds the SQLite database (`allister.db`) and the `covers/` directory. Configuration: `PORT` (default `8080`, the HTTP port) and `DATA_DIR` (default `/data`, the directory for the database and `covers/`).
+All data lives in the named volume `allister-data`, mounted at `/data`. It holds the SQLite database (`allister.db`) and the `covers/` and `fonts/` (uploaded fonts) directories. Configuration: `PORT` (default `8080`, the HTTP port) and `DATA_DIR` (default `/data`, the directory for the database, `covers/` and `fonts/`).
 
 ## Plugins
 
 A plugin adds one media type: what its entries look like (fields, statuses, progress tracks, the blocks of the overview page), where the data comes from (a source such as AniList), and how lists get in and out (importers and exporters). Plugins are data only: they never ship HTML or JavaScript. The core draws every page, runs search, filters, imports, exports and backups, and stores everything in one database. Plugins are compiled into the binary. There is no marketplace or runtime installation yet.
 
-The sidebar on the left (a top bar on phones) has one entry per enabled plugin, with the plugin's icon, and Settings at the bottom. Settings has its own column of sections: General, Plugins, Import and Backup. Settings > Plugins lists the installed plugins with their version, kinds, sources, importers and exporters, a Settings link (the plugin's title language and list columns) and a Disable or Enable button. Disabling a plugin hides its sidebar entry, pages, person pages, import choices and export links (they answer 404), and pauses its background jobs and imports. All its data stays, and enabling it brings everything back. The home page opens the first enabled plugin's list, or Settings > Plugins when none is enabled.
+The sidebar on the left (a top bar on phones) has one entry per enabled plugin, with the plugin's icon, and Settings at the bottom. Settings has its own column of sections: General, Appearance, Plugins, Import and Backup. Settings > Appearance (`/settings/appearance`) sets the colours (a preset, or every colour in Advanced with contrast warnings), the app font (system stacks, the bundled Inter, Source Serif 4 and JetBrains Mono, or up to 8 fonts you upload: woff2, woff, ttf or otf, 2 MiB each) and the text size, for the whole app; details in [docs/usage.md](docs/usage.md#appearance). Settings > Plugins lists the installed plugins with their version, kinds, sources, importers and exporters, a Settings link (the plugin's title language and list columns) and a Disable or Enable button. Disabling a plugin hides its sidebar entry, pages, person pages, import choices and export links (they answer 404), and pauses its background jobs and imports. All its data stays, and enabling it brings everything back. The home page opens the first enabled plugin's list, or Settings > Plugins when none is enabled.
 
 The **anime plugin** is on by default. It provides the anime kind (type, episodes, year, studio, synopsis, source, start and end dates, genres and tags), the AniList source (30 requests per minute), the Yamtrack CSV importer and the JSON exporter. Its pages live under `/anime`. To write a plugin, see [docs/plugins.md](docs/plugins.md).
 
@@ -73,7 +74,7 @@ Every image (the build and runtime base images and the helper images in the comm
 There are two ways out of the app:
 
 - **Per-plugin export**: the "Export JSON" link on the list page (and the plugin's row in Settings > Plugins) downloads all entries of the anime list (status, rating, progress, dates, comment, titles and external ids) as `anime-json-<date>.json`, built in memory (fine for a few thousand entries). It is for using your list elsewhere and cannot be restored.
-- **Universal backup** (Settings > Backup): downloads `allister-backup-YYYY-MM-DD.zip` with every item of every installed plugin (also disabled ones), including your edits, people and credits, relations, external ids, genres and tags, your list entries with progress, and every local item cover. A cover's remote URL is not kept once it is downloaded, so the file itself is saved. Settings, plugin choices, jobs, import history and person photos are not included. Photos are fetched again by the background sync after a restore.
+- **Universal backup** (Settings > Backup): downloads `allister-backup-YYYY-MM-DD.zip` with every item of every installed plugin (also disabled ones), including your edits, people and credits, relations, external ids, genres and tags, your list entries with progress, and every local item cover. A cover's remote URL is not kept once it is downloaded, so the file itself is saved. Your appearance settings and uploaded fonts are included (a restore adds the fonts and applies the settings only when the installation has none of its own). Other settings, plugin choices, jobs, import history and person photos are not included. Photos are fetched again by the background sync after a restore.
 
 To restore, upload the zip on the same page (up to 512 MiB). Items you do not have yet are added, items you already have (same plugin, source and id) are skipped, and nothing is overwritten or deleted, so restoring the same file twice is harmless. A backup from a newer Allister is refused. Items of a plugin that is not installed are counted and skipped. A cover larger than 10 MiB in the archive is restored without its cover. For a full copy of the data volume, use the commands below.
 
