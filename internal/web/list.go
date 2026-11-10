@@ -64,6 +64,8 @@ type listView struct {
 	SearchURL, ManualURL string
 	EmptyNoun            string
 	Dialog               *entryDialog
+	// Exports links the plugin's exporters (the whole list of the plugin).
+	Exports []exportLink
 }
 
 // listQuery is a parsed list request: Kind is the kind key shown, Status ""
@@ -212,7 +214,7 @@ func (s *server) buildList(r *http.Request, m plugin.Manifest, lq listQuery) (li
 	}
 	ret := listURL(m, k.Key, lq.Status, pg.PageNo)
 	v := listView{Heading: k.LabelPlural, AnyEntries: all > 0, Total: pg.Total,
-		SearchURL: "/" + url.PathEscape(m.ID) + "/search", EmptyNoun: lowerFirst(k.LabelPlural)}
+		SearchURL: "/" + url.PathEscape(m.ID) + "/search", EmptyNoun: lowerFirst(k.LabelPlural), Exports: s.exportLinks(m)}
 	// the manual-add link only while the plugin has the manual route
 	if manual := "/" + m.ID + "/manual/new"; slices.Contains(s.pluginRoutes[m.ID], "GET "+manual) {
 		v.ManualURL = manual

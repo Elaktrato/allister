@@ -73,6 +73,8 @@ type server struct {
 	// walk them).
 	pluginRoutes map[string][]string
 	coreGuarded  []string
+	// now is the server's clock (export file names, caches).
+	now func() time.Time
 }
 
 // pageNames lists every page template (templates/<name>.html). Add a page by
@@ -117,7 +119,7 @@ func newServer(deps Deps, now func() time.Time) (*server, http.Handler) {
 		deps.Library = library.New(deps.Store.DB(), deps.Registry)
 	}
 	s := &server{deps: deps, pages: parsePages(), cache: newAnimeCache(now, cacheMaxEntries, cacheTTL),
-		recs: newRecCache(now, recCacheMaxEntries, cacheTTL), recTimeout: recTimeout}
+		recs: newRecCache(now, recCacheMaxEntries, cacheTTL), recTimeout: recTimeout, now: now}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("ok"))

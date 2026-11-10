@@ -248,6 +248,8 @@ type pluginRow struct {
 	Kinds, Sources, Importers, Exporters []string
 	Enabled                              bool
 	ListURL                              string // set only while enabled
+	// ExportLinks links the plugin's exporters, only while it is enabled.
+	ExportLinks []exportLink
 }
 
 func (s *server) pluginRows() []pluginRow {
@@ -268,6 +270,7 @@ func (s *server) pluginRows() []pluginRow {
 		}
 		if row.Enabled {
 			row.ListURL = "/" + m.ID
+			row.ExportLinks = s.exportLinks(m)
 		}
 		rows = append(rows, row)
 	}

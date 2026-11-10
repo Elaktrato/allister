@@ -58,6 +58,7 @@ func (s *server) coreRoutes(pluginID string) routeSet {
 		reg.Handle("GET /{source}/{id}/match", func(w http.ResponseWriter, r *http.Request) { s.getMatch(w, r, pluginID) })
 		reg.Handle("GET /{source}/{id}/match/search", func(w http.ResponseWriter, r *http.Request) { s.getMatchSearch(w, r, pluginID) })
 		reg.Handle("POST /{source}/{id}/match", func(w http.ResponseWriter, r *http.Request) { s.postMatch(w, r, pluginID) })
+		reg.Handle("GET /export/{exporter}", func(w http.ResponseWriter, r *http.Request) { s.getExport(w, r, pluginID) })
 	}
 }
 

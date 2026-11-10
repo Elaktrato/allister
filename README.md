@@ -45,6 +45,12 @@ Only anime rows with MyAnimeList ids are used. Each id is looked up on AniList a
 
 The page shows progress. You can cancel an import and resume it later. Entries AniList cannot match are kept as manual entries marked "unmatched". Importing the same file again skips rows already saved, matched by MyAnimeList id. The one exception is rare: if you matched an unmatched entry to an AniList page whose MyAnimeList id differs from the one in the export, a re-import can bring that row back as a new unmatched entry.
 
+An import made by an older version of Allister that was still running when you upgraded is marked failed ("created by an older version; upload the file again"): upload the file again, already saved rows are skipped.
+
+## Exporting
+
+The list page (and the plugin's row in Settings) has an "Export JSON" link: it downloads all entries of the anime list (status, rating, progress, dates, comment, titles and external ids) as `anime-json-<date>.json`. The whole list is built in memory before it is written, which is fine for a few thousand entries.
+
 ## Matching manual entries to AniList
 
 Open an unmatched entry (or any manual entry) and press "Match to AniList". Paste its AniList URL (or just the number), or search by title and pick a result. The entry becomes a normal AniList entry in place: your status, rating, progress, dates and comment stay exactly as they are, and cast and cover arrive in the background. If that AniList anime is already in your library, Allister refuses and links to the existing entry. If AniList is not answering, nothing is changed and you can try again.
