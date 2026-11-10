@@ -151,6 +151,24 @@ func TestCalendarPage(t *testing.T) {
 	}
 	// the sidebar links the calendar and marks it current
 	mustContain(t, b, `href="/calendar"`, `aria-current="page"`)
+	// viewing the page also asks for stale schedules (its own entries were
+	// fetched above, so only entries without one are enqueued — none here)
+	if len(e.jobs.got) != 0 {
+		t.Fatalf("unexpected enqueues: %d", len(e.jobs.got))
+	}
+	// a watching entry without a stored schedule is enqueued from the page
+	other := e.addFixture(t, "tv", "show", tvShow("2", "Fresh"), library.Entry{Status: library.Active})
+	e.get("/calendar")
+	found := false
+	for _, j := range e.jobs.got {
+		if j.Kind == "sync_schedule" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("stale schedule not enqueued from the page: %+v", e.jobs.got)
+	}
+	_ = other
 }
 
 var _ = plugin.Airing{}
