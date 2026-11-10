@@ -47,6 +47,7 @@ type rowView struct {
 	Updated            string    // the day the entry was last changed (2006-01-02)
 	Progress           []progressCell
 	ShowLabels         bool // more than one track: labels are visible
+	BarPct             int  // the card's progress bar (0-100; -1: no bounded total)
 	CanIncrement       bool
 	IncrementLabel     string
 	Score, ScoreAttr   string
@@ -281,6 +282,7 @@ func (s *server) rowView(m plugin.Manifest, row library.Row, ret string, cols []
 	v := rowView{
 		Title: row.Title, Href: itemURL(m, it.Source, it.SourceID, it.Kind), Cover: covers.Src(it.CoverPath),
 		Status: statusLabel(k, e.Status), StatusKey: string(e.Status), Score: "–", ScoreAttr: "none",
+		BarPct:      -1,
 		PartialSync: row.Flags.PartialSync, Unmatched: row.Flags.Unmatched, UnmatchedHint: unmatchedRowHint(m),
 		Return: ret, IncrementURL: "/list/" + id + "/increment", RemoveURL: "/list/" + id + "/remove",
 		EditURL:       "/list/" + id + "/edit?" + url.Values{"return": {ret}}.Encode(),
@@ -309,6 +311,9 @@ func (s *server) rowView(m plugin.Manifest, row library.Row, ret string, cols []
 		total, bounded := progressTotal(def, it.Fields)
 		v.CanIncrement = !bounded || e.Progress[def.Key] < total
 		v.IncrementLabel = "Add one " + lowerFirst(def.Label) + " to " + v.Title
+		if bounded && total > 0 {
+			v.BarPct = min(100, max(0, int(e.Progress[def.Key]/total*100)))
+		}
 	}
 	if e.Rating != nil {
 		v.Score = strconv.Itoa(*e.Rating)

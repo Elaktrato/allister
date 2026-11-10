@@ -139,8 +139,10 @@ func TestTemplatesUseOnlyThemedColours(t *testing.T) {
 			t.Errorf("%s: arbitrary colour value", path)
 		}
 		for _, st := range regexp.MustCompile(`\sstyle="[^"]*"`).FindAllString(body, -1) {
-			// pre-existing: the import progress bar's width (no colour)
-			if path == "templates/import.html" && st == ` style="width: {{.Percent}}%"` {
+			// pre-existing: the import progress bar's width, and the card
+			// view's progress bar (no colour either)
+			if (path == "templates/import.html" && st == ` style="width: {{.Percent}}%"`) ||
+				(path == "templates/list_cards.html" && st == ` style="width: {{.BarPct}}%"`) {
 				continue
 			}
 			t.Errorf("%s: inline style attribute%s", path, st)

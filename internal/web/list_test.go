@@ -666,7 +666,7 @@ func TestHomeSettingsApplyToTheList(t *testing.T) {
 func TestCardView(t *testing.T) {
 	e := newFixtureEnv(t)
 	act := e.addFixture(t, "tv", "show", tvWithEpisodes("1", "Dark", 10), library.Entry{Status: library.Active, Progress: map[string]float64{"episode": 2}})
-	e.addFixture(t, "tv", "show", tvWithEpisodes("2", "Dune Days", 8), library.Entry{Status: library.Completed})
+	e.addFixture(t, "tv", "show", tvWithEpisodes("2", "Dune Days", 8), library.Entry{Status: library.Completed, Progress: map[string]float64{"episode": 8}})
 	for target := range map[string]bool{"/tv?view=cards": true, "/tv": true} {
 		b := e.get(target).Body.String()
 		mustContain(t, b, `data-cards`)
@@ -676,6 +676,8 @@ func TestCardView(t *testing.T) {
 		mustContain(t, b, `href="/tv/tvdata/1"`, "Dark", "2 / 10",
 			`border-t-indigo-500`,  // active
 			`border-t-emerald-500`, // completed
+			`<div class="h-full bg-indigo-500" style="width: 20%">`,
+			`<div class="h-full bg-emerald-500" style="width: 100%">`,
 			`action="/list/`+idStr(act)+`/increment"`, `hx-target="closest [data-card]"`,
 			`name="view" value="cards"`, `aria-label="Add one episode to Dark"`)
 		mustNotContain(t, b, `<table`)

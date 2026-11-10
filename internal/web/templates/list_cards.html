@@ -27,8 +27,12 @@
       {{end}}
     </div>
   </div>
+  {{if ge .BarPct 0}}<div class="absolute inset-x-0 bottom-0 h-1 bg-slate-800" aria-hidden="true"><div class="h-full {{template "status_fill" .StatusKey}}" style="width: {{.BarPct}}%"></div></div>{{end}}
 </div>
 {{end}}
+
+{{/* the progress bar's fill: the status colour */}}
+{{define "status_fill"}}{{if eq . "active"}}bg-indigo-500{{else if eq . "completed"}}bg-emerald-500{{else if eq . "paused"}}bg-amber-500{{else if eq . "dropped"}}bg-rose-500{{else}}bg-slate-600{{end}}{{end}}
 
 {{/* the corner triangle's status color, per core status class */}}
 {{define "status_corner"}}{{if eq . "active"}} border-t-indigo-500{{else if eq . "completed"}} border-t-emerald-500{{else if eq . "paused"}} border-t-amber-700{{else if eq . "dropped"}} border-t-rose-500{{else}} border-t-slate-600{{end}}{{end}}

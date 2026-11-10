@@ -8,7 +8,10 @@
     "black": "overlay",
     "indigo-600": "accent",
     "indigo-500": "accent-hover",
-    "amber-950": "warning-bg"
+    "amber-950": "warning-bg",
+    "emerald-500": "success",
+    "rose-500": "danger",
+    "amber-500": "warning"
   },
   "textColor": {
     "white": "text-strong",
