@@ -3,8 +3,10 @@ package web
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"net/url"
 	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -12,6 +14,7 @@ import (
 
 	"github.com/allister/allister/internal/library"
 	"github.com/allister/allister/internal/plugin"
+	"github.com/allister/allister/internal/plugin/plugintest"
 	"github.com/allister/allister/internal/plugins/anime/anilist"
 )
 
@@ -62,8 +65,8 @@ func TestListTabsShowCountsAndCurrent(t *testing.T) {
 	e.addEntry(t, anilist.AniList, "2", nil, library.Active, 0)
 	e.addEntry(t, anilist.AniList, "3", nil, library.Dropped, 0)
 	b := e.get("/anime?status=active").Body.String()
-	mustContain(t, b, `href="/anime"`, `href="/anime?status=active"`, `href="/anime?status=completed"`,
-		`href="/anime?status=planned"`, `href="/anime?status=paused"`, `href="/anime?status=dropped"`,
+	mustContain(t, b, `href="/anime?status=all&amp;view=cards"`, `href="/anime?status=active&amp;view=cards"`, `href="/anime?status=completed&amp;view=cards"`,
+		`href="/anime?status=planned&amp;view=cards"`, `href="/anime?status=paused&amp;view=cards"`, `href="/anime?status=dropped&amp;view=cards"`,
 		"All (3)", "Watching (2)", "Dropped (1)", "Completed (0)", "Plan to watch (0)", "Paused (0)")
 	// the sidebar marks the plugin itself (aria-current="page"); the tabs
 	// live in the main content and mark theirs with aria-current="true"
@@ -208,13 +211,13 @@ func TestListPagination(t *testing.T) {
 	if n := strings.Count(p1, `data-row`); n != 100 {
 		t.Fatalf("page 1 rows %d", n)
 	}
-	mustContain(t, p1, "Showing 1–100 of 101", `href="/anime?page=2"`)
+	mustContain(t, p1, "Showing 1–100 of 101", `href="/anime?page=2&amp;view=cards"`)
 	mustNotContain(t, p1, "Previous")
 	p2 := e.get("/anime?page=2").Body.String()
 	if n := strings.Count(p2, `data-row`); n != 1 {
 		t.Fatalf("page 2 rows %d", n)
 	}
-	mustContain(t, p2, "Showing 101–101 of 101", `href="/anime"`, "Previous")
+	mustContain(t, p2, "Showing 101–101 of 101", `href="/anime?status=all&amp;view=cards"`, "Previous")
 	mustNotContain(t, p2, "Next")
 	for _, q := range []string{"?page=0", "?page=-3", "?page=abc", "?page="} {
 		b := e.get("/anime" + q).Body.String()
@@ -231,9 +234,9 @@ func TestListPagination(t *testing.T) {
 		e2.addEntry(t, anilist.AniList, fmt.Sprint(i+1), nil, library.Active, 0)
 	}
 	f := e2.get("/anime?status=active").Body.String()
-	mustContain(t, f, `href="/anime?page=2&amp;status=active"`)
+	mustContain(t, f, `href="/anime?page=2&amp;status=active&amp;view=cards"`)
 	f2 := e2.get("/anime?status=active&page=2").Body.String()
-	mustContain(t, f2, `href="/anime?status=active"`, "Showing 101–101 of 101")
+	mustContain(t, f2, `href="/anime?status=active&amp;view=cards"`, "Showing 101–101 of 101")
 }
 
 func TestIncrementReturnsUpdatedRow(t *testing.T) {
@@ -536,7 +539,7 @@ func TestListRowsRenderedWithRemoveFormForNoJS(t *testing.T) {
 	e := newEnv(t)
 	id := e.addEntry(t, anilist.AniList, "1", nil, library.Active, 0)
 	b := e.get("/anime?status=active&page=1").Body.String()
-	mustContain(t, b, `method="post" action="/list/`+idStr(id)+`/remove"`, `name="return" value="/anime?status=active"`,
+	mustContain(t, b, `method="post" action="/list/`+idStr(id)+`/remove"`, `name="return" value="/anime?status=active&amp;view=cards"`,
 		`hx-confirm=`, `method="post" action="/list/`+idStr(id)+`/increment"`)
 }
 
@@ -585,6 +588,68 @@ func TestListPageParamClamping(t *testing.T) {
 }
 
 // --- generic list page (fixture plugins) ---
+
+// TestParseListViewParam: the view parameter is parsed like any other list
+// parameter (cards or table, anything else rejected with the notice), and
+// status=all is an explicit "every status" that survives URL building.
+func TestParseListViewParam(t *testing.T) {
+	m := plugintest.TVPlugin().M
+	parse := func(q string) listQuery {
+		v, err := url.ParseQuery(q)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return parseListQuery(m, v)
+	}
+	if lq := parse("view=table"); lq.View != "table" {
+		t.Errorf("view=table: %+v", lq)
+	}
+	if lq := parse("view=cards"); lq.View != "cards" {
+		t.Errorf("view=cards: %+v", lq)
+	}
+	if lq := parse("view=nope"); lq.View != "" || !slices.Contains(lq.Rejected, "view") {
+		t.Errorf("view=nope: %+v", lq)
+	}
+	if lq := parse("status=all"); lq.Status != "all" {
+		t.Errorf("status=all: %+v", lq)
+	}
+	if lq := parse("status=never"); lq.Status != "" || !slices.Contains(lq.Rejected, "status") {
+		t.Errorf("status=never: %+v", lq)
+	}
+}
+
+// TestHomeSettingsApplyToTheList: without a view or status parameter the
+// list opens with the plugin's home settings (cards by default, a chosen
+// status filter); explicit URL parameters always win, and the All tab
+// (status=all) stays reachable.
+func TestHomeSettingsApplyToTheList(t *testing.T) {
+	e := newFixtureEnv(t)
+	e.addFixture(t, "tv", "show", tvShow("1", "Dark"), library.Entry{Status: library.Active})
+	e.addFixture(t, "tv", "show", tvShow("2", "Dune Days"), library.Entry{Status: library.Completed})
+	// defaults: cards view, every status
+	b := e.get("/tv").Body.String()
+	mustContain(t, b, `<input type="hidden" name="view" value="cards">`, "Dark", "Dune Days")
+	mustContain(t, b, `href="/tv?status=all&amp;view=cards"`)
+	// the home settings: table view, only watching (active)
+	if rec := e.do("POST", "/settings/plugins/tv/home", url.Values{"view": {"table"}, "statuses": {"active"}}, false); rec.Code != http.StatusSeeOther {
+		t.Fatalf("home settings: %d %s", rec.Code, rec.Body.String())
+	}
+	b = e.get("/tv").Body.String()
+	mustContain(t, b, `<input type="hidden" name="view" value="table">`, `<input type="hidden" name="status" value="active">`, "Dark")
+	mustNotContain(t, b, "Dune Days")
+	mustContain(t, b, `href="/tv?status=all&amp;view=table"`)
+	// explicit URL parameters win over the settings
+	b = e.get("/tv?view=cards&status=all").Body.String()
+	mustContain(t, b, `<input type="hidden" name="view" value="cards">`, "Dark", "Dune Days")
+	mustContain(t, b, `<input type="hidden" name="status" value="all">`)
+	// invalid settings are refused
+	if rec := e.do("POST", "/settings/plugins/tv/home", url.Values{"view": {"nope"}}, false); rec.Code != http.StatusBadRequest {
+		t.Fatalf("invalid view: %d", rec.Code)
+	}
+	if rec := e.do("POST", "/settings/plugins/tv/home", url.Values{"statuses": {"never"}}, false); rec.Code != http.StatusBadRequest {
+		t.Fatalf("invalid status: %d", rec.Code)
+	}
+}
 
 func TestSafeReturnPerPlugin(t *testing.T) {
 	for in, want := range map[string]string{
@@ -649,7 +714,7 @@ func TestListShowsPluginStatusLabels(t *testing.T) {
 	b := rec.Body.String()
 	main := b[strings.Index(b, "</header>"):]
 	mustContain(t, main, "All (3)", "Reading (1)", "Read (1)", "Want to read (1)", "Paused (0)", "Dropped (0)",
-		`href="/book?status=active"`, `href="/book?status=completed"`, `href="/book?status=planned"`, `href="/book"`)
+		`href="/book?status=active&amp;view=cards"`, `href="/book?status=completed&amp;view=cards"`, `href="/book?status=planned&amp;view=cards"`, `href="/book?status=all&amp;view=cards"`)
 	mustContain(t, rowOf(t, b, "Reading One"), ">Reading<")
 	mustContain(t, rowOf(t, b, "Read One"), ">Read<")
 	mustNotContain(t, main, "Watching", "Plan to watch")
@@ -732,17 +797,17 @@ func TestListKindSwitchOnlyForMultiKindPlugins(t *testing.T) {
 	e.addFixture(t, "book", "comic", cd, library.Entry{Status: library.Active})
 	b := e.get("/book").Body.String()
 	// the first kind by default, with a switch to the others
-	mustContain(t, b, "The Novel", `href="/book/books/1?kind=book"`, `href="/book?kind=comic"`, ">Comics<", ">Books<", "All (1)")
+	mustContain(t, b, "The Novel", `href="/book/books/1?kind=book"`, `href="/book?kind=comic&amp;view=cards"`, ">Comics<", ">Books<", "All (1)")
 	mustNotContain(t, b, "The Comic")
 	c := e.get("/book?kind=comic").Body.String()
-	mustContain(t, c, "The Comic", `href="/book/books/2?kind=comic"`, `href="/book?kind=comic&amp;status=active"`, "All (1)")
+	mustContain(t, c, "The Comic", `href="/book/books/2?kind=comic"`, `href="/book?kind=comic&amp;status=active&amp;view=cards"`, "All (1)")
 	mustNotContain(t, c, "The Novel")
 	// an unknown kind is ignored (first kind)
 	mustContain(t, e.get("/book?kind=nope").Body.String(), "The Novel")
 	// a single-kind plugin has no switch and ignores ?kind=
 	e.addFixture(t, "tv", "show", tvShow("1", "Dark"), library.Entry{Status: library.Active})
 	tv := e.get("/tv?kind=comic").Body.String()
-	mustContain(t, tv, "Dark", `href="/tv/tvdata/1"`, `href="/tv?status=active"`)
+	mustContain(t, tv, "Dark", `href="/tv/tvdata/1"`, `href="/tv?status=active&amp;view=cards"`)
 	mustNotContain(t, tv, "kind=")
 }
 
@@ -759,7 +824,7 @@ func TestListPaginationViaLibrary(t *testing.T) {
 	if n := strings.Count(p1, "data-row"); n != 100 {
 		t.Fatalf("page 1 rows %d", n)
 	}
-	mustContain(t, p1, "Showing 1–100 of 101", `href="/tv?page=2"`, "All (101)", "Watching (90)", "Dropped (11)")
+	mustContain(t, p1, "Showing 1–100 of 101", `href="/tv?page=2&amp;view=cards"`, "All (101)", "Watching (90)", "Dropped (11)")
 	mustNotContain(t, p1, "Previous")
 	p2 := e.get("/tv?page=2").Body.String()
 	if n := strings.Count(p2, "data-row"); n != 1 {

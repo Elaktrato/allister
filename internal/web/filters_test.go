@@ -292,7 +292,7 @@ func TestFilterByStatusTabAndText(t *testing.T) {
 	wantRows(t, "active+dark", b, "Dark")
 	main := b[strings.Index(b, "</header>"):]
 	// tabs count with the text filter and keep it
-	mustContain(t, main, "All (2)", "Watching (1)", "Watched (1)", `href="/tv?q=dark"`, `href="/tv?q=dark&amp;status=completed"`,
+	mustContain(t, main, "All (2)", "Watching (1)", "Watched (1)", `href="/tv?q=dark&amp;status=all&amp;view=cards"`, `href="/tv?q=dark&amp;status=completed&amp;view=cards"`,
 		`name="status" value="active"`, `name="q" value="dark"`)
 	wantRows(t, "all dark", e.listGet(t, "/tv?q=DARK"), "Dark", "Darker")
 	wantRows(t, "completed dark", e.listGet(t, "/tv?status=completed&q=dar"), "Darker")
@@ -534,14 +534,14 @@ func TestFiltersSurvivePaginationLinks(t *testing.T) {
 	}
 	e.addFixture(t, "tv", "show", showWith("200", "Show Extra", []string{"Comedy"}), library.Entry{Status: library.Active})
 	e.addFixture(t, "tv", "show", showWith("201", "Elsewhere", []string{"Drama"}), library.Entry{Status: library.Active})
-	const filters = "genre=drama&q=Show&sort=title&status=active"
+	const filters = "genre=drama&q=Show&sort=title&status=active&view=cards"
 	b := e.listGet(t, "/tv?q=Show&genre=drama&sort=title&status=active")
 	if n := len(rowTitles(b)); n != 100 {
 		t.Fatalf("page 1 rows %d", n)
 	}
-	mustContain(t, b, "Showing 1–100 of 101", `href="/tv?genre=drama&amp;page=2&amp;q=Show&amp;sort=title&amp;status=active"`)
+	mustContain(t, b, "Showing 1–100 of 101", `href="/tv?genre=drama&amp;page=2&amp;q=Show&amp;sort=title&amp;status=active&amp;view=cards"`)
 	// the tabs keep the filters (and start at page 1)
-	mustContain(t, b, `href="/tv?genre=drama&amp;q=Show&amp;sort=title"`, `href="/tv?genre=drama&amp;q=Show&amp;sort=title&amp;status=completed"`)
+	mustContain(t, b, `href="/tv?genre=drama&amp;q=Show&amp;sort=title&amp;status=all&amp;view=cards"`, `href="/tv?genre=drama&amp;q=Show&amp;sort=title&amp;status=completed&amp;view=cards"`)
 	// the row forms return to the filtered page
 	ret := "/tv?" + filters
 	mustContain(t, b, `name="return" value="`+html.EscapeString(ret)+`"`, "return="+url.QueryEscape(ret))
@@ -551,7 +551,7 @@ func TestFiltersSurvivePaginationLinks(t *testing.T) {
 	mustNotContain(t, p2, ">Next<")
 	// range filters keep their canonical form; the form aliases are folded into it
 	p := e.listGet(t, "/tv?f.year.from=2000&f.year.to=2030&q=Show")
-	mustContain(t, p, `href="/tv?f.year=2000..2030&amp;page=2&amp;q=Show"`)
+	mustContain(t, p, `href="/tv?f.year=2000..2030&amp;page=2&amp;q=Show&amp;view=cards"`)
 }
 
 func TestFilteredReturnSurvivesEdit(t *testing.T) {
@@ -578,10 +578,10 @@ func TestPartialResponseHasOnlyRows(t *testing.T) {
 	}
 	b := rec.Body.String()
 	wantRows(t, "partial", b, "Dark")
-	mustContain(t, b, "Showing 1–1 of 1", `id="list-tabs"`, `hx-swap-oob="true"`, "All (1)", `href="/tv?q=dar&amp;status=completed"`)
+	mustContain(t, b, "Showing 1–1 of 1", `id="list-tabs"`, `hx-swap-oob="true"`, "All (1)", `href="/tv?q=dar&amp;status=completed&amp;view=cards"`)
 	mustNotContain(t, b, "<html", "<header", `id="list-rows"`, `method="get"`, `id="dialog-slot"`)
 	// the address bar gets the canonical URL
-	if got := rec.Header().Get("HX-Push-Url"); got != "/tv?q=dar" {
+	if got := rec.Header().Get("HX-Push-Url"); got != "/tv?q=dar&view=cards" {
 		t.Errorf("HX-Push-Url %q", got)
 	}
 	// a history restore (cache miss) and other htmx requests get the full page
@@ -675,10 +675,10 @@ func TestClearFiltersLink(t *testing.T) {
 	e.addFixture(t, "book", "comic", cd, library.Entry{Status: library.Active})
 	e.addFixture(t, "tv", "show", showWith("1", "Dark", []string{"Drama"}), library.Entry{Status: library.Active})
 	b := e.listGet(t, "/tv?q=x&status=active&genre=drama&sort=title")
-	mustContain(t, b, `href="/tv?status=active">Clear filters</a>`)
+	mustContain(t, b, `href="/tv?status=active&amp;view=cards">Clear filters</a>`)
 	mustNotContain(t, e.listGet(t, "/tv"), "Clear filters")
 	mustNotContain(t, e.listGet(t, "/tv?status=active"), "Clear filters")
-	mustContain(t, e.listGet(t, "/book?kind=comic&q=zzz"), `href="/book?kind=comic">Clear filters</a>`)
+	mustContain(t, e.listGet(t, "/book?kind=comic&q=zzz"), `href="/book?kind=comic&amp;view=cards">Clear filters</a>`)
 }
 
 // TestLibraryRefusalFallsBackWithNotice: should the library still refuse a
@@ -744,7 +744,7 @@ func TestPartialSwapsTermCountsAndClearOutOfBand(t *testing.T) {
 	tag := oobBlock(t, b, "innerHTML:#filter-tag-select")
 	// tag counts follow the genre and text filters: nothing matches both
 	mustNotContain(t, tag, `Loop (`, "<option")
-	mustContain(t, b, `id="filter-clear" hx-swap-oob="true"`, `href="/tv">Clear filters</a>`)
+	mustContain(t, b, `id="filter-clear" hx-swap-oob="true"`, `href="/tv?view=cards">Clear filters</a>`)
 	// never a select, fieldset, the any/all switch or the text inputs (focus stays)
 	mustNotContain(t, b, "<select", "<fieldset", `name="genre_mode"`, `name="tag_mode"`, `name="q"`, `name="rmin"`, `name="sort"`,
 		`id="filter-genre"`, `id="filter-tag"`)
@@ -788,10 +788,10 @@ func TestPushURLIsTheAppliedQuery(t *testing.T) {
 		e.addFixture(t, "tv", "show", tvShow(fmt.Sprint(i+1), fmt.Sprintf("Show %03d", i+1)), library.Entry{Status: library.Active})
 	}
 	for target, want := range map[string]string{
-		"/tv?page=99":                    "/tv?page=2",
-		"/tv?q=Show&page=99999999999999": "/tv?page=2&q=Show",
-		"/tv?q=Show+001&page=5":          "/tv?q=Show+001",
-		"/tv?q=Show&bogus=1&sort=nope":   "/tv?q=Show",
+		"/tv?page=99":                    "/tv?page=2&view=cards",
+		"/tv?q=Show&page=99999999999999": "/tv?page=2&q=Show&view=cards",
+		"/tv?q=Show+001&page=5":          "/tv?q=Show+001&view=cards",
+		"/tv?q=Show&bogus=1&sort=nope":   "/tv?q=Show&view=cards",
 	} {
 		if got := e.getWith(target, hx).Header().Get("HX-Push-Url"); got != want {
 			t.Errorf("%s: HX-Push-Url %q, want %q", target, got, want)
@@ -809,7 +809,7 @@ func TestPushURLIsTheAppliedQuery(t *testing.T) {
 	for i := 0; i < 21; i++ {
 		vals.Set(fmt.Sprintf("f.n%02d", i), "1..")
 	}
-	if got := r.getWith("/tv?"+vals.Encode(), hx).Header().Get("HX-Push-Url"); got != "/tv" {
+	if got := r.getWith("/tv?"+vals.Encode(), hx).Header().Get("HX-Push-Url"); got != "/tv?view=cards" {
 		t.Errorf("refused: HX-Push-Url %q", got)
 	}
 }

@@ -81,6 +81,53 @@ func (s *Store) KnownLanguages(ctx context.Context, pluginID string) ([]string, 
 // plugin's kind.
 func columnsKey(id, kind string) string { return "plugin." + id + ".columns." + kind }
 
+// homeViewKey and homeStatusesKey are the settings keys holding a plugin's
+// home list configuration: the view its list opens in and the status it
+// opens with.
+func homeViewKey(id string) string     { return "plugin." + id + ".home.view" }
+func homeStatusesKey(id string) string { return "plugin." + id + ".home.statuses" }
+
+// HomeView returns the view the plugin's list opens in, "cards" or "table".
+// Nothing stored (or unreadable) means "cards".
+func (s *Store) HomeView(ctx context.Context, id string) string {
+	v, ok, err := s.Get(ctx, homeViewKey(id))
+	if err != nil {
+		log.Printf("settings: read %s: %v (using cards)", homeViewKey(id), err)
+		return "cards"
+	}
+	if !ok || (v != "cards" && v != "table") {
+		return "cards"
+	}
+	return v
+}
+
+// SetHomeView stores the view the plugin's list opens in. The caller checks
+// the value ("cards" or "table").
+func (s *Store) SetHomeView(ctx context.Context, id, view string) error {
+	return s.Set(ctx, homeViewKey(id), view)
+}
+
+// HomeStatuses returns the status class the plugin's list opens with, ""
+// for every status. The caller validates the value against the core
+// statuses (it is stored checked).
+func (s *Store) HomeStatuses(ctx context.Context, id string) string {
+	v, ok, err := s.Get(ctx, homeStatusesKey(id))
+	if err != nil {
+		log.Printf("settings: read %s: %v (using every status)", homeStatusesKey(id), err)
+		return ""
+	}
+	if !ok {
+		return ""
+	}
+	return v
+}
+
+// SetHomeStatuses stores the status class the plugin's list opens with (""
+// for every status). The caller checks the value.
+func (s *Store) SetHomeStatuses(ctx context.Context, id, status string) error {
+	return s.Set(ctx, homeStatusesKey(id), status)
+}
+
 // Columns returns the visible table columns chosen for kind of plugin id, in
 // order (stored as a JSON list of column keys). ok is false when nothing is
 // stored or the value is not a JSON list of strings: the kind's defaults

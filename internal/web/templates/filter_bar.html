@@ -6,6 +6,7 @@ GET form without JavaScript; with htmx it refreshes the rows region live. */}}
   class="relative mb-5 text-sm">
   {{if .Kind}}<input type="hidden" name="kind" value="{{.Kind}}">{{end}}
   {{if .Status}}<input type="hidden" name="status" value="{{.Status}}">{{end}}
+  {{if .View}}<input type="hidden" name="view" value="{{.View}}">{{end}}
   {{/* the search bar; the Filters toggle (the panel's summary) sits at its right edge */}}
   <div class="pr-32">
     <label class="relative block">

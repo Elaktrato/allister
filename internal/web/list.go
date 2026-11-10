@@ -9,6 +9,7 @@ package web
 // the +1 response.
 
 import (
+	"context"
 	"errors"
 	"log"
 	"math"
@@ -79,6 +80,7 @@ type listView struct {
 	Tabs                 []tabView
 	TabsOOB              bool   // the tabs ride along with a rows partial
 	PushURL              string // the canonical URL of what is shown (filters applied, page clamped)
+	View                 string // "cards" or "table": how the rows are shown
 	Filters              filterBar
 	Filtered             bool     // a filter narrows the rows
 	Notice               []string // rejected parameter keys (shown escaped)
@@ -95,29 +97,33 @@ type listView struct {
 }
 
 // listQuery is a parsed list request: Kind is the kind key shown, Status ""
-// for All, Filters the valid search, filter and sort state and Rejected the
-// parameter keys that were ignored.
+// for All, "all" for an explicit All, View "cards" or "table", Filters the
+// valid search, filter and sort state and Rejected the parameter keys that
+// were ignored.
 type listQuery struct {
-	Kind, Status string
-	Page         int
-	Filters      listFilters
-	Rejected     []string
+	Kind, Status, View string
+	Page               int
+	Filters            listFilters
+	Rejected           []string
 }
 
 // listURL builds the list URL of a plugin for a kind (only for plugins with
-// several kinds), a status filter and a page (page 1 omitted).
-func listURL(m plugin.Manifest, kind, status string, page int) string {
-	return filteredListURL(m, kind, status, page, listFilters{})
+// several kinds), a status filter, a view and a page (page 1 omitted).
+func listURL(m plugin.Manifest, kind, status, view string, page int) string {
+	return filteredListURL(m, kind, status, view, page, listFilters{})
 }
 
 // filteredListURL is listURL keeping the filters f (canonical form).
-func filteredListURL(m plugin.Manifest, kind, status string, page int, f listFilters) string {
+func filteredListURL(m plugin.Manifest, kind, status, view string, page int, f listFilters) string {
 	q := f.values()
 	if len(m.Kinds) > 1 && kind != "" {
 		q.Set("kind", kind)
 	}
 	if status != "" {
 		q.Set("status", status)
+	}
+	if view != "" {
+		q.Set("view", view)
 	}
 	if page > 1 {
 		q.Set("page", strconv.Itoa(page))
@@ -130,10 +136,12 @@ func filteredListURL(m plugin.Manifest, kind, status string, page int, f listFil
 }
 
 // parseListQuery reads the kind (unknown values and single-kind plugins mean
-// the first kind), the status filter (anything but a core status class
-// means All), the requested page (invalid values mean 1, an overflowing
-// number the last page) and the filters (parseFilters) from a query. An
-// unknown kind or status is named in Rejected like any other ignored key.
+// the first kind), the status filter ("all" is an explicit All, anything
+// but a core status class means All), the view ("cards" or "table",
+// anything else means the plugin's default), the requested page (invalid
+// values mean 1, an overflowing number the last page) and the filters
+// (parseFilters) from a query. An unknown kind, status or view is named in
+// Rejected like any other ignored key.
 func parseListQuery(m plugin.Manifest, q url.Values) listQuery {
 	lq := listQuery{Kind: m.Kinds[0].Key, Status: q.Get("status")}
 	k := q.Get("kind")
@@ -143,11 +151,20 @@ func parseListQuery(m plugin.Manifest, q url.Values) listQuery {
 	case k != "" && k != lq.Kind:
 		lq.Rejected = append(lq.Rejected, "kind")
 	}
-	if !slices.Contains(library.Statuses(), library.Status(lq.Status)) {
+	switch {
+	case lq.Status == "all":
+	case slices.Contains(library.Statuses(), library.Status(lq.Status)):
+	default:
 		if lq.Status != "" {
 			lq.Rejected = append(lq.Rejected, "status")
 		}
 		lq.Status = ""
+	}
+	switch v := q.Get("view"); v {
+	case "", "cards", "table":
+		lq.View = v
+	default:
+		lq.Rejected = append(lq.Rejected, "view")
 	}
 	kd, _ := kindDef(m, lq.Kind)
 	var rejected []string
@@ -207,9 +224,9 @@ func coreSort(key string) bool {
 // sortHead builds the head cell of the column sorting by key. The sorted
 // column links to the other direction, every other column to its default
 // direction (titles A to Z, the rest highest first); the links keep the
-// filters, kind and status and start at page 1 (filteredListURL), in the
-// canonical form parseSort reads.
-func sortHead(m plugin.Manifest, kind, status string, f listFilters, key, label string) headView {
+// filters, kind, status and view and start at page 1 (filteredListURL), in
+// the canonical form parseSort reads.
+func sortHead(m plugin.Manifest, kind, status, view string, f listFilters, key, label string) headView {
 	cur, dir := f.Sort, f.Dir
 	if cur == "" {
 		cur = string(library.SortUpdated)
@@ -233,7 +250,7 @@ func sortHead(m plugin.Manifest, kind, status string, f listFilters, key, label 
 	if key == string(library.SortUpdated) && g.Dir == "" { // the default order
 		g.Sort = ""
 	}
-	h.Href = filteredListURL(m, kind, status, 1, g)
+	h.Href = filteredListURL(m, kind, status, view, 1, g)
 	return h
 }
 
@@ -311,7 +328,7 @@ func (s *server) buildList(r *http.Request, m plugin.Manifest, lq listQuery) (li
 	f := lq.Filters
 	q := library.Query{PluginID: m.ID, Kind: k.Key, Page: lq.Page, PageSize: listPageSize}
 	f.apply(k, &q)
-	if lq.Status != "" {
+	if lq.Status != "" && lq.Status != "all" {
 		st := library.Status(lq.Status)
 		q.Status = &st
 	}
@@ -355,8 +372,8 @@ func (s *server) buildList(r *http.Request, m plugin.Manifest, lq listQuery) (li
 			return listView{}, err
 		}
 	}
-	ret := filteredListURL(m, k.Key, lq.Status, pg.PageNo, f)
-	v := listView{Heading: k.LabelPlural, AnyEntries: anyEntries, Total: pg.Total, Filtered: f.narrows(), PushURL: ret,
+	ret := filteredListURL(m, k.Key, lq.Status, lq.View, pg.PageNo, f)
+	v := listView{Heading: k.LabelPlural, AnyEntries: anyEntries, Total: pg.Total, Filtered: f.narrows(), PushURL: ret, View: lq.View,
 		Filters:   buildFilterBar(m, k, lq, genres, tags),
 		SearchURL: "/" + url.PathEscape(m.ID) + "/search", EmptyNoun: lowerFirst(k.LabelPlural), Exports: s.exportLinks(m)}
 	v.Notice, v.NoticeMore = noticeKeys(lq.Rejected)
@@ -368,11 +385,11 @@ func (s *server) buildList(r *http.Request, m plugin.Manifest, lq listQuery) (li
 	// the head sorts only by visible columns; the compact sort control
 	// (sortOptions) keeps every sort key
 	cols := s.visibleColumns(ctx, m, k)
-	v.Head.Title = sortHead(m, k.Key, lq.Status, f, string(library.SortTitle), "Title")
+	v.Head.Title = sortHead(m, k.Key, lq.Status, lq.View, f, string(library.SortTitle), "Title")
 	for _, c := range cols {
 		h := headView{Label: c.Label}
 		if key := columnSort(k, c); key != "" {
-			h = sortHead(m, k.Key, lq.Status, f, key, c.Label)
+			h = sortHead(m, k.Key, lq.Status, lq.View, f, key, c.Label)
 		}
 		h.Hide = c.Hide
 		v.Head.Columns = append(v.Head.Columns, h)
@@ -384,23 +401,48 @@ func (s *server) buildList(r *http.Request, m plugin.Manifest, lq listQuery) (li
 		v.From, v.To = (pg.PageNo-1)*listPageSize+1, (pg.PageNo-1)*listPageSize+len(pg.Rows)
 	}
 	if pg.PageNo > 1 {
-		v.PrevURL = filteredListURL(m, k.Key, lq.Status, pg.PageNo-1, f)
+		v.PrevURL = filteredListURL(m, k.Key, lq.Status, lq.View, pg.PageNo-1, f)
 	}
 	if pg.PageNo < pg.Pages {
-		v.NextURL = filteredListURL(m, k.Key, lq.Status, pg.PageNo+1, f)
+		v.NextURL = filteredListURL(m, k.Key, lq.Status, lq.View, pg.PageNo+1, f)
 	}
-	v.Tabs = append(v.Tabs, tabView{Label: "All", Count: all, Href: filteredListURL(m, k.Key, "", 1, f), Current: lq.Status == ""})
+	v.Tabs = append(v.Tabs, tabView{Label: "All", Count: all,
+		Href: filteredListURL(m, k.Key, "all", lq.View, 1, f), Current: lq.Status == "" || lq.Status == "all"})
 	for _, st := range listTabOrder {
-		v.Tabs = append(v.Tabs, tabView{Label: statusLabel(k, st), Count: counts[st], Href: filteredListURL(m, k.Key, string(st), 1, f),
+		v.Tabs = append(v.Tabs, tabView{Label: statusLabel(k, st), Count: counts[st],
+			Href:    filteredListURL(m, k.Key, string(st), lq.View, 1, f),
 			Current: string(st) == lq.Status})
 	}
 	// another kind has another schema: its link starts without filters
 	if len(m.Kinds) > 1 {
 		for _, mk := range m.Kinds {
-			v.Kinds = append(v.Kinds, tabView{Label: mk.LabelPlural, Href: listURL(m, mk.Key, "", 1), Current: mk.Key == k.Key})
+			v.Kinds = append(v.Kinds, tabView{Label: mk.LabelPlural, Href: listURL(m, mk.Key, "", lq.View, 1), Current: mk.Key == k.Key})
 		}
 	}
 	return v, nil
+}
+
+// resolveView returns the view the list opens in: the URL's view, else the
+// plugin's home setting, else cards.
+func (s *server) resolveView(ctx context.Context, m plugin.Manifest, view string) string {
+	if view == "table" {
+		return "table"
+	}
+	if view == "cards" {
+		return "cards"
+	}
+	return s.deps.Settings.HomeView(ctx, m.ID)
+}
+
+// homeStatus returns the status class the plugin's list opens with when the
+// URL names none ("" for every status); a stored value that is not a core
+// status counts as none.
+func (s *server) homeStatus(ctx context.Context, m plugin.Manifest) string {
+	st := s.deps.Settings.HomeStatuses(ctx, m.ID)
+	if st == "" || !slices.Contains(library.Statuses(), library.Status(st)) {
+		return ""
+	}
+	return st
 }
 
 // getList renders the list page. The filter bar's htmx requests (HX-Target
@@ -416,6 +458,14 @@ func (s *server) getList(w http.ResponseWriter, r *http.Request, pluginID string
 	}
 	vals, err := url.ParseQuery(r.URL.RawQuery) // keeps the readable pairs
 	lq := parseListQuery(m, vals)
+	// the plugin's home settings fill what the URL does not name: the view
+	// (cards by default) and, when no status is given at all, the status
+	lq.View = s.resolveView(r.Context(), m, lq.View)
+	if !vals.Has("status") {
+		if st := s.homeStatus(r.Context(), m); st != "" {
+			lq.Status = st
+		}
+	}
 	// the answer depends on all three (rows partial, full page, restore)
 	w.Header().Set("Vary", "HX-Request, HX-Target, HX-History-Restore-Request")
 	if err != nil {

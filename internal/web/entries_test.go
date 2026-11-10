@@ -112,7 +112,7 @@ func TestIncrementHiddenWithoutPrimaryType(t *testing.T) {
 func TestRowHelperSharedByPageAndIncrement(t *testing.T) {
 	e := newFixtureEnv(t)
 	id := e.addFixture(t, "tv", "show", tvWithEpisodes("1", "Shared", 10), library.Entry{Status: library.Active, Progress: map[string]float64{"episode": 2}})
-	inc := strings.TrimSpace(e.do("POST", "/list/"+idStr(id)+"/increment", url.Values{"return": {"/tv"}}, true).Body.String())
+	inc := strings.TrimSpace(e.do("POST", "/list/"+idStr(id)+"/increment", url.Values{"return": {"/tv?view=cards"}}, true).Body.String())
 	page := rowOf(t, e.get("/tv").Body.String(), "Shared")
 	if inc != page {
 		t.Fatalf("increment row differs from the page row:\n%s\n---\n%s", inc, page)
@@ -320,7 +320,7 @@ func TestRemoveFixtureCascades(t *testing.T) {
 	}
 	b := e.get("/tv").Body.String()
 	mustContain(t, rowOf(t, b, "Gone"), `method="post" action="/list/`+idStr(id)+`/remove"`, `hx-confirm="Remove this show and all its saved details from your list?"`,
-		`name="return" value="/tv"`)
+		`name="return" value="/tv?view=cards"`)
 	rec := e.do("POST", "/list/"+idStr(id)+"/remove", url.Values{"return": {"/tv?status=active"}}, true)
 	if rec.Code != 204 || rec.Header().Get("HX-Redirect") != "/tv?status=active" {
 		t.Fatal(rec.Code, rec.Header())

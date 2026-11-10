@@ -180,8 +180,14 @@ func TestStoredTitleLanguageIsShownSelected(t *testing.T) {
 	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/settings/plugins/anime", nil))
 	b := rec.Body.String()
 	mustContain(t, b, `<option value="pt-br" selected>pt-br</option>`, `value="ja"`)
-	if n := strings.Count(b, " selected>"); n != 1 {
-		t.Fatalf("%d selected options", n)
+	// exactly one selected option in the language select (the page's other
+	// selects, the home settings, have their own)
+	i := strings.Index(b, `id="title_lang"`)
+	if i < 0 {
+		t.Fatal("no title language form")
+	}
+	if n := strings.Count(b[i:strings.Index(b[i:], "</form>")+i], " selected>"); n != 1 {
+		t.Fatalf("%d selected options in the language form", n)
 	}
 	// saving the page unchanged keeps it
 	if rec := postForm(h, "/settings/plugins/anime/title-language", url.Values{"title_lang": {"pt-br"}}); rec.Code != http.StatusSeeOther {

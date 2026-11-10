@@ -106,6 +106,7 @@ func TestSortHeaderLinks(t *testing.T) {
 			for k, v := range sv {
 				want[k] = v
 			}
+			want.Set("view", "cards") // the links keep the resolved view
 			href := listHref("/tv", want)
 			cell := headCell(t, head, l[0])
 			mustContain(t, cell, `href="`+href+`"`, `hx-get="`+href+`"`, `hx-target="#list-rows"`, `hx-push-url="true"`,
