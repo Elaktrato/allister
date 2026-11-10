@@ -14,8 +14,8 @@ import (
 )
 
 var (
-	slotRe       = regexp.MustCompile(`id="dialog-slot" hx-on::before-swap="([^"]*)"`)
-	slotStatusRe = regexp.MustCompile(`s===(\d{3})`)
+	slotRe       = regexp.MustCompile(`id="dialog-slot" data-swap-statuses="([^"]*)"`)
+	slotStatusRe = regexp.MustCompile(`\b(\d{3})\b`)
 )
 
 // slotStatuses returns the error statuses the page's dialog slot swaps in

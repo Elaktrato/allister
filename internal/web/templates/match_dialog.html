@@ -23,7 +23,7 @@
       </label>
       <button type="submit" class="rounded bg-indigo-600 px-4 py-2 font-medium hover:bg-indigo-500">Match</button>
     </form>
-    <form method="get" action="{{.SearchURL}}" class="space-y-2" hx-on:submit="event.preventDefault()">
+    <form method="get" action="{{.SearchURL}}" class="space-y-2" data-no-submit>
       {{if .Sources}}<input type="hidden" name="source" value="{{.Source}}">{{end}}
       {{if .Kind}}<input type="hidden" name="kind" value="{{.Kind}}">{{end}}
       <label class="block text-sm">{{.SearchLabel}}
@@ -35,7 +35,7 @@
     </form>
     <div id="match-results">{{template "match_results" .}}</div>
     <div class="flex justify-end">
-      <a href="{{.CancelURL}}" hx-on:click="event.preventDefault();this.closest('[data-dialog]').remove()" class="rounded px-4 py-2 hover:bg-slate-800">Cancel</a>
+      <a href="{{.CancelURL}}" data-dialog-close class="rounded px-4 py-2 hover:bg-slate-800">Cancel</a>
     </div>
   </div>
 </div>

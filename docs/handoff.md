@@ -20,7 +20,6 @@ State of the project when the work moved from Claude Code to another agent. `mai
 
 ## Known follow-ups (none blocking)
 
-- Existing inline `hx-on::before-swap` attributes (6 templates) matter if a strict CSP is added.
 - Docs under `docs/superpowers/specs` and `plans` are historical; they still describe the global title-language setting in places.
 - Smaller items: update-pins `--write` is not atomic and a dry run exits 0 even with a diff; Tailwind pin test checks text only; distroless is pinned under `latest`.
 - Not built: other media types (books, manga, TV, movies, games) as plugins, MyAnimeList source (deliberately skipped), dashboards, accounts.
