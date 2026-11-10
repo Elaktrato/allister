@@ -84,13 +84,13 @@ func TestIncrementFixtureRowAndCap(t *testing.T) {
 func TestIncrementHiddenWithoutPrimaryType(t *testing.T) {
 	e := newAddEnv(t)
 	movie := e.addFixture(t, "movie", "movie", e.movie.Data, library.Entry{Status: library.Active, Progress: map[string]float64{"position": 60}})
-	b := e.get("/movie").Body.String()
+	b := e.get("/movie?view=table").Body.String()
 	mustContain(t, rowOf(t, b, "A Movie"), "0:01:00")
 	mustNotContain(t, b, "/increment", "+1")
 	// the primary key exists but is not active for this book
 	pct := e.addFixture(t, "book", "book", bookItem("9", "Percent"), library.Entry{Status: library.Active, Progress: map[string]float64{"percent": 10}},
 		library.WithProgressKeys([]string{"percent"}))
-	mustNotContain(t, e.get("/book").Body.String(), "/increment")
+	mustNotContain(t, e.get("/book?view=table").Body.String(), "/increment")
 	// posting anyway is a documented no-op answering the unchanged row
 	before := dump(t, e.env)
 	for _, id := range []int64{movie, pct} {
@@ -112,8 +112,8 @@ func TestIncrementHiddenWithoutPrimaryType(t *testing.T) {
 func TestRowHelperSharedByPageAndIncrement(t *testing.T) {
 	e := newFixtureEnv(t)
 	id := e.addFixture(t, "tv", "show", tvWithEpisodes("1", "Shared", 10), library.Entry{Status: library.Active, Progress: map[string]float64{"episode": 2}})
-	inc := strings.TrimSpace(e.do("POST", "/list/"+idStr(id)+"/increment", url.Values{"return": {"/tv"}}, true).Body.String())
-	page := rowOf(t, e.get("/tv").Body.String(), "Shared")
+	inc := strings.TrimSpace(e.do("POST", "/list/"+idStr(id)+"/increment", url.Values{"return": {"/tv?view=table"}}, true).Body.String())
+	page := rowOf(t, e.get("/tv?view=table").Body.String(), "Shared")
 	if inc != page {
 		t.Fatalf("increment row differs from the page row:\n%s\n---\n%s", inc, page)
 	}
@@ -318,9 +318,9 @@ func TestRemoveFixtureCascades(t *testing.T) {
 	if err != nil || len(people) != 1 {
 		t.Fatalf("%v %v", people, err)
 	}
-	b := e.get("/tv").Body.String()
+	b := e.get("/tv?view=table").Body.String()
 	mustContain(t, rowOf(t, b, "Gone"), `method="post" action="/list/`+idStr(id)+`/remove"`, `hx-confirm="Remove this show and all its saved details from your list?"`,
-		`name="return" value="/tv"`)
+		`name="return" value="/tv?view=table"`)
 	rec := e.do("POST", "/list/"+idStr(id)+"/remove", url.Values{"return": {"/tv?status=active"}}, true)
 	if rec.Code != 204 || rec.Header().Get("HX-Redirect") != "/tv?status=active" {
 		t.Fatal(rec.Code, rec.Header())
@@ -379,7 +379,7 @@ func TestEntryRoutesGuardedByItemPlugin(t *testing.T) {
 		t.Fatalf("disabled plugin's entry changed:\n%s\n%s", before, after)
 	}
 	// other plugins are unaffected
-	if rec := e.get("/tv"); rec.Code != 200 {
+	if rec := e.get("/tv?view=table"); rec.Code != 200 {
 		t.Fatal(rec.Code)
 	}
 	if rec := e.do("POST", "/list/"+idStr(tv)+"/increment", url.Values{}, true); rec.Code != 200 {
@@ -559,7 +559,7 @@ func TestEditBlankProgressClears(t *testing.T) {
 			t.Fatalf("%s = %v %v, want %v", key, v, ok, want)
 		}
 	}
-	row := rowOf(t, e.get("/tv").Body.String(), "Cleared")
+	row := rowOf(t, e.get("/tv?view=table").Body.String(), "Cleared")
 	mustContain(t, row, ">0<", "0 / ?")
 	mustContain(t, e.do("GET", "/list/"+idStr(id)+"/edit", nil, true).Body.String(), `name="progress.episode" value="0"`)
 	// an absent field (not posted at all) keeps its value
@@ -585,7 +585,7 @@ func TestEditBlankProgressClears(t *testing.T) {
 	if en := e.entryOf(t, dur); en.Progress["position"] != 0 || en.Progress["episode"] != 1 {
 		t.Fatalf("%v", en.Progress)
 	}
-	mustContain(t, rowOf(t, e.get("/tv").Body.String(), "Dur"), "0:00:00")
+	mustContain(t, rowOf(t, e.get("/tv?view=table").Body.String(), "Dur"), "0:00:00")
 }
 
 func TestEditDurationBoundaries(t *testing.T) {

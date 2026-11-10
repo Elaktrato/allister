@@ -103,7 +103,7 @@ var pagePartials = map[string][]string{
 	"search":                {"templates/search_results.html"},
 	"settings_plugins_page": {"templates/settings_plugins.html"},
 	"item":                  {"templates/sections.html", "templates/add_dialog.html", "templates/progress_inputs.html", "templates/match_dialog.html"},
-	"list":                  {"templates/list_row.html", "templates/filter_bar.html", "templates/entry_dialog.html", "templates/progress_inputs.html"},
+	"list":                  {"templates/list_row.html", "templates/list_cards.html", "templates/filter_bar.html", "templates/entry_dialog.html", "templates/progress_inputs.html"},
 	"manual_form":           {"templates/item_inputs.html", "templates/progress_inputs.html"},
 	"details_form":          {"templates/item_inputs.html"},
 }
@@ -159,6 +159,7 @@ func newServer(deps Deps, now func() time.Time) (*server, http.Handler) {
 	mux.HandleFunc("POST /settings/plugins/{id}", s.postPlugin)
 	mux.HandleFunc("GET /settings/plugins/{id}", s.getPluginSettings)
 	mux.HandleFunc("POST /settings/plugins/{id}/title-language", s.postTitleLanguage)
+	mux.HandleFunc("POST /settings/plugins/{id}/home", s.postHomeSettings)
 	mux.HandleFunc("POST /settings/plugins/{id}/columns", s.postColumns)
 	mux.HandleFunc("GET /settings/backup", s.getBackup)
 	mux.HandleFunc("GET /settings/backup/download", s.getBackupDownload)

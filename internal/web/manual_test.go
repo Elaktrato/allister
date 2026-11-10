@@ -461,7 +461,7 @@ func TestManualEntryAppearsInList(t *testing.T) {
 	v.Set("title", "Home Made Show")
 	v.Set("title_lang", "en")
 	id := e.createManual(t, v, nil)
-	b := e.get("/anime").Body.String()
+	b := e.get("/anime?view=table").Body.String()
 	mustContain(t, b, "Home Made Show", `href="/anime/manual/`+id+`"`)
 }
 
@@ -500,7 +500,7 @@ func TestManualUrlencodedPostAlsoWorks(t *testing.T) {
 
 func TestListEmptyStateLinksToManual(t *testing.T) {
 	e := newEnv(t)
-	mustContain(t, e.get("/anime").Body.String(), `href="/anime/manual/new"`)
+	mustContain(t, e.get("/anime?view=table").Body.String(), `href="/anime/manual/new"`)
 }
 
 func TestCleanupCoverKeepsSharedFiles(t *testing.T) {

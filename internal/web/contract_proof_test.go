@@ -258,7 +258,7 @@ func TestBookPluginSearchAddListEditFlow(t *testing.T) {
 
 	// add with page progress
 	e.add(t, "book", "books", "earthsea", url.Values{"status": {"active"}, "rating": {"8"}, "progress.pages": {"120"}})
-	b = e.page(t, "/book")
+	b = e.page(t, "/book?view=table")
 	mustRows(t, b, "A Wizard of Earthsea")
 	mustContain(t, b, statusCell("Reading"), "120 / 250", "Reading (1)", "Want to read (0)")
 	id := e.itemID(t, "book", "books", "earthsea")
@@ -277,7 +277,7 @@ func TestBookPluginSearchAddListEditFlow(t *testing.T) {
 	if rec.Code != http.StatusNoContent {
 		t.Fatalf("switch to percent: %d %s", rec.Code, rec.Body.String())
 	}
-	b = e.page(t, "/book")
+	b = e.page(t, "/book?view=table")
 	mustContain(t, b, statusCell("Reading"), "40%")
 	mustNotContain(t, b, "/ 250", "/increment") // no +1 without an active page track
 	mustContain(t, e.page(t, "/book/books/earthsea"), "Percent: 40%")
@@ -292,14 +292,14 @@ func TestBookPluginSearchAddListEditFlow(t *testing.T) {
 	if rec.Code != http.StatusSeeOther || rec.Header().Get("Location") != "/book/books/earthsea" {
 		t.Fatalf("edit details: %d %q %s", rec.Code, rec.Header().Get("Location"), rec.Body.String())
 	}
-	mustContain(t, e.page(t, "/book"), "40%")
+	mustContain(t, e.page(t, "/book?view=table"), "40%")
 
 	// back to pages: the retained value against the edited total
 	rec = e.do("POST", "/list/"+id+"/edit", url.Values{"status": {"active"}, "rating": {"8"}, "progress_keys": {"pages"}}, true)
 	if rec.Code != http.StatusNoContent {
 		t.Fatalf("switch to pages: %d %s", rec.Code, rec.Body.String())
 	}
-	b = e.page(t, "/book")
+	b = e.page(t, "/book?view=table")
 	mustContain(t, b, "121 / 300", "/increment")
 	mustNotContain(t, b, "40%")
 
@@ -309,7 +309,7 @@ func TestBookPluginSearchAddListEditFlow(t *testing.T) {
 		t.Fatalf("percent 101: %d", rec.Code)
 	}
 	mustContain(t, rec.Body.String(), "Percent must be a whole number from 0 to 100.")
-	mustContain(t, e.page(t, "/book"), "121 / 300")
+	mustContain(t, e.page(t, "/book?view=table"), "121 / 300")
 }
 
 func TestTVPluginEpisodeAndPositionProgress(t *testing.T) {
@@ -317,7 +317,7 @@ func TestTVPluginEpisodeAndPositionProgress(t *testing.T) {
 	e.add(t, "tv", "tvdata", "dark", url.Values{"status": {"active"}, "progress.episode": {"3"}})
 	e.add(t, "tv", "tvdata", "1899", url.Values{"status": {"planned"}, "progress.episode": {"0"}})
 	dark, ship := e.itemID(t, "tv", "tvdata", "dark"), e.itemID(t, "tv", "tvdata", "1899")
-	b := e.page(t, "/tv")
+	b := e.page(t, "/tv?view=table")
 	mustRows(t, b, "1899", "Dark")
 	mustContain(t, b, statusCell("Watching"), statusCell("Planned"), "3 / 26", "0 / 8")
 
@@ -329,7 +329,7 @@ func TestTVPluginEpisodeAndPositionProgress(t *testing.T) {
 	if rec.Code != http.StatusNoContent {
 		t.Fatalf("edit: %d %s", rec.Code, rec.Body.String())
 	}
-	b = e.page(t, "/tv")
+	b = e.page(t, "/tv?view=table")
 	mustContain(t, b, ">Episode</span>", "<span>3 / 26</span>", ">Position</span>", "<span>0:12:34</span>")
 	mustContain(t, e.page(t, "/tv/tvdata/dark"), "Episode: 3 / 26", "Position: 0:12:34")
 
@@ -350,22 +350,22 @@ func TestTVPluginEpisodeAndPositionProgress(t *testing.T) {
 	mustContain(t, rec.Body.String(), "Position must be a time like")
 
 	// progress filters: not started / in progress / finished
-	mustRows(t, e.page(t, "/tv?progress=not_started"), "1899")
-	mustRows(t, e.page(t, "/tv?progress=in_progress"), "Dark")
-	mustRows(t, e.page(t, "/tv?progress=finished"))
+	mustRows(t, e.page(t, "/tv?progress=not_started&view=table"), "1899")
+	mustRows(t, e.page(t, "/tv?progress=in_progress&view=table"), "Dark")
+	mustRows(t, e.page(t, "/tv?progress=finished&view=table"))
 	rec = e.do("POST", "/list/"+ship+"/edit", url.Values{"status": {"completed"}, "progress.episode": {"8"}}, true)
 	if rec.Code != http.StatusNoContent {
 		t.Fatalf("finish: %d %s", rec.Code, rec.Body.String())
 	}
-	b = e.page(t, "/tv?progress=finished")
+	b = e.page(t, "/tv?progress=finished&view=table")
 	mustRows(t, b, "1899")
 	mustContain(t, b, statusCell("Watched"), "8 / 8", `<option value="finished" selected>`, "Clear filters")
 	mustNotContain(t, b, `/list/`+ship+`/increment`) // at the total: no +1
-	mustRows(t, e.page(t, "/tv?progress=not_started"))
+	mustRows(t, e.page(t, "/tv?progress=not_started&view=table"))
 	// the filter combines with the status tab
-	mustRows(t, e.page(t, "/tv?status=active&progress=finished"))
+	mustRows(t, e.page(t, "/tv?status=active&progress=finished&view=table"))
 	// an unknown state is named in the notice and ignored
-	b = e.page(t, "/tv?progress=halfway")
+	b = e.page(t, "/tv?progress=halfway&view=table")
 	mustContain(t, b, "Ignored unknown or invalid parameters: <code>progress</code>")
 	mustRows(t, b, "1899", "Dark")
 	// +1 at the total stays capped
@@ -385,11 +385,11 @@ func TestGenresAndTagsWorkForFixturePlugins(t *testing.T) {
 	b := e.page(t, "/book/books/earthsea")
 	mustContain(t, b, ">Genres<", ">Fantasy</li>", ">Classic</li>")
 	mustNotContain(t, b, ">Tags<", "Show spoiler tags")
-	b = e.page(t, "/book")
+	b = e.page(t, "/book?view=table")
 	mustContain(t, b, `id="filter-genre-select" name="genre"`, ">Fantasy (1)<", ">Science Fiction (1)<")
 	mustNotContain(t, b, `name="tag"`, `name="tag_mode"`)
-	mustRows(t, e.page(t, "/book?genre=fantasy"), "A Wizard of Earthsea")
-	b = e.page(t, "/book?tag=Ship")
+	mustRows(t, e.page(t, "/book?genre=fantasy&view=table"), "A Wizard of Earthsea")
+	b = e.page(t, "/book?tag=Ship&view=table")
 	mustContain(t, b, "Ignored unknown or invalid parameters: <code>tag</code>")
 	mustRows(t, b, "Dune", "A Wizard of Earthsea")
 
@@ -397,12 +397,12 @@ func TestGenresAndTagsWorkForFixturePlugins(t *testing.T) {
 	b = e.page(t, "/tv/tvdata/dark")
 	mustContain(t, b, ">Genres<", ">Mystery</li>", ">Drama</li>", ">Tags<", `Time Travel <span class="text-xs text-slate-400">90%</span>`,
 		"Show spoiler tags", ">Twist</li>")
-	b = e.page(t, "/tv")
+	b = e.page(t, "/tv?view=table")
 	mustContain(t, b, `name="genre"`, `name="tag"`, ">Mystery (2)<", ">Time Travel (1)<", ">Ship (1)<")
-	mustRows(t, e.page(t, "/tv?genre=Mystery"), "1899", "Dark")
-	mustRows(t, e.page(t, "/tv?genre=Mystery&genre=Drama&genre_mode=all"), "Dark")
-	mustRows(t, e.page(t, "/tv?tag=Ship&tag=Time+Travel"), "1899", "Dark")
-	mustRows(t, e.page(t, "/tv?tag=Ship&tag=Time+Travel&tag_mode=all"))
+	mustRows(t, e.page(t, "/tv?genre=Mystery&view=table"), "1899", "Dark")
+	mustRows(t, e.page(t, "/tv?genre=Mystery&genre=Drama&genre_mode=all&view=table"), "Dark")
+	mustRows(t, e.page(t, "/tv?tag=Ship&tag=Time+Travel&view=table"), "1899", "Dark")
+	mustRows(t, e.page(t, "/tv?tag=Ship&tag=Time+Travel&tag_mode=all&view=table"))
 
 	// terms on a kind that does not enable them are refused, nothing changes
 	before := dump(t, e.env)
@@ -428,14 +428,14 @@ func TestGenresAndTagsWorkForFixturePlugins(t *testing.T) {
 	if rec := e.do("POST", "/book/books/dune/edit", form, false); rec.Code != http.StatusSeeOther {
 		t.Fatalf("book genres: %d %s", rec.Code, rec.Body.String())
 	}
-	mustRows(t, e.page(t, "/book?genre=Desert"), "Dune")
+	mustRows(t, e.page(t, "/book?genre=Desert&view=table"), "Dune")
 	rec = e.do("POST", "/tv/tvdata/1899/edit", url.Values{"title_lang": {"en"}, "title": {"1899"}, "field.type": {"miniseries"},
 		"field.episodes": {"8"}, "field.year": {"2022"}, "genres": {"Mystery"}, "tags": {"Ship\nFog:40\nEnding!"}}, false)
 	if rec.Code != http.StatusSeeOther {
 		t.Fatalf("tv tags: %d %s", rec.Code, rec.Body.String())
 	}
 	mustContain(t, e.page(t, "/tv/tvdata/1899"), ">Ship</li>", `Fog <span class="text-xs text-slate-400">40%</span>`, "Show spoiler tags", ">Ending</li>")
-	mustRows(t, e.page(t, "/tv?tag=Fog"), "1899")
+	mustRows(t, e.page(t, "/tv?tag=Fog&view=table"), "1899")
 }
 
 func TestPluginsAreIsolated(t *testing.T) {
@@ -451,12 +451,12 @@ func TestPluginsAreIsolated(t *testing.T) {
 	e.add(t, "tv", "tvdata", "dark", url.Values{"status": {"active"}})
 	e.drain(t)
 
-	mustRows(t, e.page(t, "/anime"), "デスノート")
-	mustRows(t, e.page(t, "/book"), "A Wizard of Earthsea")
-	mustRows(t, e.page(t, "/tv"), "Dark")
+	mustRows(t, e.page(t, "/anime?view=table"), "デスノート")
+	mustRows(t, e.page(t, "/book?view=table"), "A Wizard of Earthsea")
+	mustRows(t, e.page(t, "/tv?view=table"), "Dark")
 	// list search and filters only ever see the plugin's own items
-	mustRows(t, e.page(t, "/book?q=Death"))
-	mustRows(t, e.page(t, "/tv?q=Earthsea"))
+	mustRows(t, e.page(t, "/book?q=Death&view=table"))
+	mustRows(t, e.page(t, "/tv?q=Earthsea&view=table"))
 	// source search asks the plugin's own source
 	b := e.page(t, "/book/search?q=a")
 	mustNotContain(t, b, "デスノート", "Dark")
@@ -530,8 +530,8 @@ func TestPluginsAreIsolated(t *testing.T) {
 	imp := e.page(t, "/settings/import")
 	mustContain(t, imp, `value="anime/yamtrack"`, `value="tv/tv-json"`)
 	mustNotContain(t, imp, "book/books-csv")
-	mustRows(t, e.page(t, "/anime"), "デスノート")
-	mustRows(t, e.page(t, "/tv"), "Dark")
+	mustRows(t, e.page(t, "/anime?view=table"), "デスノート")
+	mustRows(t, e.page(t, "/tv?view=table"), "Dark")
 	mustContain(t, e.page(t, tvActor), "as Jonas")
 	mustContain(t, e.page(t, animeActor), "as Light Yagami")
 	for _, id := range []string{animeID, tvID} {
@@ -552,7 +552,7 @@ func TestPluginsAreIsolated(t *testing.T) {
 	if rec := e.do("POST", "/settings/plugins/book", url.Values{"enabled": {"1"}}, false); rec.Code != http.StatusSeeOther {
 		t.Fatalf("enable: %d", rec.Code)
 	}
-	b = e.page(t, "/book")
+	b = e.page(t, "/book?view=table")
 	mustRows(t, b, "A Wizard of Earthsea")
 	mustContain(t, b, "10 / 250")
 	mustContain(t, e.page(t, author), `href="/book/books/earthsea"`)
@@ -615,11 +615,11 @@ func TestThreePluginsShareOneQueueAndImportRunner(t *testing.T) {
 	if err := e.reg.SetEnabled(context.Background(), "tv", true); err != nil {
 		t.Fatal(err)
 	}
-	mustContain(t, e.page(t, "/tv"), "partially synced")
+	mustContain(t, e.page(t, "/tv?view=table"), "partially synced")
 	e.drain(t)
 	b := e.page(t, "/tv/tvdata/dark")
 	mustContain(t, b, "Jonas", "Louis Actor")
-	mustNotContain(t, e.page(t, "/tv"), "partially synced")
+	mustNotContain(t, e.page(t, "/tv?view=table"), "partially synced")
 	// covers of every plugin went through the same download path
 	for _, p := range []struct{ plugin, source, id string }{{"anime", "anilist", "1535"}, {"book", "books", "earthsea"}, {"tv", "tvdata", "dark"}} {
 		it := e.savedItems(t, p.plugin, p.source, p.id)[0]
@@ -645,7 +645,7 @@ func TestThreePluginsShareOneQueueAndImportRunner(t *testing.T) {
 	b = e.page(t, "/settings/import")
 	mustContain(t, b, "books.txt", "Done", `data-count="imported">1<`, `data-count="unmatched">1<`, `data-count="skipped">1<`,
 		"Lost Book", "Not found on Fake Books")
-	b = e.page(t, "/book")
+	b = e.page(t, "/book?view=table")
 	mustRows(t, b, "Lost Book", "Dune", "A Wizard of Earthsea")
 	mustContain(t, b, "600 / 600", statusCell("Read"), ">unmatched</span>")
 
@@ -655,7 +655,7 @@ func TestThreePluginsShareOneQueueAndImportRunner(t *testing.T) {
 	}
 	e.drain(t)
 	mustContain(t, e.page(t, "/settings/import"), "tv.txt", "Done", `data-count="imported">1<`)
-	b = e.page(t, "/tv")
+	b = e.page(t, "/tv?view=table")
 	mustRows(t, b, "1899", "Dark")
 	mustContain(t, b, "2 / 8")
 
@@ -837,13 +837,13 @@ func TestBackupRoundTripWithThreePlugins(t *testing.T) {
 	}
 
 	// the restored server shows every plugin's data: entries, progress, covers, people and terms
-	l := b.page(t, "/book")
+	l := b.page(t, "/book?view=table")
 	mustRows(t, l, "A Wizard of Earthsea")
 	mustContain(t, l, "42 / 250", statusCell("Reading"))
-	l = b.page(t, "/tv")
+	l = b.page(t, "/tv?view=table")
 	mustRows(t, l, "Dark")
 	mustContain(t, l, "<span>7 / 26</span>", "<span>1:02:03</span>", statusCell("Paused"))
-	l = b.page(t, "/anime")
+	l = b.page(t, "/anime?view=table")
 	mustRows(t, l, "デスノート")
 	mustContain(t, l, "5 / 37", `data-score="9"`)
 	for _, p := range []struct{ plugin, source, id, img string }{

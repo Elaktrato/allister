@@ -158,10 +158,10 @@ func TestExportWriteErrorStopsTheStream(t *testing.T) {
 
 func TestExportLinksOnListAndSettings(t *testing.T) {
 	e := newFixtureEnv(t, exportFixture(&plugintest.FakeExporter{}, &plugintest.FakeExporter{}))
-	list := e.get("/book").Body.String()
+	list := e.get("/book?view=table").Body.String()
 	mustContain(t, list, `href="/book/export/lines"`, "Export Lines", `href="/book/export/odd"`)
 	mustNotContain(t, list, `href="/book/export/ghost"`)
-	mustNotContain(t, e.get("/tv").Body.String(), "/export/")
+	mustNotContain(t, e.get("/tv?view=table").Body.String(), "/export/")
 	settings := e.get("/settings/plugins").Body.String()
 	mustContain(t, settings, `href="/book/export/lines"`)
 	if err := e.reg.SetEnabled(context.Background(), "book", false); err != nil {
@@ -169,5 +169,5 @@ func TestExportLinksOnListAndSettings(t *testing.T) {
 	}
 	mustNotContain(t, e.get("/settings/plugins").Body.String(), `href="/book/export/lines"`)
 	// the anime plugin's exporter is linked too
-	mustContain(t, e.get("/anime").Body.String(), `href="/anime/export/json"`, "Export JSON")
+	mustContain(t, e.get("/anime?view=table").Body.String(), `href="/anime/export/json"`, "Export JSON")
 }

@@ -37,7 +37,7 @@ const (
 )
 
 // listParamKeys are the keys parseListQuery reads itself.
-var listParamKeys = []string{"kind", "status", "page"}
+var listParamKeys = []string{"kind", "status", "view", "page"}
 
 // fieldFilter is one valid field filter in canonical form: Values for an
 // enum (one or more), else one value ("a..b" for a range).
@@ -449,6 +449,7 @@ type termInput struct {
 type filterBar struct {
 	Action        string
 	Kind, Status  string // hidden inputs (Kind only for plugins with several kinds)
+	View          string // hidden input: cards or table
 	Q             string
 	Fields        []filterField
 	Genres, Tags  *termInput
@@ -480,13 +481,13 @@ func (b *filterBar) outOfBand() { b.OOB = true }
 // in genres/tags; a selected term without a count shows 0).
 func buildFilterBar(m plugin.Manifest, k plugin.KindDef, lq listQuery, genres, tags []library.TermCount) filterBar {
 	f := lq.Filters
-	b := filterBar{Action: "/" + url.PathEscape(m.ID), Status: lq.Status, Q: f.Q,
+	b := filterBar{Action: "/" + url.PathEscape(m.ID), Status: lq.Status, View: lq.View, Q: f.Q,
 		Unrated: f.Unrated, Zero: f.Zero, Unmatched: f.Unmatched, Partial: f.Partial}
 	if len(m.Kinds) > 1 {
 		b.Kind = k.Key
 	}
 	if f.active() {
-		b.ClearURL = listURL(m, k.Key, lq.Status, 1)
+		b.ClearURL = listURL(m, k.Key, lq.Status, lq.View, 1)
 	}
 	for _, im := range m.Importers {
 		b.ShowUnmatched = b.ShowUnmatched || im.ExternalIDType != ""

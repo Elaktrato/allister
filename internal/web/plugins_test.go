@@ -144,13 +144,13 @@ func (r *recordRoutes) Handle(p string, _ http.HandlerFunc) { r.patterns = appen
 func TestEnablingRestoresRoutes(t *testing.T) {
 	e := newEnv(t)
 	e.disable(t, "anime")
-	if c := e.get("/anime").Code; c != 404 {
+	if c := e.get("/anime?view=table").Code; c != 404 {
 		t.Fatalf("disabled: %d", c)
 	}
 	if rec := e.do("POST", "/settings/plugins/anime", url.Values{"enabled": {"1"}}, false); rec.Code != 303 {
 		t.Fatalf("toggle: %d", rec.Code)
 	}
-	if c := e.get("/anime").Code; c != 200 {
+	if c := e.get("/anime?view=table").Code; c != 200 {
 		t.Fatalf("enabled: %d", c)
 	}
 }
@@ -324,7 +324,7 @@ func TestFixturePluginsGetOnlyCoreRoutes(t *testing.T) {
 		}
 	}
 	// the generic list page is a core route
-	if c := e.get("/book").Code; c != 200 {
+	if c := e.get("/book?view=table").Code; c != 200 {
 		t.Fatalf("/book: %d", c)
 	}
 }
@@ -422,7 +422,7 @@ func TestStoreErrorFallsBackToDefault(t *testing.T) {
 		r.Register(off)
 		return r
 	})
-	if c := e.get("/anime").Code; c != 200 {
+	if c := e.get("/anime?view=table").Code; c != 200 {
 		t.Fatalf("anime (default on): %d", c)
 	}
 	body := e.get("/settings").Body.String()

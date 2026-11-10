@@ -1,9 +1,10 @@
 package web
 
 // A plugin's own settings page, GET /settings/plugins/{id}: the title
-// language of the plugin's items (POST /settings/plugins/{id}/title-language)
-// and, per kind, the columns of its list table (POST
-// /settings/plugins/{id}/columns).
+// language of the plugin's items (POST /settings/plugins/{id}/title-language),
+// what its list opens with — the view and the status (POST
+// /settings/plugins/{id}/home) — and, per kind, the columns of its list
+// table (POST /settings/plugins/{id}/columns).
 // Every choice is validated against what the plugin's manifest declares; the
 // page answers for every installed plugin (enabled or not, like its Enable
 // button), unknown ids get the 404 page and are never echoed.
@@ -115,12 +116,16 @@ func (s *server) settingsPlugin(w http.ResponseWriter, r *http.Request) (plugin.
 
 // pluginSettingsView is the data of a plugin's settings page.
 type pluginSettingsView struct {
-	ID, Name    string
-	Enabled     bool
-	LangAction  string
-	LangOptions []langOption
-	Lang        string
-	Columns     []columnsForm
+	ID, Name     string
+	Enabled      bool
+	LangAction   string
+	LangOptions  []langOption
+	Lang         string
+	HomeAction   string
+	HomeView     string
+	HomeStatus   string
+	HomeStatuses []option
+	Columns      []columnsForm
 }
 
 func (s *server) getPluginSettings(w http.ResponseWriter, r *http.Request) {
@@ -128,15 +133,65 @@ func (s *server) getPluginSettings(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	opts, err := s.titleLangOptions(r.Context(), m)
+	ctx := r.Context()
+	opts, err := s.titleLangOptions(ctx, m)
 	if err != nil {
 		s.internalError(w, r, err)
 		return
 	}
+	// the home settings: labels of the first kind, the one the list opens
+	home := []option{{Value: "", Label: "Every status"}}
+	for _, st := range listTabOrder {
+		home = append(home, option{Value: string(st), Label: statusLabel(m.Kinds[0], st)})
+	}
 	v := pluginSettingsView{ID: m.ID, Name: m.Name, Enabled: s.deps.Registry.IsEnabled(m.ID),
-		LangAction: pluginSettingsURL(m.ID) + "/title-language", LangOptions: opts, Lang: s.titleLang(r.Context(), m),
-		Columns: s.columnsForms(r.Context(), m)}
+		LangAction: pluginSettingsURL(m.ID) + "/title-language", LangOptions: opts, Lang: s.titleLang(ctx, m),
+		HomeAction: pluginSettingsURL(m.ID) + "/home", HomeView: s.deps.Settings.HomeView(ctx, m.ID),
+		HomeStatus: s.homeStatus(ctx, m), HomeStatuses: home,
+		Columns: s.columnsForms(ctx, m)}
+	for i := range v.HomeStatuses {
+		v.HomeStatuses[i].Selected = v.HomeStatuses[i].Value == v.HomeStatus
+	}
 	s.render(w, r, "settings_plugin", v)
+}
+
+// postHomeSettings stores the plugin's home settings (fields view and
+// statuses): the view its list opens in (cards or table) and the status it
+// opens with ("" for every status).
+func (s *server) postHomeSettings(w http.ResponseWriter, r *http.Request) {
+	m, ok := s.settingsPlugin(w, r)
+	if !ok {
+		return
+	}
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+	view := r.PostForm.Get("view")
+	if view == "" {
+		view = "cards" // no radio chosen: the default
+	}
+	if view != "cards" && view != "table" {
+		http.Error(w, "unknown view", http.StatusBadRequest)
+		return
+	}
+	st := r.PostForm.Get("statuses")
+	if st != "" && !slices.Contains(library.Statuses(), library.Status(st)) {
+		http.Error(w, "unknown status", http.StatusBadRequest)
+		return
+	}
+	ctx := r.Context()
+	if err := s.deps.Settings.SetHomeView(ctx, m.ID, view); err != nil {
+		log.Printf("settings %s: %v", m.ID, err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	if err := s.deps.Settings.SetHomeStatuses(ctx, m.ID, st); err != nil {
+		log.Printf("settings %s: %v", m.ID, err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	http.Redirect(w, r, pluginSettingsURL(m.ID), http.StatusSeeOther)
 }
 
 // postTitleLanguage stores the plugin's title language (field title_lang),

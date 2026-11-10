@@ -62,7 +62,7 @@ func TestSearchAddListFlow(t *testing.T) {
 		t.Fatalf("add: %d %q", rec.Code, rec.Header().Get("HX-Redirect"))
 	}
 	// list shows title and progress
-	rec = e.get("/anime")
+	rec = e.get("/anime?view=table")
 	mustContain(t, rec.Body.String(), "デスノート", "3 /")
 	id := listID(t, rec.Body.String())
 	// +1
@@ -71,7 +71,7 @@ func TestSearchAddListFlow(t *testing.T) {
 		t.Fatalf("increment: %d", rec.Code)
 	}
 	mustContain(t, rec.Body.String(), "4 /")
-	mustContain(t, e.get("/anime").Body.String(), "4 /")
+	mustContain(t, e.get("/anime?view=table").Body.String(), "4 /")
 }
 
 var listIDRe = regexp.MustCompile(`/list/(\d+)/increment`)
@@ -141,7 +141,7 @@ func TestManualEntryAndPersonFlow(t *testing.T) {
 	mustContain(t, rec.Body.String(), "Mamoru Miyano", "デスノート", "as Light Yagami", `href="/anime/anilist/1535"`)
 
 	// edit: rating 0 is accepted, blank means unrated
-	id := listID(t, e.get("/anime").Body.String())
+	id := listID(t, e.get("/anime?view=table").Body.String())
 	edit := func(rating string) {
 		t.Helper()
 		rec := e.do("POST", "/list/"+id+"/edit", url.Values{"status": {"completed"}, "rating": {rating}, "progress": {"37"}}, true)
@@ -162,7 +162,7 @@ func TestManualEntryAndPersonFlow(t *testing.T) {
 	if rec := e.do("POST", "/list/"+id+"/remove", url.Values{}, true); rec.Code != 204 {
 		t.Fatalf("remove: %d", rec.Code)
 	}
-	mustNotContain(t, e.get("/anime").Body.String(), "デスノート")
+	mustNotContain(t, e.get("/anime?view=table").Body.String(), "デスノート")
 	rec = e.get(actor)
 	if rec.Code != 200 {
 		t.Fatalf("person after remove: %d", rec.Code)
@@ -181,13 +181,13 @@ func TestImportFlow(t *testing.T) {
 	e.runJob(t)
 	mustContain(t, e.get("/settings/import", false).Body.String(), "Done", `data-count="imported">1<`, `data-count="unmatched">1<`)
 
-	list := e.get("/anime", false).Body.String()
+	list := e.get("/anime?view=table", false).Body.String()
 	mustContain(t, list, "T1", "Lost Show", ">unmatched</span>")
 	if n := strings.Count(list, "unmatched</span>"); n != 1 {
 		t.Fatalf("want one unmatched badge, got %d", n)
 	}
 	count := func() int {
-		return strings.Count(e.get("/anime", false).Body.String(), "<tr data-row")
+		return strings.Count(e.get("/anime?view=table", false).Body.String(), "<tr data-row")
 	}
 	if count() != 2 {
 		t.Fatalf("want 2 rows, got %d", count())
@@ -217,7 +217,7 @@ func TestMatchFlowEndToEnd(t *testing.T) {
 	e.fp.cast[0].Actor.ImageURL = imgs.URL + "/a.jpg"
 	id := e.unmatched(t) // status completed, rating 0, progress 3, start date, comment "c"
 
-	list := e.get("/anime").Body.String()
+	list := e.get("/anime?view=table").Body.String()
 	mustContain(t, list, "Lost Show", ">unmatched</span>")
 	_, enBefore := e.snapshot(t, id)
 
@@ -238,7 +238,7 @@ func TestMatchFlowEndToEnd(t *testing.T) {
 	mustNotContain(t, rec.Body.String(), "Match to AniList")
 
 	// the list: no badge, same data, same anime id
-	list = e.get("/anime").Body.String()
+	list = e.get("/anime?view=table").Body.String()
 	mustContain(t, list, "デスノート")
 	mustNotContain(t, list, ">unmatched</span>", "Lost Show")
 	if got := listID(t, list); got != itoa(id) {
@@ -290,7 +290,7 @@ func TestMatchRefusesAlreadySavedAnime(t *testing.T) {
 	if sv, _ := e.lib.Item(context.Background(), existing); sv == nil || sv.Source != string(anilist.AniList) {
 		t.Fatal("existing entry touched")
 	}
-	mustContain(t, e.get("/anime").Body.String(), ">unmatched</span>")
+	mustContain(t, e.get("/anime?view=table").Body.String(), ">unmatched</span>")
 }
 
 // -----------------------------------------------------------------------------
@@ -437,7 +437,7 @@ func TestPluginToggleEndToEnd(t *testing.T) {
 	// switched on again: the paused job runs, nothing was lost
 	e.togglePlugin(t, "anime", "Enable")
 	e.drain(t)
-	list := e.page(t, "/anime")
+	list := e.page(t, "/anime?view=table&view=table")
 	mustRows(t, list, "デスノート")
 	mustContain(t, list, "4 / 37", statusCell("Watching"))
 	mustNotContain(t, list, "partially synced")
@@ -457,7 +457,7 @@ func TestPluginToggleEndToEnd(t *testing.T) {
 	if rec := e.do("POST", "/list/"+id+"/increment", url.Values{}, true); rec.Code != http.StatusOK {
 		t.Fatalf("increment: %d", rec.Code)
 	}
-	mustContain(t, e.page(t, "/anime"), "5 / 37")
+	mustContain(t, e.page(t, "/anime?view=table&view=table"), "5 / 37")
 }
 
 func TestListSearchEndToEnd(t *testing.T) {
@@ -469,7 +469,7 @@ func TestListSearchEndToEnd(t *testing.T) {
 		"field.studio": {"Madhouse"}, "genres": {"Thriller"}, "status": {"planned"}}, nil)
 	e.drain(t)
 
-	list := e.page(t, "/anime")
+	list := e.page(t, "/anime?view=table&view=table")
 	mustRows(t, list, "Perfect Blue", "Cowboy Bebop", "デスノート")
 	bar := formWith(t, list, `role="search"`)
 	// a browser submits every field of the bar, most of them empty: only the
@@ -480,7 +480,7 @@ func TestListSearchEndToEnd(t *testing.T) {
 		for k, vals := range set {
 			v[k] = vals
 		}
-		body := e.page(t, "/anime?"+v.Encode())
+		body := e.page(t, "/anime?view=table&"+v.Encode())
 		if n := noticeOf(body); n != "" {
 			t.Fatalf("notice for %v: %s", set, n)
 		}
@@ -497,7 +497,7 @@ func TestListSearchEndToEnd(t *testing.T) {
 	mustRows(t, body, "Cowboy Bebop", "デスノート")
 	// the same query as a live (htmx) request answers only the rows and
 	// pushes the canonical, bookmarkable URL; that URL reproduces the result
-	rec := e.getWith("/anime?"+v.Encode(), map[string]string{"HX-Request": "true", "HX-Target": "list-rows"})
+	rec := e.getWith("/anime?view=table&"+v.Encode(), map[string]string{"HX-Request": "true", "HX-Target": "list-rows"})
 	if rec.Code != 200 || strings.Contains(rec.Body.String(), "<html") {
 		t.Fatalf("live search: %d", rec.Code)
 	}
@@ -576,8 +576,8 @@ func TestEditDetailsEndToEnd(t *testing.T) {
 	if en, _ := getEntry(context.Background(), e.lib, mustID(t, id)); !reflect.DeepEqual(en, entryBefore) {
 		t.Fatalf("entry changed: %+v -> %+v", entryBefore, en)
 	}
-	mustRows(t, e.page(t, "/anime?q="+url.QueryEscape("改")), "デスノート改")
-	mustRows(t, e.page(t, "/anime?genre=Thriller"), "デスノート改")
+	mustRows(t, e.page(t, "/anime?view=table&q="+url.QueryEscape("改")), "デスノート改")
+	mustRows(t, e.page(t, "/anime?genre=Thriller&view=table"), "デスノート改")
 	// progress stays in the entry dialog, not in Edit details
 	mustContain(t, e.page(t, "/list/"+id+"/edit"), `name="progress`)
 }
@@ -624,10 +624,10 @@ func TestBackupEndToEnd(t *testing.T) {
 	mustContain(t, rec.Body.String(), `data-count="created">2<`)
 	// person photos are not in the archive: the restored server's sync fetches them
 	b.drain(t)
-	list := b.page(t, "/anime")
+	list := b.page(t, "/anime?view=table")
 	mustRows(t, list, "Lost Show", "デスノート")
 	mustContain(t, list, "37 / 37", "1 / 2", `data-score="0"`, `data-score="7"`, statusCell("Paused"), statusCell("Completed"))
-	mustRows(t, b.page(t, "/anime?genre=Drama"), "Lost Show")
+	mustRows(t, b.page(t, "/anime?genre=Drama&view=table"), "Lost Show")
 	mustContain(t, b.page(t, overview), "Light Yagami", "twice")
 	actor := b.personPath(t, "a1")
 	mustContain(t, b.page(t, actor), "as Light Yagami")
@@ -724,7 +724,7 @@ func TestDisablingAPluginPausesItsRunningImport(t *testing.T) {
 	b = e.page(t, "/settings/import")
 	mustContain(t, b, `data-state="done"`, `data-count="imported">2<`, `data-count="unmatched">1<`, `data-count="failed">0<`)
 	mustNotContain(t, b, "is paused because")
-	mustRows(t, e.page(t, "/book"), "Lost Book", "A Wizard of Earthsea", "Dune")
+	mustRows(t, e.page(t, "/book?view=table&view=table"), "Lost Book", "A Wizard of Earthsea", "Dune")
 	if n := e.itemCount(t); n != 3 {
 		t.Fatalf("%d items after resume", n)
 	}
