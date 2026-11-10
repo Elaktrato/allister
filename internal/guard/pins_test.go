@@ -431,11 +431,51 @@ func TestReadmeHelperImagesPinned(t *testing.T) {
 // digestOrSum matches every pinned digest and 64-hex checksum.
 var digestOrSum = regexp.MustCompile(`[0-9a-f]{64}`)
 
+// pinnedFiles are the files holding pins: the build files, README.md and
+// every .sha256 of a vendored file (static files, their test data).
+func pinnedFiles(t *testing.T) []string {
+	t.Helper()
+	files := []string{"Dockerfile", "scripts/go.sh", "README.md"}
+	for _, dir := range []string{"internal/web/static", "internal/web/testdata"} {
+		err := filepath.WalkDir(filepath.Join(root, dir), func(path string, d os.DirEntry, err error) error {
+			if err != nil || d.IsDir() || !strings.HasSuffix(path, ".sha256") {
+				return err
+			}
+			rel, err := filepath.Rel(root, path)
+			files = append(files, filepath.ToSlash(rel))
+			return err
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	return files
+}
+
+// TestPinnedFilesFindsEverySum keeps pinnedFiles honest: the known sums and
+// each bundled font's are found.
+func TestPinnedFilesFindsEverySum(t *testing.T) {
+	got := strings.Join(pinnedFiles(t), " ")
+	for _, want := range []string{"internal/web/static/htmx.min.js.sha256", "internal/web/static/material-symbols-outlined-v383.woff2.sha256",
+		"internal/web/testdata/material-symbols-outlined.codepoints.sha256",
+		"internal/web/static/fonts/inter-latin-wght-v5.3.0.woff2.sha256", "internal/web/static/fonts/jetbrains-mono-latin-ext-wght-v5.3.0.woff2.sha256",
+		"internal/web/static/fonts/source-serif-4-latin-wght-v5.3.1.woff2.sha256"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("pinnedFiles misses %s: %s", want, got)
+		}
+	}
+	// update-pins.sh checks every bundled font's sum
+	script := readRoot(t, "scripts/update-pins.sh")
+	if !strings.Contains(script, "internal/web/static/fonts") || !strings.Contains(script, "sha256sum -c") {
+		t.Error("scripts/update-pins.sh does not check the bundled fonts")
+	}
+}
+
 // TestPinsDocumentListsEveryPin: PINS.md records every digest and checksum in
 // use, so a refresh that forgets the record (or the other way round) fails.
 func TestPinsDocumentListsEveryPin(t *testing.T) {
 	pins := readRoot(t, "PINS.md")
-	for _, rel := range []string{"Dockerfile", "scripts/go.sh", "README.md", "internal/web/static/htmx.min.js.sha256", "internal/web/static/material-symbols-outlined-v383.woff2.sha256", "internal/web/testdata/material-symbols-outlined.codepoints.sha256"} {
+	for _, rel := range pinnedFiles(t) {
 		found := digestOrSum.FindAllString(readRoot(t, rel), -1)
 		if len(found) == 0 {
 			t.Errorf("%s: no pinned digest or checksum found", rel)
@@ -448,7 +488,7 @@ func TestPinsDocumentListsEveryPin(t *testing.T) {
 	}
 	for _, d := range digestOrSum.FindAllString(pins, -1) {
 		used := false
-		for _, rel := range []string{"Dockerfile", "scripts/go.sh", "README.md", "internal/web/static/htmx.min.js.sha256", "internal/web/static/material-symbols-outlined-v383.woff2.sha256", "internal/web/testdata/material-symbols-outlined.codepoints.sha256"} {
+		for _, rel := range pinnedFiles(t) {
 			if strings.Contains(readRoot(t, rel), d) {
 				used = true
 			}
@@ -456,5 +496,93 @@ func TestPinsDocumentListsEveryPin(t *testing.T) {
 		if !used {
 			t.Errorf("PINS.md records %s, which nothing uses any more", d)
 		}
+	}
+}
+
+// TestLicencesShipWithTheImage: the runtime image carries LICENSES/ (the
+// final stage copies it to /licenses), and every vendored font in the
+// static files (each has a .sha256) has its licence there: the bundled app
+// fonts <family>-latin...woff2 need LICENSES/<family>-OFL-1.1.txt, the icon
+// font material-symbols-...woff2 LICENSES/material-symbols-Apache-2.0.txt.
+// The licence texts are upstream's, with their copyright lines.
+func TestLicencesShipWithTheImage(t *testing.T) {
+	lines, _ := logicalLines(readRoot(t, "Dockerfile"))
+	last := -1
+	for i, l := range lines {
+		if strings.HasPrefix(strings.ToUpper(l), "FROM ") {
+			last = i
+		}
+	}
+	copied := false
+	for _, l := range lines[last+1:] {
+		if f := strings.Fields(l); len(f) == 3 && strings.EqualFold(f[0], "COPY") && f[1] == "LICENSES" && f[2] == "/licenses" {
+			copied = true
+		}
+	}
+	if !copied {
+		t.Error("the Dockerfile's final stage does not COPY LICENSES /licenses")
+	}
+	if strings.Contains(readRoot(t, ".dockerignore"), "LICENSES") {
+		t.Error(".dockerignore excludes LICENSES")
+	}
+	fonts := 0
+	for _, rel := range pinnedFiles(t) {
+		name := strings.TrimSuffix(filepath.Base(rel), ".sha256")
+		if !strings.HasSuffix(name, ".woff2") || !strings.HasPrefix(rel, "internal/web/static/") {
+			continue
+		}
+		fonts++
+		var lic string
+		switch {
+		case strings.HasPrefix(name, "material-symbols-"):
+			lic = "LICENSES/material-symbols-Apache-2.0.txt"
+		case strings.Contains(name, "-latin"):
+			lic = "LICENSES/" + name[:strings.Index(name, "-latin")] + "-OFL-1.1.txt"
+		default:
+			t.Errorf("%s: no licence rule for this font", rel)
+			continue
+		}
+		if _, err := os.Stat(filepath.Join(root, lic)); err != nil {
+			t.Errorf("%s: licence %s missing", rel, lic)
+		}
+	}
+	if fonts != 7 {
+		t.Errorf("%d vendored fonts found, want 7 (icon font and 6 app font files)", fonts)
+	}
+	for lic, want := range map[string][]string{
+		"LICENSES/source-serif-4-OFL-1.1.txt": {"Copyright 2014 - 2023 Adobe (http://www.adobe.com/), with Reserved Font Name ‘Source’", "SIL Open Font License, Version 1.1"},
+		"LICENSES/inter-OFL-1.1.txt":          {"Copyright (c) 2016 The Inter Project Authors (https://github.com/rsms/inter)", "SIL Open Font License, Version 1.1"},
+		"LICENSES/jetbrains-mono-OFL-1.1.txt": {"Copyright 2020 The JetBrains Mono Project Authors (https://github.com/JetBrains/JetBrainsMono)", "SIL Open Font License, Version 1.1"},
+	} {
+		body := readRoot(t, lic)
+		for _, w := range want {
+			if !strings.Contains(body, w) {
+				t.Errorf("%s lacks %q", lic, w)
+			}
+		}
+		if strings.HasPrefix(body, "Google Inc.") {
+			t.Errorf("%s still carries the packaged copyright line", lic)
+		}
+	}
+}
+
+// TestDockerfileSmokeChecksTheBuiltCSS: the css stage runs
+// internal/appearance/css-smoke.sh on the built app.css, so a Tailwind
+// config that stops mapping colours to theme tokens fails the build.
+func TestDockerfileSmokeChecksTheBuiltCSS(t *testing.T) {
+	lines, _ := logicalLines(readRoot(t, "Dockerfile"))
+	copied, ran, built := false, false, -1
+	for i, l := range lines {
+		switch {
+		case strings.HasPrefix(l, "COPY internal/appearance/css-smoke.sh "):
+			copied = true
+		case strings.HasPrefix(l, "RUN tailwindcss "):
+			built = i
+		case strings.HasPrefix(l, "RUN sh ") && strings.Contains(l, "css-smoke.sh app.css"):
+			ran = built >= 0 && i > built
+		}
+	}
+	if !copied || !ran {
+		t.Errorf("the css stage does not copy and run css-smoke.sh on app.css after building it (copied %v, ran %v)", copied, ran)
 	}
 }

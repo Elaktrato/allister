@@ -33,6 +33,32 @@
     }
   });
 
+  // Appearance editor (progressive enhancement; the form works without
+  // it): the colour picker and the #rrggbb field of a token follow each
+  // other, and the page previews the colour at once through the token's
+  // custom property (CSSOM, allowed under a strict style-src). Saving
+  // applies it everywhere.
+  document.addEventListener("input", function (event) {
+    var el = event.target;
+    var token = el.getAttribute && el.getAttribute("data-token");
+    if (!token || !/^[a-z-]+$/.test(token)) {
+      return;
+    }
+    var value = el.value.trim().toLowerCase();
+    if (/^#[0-9a-f]{3}$/.test(value)) {
+      value = "#" + value[1] + value[1] + value[2] + value[2] + value[3] + value[3];
+    }
+    if (!/^#[0-9a-f]{6}$/.test(value)) {
+      return;
+    }
+    var other = document.getElementById((el.type === "color" ? "hex-" : "color-") + token);
+    if (other && other !== el) {
+      other.value = value;
+    }
+    var n = parseInt(value.slice(1), 16);
+    document.documentElement.style.setProperty("--al-" + token, (n >> 16) + " " + ((n >> 8) & 255) + " " + (n & 255));
+  });
+
   // A form marked data-no-submit never navigates: its fields drive their
   // own htmx requests (the match dialog's search form).
   document.addEventListener("submit", function (event) {

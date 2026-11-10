@@ -1,0 +1,46 @@
+{
+  "backgroundColor": {
+    "slate-950": "bg",
+    "slate-900": "surface",
+    "slate-800": "raised",
+    "slate-700": "control",
+    "slate-600": "control-hover",
+    "black": "overlay",
+    "indigo-600": "accent",
+    "indigo-500": "accent-hover",
+    "amber-950": "warning-bg"
+  },
+  "textColor": {
+    "white": "text-strong",
+    "slate-100": "text",
+    "slate-200": "text",
+    "slate-300": "text-secondary",
+    "slate-400": "text-muted",
+    "slate-500": "text-faint",
+    "indigo-200": "link",
+    "indigo-300": "link",
+    "indigo-400": "accent-icon",
+    "amber-200": "warning-text",
+    "amber-300": "warning",
+    "emerald-400": "success",
+    "sky-300": "info",
+    "red-300": "danger"
+  },
+  "borderColor": {
+    "DEFAULT": "border",
+    "slate-800": "border-muted",
+    "slate-700": "border",
+    "slate-600": "border-strong",
+    "indigo-500": "focus",
+    "amber-700": "warning-border",
+    "amber-800": "warning-border"
+  },
+  "ringColor": {
+    "DEFAULT": "focus",
+    "indigo-500": "focus",
+    "indigo-400": "focus"
+  },
+  "accentColor": {
+    "indigo-500": "focus"
+  }
+}

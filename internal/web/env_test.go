@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/allister/allister/internal/appearance"
 	"github.com/allister/allister/internal/db"
 	"github.com/allister/allister/internal/jobs"
 	"github.com/allister/allister/internal/library"
@@ -102,9 +103,10 @@ func newEnvWith(t *testing.T, mk func(es plugin.EnabledStore) *plugin.Registry) 
 		e.reg = animeRegistry(t, e.set, e.fp)
 	}
 	e.lib = library.New(d, e.reg)
+	fonts := appearance.NewFontStore(d, filepath.Join(filepath.Dir(e.covers), "fonts"))
 	e.srv, e.h = newServer(Deps{
 		Settings: e.set, Jobs: e.jobs, SyncJobs: testSyncJobs(), CoversDir: e.covers, DataDir: filepath.Dir(e.covers),
-		Registry: e.reg, Library: e.lib,
+		Registry: e.reg, Library: e.lib, Appearance: appearance.NewService(e.set, fonts),
 	}, func() time.Time { return *e.now })
 	return e
 }

@@ -21,9 +21,13 @@ RUN case "$TARGETARCH" in \
     chmod +x /usr/local/bin/tailwindcss
 WORKDIR /src
 COPY tailwind.config.js ./
+COPY internal/appearance/tailwind-map.json ./internal/appearance/tailwind-map.json
 COPY internal/web/templates ./internal/web/templates
 COPY internal/web/static/input.css ./internal/web/static/input.css
 RUN tailwindcss -c tailwind.config.js -i internal/web/static/input.css -o app.css --minify
+# the built CSS maps colours to theme tokens and holds no fixed colour
+COPY internal/appearance/css-smoke.sh ./internal/appearance/css-smoke.sh
+RUN sh internal/appearance/css-smoke.sh app.css
 
 # golang:1.27.3-bookworm (keep in step with go.mod's toolchain and scripts/go.sh)
 FROM golang:1.27.3-bookworm@sha256:dc0963f32053e4bc451d24d87e3892d42d01021b61f093e98eb95c0352bb84b0 AS build
@@ -37,6 +41,8 @@ RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /allister ./cmd/alliste
 # gcr.io/distroless/static-debian12:latest
 FROM gcr.io/distroless/static-debian12:latest@sha256:d75cdd72874d4790092fcb1b058493ecf6bb5bf2b2b897045b00ff01d91843f2
 COPY --from=build /allister /allister
+# licences of the vendored fonts (OFL-1.1, Apache-2.0), see PINS.md
+COPY LICENSES /licenses
 ENV PORT=8080 DATA_DIR=/data
 VOLUME /data
 EXPOSE 8080

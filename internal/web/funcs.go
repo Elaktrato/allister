@@ -15,6 +15,9 @@ import (
 var templateFuncs = template.FuncMap{
 	// navMarker marks where base.html's navigation goes (see executeFor).
 	"navMarker": func() template.HTML { return template.HTML(navMarker) },
+	// appearanceMarker marks where base.html's appearance stylesheet link
+	// goes (see fillMarkers).
+	"appearanceMarker": func() template.HTML { return template.HTML(appearanceMarker) },
 	// settingsTabsMarker marks where a settings page's section tabs go.
 	"settingsTabsMarker": func() template.HTML { return template.HTML(settingsTabsMarker) },
 	// dialogStatuses is the dialog slot's data-swap-statuses value: the

@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/allister/allister/internal/appearance"
 	"github.com/allister/allister/internal/backup"
 	"github.com/allister/allister/internal/importer"
 	"github.com/allister/allister/internal/library"
@@ -56,6 +57,9 @@ type Deps struct {
 	// for every page that reads or writes items (cmd/allister builds it over
 	// the database and Registry).
 	Library *library.Library
+	// Appearance holds the appearance settings and renders /appearance.css;
+	// when nil NewServer uses one over Settings without uploaded fonts.
+	Appearance *appearance.Service
 }
 
 // JobQueue is the part of jobs.Queue the web layer needs.
@@ -84,12 +88,14 @@ type server struct {
 	maxBackupBody int64
 	spoolHook     func(path string)
 	// backupWrite produces the download (backup.Write; tests replace it).
-	backupWrite func(ctx context.Context, w io.Writer, lib *library.Library, plugins []backup.PluginVersion, coversDir string, now time.Time) error
+	backupWrite func(ctx context.Context, w io.Writer, lib *library.Library, plugins []backup.PluginVersion, coversDir string, app *appearance.Service, now time.Time) error
+	// appearance is Deps.Appearance (or the default one).
+	appearance *appearance.Service
 }
 
 // pageNames lists every page template (templates/<name>.html). Add a page by
 // dropping its file in templates/ and listing it here.
-var pageNames = []string{"settings", "settings_plugins_page", "settings_plugin", "search", "item", "list", "person", "manual_form", "details_form", "import", "error", "recommendations", "backup"}
+var pageNames = []string{"settings", "settings_appearance", "settings_plugins_page", "settings_plugin", "search", "item", "list", "person", "manual_form", "details_form", "import", "error", "recommendations", "backup"}
 
 // pagePartials lists extra template files a page needs (also rendered alone
 // for htmx requests).
@@ -125,8 +131,16 @@ func newServer(deps Deps, now func() time.Time) (*server, http.Handler) {
 	if deps.Registry == nil {
 		deps.Registry = emptyRegistry(deps)
 	}
+	if deps.Appearance == nil {
+		var st appearance.Store
+		if deps.Settings != nil {
+			st = deps.Settings
+		}
+		deps.Appearance = appearance.NewService(st, nil)
+	}
 	s := &server{deps: deps, pages: parsePages(), cache: newDetailCache(now, cacheMaxEntries, cacheTTL),
-		recs: newRecCache(now, recCacheMaxEntries, cacheTTL), recTimeout: recTimeout, now: now, maxBackupBody: maxBackupBody, backupWrite: backup.Write}
+		recs: newRecCache(now, recCacheMaxEntries, cacheTTL), recTimeout: recTimeout, now: now, maxBackupBody: maxBackupBody, backupWrite: backup.Write,
+		appearance: deps.Appearance}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("ok"))
@@ -150,6 +164,7 @@ func newServer(deps Deps, now func() time.Time) (*server, http.Handler) {
 	mux.HandleFunc("GET /settings/backup/download", s.getBackupDownload)
 	mux.HandleFunc("POST /settings/backup/restore", s.postBackupRestore)
 	s.mountPlugins(mux)
+	s.mountAppearance(mux)
 	return s, refuseCrossOrigin(mux)
 }
 
@@ -222,9 +237,11 @@ func (s *server) executeFor(w http.ResponseWriter, r *http.Request, status int, 
 }
 
 // fillMarkers replaces the markers of a full page with what is prepared per
-// request: the sidebar (navMarker) and, on a settings page, the settings
-// section tabs (settingsTabsMarker).
+// request: the appearance stylesheet link (appearanceMarker), the sidebar
+// (navMarker) and, on a settings page, the settings section tabs
+// (settingsTabsMarker).
 func (s *server) fillMarkers(r *http.Request, out []byte) ([]byte, error) {
+	out = bytes.Replace(out, []byte(appearanceMarker), s.appearanceLink(r.Context()), 1)
 	var nav bytes.Buffer
 	if err := navTemplate.ExecuteTemplate(&nav, "nav.html", s.navItems(r)); err != nil {
 		return nil, err
