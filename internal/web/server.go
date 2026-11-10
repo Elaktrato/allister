@@ -44,6 +44,9 @@ type Deps struct {
 	// ScheduleJobs maps a plugin id to its schedule refresh job, like
 	// SyncJobs: the calendar feed enqueues refreshes without knowing the kind.
 	ScheduleJobs map[string]func(itemID int64) (kind string, payload any)
+	// ScheduleImport returns the job that repeats a plugin importer's stored
+	// account import; nil means imports cannot be scheduled (tests).
+	ScheduleImport func(pluginID, importerID string) (kind string, payload any)
 	// CoversDir is DATA_DIR/covers; when empty /covers/ is not served.
 	CoversDir string
 	// DataDir is DATA_DIR: a backup restore spools its upload to
@@ -165,6 +168,7 @@ func newServer(deps Deps, now func() time.Time) (*server, http.Handler) {
 	mux.HandleFunc("GET /settings/plugins/{id}", s.getPluginSettings)
 	mux.HandleFunc("POST /settings/plugins/{id}/title-language", s.postTitleLanguage)
 	mux.HandleFunc("POST /settings/plugins/{id}/home", s.postHomeSettings)
+	mux.HandleFunc("POST /settings/plugins/{id}/import/{importer}", s.postPluginImport)
 	mux.HandleFunc("POST /settings/plugins/{id}/columns", s.postColumns)
 	mux.HandleFunc("GET /settings/backup", s.getBackup)
 	mux.HandleFunc("GET /settings/backup/download", s.getBackupDownload)

@@ -72,6 +72,24 @@ type Tag struct {
 	Spoiler bool
 }
 
+// AccountEntry is one entry of a user's AniList list, media included.
+type AccountEntry struct {
+	Status    string  `json:"status"` // CURRENT, PLANNING, COMPLETED, PAUSED, DROPPED, REPEATING
+	Score     float64 `json:"score"`  // 0–10 (the query asks for POINT_10)
+	Progress  int     `json:"progress"`
+	UpdatedAt int64   `json:"updatedAt"` // unix seconds
+	Media     struct {
+		ID    int `json:"id"`
+		MALID int `json:"idMal"`
+		Title struct {
+			Romaji, English, Native string
+		} `json:"title"`
+		Cover struct {
+			Large string `json:"large"`
+		} `json:"coverImage"`
+	} `json:"media"`
+}
+
 // Anime is the full detail of an anime.
 type Anime struct {
 	SearchResult

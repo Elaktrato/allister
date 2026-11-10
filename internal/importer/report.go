@@ -31,7 +31,8 @@ type Report struct {
 	Total, Ignored int
 	// Processed is every row with an outcome; Remaining the rest.
 	Processed, Remaining int
-	Imported, Skipped    int
+	Imported, Updated    int
+	Skipped              int
 	Unmatched, Failed    int
 	// Active is true while the import is pending or running.
 	Active    bool
@@ -100,6 +101,8 @@ func (r *Runner) Report(ctx context.Context, id int64) (*Report, error) {
 			rep.Remaining = n
 		case outcomeImported:
 			rep.Imported = n
+		case outcomeUpdated:
+			rep.Updated = n
 		case outcomeSkipped:
 			rep.Skipped = n
 		case outcomeUnmatched:
@@ -112,7 +115,7 @@ func (r *Runner) Report(ctx context.Context, id int64) (*Report, error) {
 		return nil, fmt.Errorf("import report: %w", err)
 	}
 	rows.Close()
-	rep.Processed = rep.Imported + rep.Skipped + rep.Unmatched + rep.Failed
+	rep.Processed = rep.Imported + rep.Updated + rep.Skipped + rep.Unmatched + rep.Failed
 	rep.CanResume = (rep.State == stateFailed || rep.State == stateCancelled) && rep.Remaining > 0 && rep.ImporterID != ""
 	if rep.ETA, err = r.eta(ctx, &rep); err != nil {
 		return nil, err

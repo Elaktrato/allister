@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<myanimelist>
+  <myinfo>
+    <user_name>someone</user_name>
+    <user_export_type>1</user_export_type>
+  </myinfo>
+  <anime>
+    <series_animedb_id>21</series_animedb_id>
+    <series_title><![CDATA[One Piece]]></series_title>
+    <series_episodes>1100</series_episodes>
+    <my_watched_episodes>1050</my_watched_episodes>
+    <my_score>9</my_score>
+    <my_status>1</my_status>
+  </anime>
+  <anime>
+    <series_animedb_id>5114</series_animedb_id>
+    <series_title><![CDATA[Fullmetal Alchemist: Brotherhood]]></series_title>
+    <series_episodes>64</series_episodes>
+    <my_watched_episodes>64</my_watched_episodes>
+    <my_score>10</my_score>
+    <my_status>2</my_status>
+  </anime>
+  <anime>
+    <series_animedb_id>abc</series_animedb_id>
+    <series_title>Broken</series_title>
+    <my_status>1</my_status>
+  </anime>
+  <anime>
+    <series_animedb_id>999</series_animedb_id>
+    <series_title>Odd</series_title>
+    <my_watched_episodes>3</my_watched_episodes>
+    <my_score>0</my_score>
+    <my_status>9</my_status>
+  </anime>
+</myanimelist>

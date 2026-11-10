@@ -262,15 +262,18 @@ type SourceInfo struct {
 // replaced by the item's id of ExternalIDType. Empty means the core's own
 // neutral sentence.
 type ImporterInfo struct {
-	ID                string   `json:"id"`
-	Name              string   `json:"name"`
-	FileHint          string   `json:"file_hint,omitempty"`
-	Accept            []string `json:"accept,omitempty"`
-	ExternalIDType    string   `json:"external_id_type,omitempty"`
-	ExternalIDLabel   string   `json:"external_id_label,omitempty"`
-	ResolveVia        string   `json:"resolve_via,omitempty"`
-	FallbackTitleLang string   `json:"fallback_title_lang,omitempty"`
-	UnmatchedNote     string   `json:"unmatched_note,omitempty"`
+	ID       string   `json:"id"`
+	Name     string   `json:"name"`
+	FileHint string   `json:"file_hint,omitempty"`
+	Accept   []string `json:"accept,omitempty"`
+	// AccountLabel names the account field of an AccountImporter ("Username");
+	// empty means the importer takes a file.
+	AccountLabel      string `json:"account_label,omitempty"`
+	ExternalIDType    string `json:"external_id_type,omitempty"`
+	ExternalIDLabel   string `json:"external_id_label,omitempty"`
+	ResolveVia        string `json:"resolve_via,omitempty"`
+	FallbackTitleLang string `json:"fallback_title_lang,omitempty"`
+	UnmatchedNote     string `json:"unmatched_note,omitempty"`
 }
 
 // ExporterInfo describes an export format.

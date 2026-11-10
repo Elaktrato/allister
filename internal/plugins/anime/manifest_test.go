@@ -121,13 +121,23 @@ func TestManifestMatchesBaseline(t *testing.T) {
 	if !reflect.DeepEqual(k.Sections, wantSections) {
 		t.Errorf("sections = %+v", k.Sections)
 	}
-	wantSource := plugin.SourceInfo{ID: "anilist", Name: "AniList", RequestsPerMinute: 30, ExternalIDTypes: []string{"mal"},
+	wantSource := plugin.SourceInfo{ID: "anilist", Name: "AniList", RequestsPerMinute: 30, ExternalIDTypes: []string{"mal", "anilist"},
 		SupportsLookup: true, SupportsSchedule: true, LinkLabel: "View on AniList", URLPatterns: []string{"anilist.co/anime/{id}"}}
 	if len(m.Sources) != 1 || !reflect.DeepEqual(m.Sources[0], wantSource) {
 		t.Errorf("sources = %+v", m.Sources)
 	}
-	if len(m.Importers) != 1 {
+	if len(m.Importers) != 3 {
 		t.Fatalf("importers = %+v", m.Importers)
+	}
+	acc := m.Importers[1]
+	if acc.ID != "anilist-user" || acc.AccountLabel != "AniList username" || acc.ExternalIDType != "anilist" ||
+		acc.ResolveVia != "anilist" || acc.FallbackTitleLang != "ja-latn" || acc.UnmatchedNote == "" {
+		t.Errorf("account importer = %+v", acc)
+	}
+	xmlImp := m.Importers[2]
+	if xmlImp.ID != "mal-xml" || xmlImp.AccountLabel != "" || !reflect.DeepEqual(xmlImp.Accept, []string{".xml"}) ||
+		xmlImp.ExternalIDType != "mal" || xmlImp.FileHint == "" {
+		t.Errorf("xml importer = %+v", xmlImp)
 	}
 	im := m.Importers[0]
 	if im.ID != "yamtrack" || im.Name != "Yamtrack CSV" || !reflect.DeepEqual(im.Accept, []string{".csv"}) || im.ExternalIDType != "mal" || im.ExternalIDLabel != "MyAnimeList" ||

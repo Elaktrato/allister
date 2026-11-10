@@ -74,6 +74,9 @@ func run() error {
 		DB: database, Library: lib, Registry: registry, Queue: queue, SyncJobs: syncJobsByPlugin,
 	})
 	queue.Register(importer.KindRun, imports.Handler())
+	queue.Register(jobs.KindScheduledImport, jobs.ScheduledImport(jobs.ScheduledImportDeps{
+		Imports: imports, Settings: settingsStore, Queue: queue,
+	}))
 	// Reset crashed jobs first, then re-queue items whose sync never finished
 	// (jobs that gave up, or were lost) so the "partially synced" state heals.
 	if err := queue.Recover(workerCtx); err != nil {
@@ -100,10 +103,14 @@ func run() error {
 			SyncJobs: syncJobsByPlugin,
 			// the calendar feed enqueues schedule refreshes through these
 			ScheduleJobs: scheduleJobs(registry),
-			CoversDir:    coversDir,
-			DataDir:      cfg.DataDir,
-			Imports:      imports,
-			Library:      lib,
+			// saving an import schedule starts its repeat chain
+			ScheduleImport: func(pluginID, importerID string) (string, any) {
+				return jobs.KindScheduledImport, jobs.ScheduledImportPayload{PluginID: pluginID, ImporterID: importerID}
+			},
+			CoversDir: coversDir,
+			DataDir:   cfg.DataDir,
+			Imports:   imports,
+			Library:   lib,
 			// uploaded fonts live in DATA_DIR/fonts next to the covers
 			Appearance: appearance.NewService(settingsStore, appearance.NewFontStore(database, filepath.Join(cfg.DataDir, "fonts"))),
 		}),

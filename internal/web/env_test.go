@@ -15,6 +15,7 @@ import (
 
 	"github.com/allister/allister/internal/appearance"
 	"github.com/allister/allister/internal/db"
+	"github.com/allister/allister/internal/importer"
 	"github.com/allister/allister/internal/jobs"
 	"github.com/allister/allister/internal/library"
 	"github.com/allister/allister/internal/plugins/anime/anilist"
@@ -104,8 +105,13 @@ func newEnvWith(t *testing.T, mk func(es plugin.EnabledStore) *plugin.Registry) 
 	}
 	e.lib = library.New(d, e.reg)
 	fonts := appearance.NewFontStore(d, filepath.Join(filepath.Dir(e.covers), "fonts"))
+	imports := importer.New(importer.Deps{DB: d, Library: e.lib, Registry: e.reg, Queue: e.jobs, SyncJobs: testSyncJobs()})
 	e.srv, e.h = newServer(Deps{
+		Imports:  imports,
 		Settings: e.set, Jobs: e.jobs, SyncJobs: testSyncJobs(), ScheduleJobs: testScheduleJobs(), CoversDir: e.covers, DataDir: filepath.Dir(e.covers),
+		ScheduleImport: func(pluginID, importerID string) (string, any) {
+			return "scheduled_import", map[string]string{"plugin_id": pluginID, "importer_id": importerID}
+		},
 		Registry: e.reg, Library: e.lib, Appearance: appearance.NewService(e.set, fonts),
 	}, func() time.Time { return *e.now })
 	return e

@@ -144,11 +144,12 @@ func TVPlugin(opts ...Option) *Plugin {
 				},
 				TitleLanguages: []string{"en", "original"},
 			}},
-			Sources:   []plugin.SourceInfo{{ID: "tvdata", Name: "Fake TV", RequestsPerMinute: 30, ExternalIDTypes: []string{"tvdata"}, SupportsLookup: true, SupportsSchedule: true, LinkLabel: "View on Fake TV", URLPatterns: []string{"tv.example/show/{id}"}}},
-			Importers: []plugin.ImporterInfo{{ID: "tv-json", Name: "TV JSON", FileHint: "JSON export", Accept: []string{".json"}, ExternalIDType: "tvdata", ResolveVia: "tvdata", FallbackTitleLang: "en"}},
+			Sources: []plugin.SourceInfo{{ID: "tvdata", Name: "Fake TV", RequestsPerMinute: 30, ExternalIDTypes: []string{"tvdata"}, SupportsLookup: true, SupportsSchedule: true, LinkLabel: "View on Fake TV", URLPatterns: []string{"tv.example/show/{id}"}}},
+			Importers: []plugin.ImporterInfo{{ID: "tv-json", Name: "TV JSON", FileHint: "JSON export", Accept: []string{".json"}, ExternalIDType: "tvdata", ResolveVia: "tvdata", FallbackTitleLang: "en"},
+				{ID: "tv-account", Name: "TV account", AccountLabel: "Username", ExternalIDType: "tvdata", ResolveVia: "tvdata", FallbackTitleLang: "en"}},
 		},
 		Sources:   map[string]plugin.Source{"tvdata": &FakeSource{}},
-		Importers: map[string]plugin.Importer{"tv-json": &FakeImporter{}},
+		Importers: map[string]plugin.Importer{"tv-json": &FakeImporter{}, "tv-account": &FakeImporter{}},
 	}
 	return apply(p, opts)
 }
@@ -159,6 +160,7 @@ const (
 	OpDetails         = "details"
 	OpPeople          = "people"
 	OpSchedule        = "schedule"
+	OpAccount         = "account"
 	OpRecommendations = "recommendations"
 	OpLookup          = "lookup"
 )
@@ -255,8 +257,17 @@ func (f *FakeSource) Lookup(ctx context.Context, kind, idType, value string) (pl
 
 // FakeImporter returns a canned ParseResult (or Err) and ignores the input.
 type FakeImporter struct {
-	Result plugin.ParseResult
-	Err    error
+	// AccountRows is the ImportAccount result.
+	AccountRows []plugin.ParsedEntry
+	Result      plugin.ParseResult
+	Err         error
+}
+
+func (f *FakeImporter) ImportAccount(ctx context.Context, account string) (plugin.ParseResult, error) {
+	if f.Err != nil {
+		return plugin.ParseResult{}, f.Err
+	}
+	return plugin.ParseResult{Entries: f.AccountRows}, nil
 }
 
 func (f *FakeImporter) Parse(ctx context.Context, r io.Reader) (plugin.ParseResult, error) {

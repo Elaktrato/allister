@@ -135,7 +135,24 @@ func impRow(id int, title, status string) string {
 // upload posts only the file (no importer field), as the legacy form did.
 func (e *impEnv) upload(t testing.TB, field, name string, data []byte) *httptest.ResponseRecorder {
 	t.Helper()
-	return e.uploadTo(t, nil, field, name, data)
+	// several importers exist now: name the first file importer of the env's
+	// enabled plugins, like a user choosing from the select
+	v := url.Values{}
+	for _, m := range e.reg.Manifests() {
+		if !e.reg.IsEnabled(m.ID) {
+			continue
+		}
+		for _, im := range m.Importers {
+			if im.AccountLabel == "" {
+				v.Set("importer", m.ID+"/"+im.ID)
+				break
+			}
+		}
+		if len(v) > 0 {
+			break
+		}
+	}
+	return e.uploadTo(t, v, field, name, data)
 }
 
 func (e *impEnv) uploadTo(t testing.TB, v url.Values, field, name string, data []byte) *httptest.ResponseRecorder {
@@ -243,7 +260,7 @@ func TestImportPageListsFailedRows(t *testing.T) {
 		r.Register(b.p)
 		return r
 	})
-	if rec := e.upload(t, "file", "books.csv", []byte("x")); rec.Code != 303 {
+	if rec := e.uploadTo(t, url.Values{"importer": {"book/books-csv"}}, "file", "books.csv", []byte("x")); rec.Code != 303 {
 		t.Fatalf("upload: %d %s", rec.Code, rec.Body.String())
 	}
 	e.runJob(t)
@@ -278,10 +295,10 @@ func TestImportPageHasUploadFormAndSettingsLink(t *testing.T) {
 	e := newImpEnv(t, notFoundExcept())
 	page := e.get("/settings/import", false).Body.String()
 	mustContain(t, page, `action="/settings/import"`, `enctype="multipart/form-data"`, `name="file"`, `type="file"`)
-	// the only importer needs no choice: its id travels in a hidden field
-	mustContain(t, page, `name="importer" value="anime/yamtrack"`, "Import from Yamtrack CSV", `accept=".csv"`,
+	// several file importers: the form asks which one
+	mustContain(t, page, `<select name="importer"`, "Yamtrack CSV (Anime)", "MyAnimeList XML export (Anime)",
 		"Export your list from Yamtrack", "Rows are matched on AniList")
-	mustNotContain(t, page, "<select")
+	mustNotContain(t, page, "AniList account (Anime)") // account importers live on the plugin page
 	mustContain(t, settingsTabs(t, e.get("/settings", false).Body.String()), `href="/settings/import"`, "<span>Import</span>")
 }
 
@@ -409,7 +426,7 @@ func TestImportListsAreCappedAt200(t *testing.T) {
 		r.Register(b.p)
 		return r
 	})
-	e.upload(t, "file", "a.csv", []byte("x"))
+	e.uploadTo(t, url.Values{"importer": {"book/books-csv"}}, "file", "a.csv", []byte("x"))
 	e.runJob(t)
 	body := e.get("/settings/import", false).Body.String()
 	mustContain(t, body, "Show 200", "and 30 more")
@@ -503,8 +520,8 @@ func TestImportPageOffersImportersOfEnabledPlugins(t *testing.T) {
 	mustContain(t, page, "<h1 class=\"mb-6 text-2xl font-semibold\">Import</h1>")
 	mustContain(t, settingsTabs(t, e.get("/settings", false).Body.String()), `href="/settings/import"`, "<span>Import</span>")
 
-	// with two importers the field is required
-	rec := e.upload(t, "file", "x.csv", []byte("x"))
+	// with several importers the field is required
+	rec := e.uploadTo(t, nil, "file", "x.csv", []byte("x"))
 	if rec.Code != http.StatusUnprocessableEntity {
 		t.Fatalf("no importer: %d", rec.Code)
 	}
@@ -544,7 +561,7 @@ func TestImportOfDisabledPluginIsNotOfferedAndRefused(t *testing.T) {
 	}
 	page := e.get("/settings/import", false).Body.String()
 	mustNotContain(t, page, "book/books-csv", "Books CSV")
-	mustContain(t, page, `name="importer" value="anime/yamtrack"`)
+	mustContain(t, page, `<select name="importer"`, `<option value="anime/yamtrack">`)
 	rec := e.uploadTo(t, url.Values{"importer": {"book/books-csv"}}, "file", "b.csv", []byte("x"))
 	if rec.Code != http.StatusUnprocessableEntity {
 		t.Fatalf("disabled: %d", rec.Code)

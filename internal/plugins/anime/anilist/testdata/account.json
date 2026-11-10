@@ -1,0 +1,10 @@
+{"data":{"MediaListCollection":{"lists":[
+  {"entries":[
+    {"status":"CURRENT","score":8.4,"progress":3,"updatedAt":1762700000,"media":{"id":189123,"idMal":59127,"title":{"romaji":"Ao no Hako Season 2","english":"Blue Box Season 2","native":"アオのハコ Season２"},"coverImage":{"large":"https://img.example/cover.jpg"}}},
+    {"status":"REPEATING","score":0,"progress":0,"updatedAt":0,"media":{"id":21,"idMal":1,"title":{"romaji":"Rerun","english":"","native":""},"coverImage":{"large":""}}}
+  ]},
+  {"entries":[
+    {"status":"COMPLETED","score":9,"progress":12,"updatedAt":1762700001,"media":{"id":30,"idMal":2,"title":{"romaji":"Done","english":"Done EN","native":""},"coverImage":{"large":""}}},
+    {"status":"WEIRD","score":5,"progress":1,"updatedAt":0,"media":{"id":31,"idMal":3,"title":{"romaji":"Odd","english":"","native":""},"coverImage":{"large":""}}}
+  ]}
+]}}}

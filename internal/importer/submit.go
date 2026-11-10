@@ -12,6 +12,26 @@ import (
 	"github.com/allister/allister/internal/plugin"
 )
 
+// Import modes: how an import treats entries that already exist.
+const (
+	// ModeSkip leaves existing entries untouched (the default).
+	ModeSkip = "skip"
+	// ModeNewer updates an existing entry only when the source entry was
+	// modified after the local one.
+	ModeNewer = "newer"
+	// ModeAlways updates an existing entry unconditionally.
+	ModeAlways = "always"
+)
+
+// normalizeMode maps anything unknown onto the safe default.
+func normalizeMode(mode string) string {
+	switch mode {
+	case ModeNewer, ModeAlways:
+		return mode
+	}
+	return ModeSkip
+}
+
 // storedRow is one row as written by Submit.
 type storedRow struct {
 	idType, id, title, outcome, message, data string
@@ -20,14 +40,24 @@ type storedRow struct {
 // Submit parses the file through the plugin's importer, stores its rows (the
 // parsed entries as pending; the importer's skipped rows, entries of an
 // unknown kind and entries without the importer's external id as skipped
-// with their reasons) as a new import and enqueues the job. Nothing is stored
-// when the plugin or importer is unknown or disabled (ErrUnknownImporter),
-// the importer's ResolveVia source is not provided by the plugin
-// (ErrSourceMissing) or cannot look up (ErrNoLookup; only an empty
-// ResolveVia means manual-only), the file is
-// not in the format (*BadFileError), holds nothing importable (*NoRowsError)
-// or another import is active (*ActiveError).
+// with their reasons) as a new import with the skip mode and enqueues the
+// job. Nothing is stored when the plugin or importer is unknown or disabled
+// (ErrUnknownImporter), the importer's ResolveVia source is not provided by
+// the plugin (ErrSourceMissing) or cannot look up (ErrNoLookup; only an empty
+// ResolveVia means manual-only), the file is not in the format
+// (*BadFileError), holds nothing importable (*NoRowsError) or another import
+// is active (*ActiveError).
 func (r *Runner) Submit(ctx context.Context, pluginID, importerID, filename string, in io.Reader) (int64, error) {
+	return r.submitMode(ctx, pluginID, importerID, filename, ModeSkip, in)
+}
+
+// SubmitMode is Submit with an import mode for existing entries
+// (ModeSkip, ModeNewer, ModeAlways).
+func (r *Runner) SubmitMode(ctx context.Context, pluginID, importerID, filename, mode string, in io.Reader) (int64, error) {
+	return r.submitMode(ctx, pluginID, importerID, filename, mode, in)
+}
+
+func (r *Runner) submitMode(ctx context.Context, pluginID, importerID, filename, mode string, in io.Reader) (int64, error) {
 	ref, ok := r.resolve(pluginID, importerID)
 	if !ok || !r.d.Registry.IsEnabled(pluginID) {
 		return 0, ErrUnknownImporter
@@ -47,6 +77,37 @@ func (r *Runner) Submit(ctx context.Context, pluginID, importerID, filename stri
 		}
 		return 0, fmt.Errorf("import: %w", err)
 	}
+	filename = truncate(filepath.Base(strings.ReplaceAll(filename, `\`, "/")), maxFilenameRunes)
+	return r.finishSubmit(ctx, ref, plugin.SingleLine(filename, maxFilenameRunes), res, mode)
+}
+
+// SubmitAccount fetches an account's list through an AccountImporter and
+// stores it like Submit, with the given import mode.
+func (r *Runner) SubmitAccount(ctx context.Context, pluginID, importerID, account, mode string) (int64, error) {
+	ref, ok := r.resolve(pluginID, importerID)
+	if !ok || !r.d.Registry.IsEnabled(pluginID) {
+		return 0, ErrUnknownImporter
+	}
+	imp, ok := ref.plugin.Importer(importerID).(plugin.AccountImporter)
+	if !ok {
+		return 0, ErrUnknownImporter
+	}
+	if err := ref.usable(); err != nil {
+		return 0, err
+	}
+	res, err := imp.ImportAccount(ctx, account)
+	if err != nil {
+		if errors.Is(err, plugin.ErrBadInput) {
+			reason := strings.TrimPrefix(err.Error(), plugin.ErrBadInput.Error()+": ")
+			return 0, &BadFileError{Reason: plugin.SingleLine(reason, maxTitleRunes), Err: err}
+		}
+		return 0, fmt.Errorf("import: %w", err)
+	}
+	return r.finishSubmit(ctx, ref, plugin.SingleLine(account, maxFilenameRunes), res, mode)
+}
+
+// finishSubmit stores the parsed rows as a new import and enqueues its job.
+func (r *Runner) finishSubmit(ctx context.Context, ref *importerRef, filename string, res plugin.ParseResult, mode string) (int64, error) {
 	rows, entries, err := r.storedRows(ref, res)
 	if err != nil {
 		return 0, err
@@ -54,9 +115,7 @@ func (r *Runner) Submit(ctx context.Context, pluginID, importerID, filename stri
 	if entries == 0 {
 		return 0, &NoRowsError{What: ref.noRowsWhat()}
 	}
-	filename = truncate(filepath.Base(strings.ReplaceAll(filename, `\`, "/")), maxFilenameRunes)
-	filename = plugin.SingleLine(filename, maxFilenameRunes)
-
+	mode = normalizeMode(mode)
 	r.opMu.Lock()
 	defer r.opMu.Unlock()
 	tx, err := r.d.DB.BeginTx(ctx, nil)
@@ -67,8 +126,8 @@ func (r *Runner) Submit(ctx context.Context, pluginID, importerID, filename stri
 	if err := r.activeCheck(ctx, tx); err != nil {
 		return 0, err
 	}
-	ins, err := tx.ExecContext(ctx, `INSERT INTO imports(filename, state, total, ignored, plugin_id, importer_id) VALUES (?,?,?,?,?,?)`,
-		filename, statePending, len(rows), max(res.Ignored, 0), pluginID, importerID)
+	ins, err := tx.ExecContext(ctx, `INSERT INTO imports(filename, state, total, ignored, plugin_id, importer_id, mode) VALUES (?,?,?,?,?,?,?)`,
+		filename, statePending, len(rows), max(res.Ignored, 0), ref.manifest.ID, ref.info.ID, mode)
 	if err != nil {
 		return 0, fmt.Errorf("import: %w", err)
 	}
@@ -89,7 +148,7 @@ func (r *Runner) Submit(ctx context.Context, pluginID, importerID, filename stri
 	if err := tx.Commit(); err != nil {
 		return 0, fmt.Errorf("import: %w", err)
 	}
-	if err := r.d.Queue.Enqueue(ctx, KindRun, Payload{ImportID: id, PluginID: pluginID}); err != nil {
+	if err := r.d.Queue.Enqueue(ctx, KindRun, Payload{ImportID: id, PluginID: ref.manifest.ID}); err != nil {
 		if _, uerr := r.d.DB.ExecContext(context.WithoutCancel(ctx),
 			`UPDATE imports SET state=?, finished_at=`+nowSQL+` WHERE id=?`, stateFailed, id); uerr != nil {
 			r.logf("import %d: mark failed: %v", id, uerr)

@@ -36,6 +36,40 @@
         <button type="submit" class="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium hover:bg-indigo-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400">Save</button>
       </form>
     </section>
+    {{if .Imports}}
+    <section aria-labelledby="import-heading" class="mb-8 max-w-md rounded-lg border border-slate-800 bg-slate-900/40 p-4">
+      <h2 id="import-heading" class="mb-1 font-semibold">Import</h2>
+      <p class="mb-3 text-sm text-slate-400">Existing entries follow the rule you pick. Updates change only status, score and progress — never comments, dates or item data.</p>
+      {{if .Error}}<p class="mb-3 rounded border border-amber-700 bg-amber-950 p-2 text-sm text-amber-200" role="alert">{{.Error}}</p>{{end}}
+      {{range .Imports}}
+      <form method="post" action="{{.Action}}" class="mb-4 flex flex-col gap-2 border-b border-slate-800/60 pb-4 last:mb-0 last:border-0 last:pb-0"{{if not .Account}} enctype="multipart/form-data"{{end}}>
+        <p class="text-sm font-medium text-slate-200">{{.Name}}</p>
+        {{if .Account}}
+        <label class="flex flex-col gap-1 text-sm"><span class="text-slate-400">{{.AccountLabel}}</span>
+          <input name="account" value="{{.AccountValue}}" autocomplete="off" class="rounded-md border border-slate-700 bg-slate-950 px-2 py-1.5 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"></label>
+        {{else}}
+        <input type="file" name="file" required class="rounded-md border border-slate-700 bg-slate-950 px-2 py-1.5 text-sm">
+        {{end}}
+        <label class="flex flex-col gap-1 text-sm"><span class="text-slate-400">Existing entries</span>
+          <select name="mode" class="rounded-md border border-slate-700 bg-slate-950 px-2 py-1.5 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500">
+            <option value="skip"{{if or (eq .Mode "") (eq .Mode "skip")}} selected{{end}}>Skip (leave them alone)</option>
+            <option value="newer"{{if eq .Mode "newer"}} selected{{end}}>Update when the source is newer</option>
+            <option value="always"{{if eq .Mode "always"}} selected{{end}}>Always update</option>
+          </select></label>
+        {{if .Account}}
+        <label class="flex flex-col gap-1 text-sm"><span class="text-slate-400">Repeat</span>
+          <select name="schedule" class="rounded-md border border-slate-700 bg-slate-950 px-2 py-1.5 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500">
+            <option value="off"{{if or (eq .Schedule "") (eq .Schedule "off")}} selected{{end}}>Off</option>
+            <option value="daily"{{if eq .Schedule "daily"}} selected{{end}}>Daily</option>
+            <option value="weekly"{{if eq .Schedule "weekly"}} selected{{end}}>Weekly</option>
+          </select></label>
+        {{end}}
+        <button type="submit" class="self-start rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-medium hover:bg-indigo-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400">{{if .Account}}Save and import{{else}}Import{{end}}</button>
+      </form>
+      {{end}}
+      <p class="mt-2 text-xs text-slate-500">Updates need the source's modification times; a format without them (like the XML export) never updates under "newer".</p>
+    </section>
+    {{end}}
     {{range $f := .Columns}}
     <section id="{{.Anchor}}" aria-labelledby="{{.Anchor}}-heading" class="mb-8 max-w-md rounded-lg border border-slate-800 bg-slate-900/40 p-4">
       <h2 id="{{.Anchor}}-heading" class="mb-1 font-semibold">Table columns{{with .Heading}}: {{.}}{{end}}</h2>

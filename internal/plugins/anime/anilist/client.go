@@ -62,6 +62,17 @@ const animeByMALQuery = `query ($idMal: Int, $recs: Int) {
   Media(idMal: $idMal, type: ANIME) { ` + animeFields + ` }
 }`
 
+const mediaListQuery = `query ($name: String) {
+  MediaListCollection(userName: $name, type: ANIME) {
+    lists {
+      entries {
+        status score(format: POINT_10) progress updatedAt
+        media { id idMal title { romaji english native } coverImage { large } }
+      }
+    }
+  }
+}`
+
 const scheduleQuery = `query ($id: Int) {
   Media(id: $id, type: ANIME) {
     airingSchedule { nodes { episode airingAt } }
@@ -363,6 +374,26 @@ func (c *Client) AiringSchedule(ctx context.Context, id string) ([]Airing, error
 		return nil, err
 	}
 	return out.Media.AiringSchedule.Nodes, nil
+}
+
+// MediaList returns the anime list of an AniList user (all of the account's
+// lists, flattened). A name AniList does not know is ErrNotFound.
+func (c *Client) MediaList(ctx context.Context, userName string) ([]AccountEntry, error) {
+	var out struct {
+		MediaListCollection struct {
+			Lists []struct {
+				Entries []AccountEntry `json:"entries"`
+			} `json:"lists"`
+		} `json:"MediaListCollection"`
+	}
+	if err := c.do(ctx, mediaListQuery, map[string]any{"name": userName}, &out); err != nil {
+		return nil, err
+	}
+	var res []AccountEntry
+	for _, l := range out.MediaListCollection.Lists {
+		res = append(res, l.Entries...)
+	}
+	return res, nil
 }
 
 // Anime implements Provider.

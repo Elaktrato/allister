@@ -49,8 +49,13 @@ func (p *animePlugin) Source(id string) plugin.Source {
 }
 
 func (p *animePlugin) Importer(id string) plugin.Importer {
-	if id == ImporterID {
+	switch id {
+	case ImporterID:
 		return yamtrackImporter{}
+	case AniListImporter:
+		return accountImporter{c: p.source.c}
+	case MALImporter:
+		return malXMLImporter{}
 	}
 	return nil
 }
