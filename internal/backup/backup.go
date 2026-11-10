@@ -788,7 +788,8 @@ var errPrefix = errors.New("data before the zip directory")
 
 // scanDirectory finds the end of central directory record exactly the way
 // zip.NewReader does (the last signature within the last 1 KiB, then 65 KiB,
-// whose comment fits; bytes after it are allowed; zip64 records; the base
+// whose comment fits; bytes after it are allowed; zip64 records, also when
+// the writer emits them without marker values since Go 1.27; the base
 // offset of prepended data) and walks the central directory headers the
 // way it reads them (until the first header without the signature), without
 // keeping anything. It returns the number of headers walked (it stops
@@ -818,18 +819,24 @@ func scanDirectory(ra io.ReaderAt, size int64, max int) (walked, declared uint64
 	declared = uint64(le.Uint16(buf[10:]))
 	dirSize := uint64(le.Uint32(buf[12:]))
 	dirOffset := uint64(le.Uint32(buf[16:]))
-	if declared == 0xffff || dirSize == 0xffff || dirOffset == 0xffffffff {
-		if p, ok := zip64Locator(ra, endOff); ok {
-			rec := make([]byte, 56)
-			if p < 0 || p > size-56 {
-				return 0, 0, errNotZip
-			}
-			if _, err := ra.ReadAt(rec, p); err != nil || le.Uint32(rec) != 0x06064b50 {
-				return 0, 0, errNotZip
-			}
-			endOff = p
-			declared, dirSize, dirOffset = le.Uint64(rec[32:]), le.Uint64(rec[40:]), le.Uint64(rec[48:])
+	// The zip64 end record a locator right before the end record names.
+	// archive/zip consults it when the end record's fields are zip64 markers
+	// (0xffff entries, 0xffffffff size or offset; its directorySize check was
+	// 0xffff before Go 1.27), and since Go 1.27 the writer also emits it
+	// whenever any entry needed a zip64 extra, with real values instead of
+	// markers in the plain end record. The locator is therefore followed
+	// whenever one is present; markers without a locator keep the marker
+	// values, which archive/zip (and the checks below) refuse.
+	if p, ok := zip64Locator(ra, endOff); ok {
+		rec := make([]byte, 56)
+		if p < 0 || p > size-56 {
+			return 0, 0, errNotZip
 		}
+		if _, err := ra.ReadAt(rec, p); err != nil || le.Uint32(rec) != 0x06064b50 {
+			return 0, 0, errNotZip
+		}
+		endOff = p
+		declared, dirSize, dirOffset = le.Uint64(rec[32:]), le.Uint64(rec[40:]), le.Uint64(rec[48:])
 	}
 	const maxInt64 = 1<<63 - 1
 	if dirSize > maxInt64 || dirOffset > maxInt64 {

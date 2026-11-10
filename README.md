@@ -114,7 +114,6 @@ Covers and person images are stored locally in `covers/` inside the data volume.
 
 ## Known limitations
 
-- Go 1.23.12 is pinned and no longer supported upstream (no more security fixes); the upgrade is a separate follow-up.
 - Only the anime plugin exists; plugins are compiled in (no marketplace or runtime installation).
 - Files of removed or re-matched entries are not deleted from `covers/`.
 - More in [docs/usage.md](docs/usage.md#known-limitations).
@@ -138,7 +137,7 @@ scripts/go.sh vet ./...
 
 The Tailwind CSS is built inside the Docker image (`docker compose up --build`); `app.css` is not committed.
 
-`scripts/go.sh` runs the same pinned golang image as the Dockerfile. The exact Go version (1.23.12, out of upstream support; the upgrade is a separate follow-up) is also the `toolchain` line of `go.mod`. `PINS.md` lists every pin and how to update it (`scripts/update-pins.sh`, then `--write`; a new version means editing the tag first). Tests in `internal/guard` and `internal/web` fail when an image is not pinned by digest or a recorded checksum does not match.
+`scripts/go.sh` runs the same pinned golang image as the Dockerfile. The exact Go version (1.27.3) is also the `toolchain` line of `go.mod`. `PINS.md` lists every pin and how to update it (`scripts/update-pins.sh`, then `--write`; a new version means editing the tag first). Tests in `internal/guard` and `internal/web` fail when an image is not pinned by digest or a recorded checksum does not match.
 
 The plugin contract is documented in [docs/plugins.md](docs/plugins.md), the code layout in [docs/usage.md](docs/usage.md#code-layout).
 

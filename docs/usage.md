@@ -49,7 +49,6 @@ Changes from the first version: a data volume from the first (pre-plugin) previe
 
 ## Known limitations
 
-- The Go toolchain is pinned to Go 1.23.12, which is no longer supported upstream (no more security fixes). Moving to a supported Go version is planned as a separate follow-up.
 - Only the anime plugin exists. Plugins are compiled in, and there is no marketplace or runtime installation.
 - The title language is one per plugin, not per kind; the column choice is per kind.
 - "Match to AniList" accepts AniList URLs and numeric ids only.

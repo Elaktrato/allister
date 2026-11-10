@@ -25,8 +25,8 @@ COPY internal/web/templates ./internal/web/templates
 COPY internal/web/static/input.css ./internal/web/static/input.css
 RUN tailwindcss -c tailwind.config.js -i internal/web/static/input.css -o app.css --minify
 
-# golang:1.23.12-bookworm (keep in step with go.mod's toolchain and scripts/go.sh)
-FROM golang:1.23.12-bookworm@sha256:167053a2bb901972bf2c1611f8f52c44d5fe7e762e5cab213708d82c421614db AS build
+# golang:1.27.3-bookworm (keep in step with go.mod's toolchain and scripts/go.sh)
+FROM golang:1.27.3-bookworm@sha256:dc0963f32053e4bc451d24d87e3892d42d01021b61f093e98eb95c0352bb84b0 AS build
 WORKDIR /src
 COPY go.mod go.sum* ./
 RUN go mod download

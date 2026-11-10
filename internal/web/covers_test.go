@@ -45,8 +45,10 @@ func TestCoversServedWithCacheHeader(t *testing.T) {
 		"/covers/../secret.txt", "/covers/%2e%2e/secret.txt", "/covers/..%2fsecret.txt",
 		"/covers/%2e%2e%2fsecret.txt", "/covers/sub/../../secret.txt", "/covers//secret.txt"} {
 		rec := serve(h, p)
-		// The mux may answer 301 to the cleaned path; following it must 404.
-		for i := 0; rec.Code == http.StatusMovedPermanently && i < 3; i++ {
+		// The mux answers a redirect to the cleaned path (301 before Go 1.27,
+		// 307 since); following it must end in 404.
+		for i := 0; i < 3 && (rec.Code == http.StatusMovedPermanently ||
+			rec.Code == http.StatusTemporaryRedirect); i++ {
 			rec = serve(h, rec.Header().Get("Location"))
 		}
 		if rec.Code != http.StatusNotFound || rec.Body.String() == "secret" {
