@@ -403,3 +403,45 @@ func TestColumnChoiceIsPerPlugin(t *testing.T) {
 		t.Fatalf("anime head = %s", got)
 	}
 }
+
+var submitRe = regexp.MustCompile(`<button[^>]*type="submit"[^>]*>`)
+
+// TestColumnFormEnterSavesWithoutMoving: implicit submission (Enter on a
+// checkbox) uses a form's first submit button, so in every form of the
+// settings page that button has no name (a plain save, never a move or
+// reset); and a submit without a move field keeps the order as shown.
+func TestColumnFormEnterSavesWithoutMoving(t *testing.T) {
+	e := newFixtureEnv(t, bookColumns)
+	for _, id := range []string{"anime", "book", "tv"} {
+		b := e.get("/settings/plugins/" + id).Body.String()
+		forms := strings.Split(b, "<form")[1:]
+		if len(forms) < 2 {
+			t.Fatalf("%s: %d forms", id, len(forms))
+		}
+		for i, f := range forms {
+			f = f[:strings.Index(f, "</form>")]
+			first := submitRe.FindString(f)
+			if first == "" || strings.Contains(first, "name=") {
+				t.Errorf("%s form %d: first submit is %q", id, i, first)
+			}
+		}
+	}
+	// the rendered anime form, submitted as a browser does with Enter
+	if rec := e.postColumns("anime", url.Values{"kind": {"anime"}, "order": animeOrder, "show": {"year", "rating", "type"}}, nil); rec.Code != 303 {
+		t.Fatalf("save: %d", rec.Code)
+	}
+	f := columnForm(t, e.get("/settings/plugins/anime").Body.String(), "anime")
+	v := url.Values{"kind": {"anime"}}
+	for _, m := range regexp.MustCompile(`name="order" value="([^"]+)"`).FindAllStringSubmatch(f, -1) {
+		v.Add("order", m[1])
+	}
+	for _, m := range regexp.MustCompile(`name="show" value="([^"]+)" checked`).FindAllStringSubmatch(f, -1) {
+		v.Add("show", m[1])
+	}
+	if rec := e.postColumns("anime", v, nil); rec.Code != 303 {
+		t.Fatalf("resubmit: %d", rec.Code)
+	}
+	if got, _ := e.set.Columns(context.Background(), "anime", "anime"); strings.Join(got, ",") != "type,year,rating" {
+		t.Fatalf("order changed: %v", got)
+	}
+}
