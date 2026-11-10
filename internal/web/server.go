@@ -38,7 +38,8 @@ type Deps struct {
 	// SyncJobs maps a plugin id to the sync job of a newly saved item of
 	// that plugin (kind and payload for Jobs.Enqueue), so the web layer
 	// never knows the job kinds of plugins. A plugin without an entry gets no
-	// sync job (the test fixtures). cmd/allister wires the anime plugin's.
+	// sync job. cmd/allister wires the generic sync job (jobs.SyncJobFor)
+	// for every installed plugin.
 	SyncJobs map[string]func(itemID int64) (kind string, payload any)
 	// CoversDir is DATA_DIR/covers; when empty /covers/ is not served.
 	CoversDir string

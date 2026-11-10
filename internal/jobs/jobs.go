@@ -25,6 +25,11 @@ const (
 // Such reschedules are bounded by maxPartials.
 var ErrRetryLater = errors.New("jobs: retry later")
 
+// ErrPermanent, wrapped in a handler's error, means the job can never
+// succeed (for example a payload that contradicts the stored data): it fails
+// at once instead of retrying.
+var ErrPermanent = errors.New("jobs: permanent failure")
+
 var errUnknownKind = errors.New("unknown job kind")
 
 // Handler processes one job payload.
@@ -252,9 +257,9 @@ func (q *Queue) call(ctx context.Context, h Handler, payload json.RawMessage) (e
 }
 
 // finish records the outcome. The job row is updated even when the worker's
-// context is already cancelled. Unknown kinds fail at once; when shutdown
-// interrupted a handler the job goes back to pending without counting an
-// attempt.
+// context is already cancelled. Unknown kinds and ErrPermanent fail at
+// once; when shutdown interrupted a handler the job goes back to pending
+// without counting an attempt.
 func (q *Queue) finish(id int64, kind string, attempts, partials int, herr error, interrupted bool) error {
 	ctx := context.Background()
 	now := q.now()
@@ -262,7 +267,7 @@ func (q *Queue) finish(id int64, kind string, attempts, partials int, herr error
 	switch {
 	case herr == nil:
 		_, err = q.db.ExecContext(ctx, `UPDATE jobs SET state='done', last_error='' WHERE id=?`, id)
-	case errors.Is(herr, errUnknownKind):
+	case errors.Is(herr, errUnknownKind), errors.Is(herr, ErrPermanent):
 		_, err = q.db.ExecContext(ctx, `UPDATE jobs SET state='failed', last_error=? WHERE id=?`, herr.Error(), id)
 	case interrupted:
 		// interrupted by shutdown: run again after restart, no attempt used

@@ -280,11 +280,11 @@ func TestMatchEnqueuesSync(t *testing.T) {
 	e := newMatchEnv(t)
 	id := e.unmatched(t)
 	e.do("POST", matchURL, url.Values{"pick": {"1535"}}, true)
-	if len(e.jobs.got) != 1 || e.jobs.got[0].Kind != "sync_anime" {
+	if len(e.jobs.got) != 1 || e.jobs.got[0].Kind != "sync_item" {
 		t.Fatalf("%+v", e.jobs.got)
 	}
 	p := strings.ReplaceAll(toJSON(e.jobs.got[0].Payload), " ", "")
-	if !strings.Contains(p, `"anime_id":`+itoa(id)) || !strings.Contains(p, `"plugin_id":"anime"`) {
+	if !strings.Contains(p, `"item_id":`+itoa(id)) || !strings.Contains(p, `"plugin_id":"anime"`) {
 		t.Fatalf("payload %v", p)
 	}
 	// enqueue failure is logged, conversion stays

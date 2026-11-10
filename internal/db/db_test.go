@@ -158,8 +158,8 @@ func TestLegacyTablesDropped(t *testing.T) {
 	if n := rowCount(t, d, `SELECT count(*) FROM pragma_table_info('people') WHERE name = 'plugin_id'`); n != 1 {
 		t.Fatal("people is not the generic people table")
 	}
-	if v, err := goose.GetDBVersion(d); err != nil || v != 7 {
-		t.Fatalf("version = %d, %v, want 7", v, err)
+	if v, err := goose.GetDBVersion(d); err != nil || v != latestVersion {
+		t.Fatalf("version = %d, %v, want %d", v, err, latestVersion)
 	}
 }
 
@@ -190,7 +190,7 @@ func TestMigrationsApplyOnEmptyAndExistingVolume(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if v, err := goose.GetDBVersion(fresh); err != nil || v != 7 {
+	if v, err := goose.GetDBVersion(fresh); err != nil || v != latestVersion {
 		t.Fatalf("fresh version = %d, %v", v, err)
 	}
 	fresh.Close()
@@ -333,7 +333,7 @@ func TestDropLegacyDownRestoresEmptyLegacyTables(t *testing.T) {
 	mustExec(t, d, `INSERT INTO credits(item_id, seq, person_id) VALUES(1,0,1)`)
 	mustExec(t, d, `INSERT INTO imports(id) VALUES(1)`)
 	mustExec(t, d, `INSERT INTO import_rows(import_id, seq, anime_id) VALUES(1,1,1)`)
-	if err := goose.Down(d, "migrations"); err != nil {
+	if err := goose.DownTo(d, "migrations", 6); err != nil {
 		t.Fatal(err)
 	}
 	if v, err := goose.GetDBVersion(d); err != nil || v != 6 {

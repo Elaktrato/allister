@@ -537,7 +537,7 @@ func (im *Importer) handleSaved(ctx context.Context, importID int64, seq int, ro
 	}
 	syncNote := ""
 	if saved.SyncState == "pending" {
-		if err := im.queue.Enqueue(dctx, jobs.KindSyncAnime, jobs.SyncPayload{AnimeID: saved.ID, PluginID: pluginID}); err != nil {
+		if err := im.queue.Enqueue(dctx, jobs.KindSyncItem, jobs.SyncPayload{ItemID: saved.ID, PluginID: pluginID}); err != nil {
 			syncNote = "sync not queued: " + err.Error()
 		}
 	}
@@ -593,7 +593,7 @@ func (im *Importer) saveUnmatched(ctx context.Context, importID int64, seq int, 
 // finishSaved enqueues the sync job (cover, cast) for a saved anime and
 // records the row.
 func (im *Importer) finishSaved(ctx context.Context, importID int64, seq int, animeID int64, outcome, msg string) error {
-	if err := im.queue.Enqueue(ctx, jobs.KindSyncAnime, jobs.SyncPayload{AnimeID: animeID, PluginID: pluginID}); err != nil {
+	if err := im.queue.Enqueue(ctx, jobs.KindSyncItem, jobs.SyncPayload{ItemID: animeID, PluginID: pluginID}); err != nil {
 		note := "sync not queued: " + err.Error()
 		if msg != "" {
 			note = msg + "; " + note

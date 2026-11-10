@@ -268,11 +268,11 @@ func TestImportSavesEntriesAndEnqueuesSync(t *testing.T) {
 	if _, le3 := e.entryByMAL("3"); le3.Status != store.Watching || le3.Progress != 4 {
 		t.Errorf("entry 3: %+v", le3)
 	}
-	syncs := e.q.ofKind(jobs.KindSyncAnime)
+	syncs := e.q.ofKind(jobs.KindSyncItem)
 	if len(syncs) != 3 {
 		t.Fatalf("sync jobs = %d", len(syncs))
 	}
-	if p, ok := syncs[0].Payload.(jobs.SyncPayload); !ok || p.AnimeID != s.ID || p.PluginID != "anime" {
+	if p, ok := syncs[0].Payload.(jobs.SyncPayload); !ok || p.ItemID != s.ID || p.PluginID != "anime" {
 		t.Errorf("sync payload = %#v", syncs[0].Payload)
 	}
 	r := e.report()
@@ -408,8 +408,8 @@ func TestImportSavesUnmatchedAsManualEntry(t *testing.T) {
 	if le.Status != store.Dropped || le.Rating == nil || *le.Rating != 6 || le.Progress != 3 {
 		t.Errorf("entry: %+v", le)
 	}
-	syncs := e.q.ofKind(jobs.KindSyncAnime)
-	if len(syncs) != 1 || syncs[0].Payload.(jobs.SyncPayload).AnimeID != s.ID {
+	syncs := e.q.ofKind(jobs.KindSyncItem)
+	if len(syncs) != 1 || syncs[0].Payload.(jobs.SyncPayload).ItemID != s.ID {
 		t.Errorf("sync jobs: %+v", syncs)
 	}
 }
@@ -1048,7 +1048,7 @@ func TestSavedRowWithPendingSyncGetsOneSyncJob(t *testing.T) {
 		t.Fatal(err)
 	}
 	e.run(e.submit(csvOf("1|One|Planning||0", "2|Two|Planning||0", "3|Three|Planning||0")))
-	syncs := e.q.ofKind(jobs.KindSyncAnime)
+	syncs := e.q.ofKind(jobs.KindSyncItem)
 	if len(syncs) != 2 {
 		t.Fatalf("sync jobs = %d, want 2 (rows 1 and 2 only)", len(syncs))
 	}

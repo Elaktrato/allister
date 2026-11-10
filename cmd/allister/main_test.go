@@ -9,6 +9,9 @@ import (
 	"time"
 
 	"github.com/allister/allister/internal/jobs"
+	"github.com/allister/allister/internal/plugin"
+	"github.com/allister/allister/internal/plugin/plugintest"
+	"github.com/allister/allister/internal/plugins/anime"
 )
 
 func TestServeDrainsInFlightRequestsOnShutdown(t *testing.T) {
@@ -65,15 +68,30 @@ func TestServeReturnsListenError(t *testing.T) {
 	}
 }
 
-func TestSyncJobsWiresAnime(t *testing.T) {
-	job := syncJobs()["anime"]
-	if job == nil {
-		t.Fatal("no anime sync job")
+// TestSyncJobsWiresAllInstalledPlugins: every installed plugin (enabled or
+// not, with or without sources: a manual item may still hold a remote cover)
+// gets the generic sync job carrying its own plugin id.
+func TestSyncJobsWiresAllInstalledPlugins(t *testing.T) {
+	reg := plugin.NewRegistry(plugintest.NewMemEnabled())
+	noSources := plugintest.BookPlugin(plugintest.WithID("nosrc"), plugintest.WithDefaultEnabled(false))
+	noSources.M.Sources, noSources.Sources = nil, nil
+	noSources.M.Importers, noSources.Importers = nil, nil
+	for _, p := range []plugin.Plugin{anime.New(anime.Options{}), plugintest.BookPlugin(), plugintest.TVPlugin(), noSources} {
+		if err := reg.Register(p); err != nil {
+			t.Fatal(err)
+		}
 	}
-	if kind, payload := job(7); kind != jobs.KindSyncAnime || payload != (jobs.SyncPayload{AnimeID: 7, PluginID: "anime"}) {
-		t.Fatalf("got %q %+v", kind, payload)
+	got := syncJobs(reg)
+	if len(got) != 4 {
+		t.Fatalf("sync jobs for %d plugins: %v", len(got), got)
 	}
-	if len(syncJobs()) != 1 {
-		t.Fatalf("unexpected sync jobs: %v", syncJobs())
+	for i, id := range []string{"anime", "book", "tv", "nosrc"} {
+		job := got[id]
+		if job == nil {
+			t.Fatalf("no sync job for %s", id)
+		}
+		if kind, payload := job(int64(i + 7)); kind != jobs.KindSyncItem || payload != (jobs.SyncPayload{ItemID: int64(i + 7), PluginID: id}) {
+			t.Fatalf("%s: got %q %+v", id, kind, payload)
+		}
 	}
 }

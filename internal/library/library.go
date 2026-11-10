@@ -194,6 +194,43 @@ func (l *Library) ItemsToSync(ctx context.Context, pluginID string) ([]int64, er
 	return ids, nil
 }
 
+// NeedsSyncItem is an item that still needs a background sync, with its
+// owning plugin (the sync job carries the plugin id for the queue's gate).
+type NeedsSyncItem struct {
+	ItemID   int64
+	PluginID string
+}
+
+// NeedsSync returns the items of every plugin whose sync state is pending or
+// partial and that have no live (pending or running) job of jobKind, in
+// ascending id order. Jobs match by the integer "item_id" of their JSON
+// payload; failed and done jobs are not live, rows whose payload is not
+// JSON never match. The jobs table belongs to package jobs and is only read.
+func (l *Library) NeedsSync(ctx context.Context, jobKind string) ([]NeedsSyncItem, error) {
+	rows, err := l.db.QueryContext(ctx, `SELECT i.id, i.plugin_id FROM items i
+		WHERE i.sync_state IN ('pending','partial')
+		AND NOT EXISTS (SELECT 1 FROM jobs j
+			WHERE j.kind = ? AND j.state IN ('pending','running')
+			AND CASE WHEN json_valid(j.payload_json) THEN json_extract(j.payload_json, '$.item_id') END = i.id)
+		ORDER BY i.id`, jobKind)
+	if err != nil {
+		return nil, fmt.Errorf("needs sync: %w", err)
+	}
+	var out []NeedsSyncItem
+	for rows.Next() {
+		var it NeedsSyncItem
+		if err := rows.Scan(&it.ItemID, &it.PluginID); err != nil {
+			rows.Close()
+			return nil, fmt.Errorf("needs sync: %w", err)
+		}
+		out = append(out, it)
+	}
+	if err := closeRows(rows); err != nil {
+		return nil, fmt.Errorf("needs sync: %w", err)
+	}
+	return out, nil
+}
+
 // DeleteItem removes the item and, by cascade, everything attached to it.
 // People rows (and image files) stay. It returns ErrNoEntry for an unknown id.
 func (l *Library) DeleteItem(ctx context.Context, id int64) error {

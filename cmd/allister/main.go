@@ -17,6 +17,7 @@ import (
 	"github.com/allister/allister/internal/db"
 	"github.com/allister/allister/internal/importer/yamtrack"
 	"github.com/allister/allister/internal/jobs"
+	"github.com/allister/allister/internal/library"
 	"github.com/allister/allister/internal/plugin"
 	"github.com/allister/allister/internal/plugins/anime"
 	"github.com/allister/allister/internal/provider"
@@ -67,21 +68,22 @@ func run() error {
 	// Jobs of a disabled plugin stay pending until it is enabled again.
 	queue := jobs.NewQueue(database, jobs.WithMinInterval(2*time.Second),
 		jobs.WithPluginGate(registry.IsEnabled))
-	queue.Register(jobs.KindSyncAnime, jobs.SyncAnime(jobs.SyncDeps{
-		Store:     st,
-		Providers: providers,
+	lib := library.New(database, registry)
+	queue.Register(jobs.KindSyncItem, jobs.SyncItem(jobs.SyncDeps{
+		Library:   lib,
+		Registry:  registry,
 		CoversDir: coversDir,
 	}))
 	importer := yamtrack.New(database, st, aniClient, queue)
 	queue.Register(yamtrack.KindImport, importer.Handler())
-	// Reset crashed jobs first, then re-queue anime whose sync never finished
+	// Reset crashed jobs first, then re-queue items whose sync never finished
 	// (jobs that gave up, or were lost) so the "partially synced" state heals.
 	if err := queue.Recover(workerCtx); err != nil {
 		log.Printf("startup: %v", err)
-	} else if n, err := queue.SweepSync(workerCtx, st); err != nil {
+	} else if n, err := queue.SweepSync(workerCtx, lib); err != nil {
 		log.Printf("startup: %v", err)
 	} else if n > 0 {
-		log.Printf("startup: queued %d unfinished anime syncs", n)
+		log.Printf("startup: queued %d unfinished item syncs", n)
 	}
 	var wg sync.WaitGroup
 	wg.Add(1)
@@ -99,9 +101,10 @@ func run() error {
 			Store:     st,
 			Providers: providers,
 			Jobs:      queue,
-			SyncJobs:  syncJobs(),
+			SyncJobs:  syncJobs(registry),
 			CoversDir: coversDir,
 			Imports:   importer,
+			Library:   lib,
 		}),
 		ReadHeaderTimeout: 10 * time.Second,
 		IdleTimeout:       120 * time.Second,
@@ -144,8 +147,14 @@ func serveListener(ctx context.Context, srv *http.Server, ln net.Listener, shutd
 	return nil
 }
 
-// syncJobs maps each plugin with a background sync to the job of a newly
-// saved item (web.Deps.SyncJobs).
-func syncJobs() map[string]func(itemID int64) (kind string, payload any) {
-	return map[string]func(int64) (string, any){"anime": jobs.AnimeSyncJob}
+// syncJobs maps every installed plugin to the generic sync job of a newly
+// saved item (web.Deps.SyncJobs). All plugins get one, with or without a
+// source: the job downloads a remote cover of any item and fetches credits
+// only when the item's source exists.
+func syncJobs(reg *plugin.Registry) map[string]func(itemID int64) (kind string, payload any) {
+	out := map[string]func(int64) (string, any){}
+	for _, m := range reg.Manifests() {
+		out[m.ID] = jobs.SyncJobFor(m.ID)
+	}
+	return out
 }

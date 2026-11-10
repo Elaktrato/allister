@@ -61,7 +61,7 @@ func TestAddCreatesEntryAndJob(t *testing.T) {
 		en.StartedOn == nil || en.StartedOn.Format("2006-01-02") != "2024-01-02" || en.FinishedOn != nil || en.Comment != "nice" {
 		t.Fatalf("%+v", en)
 	}
-	if len(e.jobs.got) != 1 || e.jobs.got[0].Kind != jobs.KindSyncAnime || e.jobs.got[0].Payload != (jobs.SyncPayload{AnimeID: sv.ID, PluginID: "anime"}) {
+	if len(e.jobs.got) != 1 || e.jobs.got[0].Kind != jobs.KindSyncItem || e.jobs.got[0].Payload != (jobs.SyncPayload{ItemID: sv.ID, PluginID: "anime"}) {
 		t.Fatalf("jobs %+v", e.jobs.got)
 	}
 }

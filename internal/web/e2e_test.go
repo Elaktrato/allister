@@ -105,13 +105,12 @@ func TestManualEntryAndPersonFlow(t *testing.T) {
 		t.Fatalf("add: %d", rec.Code)
 	}
 	// run the queued sync job so cast and people exist
-	if len(e.jobs.got) != 1 || e.jobs.got[0].Kind != jobs.KindSyncAnime {
+	if len(e.jobs.got) != 1 || e.jobs.got[0].Kind != jobs.KindSyncItem {
 		t.Fatalf("jobs: %+v", e.jobs.got)
 	}
 	raw, _ := json.Marshal(e.jobs.got[0].Payload)
-	sync := jobs.SyncAnime(jobs.SyncDeps{
-		Store: e.st, Providers: map[provider.Source]provider.Provider{provider.AniList: e.fp},
-		HTTP: imgs.Client(), CoversDir: e.covers,
+	sync := jobs.SyncItem(jobs.SyncDeps{
+		Library: e.lib, Registry: e.reg, HTTP: imgs.Client(), CoversDir: e.covers,
 	})
 	if err := sync(context.Background(), raw); err != nil {
 		t.Fatal(err)
@@ -247,13 +246,12 @@ func TestMatchFlowEndToEnd(t *testing.T) {
 	}
 
 	// one sync job for the entry; running it brings the cast
-	if len(e.jobs.got) != 1 || e.jobs.got[0].Kind != jobs.KindSyncAnime {
+	if len(e.jobs.got) != 1 || e.jobs.got[0].Kind != jobs.KindSyncItem {
 		t.Fatalf("jobs: %+v", e.jobs.got)
 	}
 	raw, _ := json.Marshal(e.jobs.got[0].Payload)
-	sync := jobs.SyncAnime(jobs.SyncDeps{
-		Store: e.st, Providers: map[provider.Source]provider.Provider{provider.AniList: e.fp},
-		HTTP: imgs.Client(), CoversDir: e.covers,
+	sync := jobs.SyncItem(jobs.SyncDeps{
+		Library: e.lib, Registry: e.reg, HTTP: imgs.Client(), CoversDir: e.covers,
 	})
 	if err := sync(context.Background(), raw); err != nil {
 		t.Fatal(err)

@@ -110,10 +110,12 @@ func newEnvWith(t *testing.T, mk func(es plugin.EnabledStore) *plugin.Registry) 
 	return e
 }
 
-// testSyncJobs is the production wiring of Deps.SyncJobs (cmd/allister):
-// only the anime plugin has a sync job; the fixtures have none.
+// testSyncJobs is the anime entry of the production wiring of Deps.SyncJobs
+// (cmd/allister wires the same generic job for every installed plugin). The
+// fixture plugins get none here, so their tests can assert that nothing was
+// enqueued.
 func testSyncJobs() map[string]func(int64) (string, any) {
-	return map[string]func(int64) (string, any){"anime": jobs.AnimeSyncJob}
+	return map[string]func(int64) (string, any){"anime": jobs.SyncJobFor("anime")}
 }
 
 func sampleAnimeProvider() *animeProvider {
