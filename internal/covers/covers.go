@@ -1,7 +1,7 @@
 // Package covers downloads cover and person images into a local directory and
 // maps stored image values to URLs.
 //
-// Convention: anime.cover_path and people.image_path hold the remote URL until
+// Convention: items.cover_path and people.image_path hold the remote URL until
 // a download succeeded; afterwards they hold the file's base name relative to
 // DATA_DIR/covers.
 package covers

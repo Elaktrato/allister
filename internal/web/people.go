@@ -119,7 +119,7 @@ func (s *server) getPerson(w http.ResponseWriter, r *http.Request) {
 	s.render(w, r, "person", v)
 }
 
-// emptyPersonMessage names the plugin's kind: "Not in any anime in your list."
+// emptyPersonMessage names the plugin's kind: "Not in any book in your list."
 func emptyPersonMessage(m plugin.Manifest) string {
 	noun := "item"
 	if len(m.Kinds) == 1 && m.Kinds[0].Label != "" {

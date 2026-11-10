@@ -66,7 +66,7 @@ type JobQueue interface {
 type server struct {
 	deps  Deps
 	pages map[string]*template.Template
-	cache *animeCache
+	cache *detailCache
 	// recs caches recommendation results; recTimeout bounds one source
 	// call (tests shorten it).
 	recs       *recCache
@@ -125,7 +125,7 @@ func newServer(deps Deps, now func() time.Time) (*server, http.Handler) {
 	if deps.Registry == nil {
 		deps.Registry = emptyRegistry(deps)
 	}
-	s := &server{deps: deps, pages: parsePages(), cache: newAnimeCache(now, cacheMaxEntries, cacheTTL),
+	s := &server{deps: deps, pages: parsePages(), cache: newDetailCache(now, cacheMaxEntries, cacheTTL),
 		recs: newRecCache(now, recCacheMaxEntries, cacheTTL), recTimeout: recTimeout, now: now, maxBackupBody: maxBackupBody, backupWrite: backup.Write}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {

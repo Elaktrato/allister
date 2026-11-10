@@ -7,7 +7,7 @@ import (
 )
 
 // Declarative source URL matching. A source declares URL patterns as data
-// (SourceInfo.URLPatterns, for example "anilist.co/anime/{id}") and the core
+// (SourceInfo.URLPatterns, for example "example.org/item/{id}") and the core
 // matches what a person pastes against them, so no plugin code parses URLs.
 
 // maxIDDigits is the longest id {id} matches.

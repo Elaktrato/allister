@@ -57,7 +57,7 @@ func run() error {
 		log.Printf("startup: %v", err)
 	}
 
-	// One worker, at least 2s between jobs to respect AniList's rate limit.
+	// One worker, at least 2s between jobs to respect the sources' rate limits.
 	// Jobs of a disabled plugin stay pending until it is enabled again.
 	queue := jobs.NewQueue(database, jobs.WithMinInterval(2*time.Second),
 		jobs.WithPluginGate(registry.IsEnabled))

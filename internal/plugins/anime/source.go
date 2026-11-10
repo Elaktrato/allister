@@ -7,19 +7,17 @@ import (
 
 	"github.com/allister/allister/internal/plugin"
 	"github.com/allister/allister/internal/plugins/anime/anilist"
-	"github.com/allister/allister/internal/plugins/anime/animemap"
 )
 
-// Limits of the importer (the source's limits live in animemap).
+// Limits of the importer (the source's limits live in mapping.go).
 const (
-	maxTitleRunes = animemap.MaxTitleRunes
 	// maxCommentRunes mirrors the library's entry comment limit
 	// (library.MaxCommentRunes, internal/library/entries.go).
 	maxCommentRunes = 2000
 )
 
-// source adapts the legacy AniList client to plugin.Source. Everything it
-// returns goes through animemap, which sanitises it, so a quirk of the
+// source adapts the AniList client to plugin.Source. Everything it
+// returns goes through the mapping (mapping.go), which sanitises it, so a quirk of the
 // AniList data can never make an item unsaveable in the library.
 type source struct {
 	c anilist.Provider
@@ -54,7 +52,7 @@ func checkKind(kind string) error {
 	return nil
 }
 
-// mapErr maps a legacy provider error onto the plugin sentinels while keeping
+// mapErr maps an AniList client error onto the plugin sentinels while keeping
 // the cause: errors.Is matches both. Context errors pass through unchanged.
 func mapErr(err error) error {
 	if err == nil {
@@ -84,7 +82,7 @@ func (s *source) Search(ctx context.Context, kind, q string) ([]plugin.ItemSumma
 	}
 	out := make([]plugin.ItemSummary, 0, len(res))
 	for _, r := range res {
-		out = append(out, animemap.Summary(r))
+		out = append(out, toSummary(r))
 	}
 	return out, nil
 }
@@ -100,10 +98,10 @@ func (s *source) Details(ctx context.Context, kind, id string) (plugin.ItemData,
 	if err != nil {
 		return plugin.ItemData{}, mapErr(err)
 	}
-	return animemap.ItemData(a), nil
+	return ItemData(a), nil
 }
 
-// Recommendations reads the recommendations of the legacy Anime call: one
+// Recommendations reads the recommendations of the client's Anime call: one
 // request of its own (the overview loads recommendations separately, late).
 func (s *source) Recommendations(ctx context.Context, kind, id string) ([]plugin.ItemSummary, error) {
 	if err := checkKind(kind); err != nil {
@@ -116,7 +114,7 @@ func (s *source) Recommendations(ctx context.Context, kind, id string) ([]plugin
 	if err != nil {
 		return nil, mapErr(err)
 	}
-	return animemap.Recommendations(a.Recommendations), nil
+	return toRecommendations(a.Recommendations), nil
 }
 
 // People returns the characters with their first Japanese voice actor.
@@ -131,7 +129,7 @@ func (s *source) People(ctx context.Context, kind, id string) ([]plugin.Credit, 
 	if err != nil {
 		return nil, mapErr(err)
 	}
-	return animemap.Credits(cast), nil
+	return Credits(cast), nil
 }
 
 // Lookup finds an anime by external id; only the MyAnimeList id ("mal") is
@@ -151,5 +149,5 @@ func (s *source) Lookup(ctx context.Context, kind, idType, value string) (plugin
 	if err != nil {
 		return plugin.ItemData{}, mapErr(err)
 	}
-	return animemap.ItemData(a), nil
+	return ItemData(a), nil
 }

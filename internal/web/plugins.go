@@ -18,7 +18,7 @@ const animePluginID = "anime"
 
 // routeRegistrar is what a routeSet registers its handlers with. Patterns are
 // "METHOD /path" with the path relative to the plugin's prefix: "/" is the
-// prefix itself ("/anime"), "/search" is "/anime/search".
+// prefix itself ("/book"), "/search" is "/book/search".
 type routeRegistrar interface {
 	Handle(pattern string, h http.HandlerFunc)
 }

@@ -40,7 +40,7 @@ const manualSource = "manual"
 const maxPathIDBytes = 200
 
 // coreRoutes returns the generic routes every plugin gets (the whole route
-// set of every plugin, anime included), mounted under its literal prefix
+// set of every plugin), mounted under its literal prefix
 // /{plugin-id} and behind its enabled guard. Literal segments ("/manual/new")
 // win over the {source}/{id} wildcards in the mux.
 func (s *server) coreRoutes(pluginID string) routeSet {

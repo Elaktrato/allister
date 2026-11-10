@@ -42,7 +42,7 @@ type PersonRef struct {
 // Credit is a person with a role on an item. With is an optional counterpart
 // ("character, voiced by X": Person is the character, With the voice actor).
 // Detail is an optional free-text qualifier of the role shown next to it (for
-// example MAIN or SUPPORTING for an anime character): a single line of at most
+// example MAIN or SUPPORTING for a character): a single line of at most
 // 100 characters (the library rejects control characters and longer values);
 // empty means none and is omitted from JSON.
 type Credit struct {
@@ -55,8 +55,8 @@ type Credit struct {
 
 // ItemSummary is the short form of an item as returned by search. URL is an
 // optional http(s) link to the item's page on the source site (used for
-// relations the core cannot link internally, for example a manga related to
-// an anime); empty means none and is omitted from JSON. The core only ever
+// relations the core cannot link internally, for example an item of a kind
+// no installed plugin has); empty means none and is omitted from JSON. The core only ever
 // renders it as a link when it is https.
 type ItemSummary struct {
 	Source   string                `json:"source"`

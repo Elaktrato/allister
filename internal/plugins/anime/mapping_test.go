@@ -1,9 +1,7 @@
-package animemap
+package anime
 
 import (
-	"reflect"
 	"testing"
-	"time"
 
 	"github.com/allister/allister/internal/plugins/anime/anilist"
 )
@@ -45,7 +43,7 @@ func TestCreditsDropUnusablePeople(t *testing.T) {
 		{Character: ok, Actor: &anilist.Person{ID: "", Name: "V"}, Role: "MAIN"},
 		{Character: anilist.Person{ID: "c2", Name: "D", URL: "javascript:x", ImageURL: "data:x"}, Role: "SUPPORTING"},
 	})
-	if len(cs) != 2 || cs[0].With != nil || cs[0].WithRole != "" || cs[0].Detail != "MAIN" || cs[0].Role != RoleCharacter {
+	if len(cs) != 2 || cs[0].With != nil || cs[0].WithRole != "" || cs[0].Detail != "MAIN" || cs[0].Role != roleCharacter {
 		t.Fatalf("credits %+v", cs)
 	}
 	if cs[1].Person.URL != "" || cs[1].Person.ImageURL != "" || cs[1].Detail != "SUPPORTING" {
@@ -53,16 +51,11 @@ func TestCreditsDropUnusablePeople(t *testing.T) {
 	}
 }
 
-func TestUserItemDataRewritesNothing(t *testing.T) {
+func TestItemDataCleansSourceText(t *testing.T) {
 	zero := 0
 	a := anilist.Anime{SearchResult: anilist.SearchResult{Source: anilist.Manual, ID: "m", Type: "tv", Episodes: &zero,
 		Titles: []anilist.Title{{Lang: "en", Text: "My  Show"}}, Synopsis: "a\r\n\r\nb", CoverURL: "upload.png"}}
-	d := UserItemData(a)
-	if d.Titles[0].Text != "My  Show" || d.Fields["synopsis"].Text != "a\r\n\r\nb" || d.Fields["type"].Text != "tv" ||
-		d.Fields["episodes"].Num == nil || d.CoverURL != "upload.png" {
-		t.Fatalf("user input rewritten: %+v", d)
-	}
-	s := ItemData(a) // the source mode cleans the same input
+	s := ItemData(a)
 	if s.Titles[0].Text != "My Show" || s.Fields["synopsis"].Text != "a\n\nb" || len(s.Fields) != 1 || s.CoverURL != "" {
 		t.Fatalf("source mode: %+v", s)
 	}
@@ -85,26 +78,5 @@ func TestItemDataRelationURLs(t *testing.T) {
 		if got := d.Relations[i].Item.URL; got != w {
 			t.Errorf("relation %d url = %q, want %q", i, got, w)
 		}
-	}
-}
-
-func TestLegacyAnimeRoundTrip(t *testing.T) {
-	start := time.Date(2006, 10, 4, 0, 0, 0, 0, time.UTC)
-	eps, year, rank := 37, 2006, 80
-	a := anilist.Anime{
-		SearchResult: anilist.SearchResult{Source: anilist.AniList, ID: "1535", Titles: []anilist.Title{{Lang: "ja", Text: "デスノート"}},
-			Type: "TV", Episodes: &eps, Year: &year, Studio: "Madhouse", Synopsis: "a\nb", CoverURL: "https://img.example/c.jpg"},
-		StartDate: &start, SourceMaterial: "MANGA", ExternalURL: "https://anilist.co/anime/1535", MALID: "1535",
-		Relations: []anilist.Relation{{Kind: "source", Source: anilist.AniList, ID: "2", Titles: []anilist.Title{{Lang: "en", Text: "M"}}, Type: "MANGA"}},
-		Genres:    []string{"Thriller"},
-		Tags:      []anilist.Tag{{Name: "Detective", Rank: &rank, Spoiler: true}},
-	}
-	d := ItemData(a)
-	back := LegacyAnime(d)
-	if !reflect.DeepEqual(ItemData(back), d) {
-		t.Fatalf("round trip:\n%+v\n%+v", ItemData(back), d)
-	}
-	if back.Source != anilist.AniList || back.ID != "1535" || *back.Episodes != 37 || back.MALID != "1535" || back.Relations[0].Type != "MANGA" {
-		t.Fatalf("legacy %+v", back)
 	}
 }

@@ -21,7 +21,7 @@ const manualSource = "manual"
 // sync_state becomes "pending" so the sync job fetches the rest.
 //
 // The entry is left untouched, except that a progress value above a total of
-// the new data (for example 30 episodes watched of a new total of 12) is
+// the new data (for example a count of 30 units against a new total of 12) is
 // clamped to that total; only then does the entry's updated_at change.
 //
 // Errors: ErrNoEntry (no such item), ErrInvalid (the item is not a manual

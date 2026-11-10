@@ -30,10 +30,10 @@ type cacheItem struct {
 	at time.Time
 }
 
-// animeCache is a small TTL cache of live item data keyed by liveKey,
+// detailCache is a small TTL cache of live item data keyed by liveKey,
 // bounded in size, so that the add handler can save what the overview
 // already fetched without another source call.
-type animeCache struct {
+type detailCache struct {
 	mu  sync.Mutex
 	now func() time.Time
 	max int
@@ -47,11 +47,11 @@ func liveKey(pluginID, source, kind, id string) string {
 	return url.PathEscape(pluginID) + "/" + url.PathEscape(source) + "/" + url.PathEscape(kind) + "/" + url.PathEscape(id)
 }
 
-func newAnimeCache(now func() time.Time, max int, ttl time.Duration) *animeCache {
-	return &animeCache{now: now, max: max, ttl: ttl, m: map[string]cacheItem{}}
+func newDetailCache(now func() time.Time, max int, ttl time.Duration) *detailCache {
+	return &detailCache{now: now, max: max, ttl: ttl, m: map[string]cacheItem{}}
 }
 
-func (c *animeCache) get(key string) (cachedDetail, bool) {
+func (c *detailCache) get(key string) (cachedDetail, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	it, ok := c.m[key]
@@ -65,7 +65,7 @@ func (c *animeCache) get(key string) (cachedDetail, bool) {
 	return it.d, true
 }
 
-func (c *animeCache) put(key string, d cachedDetail) {
+func (c *detailCache) put(key string, d cachedDetail) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	now := c.now()

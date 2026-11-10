@@ -25,7 +25,6 @@ import (
 	"github.com/allister/allister/internal/plugin/plugintest"
 	"github.com/allister/allister/internal/plugins/anime"
 	"github.com/allister/allister/internal/plugins/anime/anilist"
-	"github.com/allister/allister/internal/plugins/anime/animemap"
 	"github.com/allister/allister/internal/plugins/anime/yamtrack"
 )
 
@@ -304,7 +303,7 @@ func (e *env) outcomes(id int64) map[string]string {
 // addAnime saves the anime with a list entry.
 func (e *env) addAnime(a anilist.Anime, en library.Entry, opts ...library.SaveOption) int64 {
 	e.t.Helper()
-	id, err := e.lib.AddToList(context.Background(), animeID, animeID, animemap.ItemData(a), en, opts...)
+	id, err := e.lib.AddToList(context.Background(), animeID, animeID, anime.ItemData(a), en, opts...)
 	if err != nil {
 		e.t.Fatal(err)
 	}
@@ -998,7 +997,7 @@ func TestCancelDuringRetryLoopStopsBeforeNextAttempt(t *testing.T) {
 
 func savedNoEntry(t *testing.T, e *env, a anilist.Anime, state string) int64 {
 	t.Helper()
-	id, err := e.lib.SaveItem(context.Background(), animeID, animeID, animemap.ItemData(a), library.WithSyncState(state))
+	id, err := e.lib.SaveItem(context.Background(), animeID, animeID, anime.ItemData(a), library.WithSyncState(state))
 	if err != nil {
 		t.Fatal(err)
 	}

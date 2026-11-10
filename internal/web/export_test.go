@@ -11,13 +11,13 @@ import (
 	"github.com/allister/allister/internal/library"
 	"github.com/allister/allister/internal/plugin"
 	"github.com/allister/allister/internal/plugin/plugintest"
-	"github.com/allister/allister/internal/plugins/anime/animemap"
+	"github.com/allister/allister/internal/plugins/anime"
 )
 
 // TestExportJSONViaRoute streams the real anime plugin's JSON exporter.
 func TestExportJSONViaRoute(t *testing.T) {
 	e := newEnv(t)
-	d := animemap.ItemData(e.fp.anime)
+	d := anime.ItemData(e.fp.anime)
 	id, err := e.lib.AddToList(context.Background(), "anime", "anime", d, library.Entry{Status: library.Active, Rating: ip(9),
 		Progress: map[string]float64{"episode": 5}, Comment: "c <b>"})
 	if err != nil {

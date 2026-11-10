@@ -24,7 +24,7 @@ import (
 	"github.com/allister/allister/internal/jobs"
 	"github.com/allister/allister/internal/library"
 	"github.com/allister/allister/internal/plugin"
-	"github.com/allister/allister/internal/plugins/anime/animemap"
+	"github.com/allister/allister/internal/plugins/anime"
 )
 
 // backupEnv is the fixture env (anime, book, tv) with a sync job for every
@@ -373,7 +373,7 @@ func TestBackupRestoreOneAtATime(t *testing.T) {
 
 func TestBackupRoundTripsRealAnimePlugin(t *testing.T) {
 	a := newEnv(t)
-	d := animemap.ItemData(a.fp.anime)
+	d := anime.ItemData(a.fp.anime)
 	id, err := a.lib.AddToList(context.Background(), "anime", "anime", d, library.Entry{Status: library.Active, Rating: ip(9),
 		Progress: map[string]float64{"episode": 5}, Comment: "c <b>"})
 	if err != nil {

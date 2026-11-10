@@ -110,7 +110,7 @@ func (s *server) postIncrement(w http.ResponseWriter, r *http.Request) {
 // comboValue encodes a progress combination for the form.
 func comboValue(keys []string) string { return strings.Join(keys, ",") }
 
-// comboLabel names a combination by its tracks' labels: "Season + Episode".
+// comboLabel names a combination by its tracks' labels: "Part + Unit".
 func comboLabel(k plugin.KindDef, keys []string) string {
 	labels := make([]string, 0, len(keys))
 	for _, key := range keys {

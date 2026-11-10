@@ -14,7 +14,7 @@ import (
 // yamtrackImporter adapts yamtrack.Parse to plugin.Importer. Text taken from
 // the file (titles, comments, notes, cover urls) is sanitised so a row can
 // never make the entry unsaveable; rows of other media types, which the
-// legacy parser marks as ignored, are not listed, only counted (Ignored). Only a file that is not
+// parser marks as ignored, are not listed, only counted (Ignored). Only a file that is not
 // in the format (yamtrack.ErrBadFormat) is plugin.ErrBadInput; a read error
 // keeps its own cause. The importer reads the WHOLE stream: capping the upload
 // size is the web layer's job (POST /settings/import caps it at 20 MiB).
@@ -27,7 +27,7 @@ func (yamtrackImporter) Parse(ctx context.Context, r io.Reader) (plugin.ParseRes
 	tr := &errTrackingReader{r: r}
 	rows, skipped, err := yamtrack.Parse(tr)
 	if err != nil {
-		// the legacy parser reports a failing read as ErrBadFormat too; a read
+		// the parser reports a failing read as ErrBadFormat too; a read
 		// error is not bad input and keeps its own cause
 		if tr.err != nil {
 			return plugin.ParseResult{}, fmt.Errorf("anime import: read: %w", tr.err)
@@ -54,7 +54,7 @@ func (yamtrackImporter) Parse(ctx context.Context, r io.Reader) (plugin.ParseRes
 		if e.Title == "" {
 			e.Title = "MAL #" + row.MALID
 		}
-		// the legacy parser already cut the comment to 2000 runes and does not
+		// the parser already cut the comment to 2000 runes and does not
 		// say so, so a comment of exactly that length is reported as truncated
 		if utf8.RuneCountInString(row.Comment) >= maxCommentRunes {
 			e.Notes = append(e.Notes, fmt.Sprintf("comment truncated to %d characters", maxCommentRunes))

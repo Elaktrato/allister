@@ -40,7 +40,7 @@ type choice struct {
 
 // searchView is the data for search.html and search_results.html.
 type searchView struct {
-	// Heading ("Search anime"), Action (/{plugin}/search), Placeholder,
+	// Heading ("Search books"), Action (/{plugin}/search), Placeholder,
 	// EmptyHint and ManualURL are fixed per plugin, source and kind.
 	Heading, Action, Placeholder, EmptyHint, ManualURL string
 	Query                                              string
@@ -73,7 +73,7 @@ func cleanQuery(raw string) string {
 }
 
 // lowerFirst lower-cases the first letter of a label for use inside a
-// sentence ("Anime" -> "anime"), but leaves acronyms ("TV shows") alone.
+// sentence ("Books" -> "books"), but leaves acronyms ("TV shows") alone.
 func lowerFirst(s string) string {
 	r, n := utf8.DecodeRuneInString(s)
 	if n == 0 {

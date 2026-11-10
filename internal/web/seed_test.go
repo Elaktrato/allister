@@ -9,7 +9,6 @@ import (
 	"github.com/allister/allister/internal/plugin"
 	"github.com/allister/allister/internal/plugins/anime"
 	"github.com/allister/allister/internal/plugins/anime/anilist"
-	"github.com/allister/allister/internal/plugins/anime/animemap"
 )
 
 // Seeding helpers: the web tests save anime items and list entries through
@@ -67,12 +66,12 @@ func (e listEntry) entry() library.Entry {
 // saveAnime saves a as an item of the anime plugin (sync state pending
 // unless opts say otherwise).
 func saveAnime(ctx context.Context, lib *library.Library, a anilist.Anime, opts ...library.SaveOption) (int64, error) {
-	return lib.SaveItem(ctx, animePluginID, animeKind, animemap.ItemData(a), opts...)
+	return lib.SaveItem(ctx, animePluginID, animeKind, anime.ItemData(a), opts...)
 }
 
 // addToList saves a with the list entry e (e.ItemID is ignored).
 func addToList(ctx context.Context, lib *library.Library, a anilist.Anime, e listEntry, opts ...library.SaveOption) (int64, error) {
-	return lib.AddToList(ctx, animePluginID, animeKind, animemap.ItemData(a), e.entry(), opts...)
+	return lib.AddToList(ctx, animePluginID, animeKind, anime.ItemData(a), e.entry(), opts...)
 }
 
 // upsertEntry writes the list entry e.
@@ -102,5 +101,5 @@ func findByMAL(ctx context.Context, lib *library.Library, mal string) (*library.
 
 // saveCast saves the cast of itemID as its credits.
 func saveCast(ctx context.Context, lib *library.Library, itemID int64, cast []anilist.CastMember) error {
-	return lib.SaveCredits(ctx, itemID, animemap.Credits(cast))
+	return lib.SaveCredits(ctx, itemID, anime.Credits(cast))
 }

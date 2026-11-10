@@ -194,7 +194,7 @@ type KindDef struct {
 }
 
 // SourceInfo describes a data source. URLPatterns look like
-// "anilist.co/anime/{id}"; the core matches pasted URLs against them so no
+// "example.org/item/{id}"; the core matches pasted URLs against them so no
 // plugin code parses URLs.
 type SourceInfo struct {
 	ID                string   `json:"id"`
@@ -209,7 +209,7 @@ type SourceInfo struct {
 // ImporterInfo describes an import format. ResolveVia names the declared
 // source used to look up ExternalIDType; FallbackTitleLang is the title
 // language of the manual entry kept when nothing matches. ExternalIDLabel is
-// an optional human name of ExternalIDType ("MyAnimeList"): a single line of
+// an optional human name of ExternalIDType ("Example DB"): a single line of
 // at most 40 characters; the core shows such an id as "<label> #<value>"
 // (the type itself when empty).
 type ImporterInfo struct {

@@ -4,22 +4,13 @@ import (
 	"errors"
 	"log"
 	"net/http"
-	"net/url"
 
 	"github.com/allister/allister/internal/library"
 	"github.com/allister/allister/internal/plugin"
 )
 
-var (
-	errNoSuchAnime = errors.New("anime not found")
-)
-
 type errorView struct {
 	Title, Message, RetryURL string
-}
-
-func animeURL(source, id string) string {
-	return "/anime/" + url.PathEscape(source) + "/" + url.PathEscape(id)
 }
 
 // maxIDDigits is the longest numeric id accepted in a URL or form field.
@@ -43,21 +34,22 @@ func (s *server) errorPage(w http.ResponseWriter, r *http.Request, status int, t
 	s.renderStatus(w, r, status, "error", errorView{Title: title, Message: msg, RetryURL: retry})
 }
 
-func providerMessage(err error) string {
+// unavailableMessage words a temporary source failure for the error page.
+func unavailableMessage(err error) string {
 	if errors.Is(err, plugin.ErrRateLimited) {
-		return "AniList is rate limiting requests, please wait a moment and try again."
+		return "The source is rate limiting requests, please wait a moment and try again."
 	}
-	return "AniList is unavailable right now, please try again."
+	return "The source is unavailable right now, please try again."
 }
 
 // fail writes the error page for a load error.
 func (s *server) fail(w http.ResponseWriter, r *http.Request, err error, retry string) {
 	switch {
-	case errors.Is(err, errNoSuchAnime), errors.Is(err, plugin.ErrNotFound):
-		s.errorPage(w, r, http.StatusNotFound, "Not found", "There is no such anime.", "")
+	case errors.Is(err, plugin.ErrNotFound):
+		s.errorPage(w, r, http.StatusNotFound, "Not found", "There is no such item.", "")
 	case errors.Is(err, plugin.ErrRateLimited), errors.Is(err, plugin.ErrUnavailable):
 		log.Printf("%s %s: %v", r.Method, r.URL.Path, err)
-		s.errorPage(w, r, http.StatusServiceUnavailable, "Temporarily unavailable", providerMessage(err), retry)
+		s.errorPage(w, r, http.StatusServiceUnavailable, "Temporarily unavailable", unavailableMessage(err), retry)
 	default:
 		log.Printf("%s %s: %v", r.Method, r.URL.Path, err)
 		http.Error(w, "internal error", http.StatusInternalServerError)

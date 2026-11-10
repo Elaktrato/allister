@@ -199,7 +199,7 @@ func (e *env) saved(t *testing.T) int64 {
 
 func TestCacheBoundedAndExpires(t *testing.T) {
 	now := time.Unix(1000, 0)
-	c := newAnimeCache(func() time.Time { return now }, 3, time.Minute)
+	c := newDetailCache(func() time.Time { return now }, 3, time.Minute)
 	for _, id := range []string{"1", "2", "3", "4"} {
 		c.put("anilist/"+id, cachedDetail{})
 		now = now.Add(time.Second)

@@ -23,7 +23,7 @@ import (
 )
 
 // progressField is the form field prefix of a progress value: the value of
-// track "episode" is posted as progress.episode.
+// track "count" is posted as progress.count.
 const progressField = "progress."
 
 // progressShorthand is the legacy form field "progress": it maps to the
