@@ -999,6 +999,46 @@ func TestCheckFilterAndSortAgreeWithList(t *testing.T) {
 	}
 }
 
+// TestTitleSortFollowsTheFallbackOrder: the title sort picks the same title
+// the rows display — the chosen language, the kind's TitleFallback in
+// order, then the first stored title — not the first stored title alone.
+func TestTitleSortFollowsTheFallbackOrder(t *testing.T) {
+	d, err := db.Open(filepath.Join(t.TempDir(), "t.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { d.Close() })
+	reg := plugin.NewRegistry(plugintest.NewMemEnabled())
+	ordered := plugintest.TVPlugin()
+	ordered.M.Kinds[0].TitleFallback = []string{"original", "en"}
+	if err := reg.Register(ordered); err != nil {
+		t.Fatal(err)
+	}
+	l := New(d, reg)
+	mk := func(id, en, original string) {
+		data := tvData(id, nil)
+		data.Titles = []plugin.Title{{Lang: "en", Text: en}, {Lang: "original", Text: original}}
+		if _, err := l.AddToList(bg, "tv", "show", data, Entry{Status: Active}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	mk("1", "Zebra", "Beta")  // displays Beta (fallback), stores en first
+	mk("2", "Alpha", "Gamma") // displays Gamma, stores en first
+	q := Query{PluginID: "tv", Kind: "show"}
+	q.Sort = Sort{Kind: SortTitle}
+	pg, err := l.List(bg, q, "de")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := titlesOf(pg); !slices.Equal(got, []string{"Beta", "Gamma"}) {
+		t.Fatalf("fallback title sort = %v", got)
+	}
+	pg, _ = l.List(bg, q, "en")
+	if got := titlesOf(pg); !slices.Equal(got, []string{"Alpha", "Zebra"}) {
+		t.Fatalf("en title sort = %v", got)
+	}
+}
+
 // TestListAndRowUseTheKindsTitleFallback: when the chosen language is
 // missing, List and Row fall back in the order the item's kind declares
 // (TitleFallback), and without one to the item's first stored title. No
