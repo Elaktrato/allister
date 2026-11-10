@@ -14,7 +14,37 @@
   src: url("/static/material-symbols-outlined-v383.woff2") format("woff2");
 }
 
+/* Colours, the app font and the size scale come from /appearance.css (the
+   user's appearance settings): every colour class is a theme token (see
+   tailwind.config.js), so nothing here or in a template names a fixed
+   colour. */
+@layer base {
+  *,
+  ::before,
+  ::after {
+    --tw-ring-color: rgb(var(--al-focus) / 0.5);
+    --tw-ring-offset-color: rgb(var(--al-bg));
+  }
+  html {
+    font-size: var(--al-root-size, 100%);
+  }
+  input::placeholder,
+  textarea::placeholder {
+    color: rgb(var(--al-text-muted));
+  }
+}
+
 @layer components {
+  /* An accent background carries its own text colour: on bg-indigo-600 and
+     bg-indigo-500 (the accent tokens) text-white means "text on accent",
+     not "strong text", so the element re-points the strong text token to
+     accent-text. Text inside without a colour class inherits it too. */
+  .bg-indigo-600,
+  .bg-indigo-500 {
+    --al-text-strong: var(--al-accent-text);
+    color: rgb(var(--al-accent-text));
+  }
+
   /* An icon is decorative: always aria-hidden="true" next to a text label.
      The box is one em square and clips, so a name the font lacks never
      spills out as text. Size an icon with a font-size-only class such as

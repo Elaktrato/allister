@@ -21,6 +21,7 @@ RUN case "$TARGETARCH" in \
     chmod +x /usr/local/bin/tailwindcss
 WORKDIR /src
 COPY tailwind.config.js ./
+COPY internal/appearance/tailwind-map.json ./internal/appearance/tailwind-map.json
 COPY internal/web/templates ./internal/web/templates
 COPY internal/web/static/input.css ./internal/web/static/input.css
 RUN tailwindcss -c tailwind.config.js -i internal/web/static/input.css -o app.css --minify
