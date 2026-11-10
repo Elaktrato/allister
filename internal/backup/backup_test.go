@@ -808,6 +808,27 @@ func TestBackupRejectsOversizedArchive(t *testing.T) {
 			t.Fatalf("items = %d", n)
 		}
 	})
+	t.Run("too many entries in a zip64 directory", func(t *testing.T) {
+		var b bytes.Buffer
+		zw := zip.NewWriter(&b)
+		zw.SetComment("PK\x05\x06 a fake record in the comment is not trusted")
+		for i := 0; i < 70000; i++ { // over 65535 entries: zip64 end records
+			if _, err := zw.CreateHeader(&zip.FileHeader{Name: fmt.Sprint("e", i), Method: zip.Store}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		zw.Close()
+		data := b.Bytes()
+		if n, ok := entryCount(bytes.NewReader(data), int64(len(data))); !ok || n != 70000 {
+			t.Fatalf("entryCount = %d, %v", n, ok)
+		}
+		e := newEnv(t)
+		_, err := e.restore(data, Limits{MaxEntries: 69999}, nil)
+		var rej *RejectError
+		if !errors.As(err, &rej) || !strings.Contains(err.Error(), "more than 69999 files") {
+			t.Fatalf("err = %v", err)
+		}
+	})
 	t.Run("too many items", func(t *testing.T) {
 		e := newEnv(t)
 		rep, err := e.restore(zipOf(t, entry{name: "backup.json", body: jsonOf(t, bookItem("1"), bookItem("2"), bookItem("3"))}), Limits{MaxItems: 2}, nil)

@@ -667,7 +667,8 @@ func entryCount(ra io.ReaderAt, size int64) (n uint64, ok bool) {
 	}
 	le := binary.LittleEndian
 	for i := len(buf) - eocdLen; i >= 0; i-- {
-		if le.Uint32(buf[i:]) != 0x06054b50 {
+		// the record ends the file: its comment runs exactly to the end
+		if le.Uint32(buf[i:]) != 0x06054b50 || i+eocdLen+int(le.Uint16(buf[i+20:])) != len(buf) {
 			continue
 		}
 		total := uint64(le.Uint16(buf[i+10:]))
