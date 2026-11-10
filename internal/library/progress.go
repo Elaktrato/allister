@@ -142,9 +142,11 @@ func itemMeta(ctx context.Context, tx *sql.Tx, itemID int64) (pluginID, kind str
 // Increment adds 1 to the item's primary progress (the kind's
 // Progress.PrimaryKey, a count or pages track) with one atomic upsert: the
 // row is created at 1 when absent, and the value never rises above the total
-// when the item has one (a no-op at the total). It returns ErrNoEntry when
-// the item or its entry does not exist. It is a documented no-op (nil) when the
-// kind has no primary key or the primary key is not active for the item.
+// when the item has one (a no-op at the total). A planned entry becomes
+// active — bumping progress means the user started it — every other status
+// stays. It returns ErrNoEntry when the item or its entry does not exist. It
+// is a documented no-op (nil) when the kind has no primary key or the
+// primary key is not active for the item.
 func (l *Library) Increment(ctx context.Context, itemID int64) error {
 	tx, err := l.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -176,7 +178,9 @@ func (l *Library) Increment(ctx context.Context, itemID int64) error {
 		return fmt.Errorf("increment progress: %w", err)
 	}
 	if n, err := res.RowsAffected(); err == nil && n > 0 {
-		if _, err := tx.ExecContext(ctx, `UPDATE `+tableEntries+` SET updated_at = `+nowSQL+` WHERE item_id = ?`, itemID); err != nil {
+		// a planned entry starts when its progress moves
+		if _, err := tx.ExecContext(ctx, `UPDATE `+tableEntries+` SET status = CASE status WHEN ? THEN ? ELSE status END,
+			updated_at = `+nowSQL+` WHERE item_id = ?`, string(Planned), string(Active), itemID); err != nil {
 			return fmt.Errorf("increment progress: %w", err)
 		}
 	}

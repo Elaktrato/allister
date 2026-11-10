@@ -17,6 +17,29 @@ func progressOf(t *testing.T, l *Library, id int64) map[string]float64 {
 	return mustEntry(t, l, id).Progress
 }
 
+// TestIncrementStartsAPlannedEntry: a +1 on a planned entry moves it to
+// active — the user started consuming it — while every other status stays.
+func TestIncrementStartsAPlannedEntry(t *testing.T) {
+	e := newEnv(t)
+	l := e.lib
+	planned := addBook(t, l, "p1", fp(10), Entry{Status: Planned})
+	if err := l.Increment(bg, planned); err != nil {
+		t.Fatal(err)
+	}
+	if en := mustEntry(t, l, planned); en.Status != Active || en.Progress["pages"] != 1 {
+		t.Fatalf("planned +1: %+v", en)
+	}
+	for _, st := range []Status{Active, Paused, Dropped, Completed} {
+		id := addBook(t, l, "s-"+string(st), fp(10), Entry{Status: st})
+		if err := l.Increment(bg, id); err != nil {
+			t.Fatal(err)
+		}
+		if en := mustEntry(t, l, id); en.Status != st {
+			t.Fatalf("%s +1 changed the status to %s", st, en.Status)
+		}
+	}
+}
+
 func TestIncrementCapsAtTotalAndNoPrimary(t *testing.T) {
 	e := newEnv(t)
 	l := e.lib
