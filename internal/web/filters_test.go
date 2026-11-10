@@ -703,20 +703,47 @@ func TestPartialSwapsTermCountsAndClearOutOfBand(t *testing.T) {
 	e.addFixture(t, "tv", "show", showWith("2", "Light", []string{"Comedy"}), active)
 	hx := map[string]string{"HX-Request": "true", "HX-Target": "list-rows"}
 	b := e.getWith("/tv?q=dar&genre=Comedy", hx).Body.String()
-	mustContain(t, b, `id="filter-genre" hx-swap-oob="true"`, `id="filter-tag" hx-swap-oob="true"`, `id="filter-clear" hx-swap-oob="true"`,
-		`<option value="Drama">Drama (1)</option>`, `<option value="Comedy" selected>Comedy (0)</option>`, `href="/tv">Clear filters</a>`)
+	// only the option lists go out of band, into the existing selects
+	genre := oobBlock(t, b, "innerHTML:#filter-genre-select")
+	mustContain(t, genre, `<option value="Drama">Drama (1)</option>`, `<option value="Comedy" selected>Comedy (0)</option>`)
+	tag := oobBlock(t, b, "innerHTML:#filter-tag-select")
 	// tag counts follow the genre and text filters: nothing matches both
-	mustNotContain(t, b, `Loop (`)
-	// never the text inputs (typing focus stays)
-	mustNotContain(t, b, `name="q"`, `name="rmin"`, `name="sort"`)
+	mustNotContain(t, tag, `Loop (`, "<option")
+	mustContain(t, b, `id="filter-clear" hx-swap-oob="true"`, `href="/tv">Clear filters</a>`)
+	// never a select, fieldset, the any/all switch or the text inputs (focus stays)
+	mustNotContain(t, b, "<select", "<fieldset", `name="genre_mode"`, `name="tag_mode"`, `name="q"`, `name="rmin"`, `name="sort"`,
+		`id="filter-genre"`, `id="filter-tag"`)
+	if n := strings.Count(b, "hx-swap-oob"); n != 4 { // tabs, clear, two option lists
+		t.Errorf("%d oob blocks", n)
+	}
 	// without filters the Clear slot is swapped empty
 	b = e.getWith("/tv", hx).Body.String()
-	mustContain(t, b, `id="filter-clear" hx-swap-oob="true"></span>`)
+	mustContain(t, b, `id="filter-clear" hx-swap-oob="true"></span>`, `<option value="Loop">Loop (1)</option>`)
 	mustNotContain(t, b, "Clear filters")
-	// the full page has the same ids, without oob
-	full := e.listGet(t, "/tv?q=dar")
-	mustContain(t, full, `id="filter-genre"`, `id="filter-tag"`, `id="filter-clear"`)
+	// the full page: the selects carry the stable target ids (unique), no oob
+	full := e.listGet(t, "/tv?q=dar&genre=Comedy")
+	for _, id := range []string{`id="filter-genre-select"`, `id="filter-tag-select"`, `id="filter-clear"`} {
+		if n := strings.Count(full, id); n != 1 {
+			t.Errorf("%s appears %d times", id, n)
+		}
+	}
+	mustContain(t, full, `<select id="filter-genre-select" name="genre" multiple`, `<option value="Comedy" selected>Comedy (0)</option>`)
 	mustNotContain(t, full, "hx-swap-oob")
+	// a newer pick replaces an older in-flight request
+	mustContain(t, full, `hx-sync="this:replace"`)
+}
+
+// oobBlock returns the inner html of the out-of-band element with the given
+// hx-swap-oob value.
+func oobBlock(t *testing.T, body, oob string) string {
+	t.Helper()
+	open := `hx-swap-oob="` + oob + `">`
+	i := strings.Index(body, open)
+	if i < 0 {
+		t.Fatalf("no oob block %q", oob)
+	}
+	rest := body[i+len(open):]
+	return rest[:strings.Index(rest, "</div>")]
 }
 
 func TestPushURLIsTheAppliedQuery(t *testing.T) {

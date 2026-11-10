@@ -2,7 +2,7 @@
 GET form without JavaScript; with htmx it refreshes the rows region live. */}}
 {{define "filter_bar"}}
 <form method="get" action="{{.Action}}" role="search" aria-label="Search and filter the list"
-  hx-get="{{.Action}}" hx-trigger="keyup changed delay:300ms, change" hx-target="#list-rows" hx-push-url="true"
+  hx-get="{{.Action}}" hx-trigger="keyup changed delay:300ms, change" hx-target="#list-rows" hx-push-url="true" hx-sync="this:replace"
   class="mb-4 rounded border border-slate-800 bg-slate-900 p-3 text-sm">
   {{if .Kind}}<input type="hidden" name="kind" value="{{.Kind}}">{{end}}
   {{if .Status}}<input type="hidden" name="status" value="{{.Status}}">{{end}}
@@ -65,10 +65,15 @@ GET form without JavaScript; with htmx it refreshes the rows region live. */}}
 
 {{define "filter_clear"}}<span id="filter-clear"{{if .OOB}} hx-swap-oob="true"{{end}}>{{with .ClearURL}}<a class="text-indigo-300 hover:underline" href="{{.}}">Clear filters</a>{{end}}</span>{{end}}
 
+{{define "filter_term_options"}}{{range .Options}}<option value="{{.Value}}"{{if .Selected}} selected{{end}}>{{.Label}}</option>{{end}}{{end}}
+
+{{/* the option list of a term select as an out-of-band swap into the existing select (which keeps focus) */}}
+{{define "filter_term_options_oob"}}<div hx-swap-oob="innerHTML:#filter-{{.Name}}-select">{{template "filter_term_options" .}}</div>{{end}}
+
 {{define "filter_terms"}}
-<fieldset id="filter-{{.Name}}"{{if .OOB}} hx-swap-oob="true"{{end}} class="flex flex-col gap-1"><legend class="mb-1 text-slate-400">{{.Label}}</legend>
-  <select name="{{.Name}}" multiple size="6" aria-label="{{.Label}}" class="min-w-40 rounded border border-slate-700 bg-slate-950 px-2 py-1">
-    {{range .Options}}<option value="{{.Value}}"{{if .Selected}} selected{{end}}>{{.Label}}</option>{{end}}
+<fieldset class="flex flex-col gap-1"><legend class="mb-1 text-slate-400">{{.Label}}</legend>
+  <select id="filter-{{.Name}}-select" name="{{.Name}}" multiple size="6" aria-label="{{.Label}}" class="min-w-40 rounded border border-slate-700 bg-slate-950 px-2 py-1">
+    {{template "filter_term_options" .}}
   </select>
   <select name="{{.ModeName}}" aria-label="{{.Label}}: match" class="rounded border border-slate-700 bg-slate-950 px-2 py-1">
     <option value="any"{{if not .All}} selected{{end}}>Any of these</option>

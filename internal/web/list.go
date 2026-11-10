@@ -311,9 +311,10 @@ func (s *server) buildList(r *http.Request, m plugin.Manifest, lq listQuery) (li
 }
 
 // getList renders the list page. The filter bar's htmx requests (HX-Target
-// list-rows) get only the rows region, with the tabs as an out-of-band swap
-// and the canonical URL for the address bar; every other request, a history
-// restore included, gets the full page (both carry Vary: HX-Request).
+// list-rows) get only the rows region, with the tabs, the Clear link and the
+// genre/tag option lists as out-of-band swaps and the canonical URL for the
+// address bar; every other request, a history restore included, gets the
+// full page. Both carry Vary: HX-Request, HX-Target, HX-History-Restore-Request.
 func (s *server) getList(w http.ResponseWriter, r *http.Request, pluginID string) {
 	m, ok := s.deps.Registry.Manifest(pluginID)
 	if !ok || len(m.Kinds) == 0 {

@@ -408,7 +408,6 @@ type termInput struct {
 	Label, Name, ModeName string
 	All                   bool
 	Options               []option
-	OOB                   bool // rendered as an out-of-band swap
 }
 
 type filterBar struct {
@@ -428,16 +427,9 @@ type filterBar struct {
 	OOB           bool   // the Clear slot is rendered as an out-of-band swap
 }
 
-// outOfBand marks the parts a rows partial swaps out of band: the Clear
-// slot and the genre/tag lists (their counts follow the filters).
-func (b *filterBar) outOfBand() {
-	b.OOB = true
-	for _, t := range []*termInput{b.Genres, b.Tags} {
-		if t != nil {
-			t.OOB = true
-		}
-	}
-}
+// outOfBand marks the Clear slot for an out-of-band swap. (The genre/tag
+// option lists always go out of band in a rows partial: list_partial.)
+func (b *filterBar) outOfBand() { b.OOB = true }
 
 // buildFilterBar draws the bar of kind k from the schema: only Filterable
 // fields, genres and tags only when enabled and filterable (with the counts
