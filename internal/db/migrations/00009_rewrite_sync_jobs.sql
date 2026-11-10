@@ -11,7 +11,8 @@
 -- untouched: no handler serves sync_anime any more, so it fails as an
 -- unknown kind instead of syncing a wrong item.
 --
--- 00008 is reserved for another migration; goose accepts the gap.
+-- 00008 is unused; later migrations continue at 00010 (goose cannot apply a
+-- lower number to a database already at a higher version).
 UPDATE jobs
 SET kind = 'sync_item',
     payload_json = json_object(

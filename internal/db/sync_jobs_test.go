@@ -6,8 +6,9 @@ import (
 	"github.com/pressly/goose/v3"
 )
 
-// latestVersion is the newest migration. 00008 is reserved for the importer
-// migration of a later task; goose applies the gap fine.
+// latestVersion is the newest migration. 00008 is unused; later migrations
+// continue at 00010 (goose cannot apply a lower number to a database already
+// at a higher version).
 const latestVersion = 9
 
 func TestMigrationRewritesLegacySyncJobs(t *testing.T) {

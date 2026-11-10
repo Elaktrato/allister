@@ -246,3 +246,43 @@ func TestRecommendationsForDisabledPlugin404(t *testing.T) {
 		t.Fatalf("source called for a 404: %d", n-calls)
 	}
 }
+
+// TestRecCacheEvictsOldestAndCopies: with room for two entries a third put
+// evicts the oldest one, and neither the stored input nor a returned value
+// aliases the cache.
+func TestRecCacheEvictsOldestAndCopies(t *testing.T) {
+	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	c := newRecCache(func() time.Time { return now }, 2, time.Hour)
+	mk := func(title string) []plugin.ItemSummary {
+		return []plugin.ItemSummary{{Source: "s", ID: title, Titles: []plugin.Title{{Lang: "en", Text: title}},
+			Fields: map[string]plugin.FieldValue{"year": {Num: num(2000)}}}}
+	}
+	in := mk("a")
+	c.put("a", in)
+	now = now.Add(time.Second)
+	c.put("b", mk("b"))
+	now = now.Add(time.Second)
+	c.put("c", mk("c"))
+	if _, ok := c.get("a"); ok {
+		t.Fatal("the oldest entry was not evicted")
+	}
+	for _, k := range []string{"b", "c"} {
+		if got, ok := c.get(k); !ok || got[0].Titles[0].Text != k {
+			t.Fatalf("entry %s: %v %v", k, got, ok)
+		}
+	}
+	if len(c.m) != 2 {
+		t.Fatalf("entries = %d", len(c.m))
+	}
+	// changing the input after put or a result after get leaves the cache alone
+	in2 := mk("b2")
+	c.put("b", in2)
+	in2[0].Titles[0].Text = "changed"
+	*in2[0].Fields["year"].Num = 1
+	got, _ := c.get("b")
+	got[0].Titles[0].Text = "changed too"
+	again, _ := c.get("b")
+	if again[0].Titles[0].Text != "b2" || *again[0].Fields["year"].Num != 2000 {
+		t.Fatalf("cache aliased: %+v", again[0])
+	}
+}
