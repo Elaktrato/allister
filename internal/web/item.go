@@ -48,6 +48,7 @@ func (s *server) coreRoutes(pluginID string) routeSet {
 		reg.Handle("GET /", func(w http.ResponseWriter, r *http.Request) { s.getList(w, r, pluginID) })
 		reg.Handle("GET /search", func(w http.ResponseWriter, r *http.Request) { s.search(w, r, pluginID) })
 		reg.Handle("GET /{source}/{id}", func(w http.ResponseWriter, r *http.Request) { s.getItem(w, r, pluginID) })
+		reg.Handle("GET /{source}/{id}/recommendations", func(w http.ResponseWriter, r *http.Request) { s.getRecommendations(w, r, pluginID) })
 		reg.Handle("GET /{source}/{id}/add", func(w http.ResponseWriter, r *http.Request) { s.getAdd(w, r, pluginID) })
 		reg.Handle("POST /{source}/{id}/add", func(w http.ResponseWriter, r *http.Request) { s.postAdd(w, r, pluginID) })
 		reg.Handle("GET /manual/new", func(w http.ResponseWriter, r *http.Request) { s.getManualNew(w, r, pluginID) })
@@ -204,7 +205,6 @@ type loadedItem struct {
 	entry         *library.Entry  // nil when not in the list
 	credits       []creditView
 	creditsFailed bool
-	recs          []plugin.ItemSummary
 }
 
 // loadItem finds the saved item of ref, else fetches it live. Unsaved manual
@@ -269,16 +269,8 @@ func (s *server) loadSaved(ctx context.Context, m plugin.Manifest, k plugin.Kind
 			li.credits = append(li.credits, cv)
 		}
 	}
-	// recommendations are not stored: fetched live, failures omit the row
-	if hasSection(k, plugin.SectionRecommendations) && hasSource(m, it.Source) {
-		if src := s.source(m.ID, it.Source); src != nil {
-			if recs, err := src.Recommendations(ctx, it.Kind, it.SourceID); err == nil {
-				li.recs = recs
-			} else {
-				log.Printf("recommendations %s/%s/%s: %v", m.ID, it.Source, it.SourceID, err)
-			}
-		}
-	}
+	// recommendations are not stored: the overview loads them late
+	// (recommendations.go)
 	return li, nil
 }
 
@@ -316,16 +308,9 @@ func (s *server) loadLive(ctx context.Context, m plugin.Manifest, ref itemRef, u
 				c.Credits, c.CreditsFailed = nil, true
 			}
 		}
-		if hasSection(k, plugin.SectionRecommendations) {
-			if recs, err := src.Recommendations(ctx, kindKey, ref.ID); err == nil {
-				c.Recs = recs
-			} else {
-				log.Printf("recommendations %s: %v", key, err)
-			}
-		}
 		s.cache.put(key, c)
 	}
-	li := &loadedItem{man: m, kind: k, data: c.Data, creditsFailed: c.CreditsFailed, recs: c.Recs}
+	li := &loadedItem{man: m, kind: k, data: c.Data, creditsFailed: c.CreditsFailed}
 	// the identity comes from the URL (matched against the manifest), not
 	// from what the source returned
 	li.data.Source, li.data.ID, li.data.Kind = ref.Source, ref.ID, kindKey

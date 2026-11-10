@@ -73,8 +73,9 @@ type sectionView struct {
 	CreditsFailed bool
 	Chips         []chipView
 	Spoilers      []chipView
-	Cards         []linkCard
 	Links         []extLink
+	// LoadURL is the recommendations endpoint the placeholder loads.
+	LoadURL string
 }
 
 type progressView struct{ Label, Value string }
@@ -367,19 +368,14 @@ func (s *server) section(li *loadedItem, sec plugin.SectionDef, lang string) (se
 		}
 		return sv, len(sv.Chips) > 0 || len(sv.Spoilers) > 0
 	case plugin.SectionRecommendations:
+		// only a placeholder: the recommendations load late, and only when
+		// the item's source can supply them (never for a manual item)
 		heading("Recommendations")
-		for _, rc := range li.recs {
-			kind := rc.Kind
-			if kind == "" {
-				kind = k.Key
-			}
-			if rc.ID == "" || !hasSource(m, rc.Source) || !hasKind(m, kind) {
-				continue
-			}
-			sv.Cards = append(sv.Cards, linkCard{Title: orID(library.ResolveTitle(rc.Titles, lang), rc.ID),
-				Href: itemURL(m, rc.Source, rc.ID, kind), Cover: httpURL(rc.CoverURL)})
+		if d.Source == manualSource || !hasSource(m, d.Source) || s.source(m.ID, d.Source) == nil {
+			return sv, false
 		}
-		return sv, len(sv.Cards) > 0
+		sv.LoadURL = recommendationsURL(m, d.Source, d.ID, d.Kind)
+		return sv, true
 	case plugin.SectionLinks:
 		if l, ok := sourceLink(m, d); ok {
 			sv.Links = []extLink{l}

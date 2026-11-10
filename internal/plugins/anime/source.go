@@ -4,8 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"sync"
-	"time"
 
 	"github.com/allister/allister/internal/plugin"
 	"github.com/allister/allister/internal/plugins/anime/animemap"
@@ -23,34 +21,14 @@ const (
 // source adapts the legacy AniList client to plugin.Source. Everything it
 // returns goes through animemap, which sanitises it, so a quirk of the
 // AniList data can never make an item unsaveable in the library.
-//
-// Details and Recommendations read the same legacy Anime call. So that an
-// overview (Details, then Recommendations of the same id) costs one request,
-// Details keeps its response for a moment and the next Recommendations of
-// that id takes it (once; see shared).
-//
-// TODO(Task 11): remove when recommendations are async/split
 type source struct {
-	c   provider.Provider
-	now func() time.Time // clock of the shared reuse; never nil
-
-	mu     sync.Mutex
-	shared sharedAnime
+	c provider.Provider
 }
 
 // malLookup is the optional MAL id lookup of a provider (anilist.Client).
 type malLookup interface {
 	AnimeByMALID(ctx context.Context, malID string) (provider.Anime, error)
 }
-
-// sharedAnime is the last Details response, kept for sharedTTL.
-type sharedAnime struct {
-	id string
-	a  provider.Anime
-	at time.Time
-}
-
-const sharedTTL = 10 * time.Second
 
 // maxIDDigits is the longest AniList id accepted.
 const maxIDDigits = 12
@@ -67,24 +45,6 @@ func checkID(id string) error {
 		}
 	}
 	return nil
-}
-
-func (s *source) keep(id string, a provider.Anime) {
-	s.mu.Lock()
-	s.shared = sharedAnime{id: id, a: a, at: s.now()}
-	s.mu.Unlock()
-}
-
-// take returns the kept response of id (and forgets it) when it is fresh.
-func (s *source) take(id string) (provider.Anime, bool) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	sh := s.shared
-	if sh.id != id || s.now().Sub(sh.at) >= sharedTTL {
-		return provider.Anime{}, false
-	}
-	s.shared = sharedAnime{}
-	return sh.a, true
 }
 
 func checkKind(kind string) error {
@@ -140,13 +100,11 @@ func (s *source) Details(ctx context.Context, kind, id string) (plugin.ItemData,
 	if err != nil {
 		return plugin.ItemData{}, mapErr(err)
 	}
-	s.keep(id, a)
 	return animemap.ItemData(a), nil
 }
 
-// Recommendations reads the recommendations of the legacy Anime call, so it
-// costs the same single request as Details until a later task splits the
-// query; right after Details of the same id it costs none (see source).
+// Recommendations reads the recommendations of the legacy Anime call: one
+// request of its own (the overview loads recommendations separately, late).
 func (s *source) Recommendations(ctx context.Context, kind, id string) ([]plugin.ItemSummary, error) {
 	if err := checkKind(kind); err != nil {
 		return nil, err
@@ -154,12 +112,9 @@ func (s *source) Recommendations(ctx context.Context, kind, id string) ([]plugin
 	if err := checkID(id); err != nil {
 		return nil, err
 	}
-	a, ok := s.take(id)
-	if !ok {
-		var err error
-		if a, err = s.c.Anime(ctx, id); err != nil {
-			return nil, mapErr(err)
-		}
+	a, err := s.c.Anime(ctx, id)
+	if err != nil {
+		return nil, mapErr(err)
 	}
 	return animemap.Recommendations(a.Recommendations), nil
 }

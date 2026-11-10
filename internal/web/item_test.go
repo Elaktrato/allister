@@ -28,7 +28,7 @@ func TestOverviewLiveForUnsaved(t *testing.T) {
 	b := rec.Body.String()
 	mustContain(t, b, "デスノート", "Line one.", "Line two.", "Madhouse", "2006-10-04", "2007-06-27", "MANGA", "37 eps",
 		"Light Yagami", "Mamoru Miyano", "Sequel Title", `href="/anime/anilist/2000"`, `href="https://anilist.co/manga/30021"`,
-		"Rec Title", `href="/anime/anilist/3000"`, "https://img.example/r.jpg", "https://img.example/c.jpg", "https://img.example/l.jpg",
+		"https://img.example/c.jpg", "https://img.example/l.jpg",
 		"View on AniList", `href="https://anilist.co/anime/1535"`, "Add to list", `hx-get="/anime/anilist/1535/add"`)
 	mustNotContain(t, b, "Cast unavailable", "partially synced")
 	if e.fp.animeCalls != 1 || e.fp.castCall != 1 {
@@ -63,12 +63,19 @@ func TestOverviewFromDatabaseForSaved(t *testing.T) {
 	if e.fp.castCall != 0 {
 		t.Fatal("cast fetched live for a saved entry")
 	}
-	// recommendations come live, failures are ignored
-	mustContain(t, b, "Rec Title")
+	// recommendations come live (loaded late from their endpoint), failures
+	// never break the page
+	mustContain(t, e.htmxGet("/anime/anilist/1535/recommendations").Body.String(), "Rec Title")
 	e.fp.animeErr = provider.ErrUnavailable
 	rec = e.get("/anime/anilist/1535")
 	if rec.Code != 200 {
 		t.Fatalf("got %d", rec.Code)
+	}
+	mustNotContain(t, rec.Body.String(), "Rec Title")
+	*e.now = e.now.Add(cacheTTL) // past the cached result
+	rec = e.htmxGet("/anime/anilist/1535/recommendations")
+	if rec.Code != 200 {
+		t.Fatalf("recommendations: %d", rec.Code)
 	}
 	mustNotContain(t, rec.Body.String(), "Rec Title")
 }
@@ -507,19 +514,6 @@ func TestOverviewPeopleFailureNotice(t *testing.T) {
 	mustNotContain(t, rec.Body.String(), ">Recommendations<")
 }
 
-func TestOverviewRecommendationCards(t *testing.T) {
-	e := newFixtureEnv(t)
-	e.tv.Data = tvShow("1", "Base")
-	e.tv.Recs = []plugin.ItemSummary{
-		{Source: "tvdata", ID: "r 1", Kind: "show", Titles: ttl("Rec One"), CoverURL: "https://img.example/r1.jpg"},
-		{Source: "elsewhere", ID: "r2", Kind: "show", Titles: ttl("Foreign Rec")},
-		{Source: "tvdata", ID: "", Kind: "show", Titles: ttl("No Id")},
-	}
-	b := e.get("/tv/tvdata/1").Body.String()
-	mustContain(t, b, ">Recommendations<", `href="/tv/tvdata/r%201"`, "Rec One", `src="https://img.example/r1.jpg"`)
-	mustNotContain(t, b, "Foreign Rec", "No Id")
-}
-
 func TestOverviewSourceErrorsForFixture(t *testing.T) {
 	for _, tc := range []struct {
 		err  error
@@ -551,9 +545,8 @@ func TestOverviewFixtureFromDatabaseForSaved(t *testing.T) {
 		t.Fatal(err)
 	}
 	e.tv.Data = tvShow("1", "LIVE TITLE")
-	e.tv.Recs = []plugin.ItemSummary{{Source: "tvdata", ID: "2", Kind: "show", Titles: ttl("Live Rec")}}
 	b := e.get("/tv/tvdata/1").Body.String()
-	mustContain(t, b, "Stored Title</h1>", "Stored Actor", `href="/people/1"`, `href="https://tv.example/p/a"`, "Live Rec")
+	mustContain(t, b, "Stored Title</h1>", "Stored Actor", `href="/people/1"`, `href="https://tv.example/p/a"`)
 	mustNotContain(t, b, "LIVE TITLE")
 	if e.tv.Calls(plugintest.OpDetails) != 0 || e.tv.Calls(plugintest.OpPeople) != 0 {
 		t.Fatal("saved item fetched live")
@@ -598,7 +591,6 @@ func TestSectionsEscapeHostileValues(t *testing.T) {
 	e.tv.Data = d
 	e.tv.Credits = []plugin.Credit{{Role: "actor", Detail: "D" + x, Person: plugin.PersonRef{ID: "p", Name: "P" + x, URL: "javascript:alert(4)", ImageURL: "javascript:alert(5)"},
 		With: &plugin.PersonRef{ID: "w", Name: "W" + x}, WithRole: "WR" + x}}
-	e.tv.Recs = []plugin.ItemSummary{{Source: "tvdata", ID: "r", Kind: "show", Titles: ttl("Rc" + x), CoverURL: "javascript:alert(6)"}}
 	rec := e.get("/tv/tvdata/1")
 	if rec.Code != 200 {
 		t.Fatalf("got %d", rec.Code)
@@ -610,7 +602,7 @@ func TestSectionsEscapeHostileValues(t *testing.T) {
 	// a non-https url field value is shown as text, never as a link
 	mustContain(t, b, "javascript:alert(2)")
 	mustNotContain(t, b, "javascript:alert(1)", "javascript:alert(3)", "javascript:alert(4)", "javascript:alert(5)", "javascript:alert(6)")
-	for _, p := range []string{"T", "O", "E", "S", "z", "R", "G", "Tg", "D", "P", "W", "WR", "Rc"} {
+	for _, p := range []string{"T", "O", "E", "S", "z", "R", "G", "Tg", "D", "P", "W", "WR"} {
 		mustContain(t, b, p+"&lt;script&gt;alert(1)&lt;/script&gt;")
 	}
 	mustContain(t, b, "Home&lt;b&gt;", "x&lt;y", `href="/tv/tvdata/%22%3E%3Cx"`)

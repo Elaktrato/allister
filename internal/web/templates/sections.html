@@ -106,19 +106,11 @@
 {{end}}
 
 {{define "section_recommendations"}}
-<section>
-  {{template "section_heading" .Heading}}
-  <ul class="flex gap-3 overflow-x-auto pb-2">
-    {{range .Cards}}
-    <li class="w-28 shrink-0">
-      <a href="{{.Href}}" class="block text-sm hover:underline">
-        {{if .Cover}}<img src="{{.Cover}}" alt="" loading="lazy" class="mb-1 h-40 w-28 rounded object-cover">
-        {{else}}<span class="mb-1 block h-40 w-28 rounded bg-slate-800" aria-hidden="true"></span>{{end}}
-        {{.Title}}
-      </a>
-    </li>
-    {{end}}
-  </ul>
+{{/* a placeholder: htmx loads the recommendations fragment once the page is
+     shown (recommendations.html replaces this element); without JavaScript
+     the link opens them as a page */}}
+<section hx-get="{{.LoadURL}}" hx-trigger="load" hx-swap="outerHTML">
+  <a href="{{.LoadURL}}" class="text-sm text-indigo-300 hover:underline">Load recommendations</a>
 </section>
 {{end}}
 

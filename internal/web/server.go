@@ -63,6 +63,10 @@ type server struct {
 	deps  Deps
 	pages map[string]*template.Template
 	cache *animeCache
+	// recs caches recommendation results; recTimeout bounds one source
+	// call (tests shorten it).
+	recs       *recCache
+	recTimeout time.Duration
 	// pluginRoutes lists the full patterns mounted per plugin id, and
 	// coreGuarded the entry routes behind the item's plugin guard (tests
 	// walk them).
@@ -72,7 +76,7 @@ type server struct {
 
 // pageNames lists every page template (templates/<name>.html). Add a page by
 // dropping its file in templates/ and listing it here.
-var pageNames = []string{"settings", "search", "item", "list", "person", "manual_form", "details_form", "import", "error"}
+var pageNames = []string{"settings", "search", "item", "list", "person", "manual_form", "details_form", "import", "error", "recommendations"}
 
 // pagePartials lists extra template files a page needs (also rendered alone
 // for htmx requests).
@@ -111,7 +115,8 @@ func newServer(deps Deps, now func() time.Time) (*server, http.Handler) {
 	if deps.Library == nil && deps.Store != nil {
 		deps.Library = library.New(deps.Store.DB(), deps.Registry)
 	}
-	s := &server{deps: deps, pages: parsePages(), cache: newAnimeCache(now, cacheMaxEntries, cacheTTL)}
+	s := &server{deps: deps, pages: parsePages(), cache: newAnimeCache(now, cacheMaxEntries, cacheTTL),
+		recs: newRecCache(now, recCacheMaxEntries, cacheTTL), recTimeout: recTimeout}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("ok"))

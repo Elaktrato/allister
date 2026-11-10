@@ -567,7 +567,9 @@ func TestSourcePeopleCarriesCastRoleAsDetail(t *testing.T) {
 	}
 }
 
-func TestSourceDetailsThenRecommendationsShareOneRequest(t *testing.T) {
+// Recommendations is its own request: the overview loads it separately
+// (late), so Details keeps nothing for it.
+func TestSourceRecommendationsMakeTheirOwnRequest(t *testing.T) {
 	var queries []string
 	s := newSource(t, nil, 0, &queries)
 	if _, err := s.Details(ctx(), "anime", "154587"); err != nil {
@@ -577,25 +579,8 @@ func TestSourceDetailsThenRecommendationsShareOneRequest(t *testing.T) {
 	if err != nil || len(recs) == 0 {
 		t.Fatalf("recs %v %v", recs, err)
 	}
-	if len(queries) != 1 {
-		t.Fatalf("Details then Recommendations made %d requests, want 1", len(queries))
-	}
-	// the shared response is used once: the next call asks again
-	if _, err := s.Recommendations(ctx(), "anime", "154587"); err != nil {
-		t.Fatal(err)
-	}
 	if len(queries) != 2 {
-		t.Fatalf("second Recommendations made %d requests in total, want 2", len(queries))
-	}
-	// another id never reuses it
-	if _, err := s.Details(ctx(), "anime", "154587"); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := s.Recommendations(ctx(), "anime", "1"); err != nil {
-		t.Fatal(err)
-	}
-	if len(queries) != 4 {
-		t.Fatalf("requests %d, want 4", len(queries))
+		t.Fatalf("Details then Recommendations made %d requests, want 2", len(queries))
 	}
 }
 
@@ -643,38 +628,5 @@ func TestOptionsProviderReplacesTheClient(t *testing.T) {
 	// a provider without a MAL lookup cannot look up
 	if _, err := s.Lookup(ctx(), "anime", "mal", "1"); !errors.Is(err, plugin.ErrUnavailable) {
 		t.Fatalf("lookup err = %v", err)
-	}
-}
-
-func TestSourceSharedDetailsExpireAfterTTL(t *testing.T) {
-	var queries []string
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		b, _ := io.ReadAll(r.Body)
-		queries = append(queries, string(b))
-		w.Header().Set("Content-Type", "application/json")
-		w.Write(fixture(t, "anime.json"))
-	}))
-	t.Cleanup(srv.Close)
-	now := time.Unix(1000, 0)
-	s := New(Options{AniListURL: srv.URL, HTTP: srv.Client(), now: func() time.Time { return now }}).Source("anilist")
-	if _, err := s.Details(ctx(), "anime", "154587"); err != nil {
-		t.Fatal(err)
-	}
-	now = now.Add(sharedTTL - time.Millisecond)
-	if _, err := s.Recommendations(ctx(), "anime", "154587"); err != nil {
-		t.Fatal(err)
-	}
-	if len(queries) != 1 {
-		t.Fatalf("within the TTL: %d requests, want 1", len(queries))
-	}
-	if _, err := s.Details(ctx(), "anime", "154587"); err != nil {
-		t.Fatal(err)
-	}
-	now = now.Add(sharedTTL)
-	if _, err := s.Recommendations(ctx(), "anime", "154587"); err != nil {
-		t.Fatal(err)
-	}
-	if len(queries) != 3 {
-		t.Fatalf("after the TTL: %d requests, want 3", len(queries))
 	}
 }

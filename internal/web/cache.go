@@ -14,8 +14,8 @@ const (
 )
 
 // cachedDetail is what the overview of an unsaved item fetched from its
-// plugin's source: the details, the credits (CreditsFailed when People
-// failed) and the recommendations (nil when not fetched or failed).
+// plugin's source: the details and the credits (CreditsFailed when People
+// failed). Recommendations are loaded late and cached apart (recCache).
 // DetailsOnly marks an entry the add dialog stored after a lone Details
 // call: the add flow uses it, the overview treats it as a miss.
 type cachedDetail struct {
@@ -23,7 +23,6 @@ type cachedDetail struct {
 	DetailsOnly   bool
 	Credits       []plugin.Credit
 	CreditsFailed bool
-	Recs          []plugin.ItemSummary
 }
 
 type cacheItem struct {
