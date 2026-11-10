@@ -12,6 +12,10 @@ services:
       # SQLite database (allister.db) and covers/ live here.
       - allister-data:/data
     restart: unless-stopped
+    # Time on stop to drain open requests (up to 10 s) and then hand the
+    # running background job back to the queue cleanly; the default 10 s
+    # could kill the process during the drain.
+    stop_grace_period: 30s
     # No healthcheck: the runtime image is distroless (no shell, curl or wget).
     # GET /healthz answers "ok" for an external monitor.
 

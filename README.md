@@ -44,7 +44,7 @@ Only anime rows with MyAnimeList ids are used. Each id is looked up on AniList a
 
 The page shows progress. You can cancel an import and resume it later. Entries AniList cannot match are kept as manual entries marked "unmatched". Importing the same file again skips rows already saved, matched by MyAnimeList id. The one exception is rare: if you matched an unmatched entry to an AniList page whose MyAnimeList id differs from the one in the export, a re-import can bring that row back as a new unmatched entry.
 
-An import made by an older version of Allister cannot be continued after the upgrade: one that was still running is marked failed, and the unfinished rows of one that had failed or was cancelled are marked failed as well, so it can no longer be resumed (each says "created by an older version; upload the file again"). Upload the file again: already saved rows are skipped. If you disable the anime plugin while an import is running, the import pauses. The import page says why, and the import continues when you enable the plugin again (or you can cancel it).
+An import made by an older version of Allister cannot be continued after the upgrade: one that was still running is marked failed, and the unfinished rows of one that had failed or was cancelled are marked failed as well, so it can no longer be resumed (each says "created by an older version; upload the file again"). Upload the file again: rows already in your library are skipped (after an upgrade from the first preview build the library starts empty, see Updating and stopping). If you disable the anime plugin while an import is running, the import pauses. The import page says why, and the import continues when you enable the plugin again (or you can cancel it).
 
 ## Searching your list
 
@@ -64,7 +64,7 @@ Anime pages live under `/anime` (list, `/anime/search`, overviews at `/anime/ani
 
 ## Updating and stopping
 
-After `git pull`, run `docker compose up -d --build`. `docker compose down` stops and removes the container but keeps the data volume. **`docker compose down -v` deletes the volume and all your data.**
+After `git pull`, run `docker compose up -d --build`. **Upgrading from the first (pre-plugin) preview build: a volume from that build starts empty after this upgrade, because its anime tables are dropped, not copied. If it holds data you want, make a cold backup of the volume first (see below).** `docker compose down` stops and removes the container but keeps the data volume; compose gives the app 30 seconds (`stop_grace_period`) to finish open requests and hand the running background job back to the queue. **`docker compose down -v` deletes the volume and all your data.**
 
 Every image (the build and runtime base images and the helper images in the commands below) is pinned by digest, and the Tailwind CLI and htmx are checked against recorded sha256 sums (see `PINS.md`). A rebuild therefore never picks up a base-image security update by itself: base-image security updates now need running `scripts/update-pins.sh` (it shows the new pins as a diff; `scripts/update-pins.sh --write` applies them), then `docker compose up -d --build`.
 

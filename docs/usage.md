@@ -8,7 +8,7 @@ The filter bar above the list searches only your own entries and updates as you 
 
 | Parameter | Meaning |
 |---|---|
-| `q` | Text matched against every stored title in any language (case-insensitive substring). Genres and tags are not searched. |
+| `q` | Text matched against every stored title in any language (substring; case-insensitive for ASCII letters only, so `é` does not match `É`). Genres and tags are not searched. |
 | `status` | Status tab: `planned`, `active`, `paused`, `completed`, `dropped` (empty: all). |
 | `f.type` | Anime type (`TV`, `MOVIE`, `OVA`, ...). Repeat it to match any of several. |
 | `f.year.from`, `f.year.to` | Year range (canonical form `f.year=1990..2000`). |
@@ -35,7 +35,7 @@ Unknown or invalid parameters are ignored, and a notice names them.
 | `/settings`, `/settings/import`, `/settings/backup` | Settings, import, backup and restore |
 | `/healthz` | Answers `ok`, for monitoring |
 
-Changes from the first version: list statuses are the core's status classes, so a bookmark like `/anime?status=watching` now opens the All tab with a notice (use `status=active`). The list's search and filter parameters are new. Edit details (`/anime/{source}/{id}/edit`) and the recommendations fragment (`/anime/{source}/{id}/recommendations`, loaded by the overview) are new routes.
+Changes from the first version: a data volume from the first (pre-plugin) preview build starts empty after the upgrade (its anime tables are dropped, not copied); make a cold backup of the volume first if it holds data you want (see the README). List statuses are the core's status classes, so a bookmark like `/anime?status=watching` now opens the All tab with a notice (use `status=active`). The list's search and filter parameters are new. Edit details (`/anime/{source}/{id}/edit`) and the recommendations fragment (`/anime/{source}/{id}/recommendations`, loaded by the overview) are new routes.
 
 ## Known limitations
 

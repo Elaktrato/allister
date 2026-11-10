@@ -66,7 +66,7 @@ type Exporter interface {
 
 A `KindDef` describes one media kind:
 
-- `Key`, `Label`, `LabelPlural`: id and display names. The list page heading uses `LabelPlural`.
+- `Key`, `Label`, `LabelPlural`: id and display names, all three required. The list page heading uses `LabelPlural`.
 - `TitleLanguages`: the language tags the plugin's titles use (at least one, no duplicates or empty values). Every item has titles per language, and the user's display language comes from Settings. **Limitation:** when the chosen language is missing, the core falls back to a fixed order: `ja`, `ja-latn`, `en`, then the first title. This order lives in the core (`library.ResolveTitle`) and is not configurable per plugin yet.
 - `Fields`: the item schema (below).
 - `Genres`, `Tags`: `TermDef{Enabled, Label, Editable, Filterable}`. When enabled, items carry genres (names) and tags (a name, an optional rank from 0 to 100 and a spoiler flag) as dedicated, indexed rows. `Label` is required when enabled. `Editable` puts a text area in Edit details and the manual form (one term per line; tags as `Name:80!`, where `:80` is the rank and a trailing `!` marks a spoiler). `Filterable` adds a multi-select with counts from the user's own library and an any/all switch to the list. The core trims terms, removes case-insensitive duplicates and allows at most 60 characters per term, 50 genres and 100 tags per item.
@@ -87,12 +87,14 @@ type FieldDef struct {
 }
 ```
 
+`Key` (unique within the kind) and `Label` are required, and `Type` must be one of the six field types.
+
 | Flag | Effect in the core |
 |---|---|
 | `Show` | The field appears in the overview's info section, and in search results unless it is a URL field or the text of a text section. The kind's first `Show` enum field (else its first `Show` text field) is the list's type column. |
 | `Editable` | The field is in Edit details and in the manual-entry form. Fields that are not editable keep their stored value on every edit. |
 | `Filterable` | The field gets a filter in the list's filter bar and a URL parameter `f.<key>`. Enum: a select, which matches exactly (several values match any of them). Number and date: a from/to range (`f.<key>.from`, `f.<key>.to`, canonical `f.<key>=a..b`). List: matches any of the given values. Text and URL: case-insensitive "contains" (ASCII case folding). |
-| `Sortable` | The field is offered as a sort (`sort=<key>`). Allowed for number, date, text, enum and URL fields, not for list fields. |
+| `Sortable` | The field is offered as a sort (`sort=<key>`) for number, date, text, enum and URL fields. On a list field the flag is accepted but has no effect: no sort is offered. |
 | `Required` | A manual entry must have a value. In Edit details the field is required only when the item already has a value stored, so a source that lacks the field never blocks other edits. A backup restore refuses a manual item that is missing one. Items saved from a source may lack it. |
 | `Unit` | A short label (at most 20 characters, single line, no control characters) shown after a number ("37 eps"). Number fields only. |
 
@@ -175,8 +177,8 @@ Source calls return errors wrapping these sentinels:
 | Sentinel | Meaning | What the core does |
 |---|---|---|
 | `plugin.ErrNotFound` | The source does not know the item. | 404 page. A search shows no results. An import keeps the row as a manual entry (see below). The sync job stores no credits. |
-| `plugin.ErrRateLimited` | The source throttled the request. | 503 page with a retry link. Imports wait and retry the row, then pause the import and try again later. Sync jobs retry later. |
-| `plugin.ErrUnavailable` | Network error, server error, timeout, unreadable response. | Same as `ErrRateLimited`. |
+| `plugin.ErrRateLimited` | The source throttled the request. | 503 page with a retry link; the search page says the source is rate limiting. Imports wait and retry the row, then pause the import and try again later. Sync jobs retry later. |
+| `plugin.ErrUnavailable` | Network error, server error, timeout, unreadable response. | Same as `ErrRateLimited`, except that the search page says search is unavailable. |
 | `plugin.ErrBadResponse` | The source answered with data the core cannot use, and a retry would get the same answer. | 502 page. An import records the row as failed and moves on, without retrying it. |
 | `plugin.ErrBadInput` | (Importers only) the file is not in the format. | The upload is refused with the error's text. |
 
