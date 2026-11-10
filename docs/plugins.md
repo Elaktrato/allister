@@ -46,7 +46,7 @@ type Exporter interface {
 }
 ```
 
-`Register` calls `Manifest()` exactly once, deep-copies the result through its JSON form, validates the copy (`plugin.Validate`) and keeps only that snapshot. Changing what `Manifest()` returns later has no effect. A nil or panicking plugin, an invalid manifest, a reserved id or an id that is already registered is refused. The reason is listed under "Refused plugins" in Settings, and the other plugins still load.
+`Register` calls `Manifest()` exactly once, deep-copies the result through its JSON form, validates the copy (`plugin.Validate`) and keeps only that snapshot. Changing what `Manifest()` returns later has no effect. A nil or panicking plugin, an invalid manifest, a reserved id or an id that is already registered is refused. The reason is listed under "Refused plugins" in Settings > Plugins, and the other plugins still load.
 
 ## Manifest
 
@@ -57,6 +57,7 @@ type Exporter interface {
 | `Version` | The plugin's own version string, shown in Settings as `v<Version>`. Not checked by the core. |
 | `ContractVersion` | Must equal `plugin.ContractVersion` (1). Any other value is refused with "plugin speaks contract N, core speaks 1". |
 | `DefaultEnabled` | Whether the plugin is on before the user has chosen. The user's choice is stored as the setting `plugin.<id>.enabled` (`1` or `0`). |
+| `Icon` | Optional. The name of a [Material Symbols](https://fonts.google.com/icons) icon shown next to the plugin's entry in the sidebar, for example `live_tv` (the anime plugin) or `menu_book`. Plain data: lower-case letters, digits and `_`, 1 to 40 characters (`^[a-z0-9_]{1,40}$`); anything else is refused. Empty means the core's default icon (`category`). JSON `icon`, omitted when empty. The core ships the whole icon font (see `PINS.md`), so every icon name works; a name the font does not have shows a clipped letter instead of an icon. |
 | `Kinds` | One or more media kinds (below). At least one is required. |
 | `Sources`, `Importers`, `Exporters` | Optional declarations (below). |
 
@@ -226,7 +227,7 @@ The core then does the rest, as a resumable job on the import page:
 type ExporterInfo struct{ ID, Name, Extension, MIME string } // all required
 ```
 
-`Export` receives every list entry of the plugin (titles, external ids, status, rating, active progress, dates, comment) and writes the file. The core serves it at `/{plugin}/export/{exporter}` as `<plugin>-<exporter>-<date><extension>`, linked from the list page and the plugin's row in Settings. The whole list is built in memory, which is fine for a few thousand entries.
+`Export` receives every list entry of the plugin (titles, external ids, status, rating, active progress, dates, comment) and writes the file. The core serves it at `/{plugin}/export/{exporter}` as `<plugin>-<exporter>-<date><extension>`, linked from the list page and the plugin's row in Settings > Plugins. The whole list is built in memory, which is fine for a few thousand entries.
 
 An export is the plugin's own interchange format. The **universal backup** (Settings > Backup) is separate and owned by the core. It covers every item of every installed plugin, including disabled ones, so a plugin needs no code for backups.
 

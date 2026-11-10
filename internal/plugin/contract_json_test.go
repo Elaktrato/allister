@@ -35,7 +35,7 @@ func TestManifestJSONRoundTrip(t *testing.T) {
 		roundTrip(t, m.ID+" manifest", m)
 	}
 	full := plugin.Manifest{
-		ID: "full", Name: "Full", Version: "1.2.3", ContractVersion: plugin.ContractVersion, DefaultEnabled: true,
+		ID: "full", Name: "Full", Version: "1.2.3", ContractVersion: plugin.ContractVersion, DefaultEnabled: true, Icon: "menu_book",
 		Kinds: []plugin.KindDef{{
 			Key: "k", Label: "K", LabelPlural: "Ks",
 			Fields: []plugin.FieldDef{
@@ -175,5 +175,20 @@ func TestImporterUnmatchedNoteJSON(t *testing.T) {
 	im.UnmatchedNote = ""
 	if b, _ = json.Marshal(im); strings.Contains(string(b), "unmatched_note") {
 		t.Fatalf("empty unmatched note not omitted: %s", b)
+	}
+}
+
+// TestManifestIconJSON: the icon travels as "icon" and is omitted when empty.
+func TestManifestIconJSON(t *testing.T) {
+	b, err := json.Marshal(plugin.Manifest{ID: "x", Icon: "live_tv"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(b), `"icon":"live_tv"`) {
+		t.Errorf("json: %s", b)
+	}
+	b, _ = json.Marshal(plugin.Manifest{ID: "x"})
+	if strings.Contains(string(b), `"icon"`) {
+		t.Errorf("empty icon not omitted: %s", b)
 	}
 }

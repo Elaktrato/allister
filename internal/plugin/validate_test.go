@@ -324,3 +324,24 @@ func TestValidateImporterLookupConfiguration(t *testing.T) {
 		})
 	}
 }
+
+// TestValidateIcon: the optional icon is an icon NAME (data only):
+// lower-case letters, digits and "_", 1 to 40 characters; empty means the
+// core's default icon.
+func TestValidateIcon(t *testing.T) {
+	for _, ok := range []string{"", "live_tv", "menu_book", "a", "3d_rotation", strings.Repeat("x", 40)} {
+		m := tv()
+		m.Icon = ok
+		if err := plugin.Validate(m); err != nil {
+			t.Errorf("icon %q refused: %v", ok, err)
+		}
+	}
+	for _, bad := range []string{"Live_tv", "live-tv", "live tv", strings.Repeat("x", 41), "<b>", "tv\n", "ä", " tv"} {
+		m := tv()
+		m.Icon = bad
+		err := plugin.Validate(m)
+		if err == nil || !strings.Contains(err.Error(), "icon: ") {
+			t.Errorf("icon %q: err = %v", bad, err)
+		}
+	}
+}
