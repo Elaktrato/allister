@@ -198,9 +198,9 @@ func TestSettingsSectionTabs(t *testing.T) {
 			t.Errorf("%s: Settings not current in the sidebar", cur.path)
 		}
 	}
-	// without an import page there is no Import tab
-	plain := newEnv(t)
-	mustNotContain(t, settingsTabs(t, plain.get("/settings").Body.String()), `href="/settings/import"`, "Import")
+	// a server without the import runner has no Import tab
+	h, _, _ := newTestServer(t)
+	mustNotContain(t, settingsTabs(t, serve(h, "/settings").Body.String()), `href="/settings/import"`, "Import")
 }
 
 func TestSettingsPluginsPage(t *testing.T) {

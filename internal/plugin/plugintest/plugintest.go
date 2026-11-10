@@ -144,11 +144,12 @@ func TVPlugin(opts ...Option) *Plugin {
 				},
 				TitleLanguages: []string{"en", "original"},
 			}},
-			Sources:   []plugin.SourceInfo{{ID: "tvdata", Name: "Fake TV", RequestsPerMinute: 30, ExternalIDTypes: []string{"tvdata"}, SupportsLookup: true, SupportsSchedule: true, LinkLabel: "View on Fake TV", URLPatterns: []string{"tv.example/show/{id}"}}},
-			Importers: []plugin.ImporterInfo{{ID: "tv-json", Name: "TV JSON", FileHint: "JSON export", Accept: []string{".json"}, ExternalIDType: "tvdata", ResolveVia: "tvdata", FallbackTitleLang: "en"}},
+			Sources: []plugin.SourceInfo{{ID: "tvdata", Name: "Fake TV", RequestsPerMinute: 30, ExternalIDTypes: []string{"tvdata"}, SupportsLookup: true, SupportsSchedule: true, LinkLabel: "View on Fake TV", URLPatterns: []string{"tv.example/show/{id}"}}},
+			Importers: []plugin.ImporterInfo{{ID: "tv-json", Name: "TV JSON", FileHint: "JSON export", Accept: []string{".json"}, ExternalIDType: "tvdata", ResolveVia: "tvdata", FallbackTitleLang: "en"},
+				{ID: "tv-account", Name: "TV account", AccountLabel: "Username", ExternalIDType: "tvdata", ResolveVia: "tvdata", FallbackTitleLang: "en"}},
 		},
 		Sources:   map[string]plugin.Source{"tvdata": &FakeSource{}},
-		Importers: map[string]plugin.Importer{"tv-json": &FakeImporter{}},
+		Importers: map[string]plugin.Importer{"tv-json": &FakeImporter{}, "tv-account": &FakeImporter{}},
 	}
 	return apply(p, opts)
 }

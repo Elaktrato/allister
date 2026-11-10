@@ -11,12 +11,14 @@ package web
 
 import (
 	"context"
+	"errors"
 	"log"
 	"net/http"
 	"net/url"
 	"slices"
 	"strings"
 
+	"github.com/allister/allister/internal/importer"
 	"github.com/allister/allister/internal/library"
 	"github.com/allister/allister/internal/plugin"
 )
@@ -125,7 +127,18 @@ type pluginSettingsView struct {
 	HomeView     string
 	HomeStatus   string
 	HomeStatuses []option
+	Imports      []importForm
+	Error        string
 	Columns      []columnsForm
+}
+
+// importForm is one importer of the plugin on its settings page.
+type importForm struct {
+	ID, Name, Action string
+	Account          bool // an AccountImporter: a name field, and it can repeat
+	AccountLabel     string
+	AccountValue     string
+	Mode, Schedule   string
 }
 
 func (s *server) getPluginSettings(w http.ResponseWriter, r *http.Request) {
@@ -139,20 +152,165 @@ func (s *server) getPluginSettings(w http.ResponseWriter, r *http.Request) {
 		s.internalError(w, r, err)
 		return
 	}
-	// the home settings: labels of the first kind, the one the list opens
+	v := s.pluginSettingsData(r, m)
+	v.LangOptions, v.Lang = opts, s.titleLang(ctx, m)
+	s.render(w, r, "settings_plugin", v)
+}
+
+// pluginSettingsData builds the settings page of m (lang options come from
+// the caller, ordered by the stored languages).
+func (s *server) pluginSettingsData(r *http.Request, m plugin.Manifest) pluginSettingsView {
+	ctx := r.Context()
 	home := []option{{Value: "", Label: "Every status"}}
 	for _, st := range listTabOrder {
 		home = append(home, option{Value: string(st), Label: statusLabel(m.Kinds[0], st)})
 	}
 	v := pluginSettingsView{ID: m.ID, Name: m.Name, Enabled: s.deps.Registry.IsEnabled(m.ID),
-		LangAction: pluginSettingsURL(m.ID) + "/title-language", LangOptions: opts, Lang: s.titleLang(ctx, m),
+		LangAction: pluginSettingsURL(m.ID) + "/title-language",
 		HomeAction: pluginSettingsURL(m.ID) + "/home", HomeView: s.deps.Settings.HomeView(ctx, m.ID),
 		HomeStatus: s.homeStatus(ctx, m), HomeStatuses: home,
 		Columns: s.columnsForms(ctx, m)}
 	for i := range v.HomeStatuses {
 		v.HomeStatuses[i].Selected = v.HomeStatuses[i].Value == v.HomeStatus
 	}
-	s.render(w, r, "settings_plugin", v)
+	for _, im := range m.Importers {
+		f := importForm{ID: im.ID, Name: im.Name, Action: pluginSettingsURL(m.ID) + "/import/" + im.ID,
+			Account: im.AccountLabel != "", AccountLabel: im.AccountLabel,
+			Mode: s.deps.Settings.ImportMode(ctx, m.ID, im.ID), Schedule: s.deps.Settings.ImportSchedule(ctx, m.ID, im.ID)}
+		if f.Account {
+			f.AccountValue = s.deps.Settings.ImportAccount(ctx, m.ID, im.ID)
+		}
+		v.Imports = append(v.Imports, f)
+	}
+	return v
+}
+
+// postPluginImport stores an importer's settings - the rule for existing
+// entries, and for an account importer the name and the repeat schedule -
+// and starts an import: an account import right away, or the uploaded file.
+func (s *server) postPluginImport(w http.ResponseWriter, r *http.Request) {
+	m, ok := s.settingsPlugin(w, r)
+	if !ok {
+		return
+	}
+	if s.deps.Imports == nil {
+		http.NotFound(w, r)
+		return
+	}
+	impID := r.PathValue("importer")
+	var info plugin.ImporterInfo
+	found := false
+	for _, im := range m.Importers {
+		if im.ID == impID {
+			info, found = im, true
+		}
+	}
+	if !found {
+		s.errorPage(w, r, http.StatusNotFound, "Not found", "There is no such importer.", "")
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, maxImportBody)
+	if err := r.ParseMultipartForm(maxImportMemory); err != nil && !errors.Is(err, http.ErrNotMultipart) {
+		var tooBig *http.MaxBytesError
+		if errors.As(err, &tooBig) {
+			http.Error(w, "The file is larger than 20 MiB.", http.StatusRequestEntityTooLarge)
+		} else {
+			http.Error(w, "bad request", http.StatusBadRequest)
+		}
+		return
+	}
+	if r.MultipartForm != nil {
+		defer r.MultipartForm.RemoveAll()
+	}
+	ctx := r.Context()
+	fail := func(msg string) {
+		v := s.pluginSettingsData(r, m)
+		opts, err := s.titleLangOptions(ctx, m)
+		if err != nil {
+			s.internalError(w, r, err)
+			return
+		}
+		v.LangOptions, v.Lang, v.Error = opts, s.titleLang(ctx, m), msg
+		s.render(w, r, "settings_plugin", v)
+	}
+	mode := r.FormValue("mode")
+	switch mode {
+	case "":
+		mode = importer.ModeSkip
+	case importer.ModeSkip, importer.ModeNewer, importer.ModeAlways:
+	default:
+		http.Error(w, "unknown import mode", http.StatusBadRequest)
+		return
+	}
+	if err := s.deps.Settings.SetImportMode(ctx, m.ID, impID, mode); err != nil {
+		s.internalError(w, r, err)
+		return
+	}
+	if info.AccountLabel != "" {
+		account := strings.TrimSpace(r.FormValue("account"))
+		schedule := r.FormValue("schedule")
+		switch schedule {
+		case "", "off", "daily", "weekly":
+		default:
+			http.Error(w, "unknown schedule", http.StatusBadRequest)
+			return
+		}
+		for _, set := range []func() error{
+			func() error { return s.deps.Settings.SetImportAccount(ctx, m.ID, impID, account) },
+			func() error { return s.deps.Settings.SetImportSchedule(ctx, m.ID, impID, schedule) },
+		} {
+			if err := set(); err != nil {
+				s.internalError(w, r, err)
+				return
+			}
+		}
+		if account == "" {
+			http.Redirect(w, r, pluginSettingsURL(m.ID), http.StatusSeeOther)
+			return
+		}
+		// saving a schedule starts the repeat chain (the job re-enqueues)
+		if schedule != "" && schedule != "off" && s.deps.ScheduleImport != nil {
+			kind, payload := s.deps.ScheduleImport(m.ID, impID)
+			if err := s.deps.Jobs.Enqueue(ctx, kind, payload); err != nil {
+				log.Printf("settings %s: schedule import: %v", m.ID, err)
+			}
+		}
+		_, err := s.deps.Imports.SubmitAccount(ctx, m.ID, impID, account, mode)
+		var active *importer.ActiveError
+		switch {
+		case errors.As(err, &active):
+			http.Redirect(w, r, "/settings/import", http.StatusSeeOther)
+		case err != nil:
+			fail(err.Error())
+		default:
+			http.Redirect(w, r, "/settings/import", http.StatusSeeOther)
+		}
+		return
+	}
+	fh := firstFile(r, "file")
+	if fh == nil {
+		fail("Please choose the file to upload.")
+		return
+	}
+	f, err := fh.Open()
+	if err != nil {
+		fail("The file cannot be read.")
+		return
+	}
+	defer f.Close()
+	_, err = s.deps.Imports.SubmitMode(ctx, m.ID, impID, fh.Filename, mode, f)
+	var bad *importer.BadFileError
+	var active *importer.ActiveError
+	switch {
+	case errors.As(err, &bad):
+		fail(bad.Reason)
+	case errors.As(err, &active):
+		http.Redirect(w, r, "/settings/import", http.StatusSeeOther)
+	case err != nil:
+		fail(err.Error())
+	default:
+		http.Redirect(w, r, "/settings/import", http.StatusSeeOther)
+	}
 }
 
 // postHomeSettings stores the plugin's home settings (fields view and

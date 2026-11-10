@@ -65,6 +65,14 @@ The universal backup includes these settings and the uploaded fonts. A restore s
 
 Changes from the first version: a data volume from the first (pre-plugin) preview build starts empty after the upgrade (its anime tables are dropped, not copied); make a cold backup of the volume first if it holds data you want (see the README). List statuses are the core's status classes, so a bookmark like `/anime?status=watching` now opens the All tab with a notice (use `status=active`). The list's search and filter parameters are new. Edit details (`/anime/{source}/{id}/edit`) and the recommendations fragment (`/anime/{source}/{id}/recommendations`, loaded by the overview) are new routes.
 
+## Imports
+
+The anime plugin's settings page has its own **Import** section with two importers: the **AniList account** (enter the username; its public list is imported with status, score and progress) and the **MyAnimeList XML export** (upload the file MyAnimeList offers from your list page). The Yamtrack CSV import lives on Settings > Import, together with the queue and the history of every import.
+
+Each importer has a rule for entries already in your list: **Skip** leaves them alone (the default); **Update when the source is newer** applies the source's status, score and progress only when its entry was modified after your local one — formats without modification times (like the XML export) never update under this rule; **Always update** applies them unconditionally. Updates touch only status, score and progress of the list entry — never comments, dates, or item data like covers and credits.
+
+The AniList import can repeat: **off, daily or weekly**. Saving a schedule starts the first import right away; the following rounds run in the background with the same rule (at most one import runs at a time, and a pending round survives a restart).
+
 ## Calendar
 
 The app has its own month view at `/calendar` (in the sidebar): the current month's stored releases as chips, one per day, with previous/next/Today links and the air time shown in your timezone. The same data feeds `/calendar.ics`, an iCalendar feed for any calendar app on your network (Thunderbird, KOrganizer and friends: add a calendar "from URL", no account needed). It lists one timed 30-minute event per upcoming release of every entry you have marked as watching, for sources that declare schedules (the anime plugin does: AniList's air dates). The summary is the entry's title in your chosen title language plus the kind's progress label — "Frieren — Episode 12" — and the description links back to the item. Each event starts at the source's air time, so your calendar shows it in your timezone.
