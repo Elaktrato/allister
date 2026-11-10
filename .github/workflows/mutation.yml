@@ -1,0 +1,63 @@
+# Mutation testing (gremlins): change the code in small ways and check that
+# the tests notice. Too slow for pull requests, so it runs after every push to
+# main and dev, weekly, and on demand (Actions > Mutation > Run workflow, with
+# an optional package list). The efficacy threshold is in scripts/ci.sh
+# (MUTATION_THRESHOLD); docs/ci.md has the measured numbers.
+name: Mutation
+
+on:
+  push:
+    branches: [main, dev]
+  schedule:
+    - cron: "17 3 * * 1" # Mondays 03:17 UTC
+  workflow_dispatch:
+    inputs:
+      packages:
+        description: Packages to mutate (space separated, e.g. internal/plugin internal/jobs); empty for the default list
+        required: false
+        default: ""
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  # one run per branch; a newer push supersedes the older run
+  group: mutation-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  mutation:
+    name: Mutation testing
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    permissions:
+      contents: read
+    env:
+      GO_CACHE_DIR: ${{ github.workspace }}/../go-cache
+      MUTATION_WORKERS: "2"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Go cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ env.GO_CACHE_DIR }}
+          key: go-mutation-${{ hashFiles('go.sum', 'tools/go.sum', 'scripts/go.sh') }}
+          restore-keys: go-mutation-
+      - name: gremlins
+        env:
+          PACKAGES: ${{ inputs.packages }}
+        # PACKAGES is split on spaces on purpose (one argument per package)
+        run: |
+          # shellcheck disable=SC2086
+          scripts/ci.sh mutation $PACKAGES
+      - name: Upload the report
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: mutation-report
+          path: .ci/mutation/
+          if-no-files-found: ignore
+          retention-days: 30
