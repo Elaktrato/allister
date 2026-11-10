@@ -34,6 +34,8 @@ func route(query string) string {
 	switch {
 	case strings.Contains(query, "characters("):
 		return "cast.json"
+	case strings.Contains(query, "airingSchedule"):
+		return "schedule.json"
 	case strings.Contains(query, "Page("):
 		return "search.json"
 	case strings.Contains(query, "idMal: $idMal"):
@@ -83,6 +85,27 @@ func titles(ts []plugin.Title) map[string]string {
 }
 
 func ctx() context.Context { return context.Background() }
+
+func TestSourceScheduleMapsAirDates(t *testing.T) {
+	s := newSource(t, nil, 0, nil)
+	airings, err := s.(plugin.ScheduleSource).Schedule(context.Background(), KindAnime, "1535")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// episode 0 is not a release and is dropped
+	if len(airings) != 2 || airings[0].Number != 1 || airings[1].Number != 2 {
+		t.Fatalf("%+v", airings)
+	}
+	if want := time.Unix(1762732800, 0).UTC(); !airings[0].AirsAt.Equal(want) {
+		t.Fatalf("first airing = %v, want %v", airings[0].AirsAt, want)
+	}
+	if err := checkKind(KindAnime); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.(plugin.ScheduleSource).Schedule(context.Background(), "nope", "1535"); !errors.Is(err, plugin.ErrNotFound) {
+		t.Fatalf("unknown kind: %v", err)
+	}
+}
 
 func TestSourceSearchMapsToSummaries(t *testing.T) {
 	s := newSource(t, nil, 0, nil)

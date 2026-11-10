@@ -62,6 +62,12 @@ const animeByMALQuery = `query ($idMal: Int, $recs: Int) {
   Media(idMal: $idMal, type: ANIME) { ` + animeFields + ` }
 }`
 
+const scheduleQuery = `query ($id: Int) {
+  Media(id: $id, type: ANIME) {
+    airingSchedule { nodes { episode airingAt } }
+  }
+}`
+
 const castQuery = `query ($id: Int, $perPage: Int) {
   Media(id: $id, type: ANIME) {
     characters(perPage: $perPage, sort: ROLE) {
@@ -337,6 +343,26 @@ func relationKind(relType, mediaType string) (string, bool) {
 		return "prequel", true
 	}
 	return "other", true
+}
+
+// AiringSchedule returns the known air dates of an anime's episodes (the
+// Media.airingSchedule nodes; airingAt is a Unix timestamp in seconds).
+func (c *Client) AiringSchedule(ctx context.Context, id string) ([]Airing, error) {
+	n, err := parseID(id)
+	if err != nil {
+		return nil, err
+	}
+	var out struct {
+		Media struct {
+			AiringSchedule struct {
+				Nodes []Airing
+			}
+		}
+	}
+	if err := c.do(ctx, scheduleQuery, map[string]any{"id": n}, &out); err != nil {
+		return nil, err
+	}
+	return out.Media.AiringSchedule.Nodes, nil
 }
 
 // Anime implements Provider.

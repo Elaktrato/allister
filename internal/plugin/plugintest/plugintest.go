@@ -144,7 +144,7 @@ func TVPlugin(opts ...Option) *Plugin {
 				},
 				TitleLanguages: []string{"en", "original"},
 			}},
-			Sources:   []plugin.SourceInfo{{ID: "tvdata", Name: "Fake TV", RequestsPerMinute: 30, ExternalIDTypes: []string{"tvdata"}, SupportsLookup: true, LinkLabel: "View on Fake TV", URLPatterns: []string{"tv.example/show/{id}"}}},
+			Sources:   []plugin.SourceInfo{{ID: "tvdata", Name: "Fake TV", RequestsPerMinute: 30, ExternalIDTypes: []string{"tvdata"}, SupportsLookup: true, SupportsSchedule: true, LinkLabel: "View on Fake TV", URLPatterns: []string{"tv.example/show/{id}"}}},
 			Importers: []plugin.ImporterInfo{{ID: "tv-json", Name: "TV JSON", FileHint: "JSON export", Accept: []string{".json"}, ExternalIDType: "tvdata", ResolveVia: "tvdata", FallbackTitleLang: "en"}},
 		},
 		Sources:   map[string]plugin.Source{"tvdata": &FakeSource{}},
@@ -158,6 +158,7 @@ const (
 	OpSearch          = "search"
 	OpDetails         = "details"
 	OpPeople          = "people"
+	OpSchedule        = "schedule"
 	OpRecommendations = "recommendations"
 	OpLookup          = "lookup"
 )
@@ -168,6 +169,7 @@ type FakeSource struct {
 	Summaries []plugin.ItemSummary // Search and Recommendations result
 	Data      plugin.ItemData      // Details and Lookup result
 	Credits   []plugin.Credit      // People result
+	Airings   []plugin.Airing      // Schedule result
 	Recs      []plugin.ItemSummary // Recommendations result (falls back to Summaries when nil)
 	Err       error                // returned by every operation when set
 	Errs      map[string]error     // per operation error (keys Op*), checked after Err
@@ -225,6 +227,13 @@ func (f *FakeSource) People(ctx context.Context, kind, id string) ([]plugin.Cred
 		return nil, err
 	}
 	return f.Credits, nil
+}
+
+func (f *FakeSource) Schedule(ctx context.Context, kind, id string) ([]plugin.Airing, error) {
+	if err := f.enter(ctx, OpSchedule); err != nil {
+		return nil, err
+	}
+	return f.Airings, nil
 }
 
 func (f *FakeSource) Recommendations(ctx context.Context, kind, id string) ([]plugin.ItemSummary, error) {

@@ -87,6 +87,7 @@ func manifest() plugin.Manifest {
 			RequestsPerMinute: 30,
 			ExternalIDTypes:   []string{"mal"},
 			SupportsLookup:    true,
+			SupportsSchedule:  true,
 			LinkLabel:         "View on AniList",
 			URLPatterns:       []string{"anilist.co/anime/{id}"},
 		}},

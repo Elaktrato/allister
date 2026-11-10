@@ -183,6 +183,7 @@ type SourceInfo struct {
 	RequestsPerMinute int      // > 0
 	ExternalIDTypes   []string // id types Lookup understands, e.g. "mal"
 	SupportsLookup    bool
+	SupportsSchedule  bool     // the source implements ScheduleSource
 	LinkLabel         string   // "View on AniList"
 	URLPatterns       []string // "anilist.co/anime/{id}"
 }
@@ -192,7 +193,8 @@ type SourceInfo struct {
 - `Search` returns `ItemSummary` values. `Details` and `Lookup` return `ItemData` (summary plus external URL, external ids, relations, genres and tags). `People` returns credits. `Recommendations` returns summaries. The operations are separate so the core can load them independently. An overview that is not saved makes one `Details` call when it renders and one `Recommendations` call afterwards. Both answers are cached for 10 minutes. Adding an item enqueues one background job that fetches `People` and downloads the cover and the people's images (at most 2 MiB per image).
 - `RequestsPerMinute` paces the import runner's lookups through this source. Background jobs run one at a time, with at least 2 seconds between them. Interactive requests (search, overview, recommendations) are not paced. Overview details and recommendations are cached, searches are not.
 - `SupportsLookup` and `ExternalIDTypes` say which external ids `Lookup` resolves. Importers use them, and the "Match to <source>" dialog offers its search through the first source that supports lookups.
-- `URLPatterns` let the core turn a pasted URL into an id, so no plugin code parses URLs. A pattern is `host/segment/.../{id}[/...]` with exactly one `{id}`. A leading `www.` is ignored, and the URL may end with one slug segment, a trailing slash, a query or a fragment. **Limitation:** `{id}` (and a bare number typed into the match dialog) is 1 to 12 ASCII digits, not zero. Leading zeros are removed. Sources with non-numeric ids cannot be matched by URL or number today.
+- `SupportsSchedule` declares the optional `ScheduleSource` capability: `Schedule(ctx, kind, id) ([]Airing, error)`, where an `Airing` is a release number and its air time. The core keeps such schedules of watching entries and lists their upcoming releases in the calendar feed (`/calendar.ics`); it refreshes them through the job queue (at most daily through the feed, and once when an entry is added or synced). Sources without the capability simply have no calendar events. Errors follow the same rules as the other source calls.
+- `URLPatterns` let the core turn a pasted URL into an id, so no plugin code parses URLs. A pattern is `host/segment/.../{id}[/...]` with exactly one `{id}`. A leading `www.` is ignored, and the URL may end with one slug segment, a trailing slash, a query or a fragment. `{id}` (and a bare id typed into the match dialog) is 1 to 12 ASCII digits with leading zeros removed and not zero, or — for sources with non-numeric ids — 1 to 64 bytes of ASCII letters, digits, `_` and `-` that starts and ends with an alphanumeric.
 
 ### Errors
 

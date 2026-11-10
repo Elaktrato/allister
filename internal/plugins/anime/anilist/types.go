@@ -17,6 +17,13 @@ const (
 // Title is one title of an anime in a single language tag (ja, ja-latn, en, ...).
 type Title struct{ Lang, Text string }
 
+// Airing is one node of a media's airing schedule: the episode number and
+// its air time as a Unix timestamp in seconds.
+type Airing struct {
+	Episode int
+	AirsAt  int64 `json:"airingAt"`
+}
+
 // Person is a character or a voice actor.
 type Person struct {
 	Source                  Source
