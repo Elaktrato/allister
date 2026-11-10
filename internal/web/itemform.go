@@ -96,8 +96,24 @@ func requiredFor(fd plugin.FieldDef, it *library.Item) bool {
 	return fd.Required && (it == nil || hasValue(it.Fields[fd.Key]))
 }
 
-// normalizeNewlines turns the CRLF line breaks browsers submit into LF.
-func normalizeNewlines(s string) string { return strings.ReplaceAll(s, "\r\n", "\n") }
+// cmpText is a text as compared with its rendering: CRLF and lone CR become
+// LF on BOTH sides, because the HTML parser turns them into LF inside a
+// textarea (a stored "A\r\nB" comes back as "A\nB"). It is used for the
+// comparison only; kept and changed values are never rewritten by it.
+func cmpText(s string) string {
+	return strings.ReplaceAll(strings.ReplaceAll(s, "\r\n", "\n"), "\r", "\n")
+}
+
+// sameRendered reports whether a posted text equals the rendering of a
+// stored value: line breaks compared normalised (cmpText), surrounding
+// whitespace aside.
+func sameRendered(posted, rendered string) bool {
+	p, r := cmpText(posted), cmpText(rendered)
+	return p == r || strings.TrimSpace(p) == strings.TrimSpace(r)
+}
+
+// splitLines splits at LF, CRLF and lone CR.
+func splitLines(s string) []string { return strings.Split(cmpText(s), "\n") }
 
 // newItemForm builds the schema part of a form for kind k from raw values
 // (keyed by field key); it is the item an edit starts from (nil when
@@ -208,8 +224,8 @@ func parseField(k plugin.KindDef, fd plugin.FieldDef, raw string) (plugin.FieldV
 	case plugin.FieldList:
 		var out []string
 		seen := map[string]bool{}
-		for _, line := range strings.Split(raw, "\n") {
-			v := strings.TrimSpace(line) // also drops the \r of CRLF
+		for _, line := range splitLines(raw) {
+			v := strings.TrimSpace(line)
 			if v == "" || seen[v] {
 				continue
 			}
@@ -245,8 +261,8 @@ func parseField(k plugin.KindDef, fd plugin.FieldDef, raw string) (plugin.FieldV
 // parseFields reads every editable field of k (field.<key>), returning the
 // raw values for the echo and the typed values. it is the item an edit
 // starts from (nil when creating): a posted value equal to the rendering of
-// its stored value (fieldFormValue, CRLF normalised) keeps the stored value
-// verbatim without the form-only syntax and limits; every other value is
+// its stored value (fieldFormValue, compared with sameRendered) keeps the
+// stored value byte for byte without the form-only syntax and limits; every other value is
 // parsed as user input. A posted field.<key> that is unknown or not
 // editable is refused; a required field must have a value (requiredFor).
 // msg is the first problem ("" when valid).
@@ -269,13 +285,13 @@ func parseFields(k plugin.KindDef, r *http.Request, it *library.Item) (vals map[
 		if !fd.Editable {
 			continue
 		}
-		raw := normalizeNewlines(r.PostFormValue(fieldPrefix + fd.Key))
+		raw := r.PostFormValue(fieldPrefix + fd.Key)
 		vals[fd.Key] = raw
 		if msg != "" {
 			continue // echo only
 		}
 		if it != nil {
-			if sv, ok := it.Fields[fd.Key]; ok && hasValue(sv) && raw == fieldFormValue(fd, sv) {
+			if sv, ok := it.Fields[fd.Key]; ok && hasValue(sv) && sameRendered(raw, fieldFormValue(fd, sv)) {
 				fields[fd.Key] = sv // untouched: kept verbatim
 				continue
 			}
@@ -307,7 +323,7 @@ func parseFields(k plugin.KindDef, r *http.Request, it *library.Item) (vals map[
 // parseGenres reads one genre per line (a genre may contain commas).
 func parseGenres(raw string) []string {
 	var out []string
-	for _, g := range strings.Split(raw, "\n") {
+	for _, g := range splitLines(raw) {
 		if g = strings.TrimSpace(g); g != "" {
 			out = append(out, g)
 		}
@@ -327,7 +343,7 @@ var tagRankRe = regexp.MustCompile(`^[+-]?[0-9]+$`)
 // the name ("Re:Zero").
 func parseTags(raw string) ([]plugin.Tag, string) {
 	var out []plugin.Tag
-	for _, line := range strings.Split(raw, "\n") {
+	for _, line := range splitLines(raw) {
 		line = strings.TrimSpace(line)
 		if line == "" {
 			continue
@@ -372,30 +388,24 @@ func formatTags(tags []plugin.Tag) string {
 	return strings.Join(lines, "\n")
 }
 
-// sameText reports whether a posted textarea text equals the rendering of
-// the stored value (surrounding whitespace aside).
-func sameText(posted, rendered string) bool {
-	return posted == rendered || strings.TrimSpace(posted) == rendered
-}
-
 // parseTerms reads the genres and tags inputs of k. Terms posted for a kind
 // that does not enable them as editable are refused. In an edit (it set) a
 // text equal to the rendering of the stored terms keeps them verbatim; an
 // edited text follows the documented syntax.
 func parseTerms(k plugin.KindDef, r *http.Request, f *itemForm, it *library.Item) (genres []string, tags []plugin.Tag, msg string) {
-	f.Genres, f.Tags = normalizeNewlines(r.PostFormValue("genres")), normalizeNewlines(r.PostFormValue("tags"))
+	f.Genres, f.Tags = r.PostFormValue("genres"), r.PostFormValue("tags")
 	switch {
 	case strings.TrimSpace(f.Genres) != "" && !f.ShowGenres:
 		return nil, nil, "This item has no genres to edit."
 	case strings.TrimSpace(f.Tags) != "" && !f.ShowTags:
 		return nil, nil, "This item has no tags to edit."
 	}
-	if it != nil && f.ShowGenres && sameText(f.Genres, formatGenres(it.Genres)) {
+	if it != nil && f.ShowGenres && sameRendered(f.Genres, formatGenres(it.Genres)) {
 		genres = slices.Clone(it.Genres)
 	} else {
 		genres = parseGenres(f.Genres)
 	}
-	if it != nil && f.ShowTags && sameText(f.Tags, formatTags(it.Tags)) {
+	if it != nil && f.ShowTags && sameRendered(f.Tags, formatTags(it.Tags)) {
 		return genres, slices.Clone(it.Tags), ""
 	}
 	tags, msg = parseTags(f.Tags)

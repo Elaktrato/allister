@@ -260,7 +260,7 @@ func TestManualSavesAllFields(t *testing.T) {
 	it, en := e.manualAnime(t, id)
 	f := it.Fields
 	if f["type"].Text != "MOVIE" || *f["episodes"].Num != 12 || *f["year"].Num != 1999 || f["studio"].Text != "Studio X" ||
-		f["synopsis"].Text != "Para one.\n\nPara <b>two</b>." /* CRLF normalised */ || it.Titles[0].Lang != "ja-latn" || fmtDay(f["started_on"].Date) != "1999-04-01" {
+		f["synopsis"].Text != "Para one.\r\n\r\nPara <b>two</b>." || it.Titles[0].Lang != "ja-latn" || fmtDay(f["started_on"].Date) != "1999-04-01" {
 		t.Fatalf("%+v", it)
 	}
 	if !reflect.DeepEqual(it.Genres, []string{"Drama", "Mystery"}) || len(it.Tags) != 2 || *it.Tags[0].Rank != 80 || !it.Tags[0].Spoiler {

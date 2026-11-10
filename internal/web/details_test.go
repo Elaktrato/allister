@@ -539,9 +539,12 @@ func formAttrs(tag string) map[string]string {
 }
 
 // browserForm extracts what a browser submits for the page's form, in
-// document order: inputs (no file or unchecked checkbox), textareas (the
-// newline right after the start tag dropped, newlines sent as CRLF) and
-// selects (the selected option, else the first).
+// document order: inputs (no file or unchecked checkbox), textareas and
+// selects (the selected option, else the first). It models the browser: the
+// HTML parser drops the newline right after a textarea's start tag and turns
+// CRLF and lone CR in its content into LF, so a rendered stored value comes
+// back with LF line breaks (newlines a user types are sent as CRLF: tests
+// that edit a textarea set such values themselves).
 func browserForm(t *testing.T, page string) url.Values {
 	t.Helper()
 	v := url.Values{}
@@ -560,7 +563,8 @@ func browserForm(t *testing.T, page string) url.Values {
 		case strings.HasPrefix(tok, "<textarea"):
 			body := tok[strings.Index(tok, ">")+1 : strings.LastIndex(tok, "</textarea>")]
 			body = strings.TrimPrefix(html.UnescapeString(body), "\n")
-			v.Add(name, strings.ReplaceAll(body, "\n", "\r\n"))
+			body = strings.ReplaceAll(strings.ReplaceAll(body, "\r\n", "\n"), "\r", "\n")
+			v.Add(name, body)
 		default:
 			opts := formOptRe.FindAllStringSubmatch(tok, -1)
 			if len(opts) == 0 {
@@ -586,6 +590,7 @@ func richTV(_, tv *plugintest.Plugin) {
 	k.Fields = append(k.Fields,
 		plugin.FieldDef{Key: "synopsis", Label: "Synopsis", Type: plugin.FieldText, Editable: true},
 		plugin.FieldDef{Key: "note", Label: "Note", Type: plugin.FieldText, Editable: true},
+		plugin.FieldDef{Key: "memo", Label: "Memo", Type: plugin.FieldText, Editable: true},
 		plugin.FieldDef{Key: "tagline", Label: "Tagline", Type: plugin.FieldText, Editable: true},
 		plugin.FieldDef{Key: "networks", Label: "Networks", Type: plugin.FieldList, Editable: true},
 		plugin.FieldDef{Key: "score", Label: "Score", Type: plugin.FieldNumber, Editable: true},
@@ -611,8 +616,9 @@ func richShow(t *testing.T, e *env) (int64, library.Item) {
 	d.Fields["episodes"] = plugin.FieldValue{Num: num(12)}
 	d.Fields["score"] = plugin.FieldValue{Num: num(12.5)}
 	d.Fields["year"] = plugin.FieldValue{Num: num(1234567890123456789)}
-	d.Fields["synopsis"] = plugin.FieldValue{Text: "Line one.\nLine two.\n\n  Indented."}
-	d.Fields["note"] = plugin.FieldValue{Text: "first line\nsecond line"}
+	d.Fields["synopsis"] = plugin.FieldValue{Text: "A\r\nB\r\n\r\nC\r\n  Indented."}
+	d.Fields["note"] = plugin.FieldValue{Text: "x\r\ny"}                         // a one-line field holding CRLF
+	d.Fields["memo"] = plugin.FieldValue{Text: "first line\nsecond line\rthird"} // LF and a lone CR
 	d.Fields["tagline"] = plugin.FieldValue{Text: strings.Repeat("t", 1500)}
 	d.Fields["networks"] = plugin.FieldValue{List: nets}
 	d.Fields["aired"] = plugin.FieldValue{Date: &aired}
@@ -705,4 +711,32 @@ func TestEditDetailsRequiredOnlyWhenStored(t *testing.T) {
 		t.Fatal("cleared")
 	}
 	mustContain(t, e.get("/anime/manual/new").Body.String(), `<select name="field.type" required`)
+}
+
+// A changed text is stored as posted (the browser sends typed newlines as
+// CRLF), only trimmed; a changed one-line field must be a single line.
+func TestEditDetailsTypedTextStoredAsPosted(t *testing.T) {
+	e := newFixtureEnv(t, richTV)
+	id, before := richShow(t, e.env)
+	form := browserForm(t, e.get("/tv/tvdata/5/edit").Body.String())
+	form.Set("field.synopsis", "New\r\nText\r\n")
+	if rec := e.postMultipart(t, "/tv/tvdata/5/edit", form, nil); rec.Code != 303 {
+		t.Fatalf("%d %s", rec.Code, rec.Body.String())
+	}
+	after := e.item(t, id)
+	if after.Fields["synopsis"].Text != "New\r\nText" {
+		t.Fatalf("synopsis %q", after.Fields["synopsis"].Text)
+	}
+	for _, k := range []string{"note", "memo", "tagline"} {
+		if !reflect.DeepEqual(after.Fields[k], before.Fields[k]) {
+			t.Errorf("%s changed: %q", k, after.Fields[k].Text)
+		}
+	}
+	form = browserForm(t, e.get("/tv/tvdata/5/edit").Body.String())
+	form.Set("field.note", "a\r\nb")
+	rec := e.postMultipart(t, "/tv/tvdata/5/edit", form, nil)
+	if rec.Code != 422 {
+		t.Fatalf("changed one-line field with a newline: %d", rec.Code)
+	}
+	mustContain(t, rec.Body.String(), "Note must be a single line")
 }
