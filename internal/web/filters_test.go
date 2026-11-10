@@ -748,7 +748,7 @@ func TestPartialSwapsTermCountsAndClearOutOfBand(t *testing.T) {
 	// never a select, fieldset, the any/all switch or the text inputs (focus stays)
 	mustNotContain(t, b, "<select", "<fieldset", `name="genre_mode"`, `name="tag_mode"`, `name="q"`, `name="rmin"`, `name="sort"`,
 		`id="filter-genre"`, `id="filter-tag"`)
-	if n := strings.Count(b, "hx-swap-oob"); n != 5 { // tabs, clear, the hidden sort inputs, two option lists
+	if n := strings.Count(b, "hx-swap-oob"); n != 6 { // tabs, clear, the hidden sort inputs, the Filters badge, two option lists
 		t.Errorf("%d oob blocks", n)
 	}
 	// without filters the Clear slot is swapped empty

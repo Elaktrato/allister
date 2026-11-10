@@ -48,7 +48,7 @@ An import made by an older version of Allister cannot be continued after the upg
 
 ## Searching your list
 
-The filter bar above the list searches only your own entries and updates as you type: title text in any language, type, year range, studio, genres and tags (any or all), progress (not started, in progress, finished), score, unmatched and partially synced entries. Click a column heading (Title, Year, Progress, Score, Updated) to sort by it; click it again to reverse the order. Everything is in the URL (for example `/anime?q=bebop&f.year.from=1990&sort=title`), so a filtered list can be bookmarked; paging and the status tabs keep it, and "Clear filters" removes it. Every parameter is listed in [docs/usage.md](docs/usage.md#searching-your-list).
+Above the list is a search bar for title text in any language. The Filters button next to it opens a panel with everything else: type, year range, studio, genres and tags (any or all), progress (not started, in progress, finished), score, unmatched and partially synced entries; its badge counts the filters that are set, and the panel opens by itself when you load a list with such filters (a bookmark, for example). Search and filters cover only your own entries and update the list as you type. Click a column heading (Title, Year, Progress, Score, Updated) to sort by it; click it again to reverse the order. Everything is in the URL (for example `/anime?q=bebop&f.year.from=1990&sort=title`), so a filtered list can be bookmarked; paging and the status tabs keep it, and "Clear filters" removes it. Every parameter is listed in [docs/usage.md](docs/usage.md#searching-your-list).
 
 ## Editing details
 

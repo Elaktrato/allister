@@ -117,6 +117,21 @@ func (f listFilters) values() url.Values {
 	return v
 }
 
+// panelCount counts the filters of the panel that are set (the badge of
+// the Filters toggle): each field filter, genres, tags, progress, the score
+// range (rmin and rmax together), unrated, zero, unmatched and partial count
+// one each; q and the sort are not in the panel and do not count.
+func (f listFilters) panelCount() int {
+	n := len(f.Fields)
+	for _, on := range []bool{len(f.Genres) > 0, len(f.Tags) > 0, f.Progress != "", f.RatingMin != nil || f.RatingMax != nil,
+		f.Unrated, f.Zero, f.Unmatched, f.Partial} {
+		if on {
+			n++
+		}
+	}
+	return n
+}
+
 // active reports whether anything is set (Clear filters is offered).
 func (f listFilters) active() bool { return len(f.values()) > 0 }
 
@@ -445,13 +460,16 @@ type filterBar struct {
 	Partial       bool
 	ShowUnmatched bool
 	Sort, Dir     string // hidden inputs: the sort chosen in the table head
+	Active        int    // the filters set besides q and the sort (the toggle's badge)
+	Open          bool   // the panel starts open (a full page with Active filters)
 	ClearURL      string // "" when nothing is set
-	OOB           bool   // the Clear and sort slots are rendered as out-of-band swaps
+	OOB           bool   // the Clear, sort and badge slots are rendered as out-of-band swaps
 }
 
-// outOfBand marks the Clear and sort slots for an out-of-band swap. (The
-// genre/tag option lists always go out of band in a rows partial:
-// list_partial.)
+// outOfBand marks the Clear, sort and badge slots for an out-of-band swap.
+// (The genre/tag option lists always go out of band in a rows partial:
+// list_partial. The panel itself is never swapped, so it stays open or
+// closed as the user left it.)
 func (b *filterBar) outOfBand() { b.OOB = true }
 
 // buildFilterBar draws the bar of kind k from the schema: only Filterable
@@ -517,6 +535,8 @@ func buildFilterBar(m plugin.Manifest, k plugin.KindDef, lq listQuery, genres, t
 		}
 	}
 	b.Sort, b.Dir = f.Sort, f.Dir
+	b.Active = f.panelCount()
+	b.Open = b.Active > 0
 	return b
 }
 
