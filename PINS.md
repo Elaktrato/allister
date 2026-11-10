@@ -1,6 +1,6 @@
 # Pins
 
-Everything Allister's build pulls from the network is pinned to an exact version and verified by a digest or checksum. The tests in `internal/guard/pins_test.go` and `internal/web/static_test.go` fail when an image is unpinned, a checksum (Tailwind, htmx, the icon font) is missing or wrong, or this file does not record a pin that is in use (or records one that is not).
+Everything Allister's build pulls from the network is pinned to an exact version and verified by a digest or checksum. The tests in `internal/guard/pins_test.go` and `internal/web/static_test.go` fail when an image is unpinned, a checksum (Tailwind, htmx, the icon font, the bundled app fonts) is missing or wrong, or this file does not record a pin that is in use (or records one that is not).
 
 Pinned on 2026-11-10.
 
@@ -48,9 +48,32 @@ Vendored as `internal/web/static/material-symbols-outlined-v383.woff2`: Material
 - Icon names (test data, not embedded): `internal/web/testdata/material-symbols-outlined.codepoints`, upstream's name list `https://raw.githubusercontent.com/google/material-design-icons/10ecc14790612ca8fd164e3f4ffe9c16fc50d5b7/variablefont/MaterialSymbolsOutlined%5BFILL,GRAD,opsz,wght%5D.codepoints` (the commit above), sha256 `a7404d9e5a1b63f496cf05ace45d386075886b5a7f123fba9f29527cb6006fde` (recorded in `internal/web/testdata/material-symbols-outlined.codepoints.sha256`), 4304 names. Downloaded twice on 2026-11-10 with the same sum; its codepoints agree with the font's (for example `settings` e8b8, `search` ef7a, `live_tv` e63a). `TestIconNamesExistInThePinnedFont` checks every icon name in the core templates and every compiled-in manifest icon against it. Update it together with the font (same commit as the licence).
 - Served from the embedded static files as `font/woff2` with `Cache-Control: public, max-age=31536000, immutable` (the version is in the file name), declared in `internal/web/static/input.css` with `font-display: block`. Nothing is fetched from a CDN at run time.
 
+## App fonts
+
+Three fonts can be chosen as the app font in Settings > Appearance (besides system font stacks and uploaded fonts). Each is the variable font (weight axis) from the Fontsource npm package `@fontsource-variable/<name>`, as the two subsets Google Fonts publishes for Latin script: Latin and Latin Extended, declared with their `unicode-range` so a browser downloads the Latin Extended file only for text that needs it. All three are under the SIL Open Font License 1.1 (OFL-1.1); the licence texts are the packages' `LICENSE` files: `LICENSES/inter-OFL-1.1.txt`, `LICENSES/source-serif-4-OFL-1.1.txt`, `LICENSES/jetbrains-mono-OFL-1.1.txt`.
+
+| Font | Package | Weights |
+|---|---|---|
+| Inter | `@fontsource-variable/inter@5.3.0` | 100 to 900 |
+| Source Serif 4 | `@fontsource-variable/source-serif-4@5.3.1` | 200 to 900 |
+| JetBrains Mono | `@fontsource-variable/jetbrains-mono@5.3.0` | 100 to 800 |
+
+| File | sha256 | Bytes |
+|---|---|---|
+| `internal/web/static/fonts/inter-latin-ext-wght-v5.3.0.woff2` | `34b9c504cab7a73e37b746343a449132e56cf7b5481af2cb81dc74dcff25c956` | 85068 |
+| `internal/web/static/fonts/inter-latin-wght-v5.3.0.woff2` | `3100e775e8616cd2611beecfa23a4263d7037586789b43f035236a2e6fbd4c62` | 48256 |
+| `internal/web/static/fonts/jetbrains-mono-latin-ext-wght-v5.3.0.woff2` | `79bfdab9ba467e26eea4122e6f2567e188dd8a09a8c730d501fc487c4ab99c6e` | 15196 |
+| `internal/web/static/fonts/jetbrains-mono-latin-wght-v5.3.0.woff2` | `18be452724bfdc236c074ca94a249a7f41a86752c7d04ab258ce9ed5651f6a7e` | 40404 |
+| `internal/web/static/fonts/source-serif-4-latin-ext-wght-v5.3.1.woff2` | `d10ccbbd0dc4ebae2938958dc1f622a53460fe297e9c958564742dd684309c3f` | 42212 |
+| `internal/web/static/fonts/source-serif-4-latin-wght-v5.3.1.woff2` | `382475f38242c52d42a3e5ff8dc69b5d73f10d0d21e4550b5fe232984688779a` | 50936 |
+
+- Source: `files/<name>-latin-wght-normal.woff2` and `files/<name>-latin-ext-wght-normal.woff2` of each package version above. Downloaded twice from jsDelivr (`https://cdn.jsdelivr.net/npm/@fontsource-variable/<name>@<version>/files/...`) on 2026-11-10 with identical sums, and cross-checked against the npm registry tarball of the same version, whose `dist.integrity` (sha512) matched; the files inside the tarball had the same sha256. The licence files came from the same tarballs.
+- Each sum is recorded next to its file (`<file>.sha256`, sha256sum format). The version is in the file name, so cached copies are never reused for a new file. Served from the embedded static files as `font/woff2` with the same immutable cache as the icon font, declared by the generated `/appearance.css` with `font-display: swap`. Nothing is fetched from a CDN at run time.
+- Refreshing: download the new package version's two files per font (twice; the sums must match; compare with the npm tarball), save them under the new version's names, regenerate the `.sha256` files (`cd internal/web/static/fonts && sha256sum <file> > <file>.sha256`), replace the licence file if it changed, and update the version in `internal/appearance/bundled.go`, `internal/web/static_test.go` and this section. `scripts/update-pins.sh` never rewrites the fonts; it only checks them.
+
 ## Refreshing
 
-- **Security updates of the same tags** (new digests, new Tailwind sums of the same release): run `scripts/update-pins.sh`. It resolves every pinned tag again, hashes the Tailwind release, checks htmx, the icon font and its name list, and prints the changes as a diff. `scripts/update-pins.sh --write` applies them to the Dockerfile, `scripts/go.sh`, `README.md` and this file. Then run `scripts/go.sh test ./...` and `docker compose build`.
+- **Security updates of the same tags** (new digests, new Tailwind sums of the same release): run `scripts/update-pins.sh`. It resolves every pinned tag again, hashes the Tailwind release, checks htmx, the icon font and its name list and the bundled app fonts, and prints the changes as a diff. `scripts/update-pins.sh --write` applies them to the Dockerfile, `scripts/go.sh`, `README.md` and this file. Then run `scripts/go.sh test ./...` and `docker compose build`.
 - **A new version** (image tag, Go patch, Tailwind release): edit the tag (or `TAILWIND_VERSION`) everywhere it appears, including this file, and for Go also the `toolchain` line of `go.mod`; then run `scripts/update-pins.sh --write` to resolve the new digests and checksums, and test as above.
 - **htmx**: replace `htmx.min.js` with the upstream file, regenerate the sum (`cd internal/web/static && sha256sum htmx.min.js > htmx.min.js.sha256`), compare it with upstream, and update the version and sum above. The script never rewrites htmx.
 - **Material Symbols**: fetch the stylesheet URL above again, download the woff2 it names (twice; the sums must match), save it as `material-symbols-outlined-v<version>.woff2` (the new version in the name, so cached copies are never reused), regenerate the `.sha256` file, and update the file name in `input.css`, `base.html`, `internal/web/static_test.go`, `internal/guard/pins_test.go`, `scripts/update-pins.sh` and this section. The script never rewrites the font; it only checks it.

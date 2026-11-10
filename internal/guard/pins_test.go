@@ -431,11 +431,51 @@ func TestReadmeHelperImagesPinned(t *testing.T) {
 // digestOrSum matches every pinned digest and 64-hex checksum.
 var digestOrSum = regexp.MustCompile(`[0-9a-f]{64}`)
 
+// pinnedFiles are the files holding pins: the build files, README.md and
+// every .sha256 of a vendored file (static files, their test data).
+func pinnedFiles(t *testing.T) []string {
+	t.Helper()
+	files := []string{"Dockerfile", "scripts/go.sh", "README.md"}
+	for _, dir := range []string{"internal/web/static", "internal/web/testdata"} {
+		err := filepath.WalkDir(filepath.Join(root, dir), func(path string, d os.DirEntry, err error) error {
+			if err != nil || d.IsDir() || !strings.HasSuffix(path, ".sha256") {
+				return err
+			}
+			rel, err := filepath.Rel(root, path)
+			files = append(files, filepath.ToSlash(rel))
+			return err
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	return files
+}
+
+// TestPinnedFilesFindsEverySum keeps pinnedFiles honest: the known sums and
+// each bundled font's are found.
+func TestPinnedFilesFindsEverySum(t *testing.T) {
+	got := strings.Join(pinnedFiles(t), " ")
+	for _, want := range []string{"internal/web/static/htmx.min.js.sha256", "internal/web/static/material-symbols-outlined-v383.woff2.sha256",
+		"internal/web/testdata/material-symbols-outlined.codepoints.sha256",
+		"internal/web/static/fonts/inter-latin-wght-v5.3.0.woff2.sha256", "internal/web/static/fonts/jetbrains-mono-latin-ext-wght-v5.3.0.woff2.sha256",
+		"internal/web/static/fonts/source-serif-4-latin-wght-v5.3.1.woff2.sha256"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("pinnedFiles misses %s: %s", want, got)
+		}
+	}
+	// update-pins.sh checks every bundled font's sum
+	script := readRoot(t, "scripts/update-pins.sh")
+	if !strings.Contains(script, "internal/web/static/fonts") || !strings.Contains(script, "sha256sum -c") {
+		t.Error("scripts/update-pins.sh does not check the bundled fonts")
+	}
+}
+
 // TestPinsDocumentListsEveryPin: PINS.md records every digest and checksum in
 // use, so a refresh that forgets the record (or the other way round) fails.
 func TestPinsDocumentListsEveryPin(t *testing.T) {
 	pins := readRoot(t, "PINS.md")
-	for _, rel := range []string{"Dockerfile", "scripts/go.sh", "README.md", "internal/web/static/htmx.min.js.sha256", "internal/web/static/material-symbols-outlined-v383.woff2.sha256", "internal/web/testdata/material-symbols-outlined.codepoints.sha256"} {
+	for _, rel := range pinnedFiles(t) {
 		found := digestOrSum.FindAllString(readRoot(t, rel), -1)
 		if len(found) == 0 {
 			t.Errorf("%s: no pinned digest or checksum found", rel)
@@ -448,7 +488,7 @@ func TestPinsDocumentListsEveryPin(t *testing.T) {
 	}
 	for _, d := range digestOrSum.FindAllString(pins, -1) {
 		used := false
-		for _, rel := range []string{"Dockerfile", "scripts/go.sh", "README.md", "internal/web/static/htmx.min.js.sha256", "internal/web/static/material-symbols-outlined-v383.woff2.sha256", "internal/web/testdata/material-symbols-outlined.codepoints.sha256"} {
+		for _, rel := range pinnedFiles(t) {
 			if strings.Contains(readRoot(t, rel), d) {
 				used = true
 			}
