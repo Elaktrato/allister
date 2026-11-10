@@ -159,6 +159,12 @@ func SyncItem(deps SyncDeps) Handler {
 			return err
 		}
 
+		// the calendar feed's schedule: best effort, the feed reports stale
+		// ones and the sync_schedule job retries them
+		if err := refreshSchedule(ctx, deps.Library, deps.Registry, it); err != nil {
+			log.Printf("sync item %d: schedule: %v", it.ID, err)
+		}
+
 		if len(failures) == 0 {
 			return setState(ctx, lib, it.ID, "done")
 		}

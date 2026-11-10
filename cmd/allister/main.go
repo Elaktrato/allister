@@ -68,6 +68,7 @@ func run() error {
 		Registry:  registry,
 		CoversDir: coversDir,
 	}))
+	queue.Register(jobs.KindSchedule, jobs.Schedule(jobs.ScheduleDeps{Library: lib, Registry: registry}))
 	syncJobsByPlugin := syncJobs(registry)
 	imports := importer.New(importer.Deps{
 		DB: database, Library: lib, Registry: registry, Queue: queue, SyncJobs: syncJobsByPlugin,
