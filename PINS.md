@@ -34,6 +34,8 @@ Version `v3.4.17` (`ARG TAILWIND_VERSION` in the Dockerfile), checked with `sha2
 
 Obtained by downloading each asset twice and hashing it; both matched the release's own `sha256sums.txt`.
 
+The css stage runs on the build machine's platform (`FROM --platform=$BUILDPLATFORM`), so the checksum used is the one of the build machine's architecture (`BUILDARCH`), whichever platforms the image is built for.
+
 ## htmx
 
 Vendored as `internal/web/static/htmx.min.js`: htmx 2.0.4, sha256 `e209dda5c8235479f3166defc7750e1dbcd5a5c1808b7792fc2e6733768fb447` (recorded in `internal/web/static/htmx.min.js.sha256`). The file is byte-identical to `htmx.org@2.0.4/dist/htmx.min.js` on unpkg and jsDelivr; its sha384 (`HGfztofotfshcF7+8n44JQL2oJmowVChPTg48S+jvZoztPfvwD79OC/LTtG6dMp+`) is the integrity value htmx publishes for 2.0.4.
@@ -110,6 +112,15 @@ Every third-party action in `.github/workflows` is referenced by its full commit
 | `actions/setup-go` | `v7.0.0` | `b7ad1dad31e06c5925ef5d2fc7ad053ef454303e` |
 | `actions/dependency-review-action` | `v5.0.0` | `a1d282b36b6f3519aa1f3fc636f609c47dddb294` |
 | `ossf/scorecard-action` | `v2.5.0` | `fa7117db83c52d787ae5a89f350999701505d78e` |
+| `docker/login-action` | `v4.7.0` | `81c6f93d4bc991e510b342a00b419b3bb4efc5c6` |
+| `docker/metadata-action` | `v6.2.0` | `dc802804100637a589fabce1cb79ff13a1411302` |
+| `sigstore/cosign-installer` | `v4.1.2` | `6f9f17788090df1f26f669e9d70d6ae9567deba6` |
+
+The release workflow's signing tool, installed by `sigstore/cosign-installer` (which checks its signature with a bootstrap cosign of known sha256; `TestPinsDocumentListsCosign` checks this row):
+
+| Tool | Version | Installed by |
+|---|---|---|
+| cosign | `v3.1.4` | `sigstore/cosign-installer` (`cosign-release` in `release.yml`) |
 
 ## Go tools
 
