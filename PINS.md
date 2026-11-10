@@ -95,6 +95,19 @@ The checks in `scripts/ci.sh` (run by the GitHub workflows and locally, see `doc
 
 Go itself is the build image above (`scripts/ci.sh` reads it from `scripts/go.sh`).
 
+## GitHub Actions
+
+Every third-party action in `.github/workflows` is referenced by its full commit SHA with the release in a comment (`uses: actions/checkout@<sha> # v7.0.1`): a tag can be moved, a commit cannot. Each SHA was resolved from the release tag twice, through the GitHub API (`git/ref/tags/<tag>`, dereferencing annotated tags) and with `git ls-remote` (the peeled `^{}` commit); both agreed. Releases younger than a week at pinning time were skipped for the previous one. `TestWorkflowActionsPinnedBySHA` and `TestPinsDocumentListsEveryAction` fail when a reference is not pinned or this table disagrees with the workflows. Dependabot (`github-actions`) proposes updates and keeps the SHA and the comment in step; update this table in the same pull request.
+
+| Action | Release | Commit |
+|---|---|---|
+| `actions/checkout` | `v7.0.1` | `3d3c42e5aac5ba805825da76410c181273ba90b1` |
+| `actions/cache` | `v6.1.0` | `55cc8345863c7cc4c66a329aec7e433d2d1c52a9` |
+| `actions/upload-artifact` | `v7.0.2` | `cf430e030ddbb5b0abf93d22962f4752f3646cd9` |
+| `docker/setup-buildx-action` | `v4.4.1` | `f87e5991a6d7451dcb8d9637bfbc97413f497069` |
+| `docker/build-push-action` | `v7.4.0` | `c3c9e263c25d99ce0380d002d59b67737d91b0dc` |
+| `github/codeql-action` | `v4.39.1` | `9b3254085494b55a0f7c4c2b3d2d52cc712ce370` |
+
 ## Go tools
 
 Built from the separate module `tools/` (`tools/go.mod` with `tool` directives; `tools/go.sum` holds the hashes, verified against the Go checksum database when downloaded). It is a module of its own so the tools' dependencies never enter the application's `go.mod`. `TestPinsDocumentListsTools` checks this table against `tools/go.mod` and `tools/go.sum`.
