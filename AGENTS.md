@@ -27,7 +27,7 @@ scripts/go.sh fmt ./...
 
 ## Conventions
 
-- Migrations (`internal/db/migrations`, goose, embedded) must be strictly increasing. **00008 is intentionally unused** (a guard test asserts it); the next number is 00012. Never edit an applied migration's SQL.
+- Migrations (`internal/db/migrations`, goose, embedded) must be strictly increasing. **00008 is intentionally unused** (a guard test asserts it); the next number is 00013. Never edit an applied migration's SQL.
 - Text hygiene: user input is rejected when invalid (control characters etc.); plugins sanitise source input with `plugin.SingleLine/MultiLine/HTTPSURL`.
 - Errors from sources: `plugin.ErrNotFound`, `ErrRateLimited`, `ErrUnavailable` (retryable), `ErrBadResponse` (answered with unusable data: web shows a 502 page, the import records the row failed without retry), `jobs.ErrRetryLater`, `ErrPaused` (an unbounded hold, not counted), `ErrPermanent` for jobs.
 - htmx: `hx-history="false"` on `#list-rows` (restore returns the full page), `Vary: HX-Request, HX-Target, HX-History-Restore-Request` on the list, out-of-band swaps update only option lists and links, never focused inputs. No new inline scripts (existing `hx-on::before-swap` attributes are known debt).

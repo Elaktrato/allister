@@ -56,13 +56,14 @@ func testQueue(t *testing.T, d *sql.DB, clk *fakeClock, opts ...Option) *Queue {
 type jobRow struct {
 	State, LastError, RunAfter string
 	Attempts, Partials         int
+	FinishedAt                 sql.NullString
 }
 
 func row(t *testing.T, d *sql.DB, id int64) jobRow {
 	t.Helper()
 	var r jobRow
-	err := d.QueryRow(`SELECT state, last_error, run_after, attempts, partials FROM jobs WHERE id = ?`, id).
-		Scan(&r.State, &r.LastError, &r.RunAfter, &r.Attempts, &r.Partials)
+	err := d.QueryRow(`SELECT state, last_error, run_after, attempts, partials, finished_at FROM jobs WHERE id = ?`, id).
+		Scan(&r.State, &r.LastError, &r.RunAfter, &r.Attempts, &r.Partials, &r.FinishedAt)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -244,6 +245,59 @@ func TestPausedJobRunsAgainWithoutCounting(t *testing.T) {
 	step(t, q)
 	if r := row(t, d, id); r.State != "done" || r.Attempts != 0 || r.Partials != 0 || calls != maxPartials+3 {
 		t.Fatalf("final: %+v calls=%d", r, calls)
+	}
+}
+
+// TestDoneJobsArePruned: a finished job records when it finished, and
+// Recover deletes done jobs older than 30 days — only those: failed,
+// pending and running rows stay (running is reset to pending first).
+func TestDoneJobsArePruned(t *testing.T) {
+	d := openDB(t)
+	clk := newClock()
+	q := testQueue(t, d, clk)
+	q.Register("k", func(ctx context.Context, p json.RawMessage) error { return nil })
+	q.Register("f", func(ctx context.Context, p json.RawMessage) error {
+		return fmt.Errorf("never: %w", ErrPermanent)
+	})
+	stamp := func(dt time.Duration) string {
+		return clk.Now().Add(dt).UTC().Format(timeLayout)
+	}
+	done := enqueue(t, q, "k", nil)
+	step(t, q)
+	if r := row(t, d, done); r.State != "done" || !r.FinishedAt.Valid || r.FinishedAt.String != stamp(0) {
+		t.Fatalf("done row: %+v", r)
+	}
+	failed := enqueue(t, q, "f", nil)
+	clk.Advance(time.Hour)
+	step(t, q)
+	if r := row(t, d, failed); r.State != "failed" || !r.FinishedAt.Valid {
+		t.Fatalf("failed row: %+v", r)
+	}
+	pending := enqueue(t, q, "k", nil)
+	if _, err := d.Exec(`INSERT INTO jobs(kind, payload_json, state) VALUES ('k', '{}', 'running')`); err != nil {
+		t.Fatal(err)
+	}
+	// the done job aged past the cutoff
+	if _, err := d.Exec(`UPDATE jobs SET finished_at = ? WHERE id = ?`, stamp(-31*24*time.Hour), done); err != nil {
+		t.Fatal(err)
+	}
+	clk.Advance(24 * time.Hour)
+	if err := q.Recover(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	var n int
+	if err := d.QueryRow(`SELECT COUNT(*) FROM jobs WHERE id = ?`, done).Scan(&n); err != nil || n != 0 {
+		t.Fatalf("old done job still there: %d %v", n, err)
+	}
+	if r := row(t, d, failed); r.State != "failed" {
+		t.Fatalf("failed row pruned or changed: %+v", r)
+	}
+	if r := row(t, d, pending); r.State != "pending" || r.FinishedAt.Valid {
+		t.Fatalf("pending row: %+v", r)
+	}
+	var running int
+	if err := d.QueryRow(`SELECT COUNT(*) FROM jobs WHERE state = 'running'`).Scan(&running); err != nil || running != 0 {
+		t.Fatalf("running rows after Recover: %d %v", running, err)
 	}
 }
 
