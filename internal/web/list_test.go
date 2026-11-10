@@ -679,7 +679,9 @@ func TestCardView(t *testing.T) {
 			`<div class="h-full bg-indigo-500" style="width: 20%">`,
 			`<div class="h-full bg-emerald-500" style="width: 100%">`,
 			`action="/list/`+idStr(act)+`/increment"`, `hx-target="closest [data-card]"`,
-			`name="view" value="cards"`, `aria-label="Add one episode to Dark"`)
+			`name="view" value="cards"`, `aria-label="Add one episode to Dark"`,
+			// the little edit button opens the entry dialog from the card
+			`href="/list/`+idStr(act)+`/edit?`, `aria-label="Edit list entry"`)
 		mustNotContain(t, b, `<table`)
 	}
 	// the table view is unchanged

@@ -18,13 +18,16 @@
     <a href="{{.Href}}" class="line-clamp-2 text-sm font-medium leading-snug text-white hover:underline">{{.Title}}</a>
     <div class="mt-1 flex items-center justify-between gap-2 text-xs text-slate-300">
       <span class="min-w-0">{{range .Progress}}<span>{{if $.ShowLabels}}<span class="text-slate-400">{{.Label}}</span> {{else}}<span class="sr-only">{{.Label}}</span> {{end}}{{.Value}}</span> {{end}}</span>
-      {{if .CanIncrement}}
-      <form method="post" action="{{.IncrementURL}}" hx-post="{{.IncrementURL}}" hx-target="closest [data-card]" hx-swap="outerHTML" class="inline shrink-0">
-        <input type="hidden" name="return" value="{{.Return}}">
-        <input type="hidden" name="view" value="cards">
-        <button type="submit" class="rounded bg-slate-800/80 px-2 py-0.5 text-sm hover:bg-slate-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500" aria-label="{{.IncrementLabel}}">+1</button>
-      </form>
-      {{end}}
+      <span class="flex shrink-0 items-center gap-1">
+        <a href="{{.EditURL}}" hx-get="{{.EditURL}}" hx-target="#dialog-slot" hx-swap="innerHTML" aria-label="Edit list entry" title="Edit list entry" class="rounded bg-slate-800/80 p-1 hover:bg-slate-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"><span class="icon text-[1rem]" aria-hidden="true">edit</span></a>
+        {{if .CanIncrement}}
+        <form method="post" action="{{.IncrementURL}}" hx-post="{{.IncrementURL}}" hx-target="closest [data-card]" hx-swap="outerHTML" class="inline shrink-0">
+          <input type="hidden" name="return" value="{{.Return}}">
+          <input type="hidden" name="view" value="cards">
+          <button type="submit" class="rounded bg-slate-800/80 px-2 py-0.5 text-sm hover:bg-slate-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500" aria-label="{{.IncrementLabel}}">+1</button>
+        </form>
+        {{end}}
+      </span>
     </div>
   </div>
   {{if ge .BarPct 0}}<div class="absolute inset-x-0 bottom-0 h-1 bg-slate-800" aria-hidden="true"><div class="h-full {{template "status_fill" .StatusKey}}" style="width: {{.BarPct}}%"></div></div>{{end}}

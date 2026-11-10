@@ -35,7 +35,7 @@
   {{- end}}
   {{- end}}
   <td class="py-2 text-right whitespace-nowrap">
-    <a href="{{.EditURL}}" hx-get="{{.EditURL}}" hx-target="#dialog-slot" hx-swap="innerHTML" class="mr-2 text-indigo-300 hover:underline">Edit</a>
+    <a href="{{.EditURL}}" hx-get="{{.EditURL}}" hx-target="#dialog-slot" hx-swap="innerHTML" aria-label="Edit list entry" title="Edit list entry" class="mr-2 inline-flex rounded p-1 text-indigo-300 hover:bg-slate-800 hover:text-indigo-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"><span class="icon text-[1.125rem]" aria-hidden="true">edit</span></a>
     <form method="post" action="{{.RemoveURL}}" hx-post="{{.RemoveURL}}" hx-confirm="{{.RemoveConfirm}}" class="inline">
       <input type="hidden" name="return" value="{{.Return}}">
       <button type="submit" class="text-red-300 hover:underline">Remove</button>
