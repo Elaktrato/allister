@@ -224,3 +224,20 @@ func TestSettingsPluginsPage(t *testing.T) {
 func httptestRequest(path string) *http.Request {
 	return httptest.NewRequest(http.MethodGet, path, nil)
 }
+
+// TestIconsSizedWithoutLineHeight: text-sm, text-lg and friends set a
+// line-height as well, which moves an icon's glyph out of its one-em box;
+// icons are sized with font-size-only classes (text-[1rem]).
+func TestIconsSizedWithoutLineHeight(t *testing.T) {
+	ents, err := templateFS.ReadDir("templates")
+	if err != nil {
+		t.Fatal(err)
+	}
+	bad := regexp.MustCompile(`class="(?:[^"]* )?icon [^"]*\btext-(?:xs|sm|base|lg|xl|[2-9]xl)\b`)
+	for _, e := range ents {
+		b, _ := templateFS.ReadFile("templates/" + e.Name())
+		if m := bad.FindString(string(b)); m != "" {
+			t.Errorf("%s: %s", e.Name(), m)
+		}
+	}
+}
