@@ -25,24 +25,26 @@ const root = "../.."
 // module is the module path of the repository.
 const module = "github.com/allister/allister"
 
-// coreDirs are the directories (relative to root) of the core whose
-// production sources and templates must not name a media type.
-var coreDirs = []string{
-	"cmd",
-	"internal/plugin",
-	"internal/library",
-	"internal/web",
-	"internal/jobs",
-	"internal/covers",
-	"internal/importer",
-	"internal/backup",
-	"internal/settings",
-	"internal/db",
-	"internal/ids",
-	"internal/config",
+// coreDirsIn returns the core directories of the repository at base
+// (relative, forward slashes): cmd and every directory directly under
+// internal except internal/plugins (the plugins). A new core package is
+// scanned without being listed anywhere.
+func coreDirsIn(t *testing.T, base string) []string {
+	t.Helper()
+	dirs := []string{"cmd"}
+	ents, err := os.ReadDir(filepath.Join(base, "internal"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range ents {
+		if e.IsDir() && e.Name() != "plugins" {
+			dirs = append(dirs, "internal/"+e.Name())
+		}
+	}
+	return dirs
 }
 
-// excludedDirs are skipped inside coreDirs: the plugin test fixtures may use
+// excludedDirs are skipped inside the core directories: the plugin test fixtures may use
 // any example data.
 var excludedDirs = []string{
 	"internal/plugin/plugintest",
@@ -64,11 +66,18 @@ var allowed = map[string][]string{
 }
 
 // productionFiles returns the .go (not _test.go) and .html files under the
-// core directories, relative to root with forward slashes, sorted.
+// core directories (coreDirsIn), relative to root with forward slashes, sorted.
 func productionFiles(t *testing.T) []string {
 	t.Helper()
+	return productionFilesIn(t, root)
+}
+
+// productionFilesIn is productionFiles for the repository at base.
+func productionFilesIn(t *testing.T, base string) []string {
+	t.Helper()
+	root := base
 	var out []string
-	for _, dir := range coreDirs {
+	for _, dir := range coreDirsIn(t, base) {
 		err := filepath.WalkDir(filepath.Join(root, dir), func(path string, d os.DirEntry, err error) error {
 			if err != nil {
 				return err
@@ -284,7 +293,7 @@ func TestMigrationsAreStrictlyIncreasing(t *testing.T) {
 // TestScannerFlagsPlantedWords keeps the guard honest: the scanner flags
 // planted media words in Go and HTML lines and in file names, leaves clean
 // lines alone, and the walked files cover the core (so nobody can neuter the
-// word list or coreDirs unnoticed).
+// word list or the core directory walk unnoticed).
 func TestScannerFlagsPlantedWords(t *testing.T) {
 	for _, line := range []string{
 		"// Episode counter", "func AnimeID() {}", "<h1>Anime</h1>", `x := "anilist.co"`,
@@ -340,5 +349,26 @@ func TestScannerFlagsPlantedWords(t *testing.T) {
 		if !found {
 			t.Errorf("no file of %s is scanned", d)
 		}
+	}
+}
+
+// TestGuardScansEveryCoreDir: a directory added under internal/ later (not
+// a plugin) is core and is scanned without anyone remembering to list it;
+// internal/plugins and the plugin test fixtures are not.
+func TestGuardScansEveryCoreDir(t *testing.T) {
+	base := t.TempDir()
+	for _, f := range []string{"cmd/app/main.go", "internal/newcore/x.go", "internal/newcore/templates/p.html",
+		"internal/plugins/media/m.go", "internal/plugin/plugintest/f.go", "internal/newcore/x_test.go"} {
+		p := filepath.Join(base, filepath.FromSlash(f))
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte("package x\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got := strings.Join(productionFilesIn(t, base), " ")
+	if want := "cmd/app/main.go internal/newcore/templates/p.html internal/newcore/x.go"; got != want {
+		t.Fatalf("scanned %q, want %q", got, want)
 	}
 }
