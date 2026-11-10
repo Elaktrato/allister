@@ -1,0 +1,30 @@
+{{define "search_results"}}
+{{if .Message}}
+<div class="max-w-2xl rounded border border-amber-700 bg-amber-950 p-4 text-amber-200" role="alert">
+  <p>{{.Message}}</p>
+  {{if .Retry}}<button type="button" hx-get="{{.RetryURL}}" hx-target="#results" hx-push-url="true"
+    class="mt-3 rounded bg-indigo-600 px-3 py-1 font-medium text-white hover:bg-indigo-500">Try again</button>{{end}}
+</div>
+{{else if .Results}}
+<ul class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+  {{range .Results}}
+  <li class="flex gap-3 rounded border border-slate-800 bg-slate-900 p-3">
+    {{if .Cover}}<img src="{{.Cover}}" alt="{{.Title}}" loading="lazy" class="h-36 w-24 shrink-0 rounded object-cover">
+    {{else}}<div data-cover-placeholder class="h-36 w-24 shrink-0 rounded bg-slate-800" aria-hidden="true"></div>{{end}}
+    <div class="flex min-w-0 flex-col gap-1">
+      <h2 class="font-semibold">{{.Title}}</h2>
+      {{if .Badge}}<span data-source-badge class="self-start rounded bg-slate-800 px-2 py-0.5 text-xs text-slate-300">{{.Badge}}</span>{{end}}
+      {{if .Meta}}<p class="text-sm text-slate-400">{{.Meta}}</p>{{end}}
+      {{if .Text}}<p class="text-sm text-slate-300">{{.Text}}</p>{{end}}
+      <a href="{{.Href}}" class="mt-auto self-start rounded bg-indigo-600 px-3 py-1 text-sm font-medium hover:bg-indigo-500">Add</a>
+    </div>
+  </li>
+  {{end}}
+</ul>
+{{else if .Searched}}
+<p class="text-slate-300">No results for “{{.Query}}”</p>
+{{else}}
+<p class="text-slate-400">{{.EmptyHint}}</p>
+{{end}}
+<p class="mt-6 text-sm"><a href="{{.ManualURL}}" class="text-indigo-400 hover:underline">Can't find it? Add manually</a></p>
+{{end}}

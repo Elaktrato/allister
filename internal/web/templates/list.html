@@ -1,0 +1,66 @@
+{{define "title"}}{{.Heading}} list - Allister{{end}}
+{{define "content"}}
+<div class="mb-4 flex flex-wrap items-baseline gap-x-4 gap-y-1">
+  <h1 class="text-3xl font-semibold">{{.Heading}}</h1>
+  {{range .Exports}}<a href="{{.URL}}" class="text-sm text-indigo-400 underline hover:text-indigo-300" download>Export {{.Name}}</a>{{end}}
+</div>
+{{if .Kinds}}
+<nav aria-label="Kinds" class="mb-3 flex flex-wrap gap-2">
+  {{range .Kinds}}
+  <a href="{{.Href}}"{{if .Current}} aria-current="true"{{end}} class="rounded px-3 py-1 text-sm {{if .Current}}bg-slate-700 font-medium{{else}}bg-slate-900 hover:bg-slate-800{{end}}">{{.Label}}</a>
+  {{end}}
+</nav>
+{{end}}
+{{template "list_tabs" .}}
+{{if .AnyEntries}}{{template "filter_bar" .Filters}}{{end}}
+{{/* hx-history="false": htmx never snapshots this page (a snapshot keeps attributes, not typed values), so Back refetches it in full */}}
+<div id="list-rows" hx-history="false">{{template "list_rows" .}}</div>
+<div id="dialog-slot" hx-on::before-swap="var s=event.detail.xhr.status;if({{dialogSwap}}){event.detail.shouldSwap=true;event.detail.isError=false}">{{with .Dialog}}{{template "entry_dialog" .}}{{end}}</div>
+{{end}}
+
+{{define "list_tabs"}}
+<nav id="list-tabs" aria-label="List status" class="mb-4 flex flex-wrap gap-2"{{if .TabsOOB}} hx-swap-oob="true"{{end}}>
+  {{range .Tabs}}
+  <a href="{{.Href}}"{{if .Current}} aria-current="page"{{end}} class="rounded px-3 py-1 text-sm {{if .Current}}bg-indigo-600 font-medium{{else}}bg-slate-800 hover:bg-slate-700{{end}}">{{.Label}} ({{.Count}})</a>
+  {{end}}
+</nav>
+{{end}}
+
+{{/* list_partial answers the filter bar: the rows region plus, out of band, the tabs, the Clear link and the genre/tag option lists (never an input or select element, which keep focus) */}}
+{{define "list_partial"}}{{template "list_rows" .}}{{template "list_tabs" .}}{{with .Filters}}{{template "filter_clear" .}}{{with .Genres}}{{template "filter_term_options_oob" .}}{{end}}{{with .Tags}}{{template "filter_term_options_oob" .}}{{end}}{{end}}{{end}}
+
+{{define "list_rows"}}
+{{if .Notice}}<p data-filter-notice role="status" class="mb-4 rounded border border-amber-800 bg-slate-900 p-3 text-sm text-amber-200">Ignored unknown or invalid parameters: {{range $i, $k := .Notice}}{{if $i}}, {{end}}<code>{{$k}}</code>{{end}}{{if .NoticeMore}} and {{.NoticeMore}} more{{end}}.</p>{{end}}
+{{if not .AnyEntries}}
+<p class="rounded border border-slate-800 bg-slate-900 p-4 text-slate-300"><strong class="font-medium text-slate-100">No {{.EmptyNoun}} in your list yet.</strong> Your list is empty: <a href="{{.SearchURL}}" class="text-indigo-300 underline">search for {{.EmptyNoun}} to add</a>{{if .ManualURL}} or <a href="{{.ManualURL}}" class="text-indigo-300 underline">add one manually</a>{{end}}.</p>
+{{else if not .Rows}}
+{{if .Filtered}}<p class="rounded border border-slate-800 bg-slate-900 p-4 text-slate-300">No {{.EmptyNoun}} match these filters.{{with .Filters.ClearURL}} <a class="text-indigo-300 underline" href="{{.}}">Clear filters</a>{{end}}</p>
+{{else}}<p class="rounded border border-slate-800 bg-slate-900 p-4 text-slate-300">Nothing here yet.</p>{{end}}
+{{else}}
+<div class="overflow-x-auto">
+  <table class="w-full text-left text-sm">
+    <thead class="text-slate-400">
+      <tr class="border-b border-slate-800">
+        <th class="py-2 pr-3"><span class="sr-only">Cover</span></th>
+        <th class="py-2 pr-3 font-medium">Title</th>
+        {{if .TypeHeader}}<th class="hidden py-2 pr-3 font-medium sm:table-cell">{{.TypeHeader}}</th>{{end}}
+        <th class="py-2 pr-3 font-medium">Progress</th>
+        <th class="py-2 pr-3 font-medium">Score</th>
+        <th class="py-2 pr-3 font-medium">Status</th>
+        <th class="py-2 text-right font-medium"><span class="sr-only">Actions</span></th>
+      </tr>
+    </thead>
+    <tbody>
+      {{range .Rows}}{{template "list_row" .}}{{end}}
+    </tbody>
+  </table>
+</div>
+<div class="mt-4 flex items-center justify-between text-sm text-slate-400">
+  <p>Showing {{.From}}–{{.To}} of {{.Total}}</p>
+  <p class="flex gap-4">
+    {{if .PrevURL}}<a href="{{.PrevURL}}" class="text-indigo-300 hover:underline">Previous</a>{{end}}
+    {{if .NextURL}}<a href="{{.NextURL}}" class="text-indigo-300 hover:underline">Next</a>{{end}}
+  </p>
+</div>
+{{end}}
+{{end}}

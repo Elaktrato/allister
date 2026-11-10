@@ -1,0 +1,51 @@
+{{define "title"}}Add manually - Allister{{end}}
+{{define "content"}}
+<h1 class="mb-6 text-2xl font-semibold">{{.Heading}}</h1>
+{{if .Kinds}}
+<nav class="mb-4 flex flex-wrap gap-2 text-sm" aria-label="Kind">
+  {{range .Kinds}}<a href="{{.Value}}"{{if .Selected}} aria-current="page"{{end}} class="rounded px-3 py-1 {{if .Selected}}bg-slate-700{{else}}hover:bg-slate-800{{end}}">{{.Label}}</a>{{end}}
+</nav>
+{{end}}
+<form method="post" action="{{.Action}}" enctype="multipart/form-data" class="max-w-2xl space-y-4">
+  {{if .Error}}
+  <div class="rounded border border-amber-700 bg-amber-950 p-3 text-amber-200" role="alert"><p>{{.Error}}</p></div>
+  {{end}}
+  <div class="grid gap-3 sm:grid-cols-[1fr_12rem]">
+    <label class="block text-sm">Title
+      <input type="text" name="title" value="{{.Title}}" required maxlength="300" class="mt-1 w-full rounded border border-slate-700 bg-slate-950 px-3 py-2">
+    </label>
+    <label class="block text-sm">Title language
+      <select name="title_lang" class="mt-1 w-full rounded border border-slate-700 bg-slate-950 px-3 py-2">
+        {{range .Langs}}<option value="{{.Value}}"{{if .Selected}} selected{{end}}>{{.Label}}</option>{{end}}
+      </select>
+    </label>
+  </div>
+  {{template "item_inputs" .}}
+
+  <h2 class="pt-2 text-lg font-semibold">Your list entry</h2>
+  <label class="block text-sm">Status
+    <select name="status" required class="mt-1 w-full rounded border border-slate-700 bg-slate-950 px-3 py-2">
+      {{range .Statuses}}<option value="{{.Value}}"{{if .Selected}} selected{{end}}>{{.Label}}</option>{{end}}
+    </select>
+  </label>
+  <div class="grid grid-cols-2 gap-3">
+    <label class="block text-sm">Rating
+      <input type="number" min="0" max="10" step="1" name="rating" value="{{.Rating}}" placeholder="0–10" class="mt-1 w-full rounded border border-slate-700 bg-slate-950 px-3 py-2">
+    </label>
+    {{template "progress_inputs" .Progress}}
+    <label class="block text-sm">Started
+      <input type="date" name="started_on" value="{{.StartedOn}}" class="mt-1 w-full rounded border border-slate-700 bg-slate-950 px-3 py-2">
+    </label>
+    <label class="block text-sm">Finished
+      <input type="date" name="finished_on" value="{{.FinishedOn}}" class="mt-1 w-full rounded border border-slate-700 bg-slate-950 px-3 py-2">
+    </label>
+  </div>
+  <label class="block text-sm">Comment
+    <textarea name="comment" rows="3" maxlength="2000" class="mt-1 w-full rounded border border-slate-700 bg-slate-950 px-3 py-2">{{.Comment}}</textarea>
+  </label>
+  <div class="flex justify-end gap-3">
+    <a href="{{.CancelURL}}" class="rounded px-4 py-2 hover:bg-slate-800">Cancel</a>
+    <button type="submit" class="rounded bg-indigo-600 px-4 py-2 font-medium hover:bg-indigo-500">{{.Submit}}</button>
+  </div>
+</form>
+{{end}}

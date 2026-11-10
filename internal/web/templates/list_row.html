@@ -1,0 +1,36 @@
+{{define "list_row"}}
+<tr data-row class="border-b border-slate-800 align-middle">
+  <td class="w-14 py-2 pr-3">
+    {{if .Cover}}<img src="{{.Cover}}" alt="" loading="lazy" class="h-20 w-14 rounded object-cover">
+    {{else}}<span class="block h-20 w-14 rounded bg-slate-800" aria-hidden="true"></span>{{end}}
+  </td>
+  <td class="min-w-40 py-2 pr-3">
+    <a href="{{.Href}}" class="font-medium text-indigo-300 hover:underline">{{.Title}}</a>
+    <div class="mt-1 flex flex-wrap gap-1 text-xs">
+      {{if .PartialSync}}<span title="Some details are still being downloaded in the background" class="rounded bg-slate-800 px-2 py-0.5 text-amber-300">partially synced</span>{{end}}
+      {{if .Unmatched}}<span title="{{.UnmatchedHint}}" class="rounded bg-slate-800 px-2 py-0.5 text-sky-300">unmatched</span>{{end}}
+    </div>
+  </td>
+  {{if .HasType}}<td class="hidden py-2 pr-3 text-slate-300 sm:table-cell">{{.Type}}</td>{{end}}
+  <td class="py-2 pr-3 whitespace-nowrap">
+    <span class="inline-flex flex-wrap items-center gap-2">
+      {{range .Progress}}<span>{{if $.ShowLabels}}<span class="text-slate-400">{{.Label}}</span> {{else}}<span class="sr-only">{{.Label}}</span>{{end}}<span>{{.Value}}</span></span>{{end}}
+      {{if .CanIncrement}}
+      <form method="post" action="{{.IncrementURL}}" hx-post="{{.IncrementURL}}" hx-target="closest tr" hx-swap="outerHTML" class="inline">
+        <input type="hidden" name="return" value="{{.Return}}">
+        <button type="submit" class="rounded bg-slate-800 px-2 py-0.5 text-sm hover:bg-slate-700" aria-label="{{.IncrementLabel}}">+1</button>
+      </form>
+      {{end}}
+    </span>
+  </td>
+  <td class="py-2 pr-3" data-score="{{.ScoreAttr}}">{{.Score}}</td>
+  <td class="py-2 pr-3 whitespace-nowrap">{{.Status}}</td>
+  <td class="py-2 text-right whitespace-nowrap">
+    <a href="{{.EditURL}}" hx-get="{{.EditURL}}" hx-target="#dialog-slot" hx-swap="innerHTML" class="mr-2 text-indigo-300 hover:underline">Edit</a>
+    <form method="post" action="{{.RemoveURL}}" hx-post="{{.RemoveURL}}" hx-confirm="{{.RemoveConfirm}}" class="inline">
+      <input type="hidden" name="return" value="{{.Return}}">
+      <button type="submit" class="text-red-300 hover:underline">Remove</button>
+    </form>
+  </td>
+</tr>
+{{end}}

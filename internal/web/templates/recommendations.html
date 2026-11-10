@@ -1,0 +1,37 @@
+{{/* The late-loaded recommendations of an item: "recommendations_block" is
+     the fragment that replaces the overview's placeholder (htmx); the page
+     wraps it for the no-JavaScript link. All text is escaped; card links
+     and covers are built by the server. */}}
+{{define "title"}}{{.Heading}} - Allister{{end}}
+{{define "content"}}
+<div class="space-y-4">
+  <a href="{{.ItemURL}}" class="text-sm text-indigo-300 hover:underline">Back to the item</a>
+  {{template "recommendations_block" .}}
+  {{if not (or .Failed .Cards)}}<p class="text-slate-400">No recommendations.</p>{{end}}
+</div>
+{{end}}
+
+{{define "recommendations_block"}}
+{{- if .Failed}}
+<section>
+  <h2 class="mb-1 text-lg font-semibold">{{.Heading}}</h2>
+  <p class="text-sm text-amber-300">Recommendations are unavailable right now.</p>
+  <a href="{{.URL}}" hx-get="{{.URL}}" hx-target="closest section" hx-swap="outerHTML" class="mt-1 inline-block text-sm text-indigo-300 hover:underline">Try again</a>
+</section>
+{{- else if .Cards}}
+<section>
+  <h2 class="mb-1 text-lg font-semibold">{{.Heading}}</h2>
+  <ul class="flex gap-3 overflow-x-auto pb-2">
+    {{range .Cards}}
+    <li class="w-28 shrink-0">
+      <a href="{{.Href}}" class="block text-sm hover:underline">
+        {{if .Cover}}<img src="{{.Cover}}" alt="" loading="lazy" class="mb-1 h-40 w-28 rounded object-cover">
+        {{else}}<span class="mb-1 block h-40 w-28 rounded bg-slate-800" aria-hidden="true"></span>{{end}}
+        {{.Title}}
+      </a>
+    </li>
+    {{end}}
+  </ul>
+</section>
+{{- end}}
+{{end}}

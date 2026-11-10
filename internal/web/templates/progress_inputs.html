@@ -1,0 +1,20 @@
+{{define "progress_inputs"}}
+{{range .}}
+<label class="block text-sm{{if .Inactive}} text-slate-500{{end}}"{{if .Inactive}} data-inactive{{end}}>{{.Label}}{{if .Hint}} <span class="text-xs text-slate-500">({{.Hint}})</span>{{end}}
+  <span class="mt-1 flex items-center gap-2">
+    {{if .Duration}}
+    <input type="text" name="{{.Name}}" value="{{.Value}}" placeholder="h:mm:ss" inputmode="numeric" maxlength="20" autocomplete="off"
+      class="w-full rounded border border-slate-700 bg-slate-950 px-3 py-2">
+    {{else if .Percent}}
+    <input type="number" min="0" max="100" step="1" name="{{.Name}}" value="{{.Value}}" placeholder="0"
+      class="w-full rounded border border-slate-700 bg-slate-950 px-3 py-2">
+    <span class="text-slate-400">%</span>
+    {{else}}
+    <input type="number" min="0"{{if .Max}} max="{{.Max}}"{{end}} step="1" name="{{.Name}}" value="{{.Value}}" placeholder="0"
+      class="w-full rounded border border-slate-700 bg-slate-950 px-3 py-2">
+    {{end}}
+    {{if .Total}}<span class="whitespace-nowrap text-slate-400">/ {{.Total}}</span>{{end}}
+  </span>
+</label>
+{{end}}
+{{end}}

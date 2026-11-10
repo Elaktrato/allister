@@ -1,0 +1,57 @@
+{{define "title"}}Backup - Allister{{end}}
+
+{{define "backup_list"}}
+<section class="mt-6">
+  <h3 class="mb-2 font-medium">{{.Heading}} <span class="text-slate-400">({{.Count}})</span></h3>
+  {{if .Note}}<p class="mb-2 text-sm text-slate-400">{{.Note}}</p>{{end}}
+  <ul class="divide-y divide-slate-800 rounded border border-slate-800 text-sm">
+    {{range .Rows}}
+    <li class="flex flex-col gap-1 px-3 py-2">
+      <span class="break-words font-medium">{{.Title}}</span>
+      {{if .Identity}}<span class="break-words text-xs text-slate-500">{{.Identity}}</span>{{end}}
+      {{if .Message}}<span class="break-words text-slate-400">{{.Message}}</span>{{end}}
+    </li>
+    {{end}}
+    {{if .More}}<li class="px-3 py-2 text-slate-400">and {{.More}} more</li>{{end}}
+  </ul>
+</section>
+{{end}}
+
+{{define "content"}}
+<h1 class="mb-6 text-2xl font-semibold">Backup</h1>
+{{if .Error}}
+<div class="mb-4 max-w-2xl rounded border border-amber-700 bg-amber-950 p-3 text-amber-200" role="alert">
+  <p>{{.Error}}</p>
+</div>
+{{end}}
+<div class="max-w-2xl space-y-3 text-sm text-slate-300">
+  <p>The backup is one .zip file with every item of every plugin (also of disabled plugins): titles, fields, genres and tags, external ids, relations, credits, your list entries with ratings, comments, dates and progress, and the local cover images.</p>
+  <p>Settings, plugin choices, background jobs and import history are not included. Person photos are not included either: they are downloaded again after a restore.</p>
+</div>
+<p class="mt-4"><a href="/settings/backup/download" class="inline-block rounded bg-indigo-600 px-4 py-2 font-medium hover:bg-indigo-500">Download backup</a></p>
+
+{{if .CanRestore}}
+<h2 class="mb-2 mt-10 text-lg font-semibold">Restore</h2>
+<p class="mb-3 max-w-2xl text-sm text-slate-300">Restoring adds the items of a backup that are not in your library yet. Items you already have are skipped and never overwritten, and nothing is deleted. Restored items are synced again in the background.</p>
+<form method="post" action="/settings/backup/restore" enctype="multipart/form-data" class="flex max-w-md flex-col gap-3">
+  <label for="backup-file" class="text-sm font-medium text-slate-300">Backup file (.zip)</label>
+  <input id="backup-file" type="file" name="file" accept=".zip,application/zip" required class="text-sm">
+  <button type="submit" class="self-start rounded bg-indigo-600 px-4 py-2 font-medium hover:bg-indigo-500">Restore backup</button>
+</form>
+{{end}}
+
+{{with .Report}}
+<section class="mt-8">
+  <h2 class="mb-2 text-lg font-semibold">Restore summary</h2>
+  <dl class="grid grid-cols-2 gap-3 text-sm sm:grid-cols-4">
+    <div class="rounded border border-slate-800 p-3"><dt class="text-slate-400">Created</dt><dd class="text-lg font-semibold" data-count="created">{{.Created}}</dd></div>
+    <div class="rounded border border-slate-800 p-3"><dt class="text-slate-400">Skipped</dt><dd class="text-lg font-semibold" data-count="skipped">{{.Skipped}}</dd></div>
+    <div class="rounded border border-slate-800 p-3"><dt class="text-slate-400">Failed</dt><dd class="text-lg font-semibold" data-count="failed">{{.Failed}}</dd></div>
+    <div class="rounded border border-slate-800 p-3"><dt class="text-slate-400">Unknown plugin</dt><dd class="text-lg font-semibold" data-count="unknown">{{.UnknownPlugin}}</dd></div>
+  </dl>
+  {{if .Ignored}}<p class="mt-2 text-sm text-slate-400" data-ignored>{{.Ignored}} archive entries were ignored (only backup.json and covers/ files are read).</p>{{end}}
+  {{range $.Lists}}{{template "backup_list" .}}{{end}}
+</section>
+{{end}}
+<p class="mt-10"><a href="/settings" class="text-indigo-400 underline hover:text-indigo-300">Back to Settings</a></p>
+{{end}}
