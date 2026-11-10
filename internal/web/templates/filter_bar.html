@@ -16,10 +16,10 @@ GET form without JavaScript; with htmx it refreshes the rows region live. */}}
         class="h-10 w-full rounded-md border border-slate-700 bg-slate-900 pl-10 pr-3 text-base placeholder:text-slate-500 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 sm:text-sm">
     </label>
   </div>
-  {{/* in the card view the table head is gone: the sort control sits open
-       next to the search bar (in the table view it stays in the panel,
+  {{/* in the card view the table head is gone: a compact sort row sits under
+       the search bar (in the table view the control stays in the panel,
        hidden on large screens where the head sorts) */}}
-  {{if eq .View "cards"}}{{template "sort_control" .}}{{end}}
+  {{if eq .View "cards"}}{{template "sort_control_cards" .}}{{end}}
   {{/* a native disclosure: works without JavaScript, its fields are submitted
        open or closed, and a rows partial never swaps it (it keeps its state);
        a full page opens it when a filter of the panel is set */}}
@@ -96,8 +96,17 @@ GET form without JavaScript; with htmx it refreshes the rows region live. */}}
   <select id="filter-dir-select" name="dir" aria-label="Order" class="rounded-md border border-slate-700 bg-slate-950 px-2 py-1.5 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500">{{template "filter_options" .Dirs}}</select>
 </fieldset>{{end}}
 
+{{/* the card view's sort row: one compact line, the direction as an icon
+     button submitting the other direction (its direction rides in the value) */}}
+{{define "sort_control_cards"}}<fieldset id="filter-sort-control" class="mt-4 flex flex-wrap items-center gap-2"><legend class="sr-only">Sort by</legend>
+  <select id="filter-sort-select" name="sort" aria-label="Sort by" class="rounded-md border border-slate-700 bg-slate-950 px-2 py-1.5 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500">{{template "filter_options" .Sorts}}</select>
+  {{template "sort_dir_toggle" .}}
+</fieldset>{{end}}
+
+{{define "sort_dir_toggle"}}<button type="submit" id="filter-dir-toggle" name="dir" value="{{.SwapDir}}" aria-label="{{.DirLabel}}" title="{{.DirLabel}}" class="rounded-md border border-slate-700 bg-slate-950 p-1.5 text-slate-300 hover:bg-slate-800 hover:text-slate-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"><span class="icon text-[1.125rem]" aria-hidden="true">{{.DirIcon}}</span></button>{{end}}
+
 {{/* the sort control's option lists as out-of-band swaps into the existing selects (which keep focus) */}}
-{{define "filter_sort_oob"}}<div hx-swap-oob="innerHTML:#filter-sort-select">{{template "filter_options" .Sorts}}</div><div hx-swap-oob="innerHTML:#filter-dir-select">{{template "filter_options" .Dirs}}</div>{{end}}
+{{define "filter_sort_oob"}}<div hx-swap-oob="innerHTML:#filter-sort-select">{{template "filter_options" .Sorts}}</div><div hx-swap-oob="innerHTML:#filter-dir-select">{{template "filter_options" .Dirs}}</div><div hx-swap-oob="outerHTML:#filter-dir-toggle">{{template "sort_dir_toggle" .}}</div>{{end}}
 
 {{define "filter_clear"}}<span id="filter-clear"{{if .OOB}} hx-swap-oob="true"{{end}}>{{with .ClearURL}}<a class="text-indigo-300 hover:underline" href="{{.}}">Clear filters</a>{{end}}</span>{{end}}
 

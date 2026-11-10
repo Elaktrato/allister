@@ -32,6 +32,7 @@ type tabView struct {
 	Label, Href string
 	Count       int
 	Current     bool
+	Status      string // the core status class ("" for All), the tab's colour
 }
 
 // progressCell is one active progress track of a row.
@@ -417,7 +418,7 @@ func (s *server) buildList(r *http.Request, m plugin.Manifest, lq listQuery) (li
 	for _, st := range listTabOrder {
 		v.Tabs = append(v.Tabs, tabView{Label: statusLabel(k, st), Count: counts[st],
 			Href:    filteredListURL(m, k.Key, string(st), lq.View, 1, f),
-			Current: string(st) == lq.Status})
+			Current: string(st) == lq.Status, Status: string(st)})
 	}
 	// another kind has another schema: its link starts without filters
 	if len(m.Kinds) > 1 {

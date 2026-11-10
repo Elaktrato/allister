@@ -463,10 +463,13 @@ type filterBar struct {
 	// Sorts and Dirs are the compact sort control (the form's only sort and
 	// dir fields): every key the table head sorts by, the current one selected.
 	Sorts, Dirs []option
-	Active      int    // the filters set besides q and the sort (the toggle's badge)
-	Open        bool   // the panel starts open (a full page with Active filters)
-	ClearURL    string // "" when nothing is set
-	OOB         bool   // the Clear slot, the badge and the sort options are rendered as out-of-band swaps
+	// SwapDir, DirIcon and DirLabel drive the card view's direction toggle:
+	// it submits the other direction and shows the current one as an icon.
+	SwapDir, DirIcon, DirLabel string
+	Active                     int    // the filters set besides q and the sort (the toggle's badge)
+	Open                       bool   // the panel starts open (a full page with Active filters)
+	ClearURL                   string // "" when nothing is set
+	OOB                        bool   // the Clear slot, the badge and the sort options are rendered as out-of-band swaps
 }
 
 // outOfBand marks the Clear slot, the badge and the sort control's option
@@ -539,6 +542,20 @@ func buildFilterBar(m plugin.Manifest, k plugin.KindDef, lq listQuery, genres, t
 		}
 	}
 	b.Sorts, b.Dirs = sortOptions(k, f)
+	// the card view's direction toggle submits the other direction and shows
+	// the current one as an icon
+	cur, dir := f.Sort, f.Dir
+	if cur == "" {
+		cur = string(library.SortUpdated)
+	}
+	if dir == "" {
+		dir = defaultDir(cur)
+	}
+	if dir == "asc" {
+		b.SwapDir, b.DirIcon, b.DirLabel = "desc", "arrow_upward", "Sort descending"
+	} else {
+		b.SwapDir, b.DirIcon, b.DirLabel = "asc", "arrow_downward", "Sort ascending"
+	}
 	b.Active = f.panelCount()
 	b.Open = b.Active > 0
 	return b

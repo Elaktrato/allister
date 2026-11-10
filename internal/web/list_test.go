@@ -90,6 +90,9 @@ func TestListTabsShowCountsAndCurrent(t *testing.T) {
 	if !strings.Contains(all[j:j+100], "All (3)") {
 		t.Fatal("All not current")
 	}
+	// every status tab carries its colour, matching the card corners
+	mustContain(t, all, `text-indigo-300">Watching (2)`, `text-emerald-400">Completed (0)`,
+		`text-amber-300">Paused (0)`, `text-red-300">Dropped (1)`, `text-slate-400">Plan to watch (0)`)
 }
 
 func TestListUnknownStatusShowsAll(t *testing.T) {
@@ -681,17 +684,17 @@ func TestCardView(t *testing.T) {
 	b := e.get("/tv?view=table").Body.String()
 	mustContain(t, b, `<table`, `data-row`)
 	mustNotContain(t, b, `data-cards`)
-	// the toggle marks the current view; in cards the sort control is open
-	// (not the table head's lg:hidden copy)
-	mustContain(t, b, `aria-current="true"`, `href="/tv?view=cards"`)
-	if !strings.Contains(b, `id="filter-sort-control" class="flex flex-col gap-1 lg:hidden"`) {
-		t.Error("table view: the panel's sort control is not the small-screen one")
-	}
+	// the toggle marks the current view; in cards the sort row is compact
+	// (under the search bar, the direction as an icon), in the table the
+	// panel keeps the small-screen selects
+	mustContain(t, b, `aria-current="true"`, `href="/tv?view=cards"`,
+		`id="filter-sort-control" class="flex flex-col gap-1 lg:hidden"`)
 	c := e.get("/tv").Body.String()
-	mustContain(t, c, `href="/tv?view=table"`)
-	if strings.Contains(c, `id="filter-sort-control" class="flex flex-col gap-1 lg:hidden"`) {
-		t.Error("card view: the sort control is still hidden on large screens")
-	}
+	mustContain(t, c, `href="/tv?view=table"`,
+		`id="filter-sort-control" class="mt-4 flex flex-wrap items-center gap-2"`,
+		`id="filter-dir-toggle"`, `name="dir" value="asc"`, `aria-label="Sort ascending"`,
+		`aria-hidden="true">arrow_downward`)
+	mustNotContain(t, c, `id="filter-sort-control" class="flex flex-col gap-1 lg:hidden"`)
 }
 
 // TestIncrementFromACardAnswersTheCard: a +1 posted with view=cards answers
