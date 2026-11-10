@@ -127,6 +127,21 @@ func (q *Queue) Enqueue(ctx context.Context, kind string, payload any) error {
 	return nil
 }
 
+// EnqueueAt stores a job that may run no earlier than at (a self-rescheduling
+// job's next round, for example).
+func (q *Queue) EnqueueAt(ctx context.Context, kind string, payload any, at time.Time) error {
+	b, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("enqueue %s: %w", kind, err)
+	}
+	_, err = q.db.ExecContext(ctx, `INSERT INTO jobs(kind, payload_json, run_after) VALUES (?,?,?)`,
+		kind, string(b), q.stamp(at))
+	if err != nil {
+		return fmt.Errorf("enqueue %s: %w", kind, err)
+	}
+	return nil
+}
+
 func (q *Queue) stamp(t time.Time) string { return t.UTC().Format(timeLayout) }
 
 // Run processes jobs until ctx is cancelled. Jobs left in state running by a

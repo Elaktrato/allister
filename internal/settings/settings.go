@@ -81,6 +81,60 @@ func (s *Store) KnownLanguages(ctx context.Context, pluginID string) ([]string, 
 // plugin's kind.
 func columnsKey(id, kind string) string { return "plugin." + id + ".columns." + kind }
 
+// importKey is the settings key of one importer option (mode, account or
+// schedule).
+func importKey(id, importer, field string) string {
+	return "plugin." + id + ".import." + importer + "." + field
+}
+
+// ImportMode returns the stored import mode of an importer ("skip", "newer",
+// "always"; "" when none is stored).
+func (s *Store) ImportMode(ctx context.Context, id, importer string) string {
+	v, _, err := s.Get(ctx, importKey(id, importer, "mode"))
+	if err != nil {
+		log.Printf("settings: read import mode %s/%s: %v", id, importer, err)
+		return ""
+	}
+	return v
+}
+
+// SetImportMode stores the import mode of an importer (the caller checks it).
+func (s *Store) SetImportMode(ctx context.Context, id, importer, mode string) error {
+	return s.Set(ctx, importKey(id, importer, "mode"), mode)
+}
+
+// ImportAccount returns the stored account name of an account importer.
+func (s *Store) ImportAccount(ctx context.Context, id, importer string) string {
+	v, _, err := s.Get(ctx, importKey(id, importer, "account"))
+	if err != nil {
+		log.Printf("settings: read import account %s/%s: %v", id, importer, err)
+		return ""
+	}
+	return v
+}
+
+// SetImportAccount stores the account name of an account importer.
+func (s *Store) SetImportAccount(ctx context.Context, id, importer, account string) error {
+	return s.Set(ctx, importKey(id, importer, "account"), account)
+}
+
+// ImportSchedule returns the stored schedule of an account importer ("",
+// "off", "daily" or "weekly").
+func (s *Store) ImportSchedule(ctx context.Context, id, importer string) string {
+	v, _, err := s.Get(ctx, importKey(id, importer, "schedule"))
+	if err != nil {
+		log.Printf("settings: read import schedule %s/%s: %v", id, importer, err)
+		return ""
+	}
+	return v
+}
+
+// SetImportSchedule stores the schedule of an account importer (the caller
+// checks it).
+func (s *Store) SetImportSchedule(ctx context.Context, id, importer, schedule string) error {
+	return s.Set(ctx, importKey(id, importer, "schedule"), schedule)
+}
+
 // homeViewKey and homeStatusesKey are the settings keys holding a plugin's
 // home list configuration: the view its list opens in and the status it
 // opens with.

@@ -74,6 +74,9 @@ func run() error {
 		DB: database, Library: lib, Registry: registry, Queue: queue, SyncJobs: syncJobsByPlugin,
 	})
 	queue.Register(importer.KindRun, imports.Handler())
+	queue.Register(jobs.KindScheduledImport, jobs.ScheduledImport(jobs.ScheduledImportDeps{
+		Imports: imports, Settings: settingsStore, Queue: queue,
+	}))
 	// Reset crashed jobs first, then re-queue items whose sync never finished
 	// (jobs that gave up, or were lost) so the "partially synced" state heals.
 	if err := queue.Recover(workerCtx); err != nil {
