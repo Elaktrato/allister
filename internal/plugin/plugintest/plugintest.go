@@ -380,3 +380,226 @@ func (f *FakeExporter) Export(ctx context.Context, entries []plugin.ExportEntry,
 	}
 	return nil
 }
+
+// CatalogItem is one item of a Catalog: its details, its credits and its
+// recommendations.
+type CatalogItem struct {
+	Data    plugin.ItemData
+	Credits []plugin.Credit
+	Recs    []plugin.ItemSummary
+}
+
+// Catalog is a canned plugin.Source over a fixed set of items keyed by source
+// id: Search matches the query case-insensitively against every title (results
+// ordered by id), Details/People/Recommendations answer per id (ErrNotFound
+// for an unknown id) and Lookup finds the item carrying that external id.
+// Items must not be changed while calls are in flight.
+type Catalog struct {
+	Items map[string]CatalogItem
+
+	mu    sync.Mutex
+	calls map[string]int
+}
+
+// Calls returns how many times the operation (Op*) was called.
+func (c *Catalog) Calls(op string) int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.calls[op]
+}
+
+func (c *Catalog) count(op string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.calls == nil {
+		c.calls = map[string]int{}
+	}
+	c.calls[op]++
+}
+
+func (c *Catalog) item(kind, id string) (CatalogItem, error) {
+	it, ok := c.Items[id]
+	if !ok || it.Data.Kind != kind {
+		return CatalogItem{}, fmt.Errorf("%w: %s %q", plugin.ErrNotFound, kind, id)
+	}
+	return it, nil
+}
+
+func (c *Catalog) Search(ctx context.Context, kind, q string) ([]plugin.ItemSummary, error) {
+	c.count(OpSearch)
+	q = strings.ToLower(strings.TrimSpace(q))
+	ids := make([]string, 0, len(c.Items))
+	for id := range c.Items {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	var out []plugin.ItemSummary
+	for _, id := range ids {
+		it := c.Items[id]
+		if it.Data.Kind != kind {
+			continue
+		}
+		for _, t := range it.Data.Titles {
+			if strings.Contains(strings.ToLower(t.Text), q) {
+				out = append(out, it.Data.ItemSummary)
+				break
+			}
+		}
+	}
+	return out, nil
+}
+
+func (c *Catalog) Details(ctx context.Context, kind, id string) (plugin.ItemData, error) {
+	c.count(OpDetails)
+	it, err := c.item(kind, id)
+	return it.Data, err
+}
+
+func (c *Catalog) People(ctx context.Context, kind, id string) ([]plugin.Credit, error) {
+	c.count(OpPeople)
+	it, err := c.item(kind, id)
+	return it.Credits, err
+}
+
+func (c *Catalog) Recommendations(ctx context.Context, kind, id string) ([]plugin.ItemSummary, error) {
+	c.count(OpRecommendations)
+	it, err := c.item(kind, id)
+	return it.Recs, err
+}
+
+func (c *Catalog) Lookup(ctx context.Context, kind, idType, value string) (plugin.ItemData, error) {
+	c.count(OpLookup)
+	for _, it := range c.Items {
+		if it.Data.Kind == kind && it.Data.ExternalIDs[idType] == value {
+			return it.Data, nil
+		}
+	}
+	return plugin.ItemData{}, fmt.Errorf("%w: %s %s=%q", plugin.ErrNotFound, kind, idType, value)
+}
+
+// BookCatalog is the canned catalog of the book fixture (source "books"):
+//   - "earthsea": "A Wizard of Earthsea" by Ursula Writer, 250 pages, ISBN
+//     9780000000001, genres Fantasy and Classic;
+//   - "dune": "Dune" by Frank Writer, 600 pages, ISBN 9780000000002, genre
+//     Science Fiction.
+func BookCatalog() *Catalog {
+	book := func(id, title, author string, pages float64, isbn string, genres ...string) CatalogItem {
+		return CatalogItem{
+			Data: plugin.ItemData{
+				ItemSummary: plugin.ItemSummary{Source: "books", ID: id, Kind: "book",
+					Titles: []plugin.Title{{Lang: "en", Text: title}},
+					Fields: map[string]plugin.FieldValue{"author": {Text: author}, "pages": {Num: num(pages)}, "isbn": {Text: isbn}}},
+				ExternalURL: "https://books.example/work/" + id,
+				ExternalIDs: map[string]string{"isbn": isbn},
+				Genres:      genres,
+			},
+			Credits: []plugin.Credit{{Role: "author", Person: plugin.PersonRef{ID: "a-" + id, Name: author,
+				URL: "https://books.example/author/a-" + id}}},
+		}
+	}
+	return &Catalog{Items: map[string]CatalogItem{
+		"earthsea": book("earthsea", "A Wizard of Earthsea", "Ursula Writer", 250, "9780000000001", "Fantasy", "Classic"),
+		"dune":     book("dune", "Dune", "Frank Writer", 600, "9780000000002", "Science Fiction"),
+	}}
+}
+
+// TVCatalog is the canned catalog of the TV fixture (source "tvdata"):
+//   - "dark": "Dark" (original title "Dark (Original)"), series, 26 episodes,
+//     2017, genres Mystery and Drama, tags Time Travel (rank 90) and Twist
+//     (spoiler), cast "Jonas" played by Louis Actor, recommends "1899";
+//   - "1899": "1899", miniseries, 8 episodes, 2022, genre Mystery, tag Ship.
+func TVCatalog() *Catalog {
+	rank := 90
+	show := func(id, title, typ string, episodes, year float64) plugin.ItemData {
+		return plugin.ItemData{
+			ItemSummary: plugin.ItemSummary{Source: "tvdata", ID: id, Kind: "show",
+				Titles: []plugin.Title{{Lang: "en", Text: title}},
+				Fields: map[string]plugin.FieldValue{"type": {Text: typ}, "episodes": {Num: num(episodes)}, "year": {Num: num(year)}}},
+			ExternalURL: "https://tv.example/show/" + id,
+			ExternalIDs: map[string]string{"tvdata": id},
+		}
+	}
+	dark := show("dark", "Dark", "series", 26, 2017)
+	dark.Titles = append(dark.Titles, plugin.Title{Lang: "original", Text: "Dark (Original)"})
+	dark.Genres = []string{"Mystery", "Drama"}
+	dark.Tags = []plugin.Tag{{Name: "Time Travel", Rank: &rank}, {Name: "Twist", Spoiler: true}}
+	ship := show("1899", "1899", "miniseries", 8, 2022)
+	ship.Genres = []string{"Mystery"}
+	ship.Tags = []plugin.Tag{{Name: "Ship"}}
+	return &Catalog{Items: map[string]CatalogItem{
+		"dark": {Data: dark, Recs: []plugin.ItemSummary{ship.ItemSummary},
+			Credits: []plugin.Credit{{Role: "actor", Detail: "MAIN",
+				Person: plugin.PersonRef{ID: "c-jonas", Name: "Jonas", URL: "https://tv.example/character/c-jonas"},
+				With:   &plugin.PersonRef{ID: "p-louis", Name: "Louis Actor", URL: "https://tv.example/person/p-louis"}, WithRole: "actor"}}},
+		"1899": {Data: ship},
+	}}
+}
+
+// LinesImporter parses a tiny line format into rows of one kind. Every
+// non-empty line is "external id;title;status class;progress" where progress
+// is optional "key=value" pairs joined by ","; a malformed line (missing
+// fields, unknown status class, bad progress) is reported as skipped. A file
+// without a single line is ErrBadInput.
+type LinesImporter struct {
+	Kind   string // the kind of every row
+	IDType string // the external id type of the first column
+}
+
+func (l LinesImporter) Parse(ctx context.Context, r io.Reader) (plugin.ParseResult, error) {
+	raw, err := io.ReadAll(r)
+	if err != nil {
+		return plugin.ParseResult{}, err
+	}
+	var res plugin.ParseResult
+	lines := 0
+	for i, line := range strings.Split(string(raw), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		lines++
+		parts := strings.Split(line, ";")
+		skip := func(reason string) {
+			title := ""
+			if len(parts) > 1 {
+				title = parts[1]
+			}
+			res.Skipped = append(res.Skipped, plugin.SkippedRow{Line: i + 1, Title: plugin.SingleLine(title, 300), Reason: reason})
+		}
+		if len(parts) < 3 || len(parts) > 4 || strings.TrimSpace(parts[0]) == "" {
+			skip("expected id;title;status;progress")
+			continue
+		}
+		st := plugin.StatusClass(strings.TrimSpace(parts[2]))
+		switch st {
+		case plugin.Planned, plugin.Active, plugin.Paused, plugin.Completed, plugin.Dropped:
+		default:
+			skip("unknown status")
+			continue
+		}
+		e := plugin.ParsedEntry{Kind: l.Kind, Title: plugin.SingleLine(parts[1], 300), Status: st,
+			ExternalIDs: map[string]string{l.IDType: strings.TrimSpace(parts[0])}}
+		if len(parts) == 4 && strings.TrimSpace(parts[3]) != "" {
+			e.Progress = map[string]float64{}
+			bad := false
+			for _, kv := range strings.Split(parts[3], ",") {
+				k, v, ok := strings.Cut(strings.TrimSpace(kv), "=")
+				n, err := strconv.ParseFloat(v, 64)
+				if !ok || k == "" || err != nil {
+					bad = true
+					break
+				}
+				e.Progress[k] = n
+			}
+			if bad {
+				skip("bad progress")
+				continue
+			}
+		}
+		res.Entries = append(res.Entries, e)
+	}
+	if lines == 0 {
+		return plugin.ParseResult{}, fmt.Errorf("%w: no lines", plugin.ErrBadInput)
+	}
+	return res, nil
+}
