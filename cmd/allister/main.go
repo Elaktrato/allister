@@ -22,6 +22,7 @@ import (
 	"github.com/allister/allister/internal/library"
 	"github.com/allister/allister/internal/plugin"
 	"github.com/allister/allister/internal/plugins/anime"
+	"github.com/allister/allister/internal/plugins/manga"
 	"github.com/allister/allister/internal/settings"
 	"github.com/allister/allister/internal/web"
 )
@@ -54,6 +55,9 @@ func run() error {
 
 	settingsStore := settings.New(database)
 	registry := plugin.NewRegistry(settingsStore)
+	if err := registry.Register(manga.New(manga.Options{})); err != nil {
+		log.Printf("startup: %v", err)
+	}
 	if err := registry.Register(anime.New(anime.Options{})); err != nil {
 		log.Printf("startup: %v", err)
 	}

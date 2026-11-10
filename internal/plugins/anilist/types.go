@@ -39,11 +39,12 @@ type CastMember struct {
 
 // Relation links to a related work. Kind is sequel, prequel, source or other.
 type Relation struct {
-	Kind   string
-	Source Source
-	ID     string
-	Titles []Title
-	Type   string
+	Kind      string
+	Source    Source
+	ID        string
+	Titles    []Title
+	Type      string // the related item's format (TV, MANGA, ...)
+	MediaType string // ANIME or MANGA
 }
 
 // Recommendation references another anime recommended for this one.
@@ -61,6 +62,7 @@ type SearchResult struct {
 	Titles                     []Title
 	Type                       string
 	Episodes                   *int
+	Chapters, Volumes          *int
 	Year                       *int
 	Studio, Synopsis, CoverURL string
 }

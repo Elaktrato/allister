@@ -176,7 +176,7 @@ func TestSourceDetailsMapsFieldsTitlesRelations(t *testing.T) {
 		}
 		rel[r.Item.ID] = r
 	}
-	if r := rel["118586"]; r.Kind != "source" || r.Item.Kind != "manga" || r.Item.Fields["type"].Text != "MANGA" {
+	if r := rel["118586"]; r.Kind != "adaptation" || r.Item.Kind != "manga" || r.Item.Fields["type"].Text != "MANGA" {
 		t.Errorf("source relation = %+v", r)
 	}
 	if r := rel["182255"]; r.Kind != "sequel" || r.Item.Kind != "anime" || r.Item.Fields["type"].Text != "TV" || titles(r.Item.Titles)["ja-latn"] == "" {

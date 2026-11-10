@@ -58,10 +58,12 @@ var mediaWords = regexp.MustCompile(`(?i)anime|anilist|episode|yamtrack|mal_id|m
 // word. Keep it minimal: every entry needs a reason.
 var allowed = map[string][]string{
 	"cmd/allister/main.go": {
-		// the one place that compiles in the default plugin: its import ...
+		// the one place that compiles in the plugins: their imports ...
 		`"github.com/allister/allister/internal/plugins/anime"`,
-		// ... and its registration
+		`"github.com/allister/allister/internal/plugins/manga"`,
+		// ... and their registrations
 		`if err := registry.Register(anime.New(anime.Options{})); err != nil {`,
+		`if err := registry.Register(manga.New(manga.Options{})); err != nil {`,
 	},
 }
 

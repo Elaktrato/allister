@@ -184,7 +184,7 @@ func TestAnimeMapsTitlesRelationsRecsMALID(t *testing.T) {
 		}
 		kinds[r.ID] = r
 	}
-	if r, ok := kinds["118586"]; !ok || r.Kind != "source" || r.Type != "MANGA" {
+	if r, ok := kinds["118586"]; !ok || r.Kind != "adaptation" || r.Type != "MANGA" || r.MediaType != "MANGA" {
 		t.Errorf("manga source relation = %+v ok=%v", r, ok)
 	}
 	if r, ok := kinds["182255"]; !ok || r.Kind != "sequel" || r.Type != "TV" || titleMap(r.Titles)["ja-latn"] == "" {
@@ -217,7 +217,9 @@ func TestAnimeRelationsFilterAndRecsSkipNull(t *testing.T) {
 	if a.MALID != "" || a.StartDate != nil || a.EndDate != nil {
 		t.Errorf("absent fields: %q %v %v", a.MALID, a.StartDate, a.EndDate)
 	}
-	if len(a.Relations) != 2 || a.Relations[0].Kind != "source" || a.Relations[0].Type != "NOVEL" || a.Relations[1].Kind != "prequel" {
+	// every related media type is kept; the kind is the normalised relation
+	if len(a.Relations) != 3 || a.Relations[0].Kind != "source" || a.Relations[0].MediaType != "MANGA" ||
+		a.Relations[1].Kind != "other" || a.Relations[1].MediaType != "MANGA" || a.Relations[2].Kind != "prequel" {
 		t.Errorf("relations = %+v", a.Relations)
 	}
 	if len(a.Recommendations) != 1 || a.Recommendations[0].ID != "5" {

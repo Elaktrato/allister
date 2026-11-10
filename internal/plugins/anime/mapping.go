@@ -161,7 +161,7 @@ func (c cleaner) itemData(a anilist.Media) plugin.ItemData {
 			continue
 		}
 		itemKind := KindAnime
-		if kind == "source" {
+		if r.MediaType == "MANGA" {
 			itemKind = "manga"
 		}
 		item := plugin.ItemSummary{Source: sourceOf(r.Source), ID: id, Kind: itemKind, Titles: c.titles(r.Titles),

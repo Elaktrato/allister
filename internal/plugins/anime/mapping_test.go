@@ -9,10 +9,10 @@ import (
 func TestItemDataRelationsAndSource(t *testing.T) {
 	a := anilist.Media{SearchResult: anilist.SearchResult{Source: anilist.Manual, ID: "m1", Titles: []anilist.Title{{Lang: "en", Text: "T"}}}}
 	a.Relations = []anilist.Relation{
-		{Kind: "source", Source: anilist.AniList, ID: "1"},
-		{Kind: "", Source: anilist.AniList, ID: "2"},       // no kind: dropped
-		{Kind: "sequel", Source: anilist.AniList, ID: " "}, // no id: dropped
-		{Kind: "sequel", ID: "3", Type: "TV"},              // no source: AniList
+		{Kind: "source", Source: anilist.AniList, ID: "1", MediaType: "MANGA"},
+		{Kind: "", Source: anilist.AniList, ID: "2"},              // no kind: dropped
+		{Kind: "sequel", Source: anilist.AniList, ID: " "},        // no id: dropped
+		{Kind: "sequel", ID: "3", Type: "TV", MediaType: "ANIME"}, // no source: AniList
 	}
 	d := ItemData(a)
 	if d.Source != "manual" || d.ID != "m1" || d.Kind != "anime" {
@@ -64,8 +64,8 @@ func TestItemDataCleansSourceText(t *testing.T) {
 func TestItemDataRelationURLs(t *testing.T) {
 	a := anilist.Media{SearchResult: anilist.SearchResult{Source: anilist.AniList, ID: "1"}}
 	a.Relations = []anilist.Relation{
-		{Kind: "source", Source: anilist.AniList, ID: "30021"},
-		{Kind: "sequel", Source: anilist.AniList, ID: "2000"},
+		{Kind: "source", Source: anilist.AniList, ID: "30021", MediaType: "MANGA"},
+		{Kind: "sequel", Source: anilist.AniList, ID: "2000", MediaType: "ANIME"},
 		{Kind: "other", Source: "elsewhere", ID: "9"},
 		{Kind: "sequel", Source: anilist.AniList, ID: "1/../x?y"},
 	}

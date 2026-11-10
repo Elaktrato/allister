@@ -143,7 +143,7 @@ func sampleAnimeProvider() *animeProvider {
 			StartDate: &start, EndDate: &end, SourceMaterial: "MANGA", ExternalURL: "https://anilist.co/anime/1535",
 			Relations: []anilist.Relation{
 				{Kind: "sequel", Source: anilist.AniList, ID: "2000", Titles: []anilist.Title{{Lang: "en", Text: "Sequel Title"}}, Type: "TV"},
-				{Kind: "source", Source: anilist.AniList, ID: "30021", Titles: []anilist.Title{{Lang: "en", Text: "Manga Title"}}, Type: "MANGA"},
+				{Kind: "source", Source: anilist.AniList, ID: "30021", Titles: []anilist.Title{{Lang: "en", Text: "Manga Title"}}, Type: "MANGA", MediaType: "MANGA"},
 			},
 			Recommendations: []anilist.Recommendation{
 				{Source: anilist.AniList, ID: "3000", Titles: []anilist.Title{{Lang: "en", Text: "Rec Title"}}, CoverURL: "https://img.example/r.jpg"},

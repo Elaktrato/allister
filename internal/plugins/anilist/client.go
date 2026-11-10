@@ -41,7 +41,7 @@ const (
 const searchQuery = `query ($q: String, $perPage: Int, $type: MediaType) {
   Page(page: 1, perPage: $perPage) {
     media(search: $q, type: $type, sort: SEARCH_MATCH) {
-      id idMal ` + titleFields + ` format episodes seasonYear startDate { year }
+      id idMal ` + titleFields + ` format episodes chapters volumes seasonYear startDate { year }
       description(asHtml: true) coverImage { large }
       studios(isMain: true) { nodes { name } } siteUrl
     }
@@ -245,6 +245,8 @@ type apiMedia struct {
 	Title       apiTitle `json:"title"`
 	Format      string   `json:"format"`
 	Episodes    *int     `json:"episodes"`
+	Chapters    *int     `json:"chapters"`
+	Volumes     *int     `json:"volumes"`
 	SeasonYear  *int     `json:"seasonYear"`
 	StartDate   apiDate  `json:"startDate"`
 	EndDate     apiDate  `json:"endDate"`
@@ -258,9 +260,24 @@ type apiMedia struct {
 			Name string `json:"name"`
 		} `json:"nodes"`
 	} `json:"studios"`
-	SiteURL string   `json:"siteUrl"`
-	Genres  []string `json:"genres"`
-	Tags    []struct {
+	SiteURL string `json:"siteUrl"`
+	Status  string `json:"status"`
+	Staff   struct {
+		Edges []struct {
+			Role string `json:"role"`
+			Node struct {
+				Name struct {
+					Full string `json:"full"`
+				} `json:"name"`
+				Image struct {
+					Medium string `json:"medium"`
+				} `json:"image"`
+				SiteURL string `json:"siteUrl"`
+			} `json:"node"`
+		} `json:"edges"`
+	} `json:"staff"`
+	Genres []string `json:"genres"`
+	Tags   []struct {
 		Name           string `json:"name"`
 		Rank           *int   `json:"rank"`
 		IsMediaSpoiler bool   `json:"isMediaSpoiler"`
@@ -296,6 +313,8 @@ func (m apiMedia) searchResult() SearchResult {
 		Titles:   m.Title.titles(),
 		Type:     m.Format,
 		Episodes: m.Episodes,
+		Chapters: m.Chapters,
+		Volumes:  m.Volumes,
 		Year:     m.SeasonYear,
 		Synopsis: PlainText(m.Description),
 		CoverURL: m.CoverImage.Large,
@@ -347,18 +366,18 @@ func parseID(id string) (int, error) {
 // manga/novels only as the source work. AniList labels the manga an anime was
 // adapted from as ADAPTATION (and SOURCE in the reverse direction), so both
 // count as source for non-anime nodes.
-func relationKind(relType, mediaType string) (string, bool) {
-	isSource := relType == "SOURCE" || (relType == "ADAPTATION" && mediaType == "MANGA")
-	if mediaType != "ANIME" && !isSource {
-		return "", false
-	}
-	switch {
-	case isSource:
+func relationKind(relType string) (string, bool) {
+	switch relType {
+	case "SOURCE":
 		return "source", true
-	case relType == "SEQUEL":
+	case "ADAPTATION":
+		return "adaptation", true
+	case "SEQUEL":
 		return "sequel", true
-	case relType == "PREQUEL":
+	case "PREQUEL":
 		return "prequel", true
+	case "":
+		return "", false
 	}
 	return "other", true
 }
@@ -451,6 +470,11 @@ func (m *apiMedia) media() Media {
 		EndDate:        m.EndDate.time(),
 		SourceMaterial: m.Source,
 		ExternalURL:    m.SiteURL,
+		Status:         m.Status,
+	}
+	for _, e := range m.Staff.Edges {
+		a.Staff = append(a.Staff, StaffMember{Role: e.Role, Name: e.Node.Name.Full,
+			ImageURL: e.Node.Image.Medium, URL: e.Node.SiteURL})
 	}
 	if m.IDMal != nil {
 		a.MALID = strconv.Itoa(*m.IDMal)
@@ -473,16 +497,17 @@ func (m *apiMedia) media() Media {
 		a.Tags = append(a.Tags, tag)
 	}
 	for _, e := range m.Relations.Edges {
-		kind, ok := relationKind(e.RelationType, e.Node.Type)
+		kind, ok := relationKind(e.RelationType)
 		if !ok {
 			continue
 		}
 		a.Relations = append(a.Relations, Relation{
-			Kind:   kind,
-			Source: AniList,
-			ID:     strconv.Itoa(e.Node.ID),
-			Titles: e.Node.Title.titles(),
-			Type:   e.Node.Format,
+			Kind:      kind,
+			Source:    AniList,
+			ID:        strconv.Itoa(e.Node.ID),
+			Titles:    e.Node.Title.titles(),
+			Type:      e.Node.Format,
+			MediaType: e.Node.Type,
 		})
 	}
 	for _, r := range m.Recommendations.Nodes {
