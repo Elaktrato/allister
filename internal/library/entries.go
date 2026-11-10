@@ -358,3 +358,54 @@ func (l *Library) RemoveEntry(ctx context.Context, itemID int64) error {
 	}
 	return nil
 }
+
+// ApplyImport applies the three list fields of an import row - status,
+// rating and the primary progress value - to an existing entry and bumps its
+// updated_at. With a non-nil newerThan it does nothing when the entry is not
+// older than that source modification time: the user's own later changes win.
+// Everything else (comment, dates, the other progress tracks) stays as it is.
+// It reports whether anything was written.
+func (l *Library) ApplyImport(ctx context.Context, itemID int64, in Entry, newerThan *time.Time) (bool, error) {
+	cur, err := l.Entry(ctx, itemID)
+	if err != nil {
+		return false, err
+	}
+	if cur == nil {
+		return false, nil // no entry to update
+	}
+	if newerThan != nil && !cur.UpdatedAt.Before(*newerThan) {
+		return false, nil
+	}
+	it, err := l.Item(ctx, itemID)
+	if err != nil {
+		return false, err
+	}
+	if it == nil {
+		return false, nil
+	}
+	def, err := l.kindDef(it.PluginID, it.Kind)
+	if err != nil {
+		return false, err
+	}
+	upd := Entry{ItemID: itemID, Status: cur.Status, Rating: cur.Rating,
+		Comment: cur.Comment, StartedOn: cur.StartedOn, FinishedOn: cur.FinishedOn,
+		Progress: map[string]float64{}}
+	for k, v := range cur.Progress {
+		upd.Progress[k] = v
+	}
+	if in.Status != "" {
+		upd.Status = in.Status
+	}
+	if in.Rating != nil {
+		upd.Rating = in.Rating
+	}
+	if key := def.Progress.PrimaryKey; key != "" {
+		if v, ok := in.Progress[key]; ok {
+			upd.Progress[key] = v
+		}
+	}
+	if err := l.UpsertEntry(ctx, upd); err != nil {
+		return false, err
+	}
+	return true, nil
+}

@@ -69,6 +69,7 @@ const (
 	outcomeUnmatched = "unmatched"
 	outcomeSkipped   = "skipped"
 	outcomeFailed    = "failed"
+	outcomeUpdated   = "updated"
 )
 
 var (
@@ -424,9 +425,9 @@ func (r *Runner) Handler() jobs.Handler {
 		if err := json.Unmarshal(raw, &p); err != nil {
 			return fmt.Errorf("import: bad payload: %w", err)
 		}
-		var state, pluginID, importerID string
-		err := r.d.DB.QueryRowContext(ctx, `SELECT state, plugin_id, importer_id FROM imports WHERE id=?`, p.ImportID).
-			Scan(&state, &pluginID, &importerID)
+		var state, pluginID, importerID, mode string
+		err := r.d.DB.QueryRowContext(ctx, `SELECT state, plugin_id, importer_id, mode FROM imports WHERE id=?`, p.ImportID).
+			Scan(&state, &pluginID, &importerID, &mode)
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil // deleted
 		}
@@ -475,7 +476,7 @@ func (r *Runner) Handler() jobs.Handler {
 			if !r.d.Registry.IsEnabled(pluginID) {
 				return fmt.Errorf("import %d: plugin %q is disabled, paused: %w", p.ImportID, pluginID, jobs.ErrPaused)
 			}
-			if err := r.process(ctx, ref, p.ImportID, row); errors.Is(err, errStopped) {
+			if err := r.process(ctx, ref, p.ImportID, mode, row); errors.Is(err, errStopped) {
 				return nil // cancelled while retrying
 			} else if err != nil {
 				return err
@@ -559,6 +560,7 @@ type rowCtx struct {
 	ref      *importerRef
 	importID int64
 	seq      int
+	mode     string // how an existing entry is treated (Mode*)
 	entry    plugin.ParsedEntry
 	kind     plugin.KindDef
 	idType   string
@@ -569,8 +571,8 @@ func (rc *rowCtx) pluginID() string { return rc.ref.manifest.ID }
 
 // process handles one row. It returns an error only when the job must stop:
 // context cancellation, the source staying unavailable, or a database failure.
-func (r *Runner) process(ctx context.Context, ref *importerRef, importID int64, pr pendingRow) error {
-	rc := &rowCtx{ref: ref, importID: importID, seq: pr.seq, idType: ref.info.ExternalIDType}
+func (r *Runner) process(ctx context.Context, ref *importerRef, importID int64, mode string, pr pendingRow) error {
+	rc := &rowCtx{ref: ref, importID: importID, seq: pr.seq, idType: ref.info.ExternalIDType, mode: normalizeMode(mode)}
 	if err := json.Unmarshal([]byte(pr.data), &rc.entry); err != nil {
 		return r.record(ctx, importID, pr.seq, outcomeFailed, 0, "stored row is unreadable: "+err.Error())
 	}
@@ -697,11 +699,12 @@ func (r *Runner) syncJob(ctx context.Context, pluginID string, itemID int64) str
 	return ""
 }
 
-// handleSaved deals with a row whose item is already stored. When the item
-// has a list entry the row is skipped; when it has none (removed, or never
-// created) the entry is created from the row. Either way an item whose sync
-// never started (state pending, e.g. a crash before its job was enqueued)
-// gets a sync job.
+// handleSaved deals with a row whose item is already stored. With an import
+// mode other than skip, an existing entry is updated from the row (only when
+// the row is newer for ModeNewer); otherwise a stored entry is skipped. When
+// the item has no entry (removed, or never created) the entry is created from
+// the row. Either way an item whose sync never started (state pending, e.g. a
+// crash before its job was enqueued) gets a sync job.
 func (r *Runner) handleSaved(ctx context.Context, rc *rowCtx, saved *library.Item) error {
 	dctx := context.WithoutCancel(ctx)
 	le, err := r.d.Library.Entry(dctx, saved.ID)
@@ -713,6 +716,21 @@ func (r *Runner) handleSaved(ctx context.Context, rc *rowCtx, saved *library.Ite
 		syncNote = r.syncJob(dctx, rc.pluginID(), saved.ID)
 	}
 	if le != nil {
+		// a "newer" row without a source timestamp cannot prove it is newer
+		if rc.mode == ModeAlways || (rc.mode == ModeNewer && rc.entry.UpdatedAt != nil) {
+			newerThan := rc.entry.UpdatedAt
+			if rc.mode == ModeAlways {
+				newerThan = nil
+			}
+			upd := library.Entry{Status: library.Status(rc.entry.Status), Rating: rc.entry.Rating, Progress: rc.entry.Progress}
+			updated, uerr := r.d.Library.ApplyImport(dctx, saved.ID, upd, newerThan)
+			if uerr != nil {
+				return r.record(dctx, rc.importID, rc.seq, outcomeFailed, saved.ID, uerr.Error())
+			}
+			if updated {
+				return r.record(dctx, rc.importID, rc.seq, outcomeUpdated, saved.ID, joinNotes("updated from the source", syncNote))
+			}
+		}
 		return r.record(dctx, rc.importID, rc.seq, outcomeSkipped, saved.ID, joinNotes("already in your list", syncNote))
 	}
 	entry, notes := buildEntry(rc.kind, saved, rc.entry)
