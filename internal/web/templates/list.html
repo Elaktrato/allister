@@ -70,7 +70,7 @@
 
 {{/* a table head cell: a sort link (plain GET; with htmx it refreshes the rows region like the filter bar) or plain text */}}
 {{define "sort_th"}}<th scope="col"{{with .Sort}} aria-sort="{{.}}"{{end}} class="{{if .Hide}}hidden {{end}}py-2 pr-3 font-medium{{template "cell_hide" .Hide}}">
-{{- if .Href}}<a id="{{.ID}}" href="{{.Href}}" hx-get="{{.Href}}" hx-target="#list-rows" hx-push-url="true" hx-sync="#list-filter:replace" class="group -mx-1 inline-flex items-center gap-1 whitespace-nowrap rounded px-1 hover:text-slate-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500{{if .Sort}} text-slate-100{{end}}"><span>{{.Label}}</span>
+{{- if .Href}}<a id="{{.ID}}" href="{{.Href}}" hx-get="{{.Href}}" hx-target="#list-rows" hx-push-url="true" hx-sync="#list-filter:replace" hx-include="#list-filter" class="group -mx-1 inline-flex items-center gap-1 whitespace-nowrap rounded px-1 hover:text-slate-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500{{if .Sort}} text-slate-100{{end}}"><span>{{.Label}}</span>
 {{- if .Sort}}<span class="icon text-[1rem] text-indigo-400" aria-hidden="true">{{if eq .Sort "ascending"}}arrow_upward{{else}}arrow_downward{{end}}</span>
 {{- else}}<span class="icon text-[1rem] opacity-0 group-hover:opacity-60 group-focus-visible:opacity-60" aria-hidden="true">unfold_more</span>{{end}}</a>
 {{- else}}{{.Label}}{{end}}</th>{{end}}

@@ -109,7 +109,7 @@ func TestSortHeaderLinks(t *testing.T) {
 			href := listHref("/tv", want)
 			cell := headCell(t, head, l[0])
 			mustContain(t, cell, `href="`+href+`"`, `hx-get="`+href+`"`, `hx-target="#list-rows"`, `hx-push-url="true"`,
-				`hx-sync="#list-filter:replace"`)
+				`hx-sync="#list-filter:replace"`, `hx-include="#list-filter"`)
 			mustNotContain(t, cell, "page=")
 		}
 		// non-sortable columns are plain text
