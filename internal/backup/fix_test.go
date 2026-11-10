@@ -248,19 +248,16 @@ func TestBackupRestoreQueuesManualItemsWithRemoteCovers(t *testing.T) {
 	}
 }
 
-// decoyArchive is the base-offset exploit: a decoy central directory header
-// at offset 0 that archive/zip refuses (CompressedSize 0xFFFFFFFF without a
-// zip64 extra), junk, then n cheap headers at the real base X, and an end
-// record declaring 1 entry at directory offset 0 with size endOff-X, so the
+// decoyArchive is the base-offset exploit: junk at offset 0 (no central
+// directory header, so archive/zip's base-0 fallback fails and it walks the
+// headers at the computed base; a decoy header with CompressedSize
+// 0xFFFFFFFF and no zip64 extra served as the junk until Go 1.27 began
+// accepting it), then n cheap headers at the real base X, and an end record
+// declaring 1 entry at directory offset 0 with size endOff-X, so the
 // computed base offset is X.
 func decoyArchive(n int) []byte {
 	le := binary.LittleEndian
-	decoy := make([]byte, 47)
-	le.PutUint32(decoy, 0x02014b50)
-	le.PutUint32(decoy[20:], 0xFFFFFFFF) // compressed size: needs a zip64 extra
-	le.PutUint16(decoy[28:], 1)
-	decoy[46] = 'a'
-	out := append(decoy, bytes.Repeat([]byte{'J'}, 100)...)
+	out := append(bytes.Repeat([]byte{'D'}, 47), bytes.Repeat([]byte{'J'}, 100)...)
 	x := len(out)
 	hdr := make([]byte, 47)
 	le.PutUint32(hdr, 0x02014b50)
