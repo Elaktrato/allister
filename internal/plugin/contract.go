@@ -208,13 +208,17 @@ type SourceInfo struct {
 
 // ImporterInfo describes an import format. ResolveVia names the declared
 // source used to look up ExternalIDType; FallbackTitleLang is the title
-// language of the manual entry kept when nothing matches.
+// language of the manual entry kept when nothing matches. ExternalIDLabel is
+// an optional human name of ExternalIDType ("MyAnimeList"): a single line of
+// at most 40 characters; the core shows such an id as "<label> #<value>"
+// (the type itself when empty).
 type ImporterInfo struct {
 	ID                string   `json:"id"`
 	Name              string   `json:"name"`
 	FileHint          string   `json:"file_hint,omitempty"`
 	Accept            []string `json:"accept,omitempty"`
 	ExternalIDType    string   `json:"external_id_type,omitempty"`
+	ExternalIDLabel   string   `json:"external_id_label,omitempty"`
 	ResolveVia        string   `json:"resolve_via,omitempty"`
 	FallbackTitleLang string   `json:"fallback_title_lang,omitempty"`
 }

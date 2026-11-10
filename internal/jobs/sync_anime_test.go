@@ -2,11 +2,14 @@ package jobs
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 
@@ -284,5 +287,88 @@ func TestAnimeSyncJob(t *testing.T) {
 	kind, payload := AnimeSyncJob(42)
 	if kind != KindSyncAnime || payload != (SyncPayload{AnimeID: 42, PluginID: "anime"}) {
 		t.Fatalf("got %q %+v", kind, payload)
+	}
+}
+
+// raceServer serves an image and, while serving it, lets the user replace
+// the cover (the job read the remote URL before).
+func raceServer(t *testing.T, e *syncEnv, id *int64, body string) string {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := e.st.SetAnimeCoverPath(context.Background(), *id, "user.png"); err != nil {
+			t.Error(err)
+		}
+		w.Header().Set("Content-Type", "image/jpeg")
+		w.Write([]byte(body))
+	}))
+	t.Cleanup(srv.Close)
+	e.deps.HTTP = srv.Client()
+	return srv.URL + "/cover"
+}
+
+func coverDirFiles(t *testing.T, dir string) []string {
+	t.Helper()
+	ents, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out []string
+	for _, x := range ents {
+		out = append(out, x.Name())
+	}
+	return out
+}
+
+func TestSyncAnimeKeepsCoverReplacedDuringDownload(t *testing.T) {
+	for _, src := range []provider.Source{provider.AniList, provider.Manual} {
+		t.Run(string(src), func(t *testing.T) {
+			e := newSyncEnv(t)
+			var id int64
+			url := raceServer(t, e, &id, "race-"+string(src))
+			id = e.save(t, src, url)
+			if err := e.run(id); err != nil {
+				t.Fatal(err)
+			}
+			if s := e.saved(t, id); s.CoverPath != "user.png" || s.SyncState != "done" {
+				t.Fatalf("cover %q state %q", s.CoverPath, s.SyncState)
+			}
+			if f := coverDirFiles(t, e.deps.CoversDir); len(f) != 0 {
+				t.Fatalf("downloaded file left behind: %v", f)
+			}
+		})
+	}
+}
+
+func TestSyncAnimeStaleDownloadKeepsSharedFile(t *testing.T) {
+	e := newSyncEnv(t)
+	var id int64
+	url := raceServer(t, e, &id, "shared-bytes")
+	// another item already holds the file with the same content
+	other := e.save(t, provider.Manual, "")
+	id = e.save(t, provider.AniList, url)
+	if err := e.run(id); err != nil {
+		t.Fatal(err)
+	}
+	files := coverDirFiles(t, e.deps.CoversDir)
+	if len(files) != 0 {
+		t.Fatalf("unreferenced stale file kept: %v", files)
+	}
+	// now let the other item reference the same content and race again
+	sum := sha256.Sum256([]byte("shared-bytes"))
+	shared := hex.EncodeToString(sum[:]) + ".jpg"
+	if err := e.st.SetAnimeCoverPath(context.Background(), other, shared); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.st.SetAnimeCoverPath(context.Background(), id, url); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.st.SetSyncState(context.Background(), id, "pending"); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.run(id); err != nil {
+		t.Fatal(err)
+	}
+	if f := coverDirFiles(t, e.deps.CoversDir); len(f) != 1 || f[0] != shared {
+		t.Fatalf("shared file removed: %v", f)
 	}
 }

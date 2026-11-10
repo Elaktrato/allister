@@ -111,7 +111,7 @@ func TestManifestMatchesBaseline(t *testing.T) {
 		t.Fatalf("importers = %+v", m.Importers)
 	}
 	im := m.Importers[0]
-	if im.ID != "yamtrack" || im.Name != "Yamtrack CSV" || !reflect.DeepEqual(im.Accept, []string{".csv"}) || im.ExternalIDType != "mal" ||
+	if im.ID != "yamtrack" || im.Name != "Yamtrack CSV" || !reflect.DeepEqual(im.Accept, []string{".csv"}) || im.ExternalIDType != "mal" || im.ExternalIDLabel != "MyAnimeList" ||
 		im.ResolveVia != "anilist" || im.FallbackTitleLang != "ja-latn" || im.FileHint == "" {
 		t.Errorf("importer = %+v", im)
 	}

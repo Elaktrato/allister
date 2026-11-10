@@ -86,9 +86,10 @@ func TestMatchDialogOnlyForManual(t *testing.T) {
 	if rec.Code != 200 {
 		t.Fatalf("manual: %d", rec.Code)
 	}
-	// ADAPTED: the reference field is source_ref, external ids show as "<type> <value>"
+	// ADAPTED: the reference field is source_ref (the external id label comes
+	// from the importer's ExternalIDLabel)
 	mustContain(t, rec.Body.String(), `name="source_ref"`, `name="q"`, `hx-get="/anime/manual/man1/match/search"`,
-		`keyup changed delay:400ms, search`, "mal 5114", "Lost Show &lt;b&gt;", `id="match-results"`, "Match to AniList",
+		`keyup changed delay:400ms, search`, "MyAnimeList #5114", "Lost Show &lt;b&gt;", `id="match-results"`, "Match to AniList",
 		`placeholder="https://anilist.co/anime/123"`)
 	mustNotContain(t, rec.Body.String(), "<html", "<b>")
 	if rec.Header().Get("Vary") != "HX-Request" {
@@ -199,16 +200,17 @@ func TestMatchRejectsBadInput(t *testing.T) {
 	id := e.unmatched(t)
 	before, _ := e.snapshot(t, id)
 	for name, form := range map[string]url.Values{
-		"neither":     {},
-		"blank":       {"source_ref": {"  "}},
-		"bad url":     {"source_ref": {"https://example.com/anime/5"}},
-		"look-alike":  {"source_ref": {"https://anilist.co.evil.com/anime/5"}},
-		"userinfo":    {"source_ref": {"https://anilist.co@evil.com/anime/5"}},
-		"bad pick":    {"pick": {"12abc"}},
-		"zero":        {"source_ref": {"0"}},
-		"manga":       {"source_ref": {"https://anilist.co/manga/5"}},
-		"pick as url": {"pick": {"https://anilist.co/anime/5"}},
-		"bad source":  {"pick": {"5"}, "source": {"mal"}},
+		"neither":      {},
+		"blank":        {"source_ref": {"  "}},
+		"bad url":      {"source_ref": {"https://example.com/anime/5"}},
+		"look-alike":   {"source_ref": {"https://anilist.co.evil.com/anime/5"}},
+		"userinfo":     {"source_ref": {"https://anilist.co@evil.com/anime/5"}},
+		"bad pick":     {"pick": {"12abc"}}, // a valid path id, refused by the source
+		"control pick": {"pick": {"1\x002"}},
+		"zero":         {"source_ref": {"0"}},
+		"manga":        {"source_ref": {"https://anilist.co/manga/5"}},
+		"pick as url":  {"pick": {"https://anilist.co/anime/5"}},
+		"bad source":   {"pick": {"5"}, "source": {"mal"}},
 	} {
 		rec := e.do("POST", matchURL, form, true)
 		if rec.Code != 422 {
@@ -234,8 +236,7 @@ func TestMatchUnknownIDShowsError(t *testing.T) {
 	if rec.Code != 422 {
 		t.Fatalf("%d", rec.Code)
 	}
-	// ADAPTED: generic wording (was "AniList has no anime with that id")
-	mustContain(t, rec.Body.String(), "No item with that id at AniList", `value="999999"`)
+	mustContain(t, rec.Body.String(), "AniList has no anime with that id", `value="999999"`)
 	after, enA := e.snapshot(t, id)
 	if !reflect.DeepEqual(before, after) || !reflect.DeepEqual(enB, enA) || len(e.jobs.got) != 0 {
 		t.Fatal("changed")
@@ -465,7 +466,7 @@ func TestMatchFetchesBeforeAnyChange(t *testing.T) {
 		code int
 		want string
 	}{
-		"not found":    {plugin.ErrNotFound, 422, "No item with that id at Fake TV"},
+		"not found":    {plugin.ErrNotFound, 422, "Fake TV has no show with that id."},
 		"unavailable":  {plugin.ErrUnavailable, 503, "Nothing was changed"},
 		"rate limited": {plugin.ErrRateLimited, 503, "Nothing was changed"},
 	} {
@@ -576,4 +577,38 @@ func TestMatchWithSeveralSources(t *testing.T) {
 	if it, _ := e.snapshot(t, id); it.Source != "tvalt" || it.SourceID != "5" {
 		t.Fatalf("%+v", it)
 	}
+}
+
+// A pick is any valid path id (the source's Details verifies it); only a
+// pasted reference follows the URL patterns' digit rule.
+func TestMatchPickAcceptsNonDigitIDs(t *testing.T) {
+	e := newFixtureEnv(t)
+	id := tvManual(t, e.env)
+	e.tv.Data = tvShow("x", "Found")
+	rec := e.do("POST", "/tv/manual/m1/match", url.Values{"pick": {"tt-77"}}, true)
+	if rec.Code != 204 || rec.Header().Get("HX-Redirect") != "/tv/tvdata/tt-77" {
+		t.Fatalf("%d %q %s", rec.Code, rec.Header().Get("HX-Redirect"), rec.Body.String())
+	}
+	if it, _ := e.snapshot(t, id); it.SourceID != "tt-77" {
+		t.Fatalf("%+v", it)
+	}
+	e2 := newFixtureEnv(t)
+	tvManual(t, e2.env)
+	if rec := e2.do("POST", "/tv/manual/m1/match", url.Values{"source_ref": {"tt-77"}}, true); rec.Code != 422 {
+		t.Fatalf("reference: %d", rec.Code)
+	}
+	if e2.tv.Calls(plugintest.OpDetails) != 0 {
+		t.Fatal("source called for an invalid reference")
+	}
+}
+
+// The no-JS search form keeps ?kind= (browsers drop the action's query on a
+// GET submit).
+func TestMatchSearchFormKeepsKind(t *testing.T) {
+	e := newFixtureEnv(t, withComicKind)
+	e.saveFixture(t, "book", "comic", plugin.ItemData{ItemSummary: plugin.ItemSummary{Source: "manual", ID: "c1", Kind: "comic", Titles: ttl("Mine")}},
+		library.WithSyncState("done"))
+	b := e.get("/book/manual/c1/match?kind=comic").Body.String()
+	mustContain(t, b, `<input type="hidden" name="kind" value="comic">`, `action="/book/manual/c1/match?kind=comic"`)
+	mustNotContain(t, e.get("/anime/manual/x/match").Body.String(), `name="kind"`)
 }

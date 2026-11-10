@@ -85,6 +85,7 @@ func Manifest() plugin.Manifest {
 			FileHint:          "Export your list from Yamtrack (Settings, Export data) and upload the CSV file. Only anime rows with MyAnimeList ids are imported.",
 			Accept:            []string{".csv"},
 			ExternalIDType:    "mal",
+			ExternalIDLabel:   "MyAnimeList",
 			ResolveVia:        SourceID,
 			FallbackTitleLang: "ja-latn",
 		}},

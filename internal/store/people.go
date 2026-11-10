@@ -33,6 +33,13 @@ func (s *Store) SetPersonImagePath(ctx context.Context, personID int64, path str
 	return ignoreMissing(s.lib.SetPersonImagePath(ctx, personID, path))
 }
 
+// SetPersonImagePathIf sets the image to path only while it still holds
+// expected (library.SetPersonImagePathIf).
+func (s *Store) SetPersonImagePathIf(ctx context.Context, personID int64, expected, path string) (bool, error) {
+	ok, err := s.lib.SetPersonImagePathIf(ctx, personID, expected, path)
+	return ok, wrapf("set person image", err)
+}
+
 // Person returns the person or nil, nil when absent.
 func (s *Store) Person(ctx context.Context, id int64) (*Person, error) {
 	p, err := s.lib.Person(ctx, id)

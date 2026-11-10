@@ -2,11 +2,13 @@
 {{range .Fields}}
 {{if eq .Kind "textarea"}}
 <label class="block text-sm">{{.Label}}
-  <textarea name="{{.Name}}" rows="5" maxlength="20000"{{if .Required}} required{{end}} class="mt-1 w-full rounded border border-slate-700 bg-slate-950 px-3 py-2">{{.Value}}</textarea>
+  <textarea name="{{.Name}}" rows="5" maxlength="20000"{{if .Required}} required{{end}} class="mt-1 w-full rounded border border-slate-700 bg-slate-950 px-3 py-2">
+{{.Value}}</textarea>
 </label>
 {{else if eq .Kind "list"}}
 <label class="block text-sm">{{.Label}} <span class="text-xs text-slate-400">(one per line, up to 50)</span>
-  <textarea name="{{.Name}}" rows="3"{{if .Required}} required{{end}} class="mt-1 w-full rounded border border-slate-700 bg-slate-950 px-3 py-2">{{.Value}}</textarea>
+  <textarea name="{{.Name}}" rows="3"{{if .Required}} required{{end}} class="mt-1 w-full rounded border border-slate-700 bg-slate-950 px-3 py-2">
+{{.Value}}</textarea>
 </label>
 {{else if eq .Kind "enum"}}
 <label class="block text-sm">{{.Label}}
@@ -29,23 +31,25 @@
 </label>
 {{else if eq .Kind "url"}}
 <label class="block text-sm">{{.Label}}
-  <input type="url" name="{{.Name}}" value="{{.Value}}"{{if .Required}} required{{end}} maxlength="1000" placeholder="https://" class="mt-1 w-full rounded border border-slate-700 bg-slate-950 px-3 py-2">
+  <input type="url" name="{{.Name}}" value="{{.Value}}"{{if .Required}} required{{end}} placeholder="https://" class="mt-1 w-full rounded border border-slate-700 bg-slate-950 px-3 py-2">
 </label>
 {{else}}
 <label class="block text-sm">{{.Label}}
-  <input type="text" name="{{.Name}}" value="{{.Value}}"{{if .Required}} required{{end}} maxlength="1000" class="mt-1 w-full rounded border border-slate-700 bg-slate-950 px-3 py-2">
+  <input type="text" name="{{.Name}}" value="{{.Value}}"{{if .Required}} required{{end}} class="mt-1 w-full rounded border border-slate-700 bg-slate-950 px-3 py-2">
 </label>
 {{end}}
 {{end}}
 {{if .ShowGenres}}
 <label class="block text-sm">{{.GenresLabel}}
-  <textarea name="genres" rows="2" class="mt-1 w-full rounded border border-slate-700 bg-slate-950 px-3 py-2">{{.Genres}}</textarea>
-  <span class="mt-1 block text-xs text-slate-400">Separate them with a comma or a new line (up to 50).</span>
+  <textarea name="genres" rows="2" class="mt-1 w-full rounded border border-slate-700 bg-slate-950 px-3 py-2">
+{{.Genres}}</textarea>
+  <span class="mt-1 block text-xs text-slate-400">One per line (up to 50); a genre may contain commas.</span>
 </label>
 {{end}}
 {{if .ShowTags}}
 <label class="block text-sm">{{.TagsLabel}}
-  <textarea name="tags" rows="3" class="mt-1 w-full rounded border border-slate-700 bg-slate-950 px-3 py-2">{{.Tags}}</textarea>
+  <textarea name="tags" rows="3" class="mt-1 w-full rounded border border-slate-700 bg-slate-950 px-3 py-2">
+{{.Tags}}</textarea>
   <span class="mt-1 block text-xs text-slate-400">One per line (up to 100). Add a relevance from 0 to 100 after a colon and mark a spoiler with a trailing “!”, for example: Time Travel:80!</span>
 </label>
 {{end}}

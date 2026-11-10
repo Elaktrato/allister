@@ -20,7 +20,14 @@ import (
 //   - the genres when the kind enables them as editable, and the tags when
 //     the kind enables them as editable (terms of a kind that does not allow
 //     editing them must be empty and stay as stored);
-//   - CoverPath, the stored cover value ("" clears it).
+//   - the cover when CoverPath is set (the new stored value; "" clears it);
+//     nil keeps the current cover as it is at write time, so an edit never
+//     writes back a stale value (a sync job may finish a download meanwhile).
+//
+// Required fields are enforced only for fields that currently have a stored
+// value (clearing one is refused): a source may lack a required field, and
+// that must not block editing anything else. Manual create enforces them all
+// (ValidateItem).
 //
 // Source, source id, external ids, relations, sync state, progress keys,
 // credits and the list entry are never touched.
@@ -29,7 +36,7 @@ type DetailsUpdate struct {
 	Fields    map[string]plugin.FieldValue
 	Genres    []string
 	Tags      []plugin.Tag
-	CoverPath string
+	CoverPath *string
 }
 
 // preparedDetails is the validated form of a DetailsUpdate.
@@ -75,12 +82,14 @@ func detailsMeta(ctx context.Context, q queryer, itemID int64) (pluginID, kind s
 }
 
 // prepareDetails validates u against the kind exactly like SaveItem and
-// ValidateItem do (text hygiene, bounds, enums, URLs, term limits, required
-// fields). stored are the keys of the item's stored fields: the values of
-// non-editable ones stay and count for the required check.
+// ValidateItem do (text hygiene, bounds, enums, URLs, term limits). stored
+// are the keys of the item's stored fields (fields with a value): the values
+// of non-editable ones stay; a required field among them must keep a value.
 func prepareDetails(def plugin.KindDef, u DetailsUpdate, stored []string) (*preparedDetails, error) {
-	if err := checkImageRef("cover", u.CoverPath); err != nil {
-		return nil, err
+	if u.CoverPath != nil {
+		if err := checkImageRef("cover", *u.CoverPath); err != nil {
+			return nil, err
+		}
 	}
 	p := &preparedDetails{genres: def.Genres.Enabled && def.Genres.Editable, tags: def.Tags.Enabled && def.Tags.Editable}
 	var err error
@@ -113,7 +122,17 @@ func prepareDetails(def plugin.KindDef, u DetailsUpdate, stored []string) (*prep
 			all = append(all, fieldRow{key: k})
 		}
 	}
-	if miss := requiredMissing(def, all); len(miss) > 0 {
+	had := map[string]bool{}
+	for _, k := range stored {
+		had[k] = true
+	}
+	var miss []string
+	for _, k := range requiredMissing(def, all) {
+		if had[k] {
+			miss = append(miss, k)
+		}
+	}
+	if len(miss) > 0 {
 		return nil, invalid("required field(s) missing: %s", strings.Join(miss, ", "))
 	}
 	if len(u.Genres) > 0 && !p.genres {
@@ -197,11 +216,51 @@ func (l *Library) UpdateDetails(ctx context.Context, itemID int64, u DetailsUpda
 	if err := insertTerms(ctx, tx, itemID, p.terms); err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE items SET cover_path = ?, updated_at = `+nowSQL+` WHERE id = ?`, u.CoverPath, itemID); err != nil {
+	if u.CoverPath != nil {
+		if _, err := tx.ExecContext(ctx, `UPDATE items SET cover_path = ? WHERE id = ?`, *u.CoverPath, itemID); err != nil {
+			return fmt.Errorf("update details: %w", err)
+		}
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE items SET updated_at = `+nowSQL+` WHERE id = ?`, itemID); err != nil {
 		return fmt.Errorf("update details: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("update details: %w", err)
 	}
 	return nil
+}
+
+// compareAndSet runs a one-row UPDATE ... WHERE ... AND <col> = expected and
+// reports whether it changed the row.
+func (l *Library) compareAndSet(ctx context.Context, what, query string, args ...any) (bool, error) {
+	res, err := l.db.ExecContext(ctx, query, args...)
+	if err != nil {
+		return false, fmt.Errorf("%s: %w", what, err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("%s: %w", what, err)
+	}
+	return n == 1, nil
+}
+
+// SetCoverPathIf replaces the item's cover with name only while it still
+// holds expected (compare-and-set), so a background download never
+// overwrites a cover the user changed meanwhile. It reports whether the
+// cover was set; an unknown item or another current value is false, nil.
+func (l *Library) SetCoverPathIf(ctx context.Context, itemID int64, expected, name string) (bool, error) {
+	if err := checkImageRef("cover", name); err != nil {
+		return false, err
+	}
+	return l.compareAndSet(ctx, "set cover path", `UPDATE items SET cover_path = ?, updated_at = `+nowSQL+`
+		WHERE id = ? AND cover_path = ?`, name, itemID, expected)
+}
+
+// SetPersonImagePathIf is SetCoverPathIf for a person's image.
+func (l *Library) SetPersonImagePathIf(ctx context.Context, personID int64, expected, name string) (bool, error) {
+	if err := checkImageRef("person image", name); err != nil {
+		return false, err
+	}
+	return l.compareAndSet(ctx, "set person image", `UPDATE `+tablePeople+` SET image_path = ? WHERE id = ? AND image_path = ?`,
+		name, personID, expected)
 }

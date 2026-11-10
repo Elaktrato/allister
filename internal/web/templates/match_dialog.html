@@ -25,6 +25,7 @@
     </form>
     <form method="get" action="{{.SearchURL}}" class="space-y-2" hx-on:submit="event.preventDefault()">
       {{if .Sources}}<input type="hidden" name="source" value="{{.Source}}">{{end}}
+      {{if .Kind}}<input type="hidden" name="kind" value="{{.Kind}}">{{end}}
       <label class="block text-sm">{{.SearchLabel}}
         <input type="search" name="q" value="{{.Search.Query}}" maxlength="200" placeholder="Title" autocomplete="off"
           hx-get="{{.SearchURL}}" hx-trigger="keyup changed delay:400ms, search" hx-target="#match-results" hx-swap="innerHTML"

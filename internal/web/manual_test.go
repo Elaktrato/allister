@@ -248,7 +248,7 @@ func TestManualSavesAllFields(t *testing.T) {
 	v.Set("field.studio", "Studio X")
 	v.Set("field.synopsis", "Para one.\r\n\r\nPara <b>two</b>.")
 	v.Set("field.started_on", "1999-04-01")
-	v.Set("genres", "Drama, Mystery")
+	v.Set("genres", "Drama\nMystery")
 	v.Set("tags", "Time Travel:80!\nTwist")
 	v.Set("status", "active")
 	v.Set("rating", "0")
@@ -260,7 +260,7 @@ func TestManualSavesAllFields(t *testing.T) {
 	it, en := e.manualAnime(t, id)
 	f := it.Fields
 	if f["type"].Text != "MOVIE" || *f["episodes"].Num != 12 || *f["year"].Num != 1999 || f["studio"].Text != "Studio X" ||
-		f["synopsis"].Text != "Para one.\r\n\r\nPara <b>two</b>." || it.Titles[0].Lang != "ja-latn" || fmtDay(f["started_on"].Date) != "1999-04-01" {
+		f["synopsis"].Text != "Para one.\n\nPara <b>two</b>." /* CRLF normalised */ || it.Titles[0].Lang != "ja-latn" || fmtDay(f["started_on"].Date) != "1999-04-01" {
 		t.Fatalf("%+v", it)
 	}
 	if !reflect.DeepEqual(it.Genres, []string{"Drama", "Mystery"}) || len(it.Tags) != 2 || *it.Tags[0].Rank != 80 || !it.Tags[0].Spoiler {
@@ -525,7 +525,7 @@ func TestCleanupCoverKeepsSharedFiles(t *testing.T) {
 func TestManualFormOffersGenresAndTags(t *testing.T) {
 	e := newFixtureEnv(t)
 	b := e.get("/anime/manual/new").Body.String()
-	mustContain(t, b, `name="genres"`, `name="tags"`, "Time Travel:80!", "comma")
+	mustContain(t, b, `name="genres"`, `name="tags"`, "Time Travel:80!", "One per line")
 	b = e.get("/book/manual/new").Body.String()
 	mustContain(t, b, `name="genres"`)
 	mustNotContain(t, b, `name="tags"`)
@@ -587,13 +587,13 @@ func TestManualTVFixture(t *testing.T) {
 		`<option value="original">`)
 	v := url.Values{"title": {"Dark"}, "title_lang": {"original"}, "field.type": {"series"}, "status": {"planned"},
 		"field.networks": {"Netflix\r\nNetflix\n  ZDF  \n\nnetflix"},
-		"genres":         {"Drama, Mystery\nThriller,,"},
+		"genres":         {"Drama\r\nSci-Fi, Fantasy\n\nThriller"},
 		"tags":           {"Time Travel:80!\nTwist\nRe:Zero\nSpoiler!\n  Plot:0  "}}
 	it := e.createAt(t, "/tv/manual/new", v, nil)
 	if !reflect.DeepEqual(it.Fields["networks"].List, []string{"Netflix", "ZDF", "netflix"}) {
 		t.Fatalf("list %q", it.Fields["networks"].List)
 	}
-	if !reflect.DeepEqual(it.Genres, []string{"Drama", "Mystery", "Thriller"}) || it.Titles[0].Lang != "original" {
+	if !reflect.DeepEqual(it.Genres, []string{"Drama", "Sci-Fi, Fantasy", "Thriller"}) || it.Titles[0].Lang != "original" {
 		t.Fatalf("%+v", it)
 	}
 	want := []plugin.Tag{{Name: "Time Travel", Rank: ip(80), Spoiler: true}, {Name: "Twist"}, {Name: "Re:Zero"},

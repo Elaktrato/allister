@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/allister/allister/internal/covers"
@@ -76,7 +78,7 @@ func SyncAnime(deps SyncDeps) Handler {
 		if isRemote(saved.CoverPath) {
 			if name, err := covers.Download(ctx, deps.HTTP, deps.CoversDir, saved.CoverPath); err != nil {
 				failures = append(failures, fmt.Sprintf("cover: %v", err))
-			} else if err := st.SetAnimeCoverPath(ctx, saved.ID, name); err != nil {
+			} else if err := setCover(ctx, deps, saved.ID, saved.CoverPath, name); err != nil {
 				return fmt.Errorf("sync anime %d: %w", saved.ID, err)
 			}
 		}
@@ -118,8 +120,12 @@ func SyncAnime(deps SyncDeps) Handler {
 				failures = append(failures, fmt.Sprintf("person %d: %v", person.ID, err))
 				continue
 			}
-			if err := st.SetPersonImagePath(ctx, person.ID, name); err != nil {
+			ok, err := st.SetPersonImagePathIf(ctx, person.ID, person.ImagePath, name)
+			if err != nil {
 				return fmt.Errorf("sync anime %d: %w", saved.ID, err)
+			}
+			if !ok {
+				discardDownload(ctx, deps, name)
 			}
 		}
 		if err := ctx.Err(); err != nil {
@@ -152,7 +158,7 @@ func syncManual(ctx context.Context, deps SyncDeps, saved *store.Saved) error {
 			}
 			return fmt.Errorf("sync anime %d: cover: %v: %w", saved.ID, err, ErrRetryLater)
 		}
-		if err := deps.Store.SetAnimeCoverPath(ctx, saved.ID, name); err != nil {
+		if err := setCover(ctx, deps, saved.ID, saved.CoverPath, name); err != nil {
 			return fmt.Errorf("sync anime %d: %w", saved.ID, err)
 		}
 	}
@@ -164,4 +170,37 @@ func setState(ctx context.Context, st *store.Store, id int64, state string) erro
 		return fmt.Errorf("sync anime %d: set state %s: %w", id, state, err)
 	}
 	return nil
+}
+
+// setCover stores a downloaded cover only while the item still holds the
+// remote URL the job started from (compare-and-set): the user may have
+// replaced or removed the cover during the download. Then the downloaded
+// file is discarded (when nothing else references it) and the job carries
+// on without error.
+func setCover(ctx context.Context, deps SyncDeps, id int64, expected, name string) error {
+	ok, err := deps.Store.SetAnimeCoverPathIf(ctx, id, expected, name)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		discardDownload(ctx, deps, name)
+	}
+	return nil
+}
+
+// discardDownload removes a downloaded file that lost its compare-and-set,
+// unless another row references the same content-hash name. Failures only
+// leave a harmless orphan and are logged.
+func discardDownload(ctx context.Context, deps SyncDeps, name string) {
+	used, err := deps.Store.CoverReferenced(ctx, name)
+	if err != nil {
+		log.Printf("sync: discard %s: %v", name, err)
+		return
+	}
+	if used {
+		return
+	}
+	if err := os.Remove(filepath.Join(deps.CoversDir, name)); err != nil && !os.IsNotExist(err) {
+		log.Printf("sync: discard %s: %v", name, err)
+	}
 }

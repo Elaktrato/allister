@@ -55,7 +55,7 @@ func TestManifestJSONRoundTrip(t *testing.T) {
 			TitleLanguages: []string{"en", "ja"},
 		}},
 		Sources:   []plugin.SourceInfo{{ID: "s", Name: "S", RequestsPerMinute: 30, ExternalIDTypes: []string{"s"}, SupportsLookup: true, LinkLabel: "View on S", URLPatterns: []string{"s.example/{id}"}}},
-		Importers: []plugin.ImporterInfo{{ID: "i", Name: "I", FileHint: "csv", Accept: []string{".csv"}, ExternalIDType: "s", ResolveVia: "s", FallbackTitleLang: "en"}},
+		Importers: []plugin.ImporterInfo{{ID: "i", Name: "I", FileHint: "csv", Accept: []string{".csv"}, ExternalIDType: "s", ExternalIDLabel: "S id", ResolveVia: "s", FallbackTitleLang: "en"}},
 		Exporters: []plugin.ExporterInfo{{ID: "x", Name: "X", Extension: ".json", MIME: "application/json"}},
 	}
 	roundTrip(t, "full manifest", full)

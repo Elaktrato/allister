@@ -1,6 +1,10 @@
 package plugin
 
-import "strings"
+import (
+	"errors"
+	"strings"
+	"unicode"
+)
 
 // Declarative source URL matching. A source declares URL patterns as data
 // (SourceInfo.URLPatterns, for example "anilist.co/anime/{id}") and the core
@@ -79,17 +83,58 @@ func MatchURL(patterns []string, raw string) (id string, ok bool) {
 	return "", false
 }
 
+// checkURLPattern applies the pattern rules MatchURL relies on: no scheme,
+// a non-empty host without port, userinfo or placeholder, then path segments
+// that are non-empty literals plus exactly one whole "{id}" segment, and no
+// query, fragment, whitespace, control character or backslash. Validate
+// refuses manifests with a pattern that breaks them.
+func checkURLPattern(p string) error {
+	if strings.Contains(p, "://") || strings.HasPrefix(p, "//") {
+		return errors.New("must not contain a scheme (write host/path/{id})")
+	}
+	for _, r := range p {
+		if r <= ' ' || r == 0x7f || r == '\\' || unicode.IsSpace(r) || unicode.IsControl(r) {
+			return errors.New("must not contain a space, control character or backslash")
+		}
+	}
+	if strings.ContainsAny(p, "?#") {
+		return errors.New("must not contain a query or fragment")
+	}
+	host, path, _ := strings.Cut(p, "/")
+	if host == "" || strings.ContainsAny(host, ":@{}") {
+		return errors.New("needs a host without port, userinfo or placeholder")
+	}
+	ids := 0
+	for _, seg := range strings.Split(path, "/") {
+		switch {
+		case seg == "{id}":
+			ids++
+		case seg == "":
+			return errors.New("has an empty path segment")
+		case strings.ContainsAny(seg, "{}"):
+			return errors.New(`"{id}" must be a whole path segment`)
+		}
+	}
+	if ids != 1 {
+		return errors.New(`must contain "{id}" exactly once as a path segment`)
+	}
+	return nil
+}
+
 func matchPattern(pattern, host string, segs []string) (string, bool) {
-	ph, pp, ok := strings.Cut(pattern, "/")
+	if checkURLPattern(pattern) != nil {
+		return "", false
+	}
+	ph, pp, _ := strings.Cut(pattern, "/")
 	ph = strings.ToLower(ph)
 	if strings.HasPrefix(ph, "www.") {
 		ph = ph[len("www."):]
 	}
-	if !ok || ph == "" || strings.ContainsAny(ph, ":@?#{}") || ph != host {
+	if ph != host {
 		return "", false
 	}
 	psegs := strings.Split(pp, "/")
-	if strings.Count(pp, "{id}") != 1 || len(segs) < len(psegs) {
+	if len(segs) < len(psegs) {
 		return "", false
 	}
 	var id string

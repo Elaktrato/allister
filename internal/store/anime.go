@@ -81,6 +81,14 @@ func (s *Store) SetAnimeCoverPath(ctx context.Context, animeID int64, path strin
 	return ignoreMissing(s.lib.SetCoverPath(ctx, animeID, path))
 }
 
+// SetAnimeCoverPathIf sets the cover to path only while it still holds
+// expected (library.SetCoverPathIf); false means the cover changed meanwhile
+// (or the anime is gone).
+func (s *Store) SetAnimeCoverPathIf(ctx context.Context, animeID int64, expected, path string) (bool, error) {
+	ok, err := s.lib.SetCoverPathIf(ctx, animeID, expected, path)
+	return ok, wrapf("set cover", err)
+}
+
 // SetSyncState sets the anime's sync_state (pending, partial, done). An
 // unknown id is a no-op.
 func (s *Store) SetSyncState(ctx context.Context, animeID int64, state string) error {

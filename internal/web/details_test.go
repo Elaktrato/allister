@@ -2,6 +2,7 @@ package web
 
 import (
 	"context"
+	"html"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -172,7 +173,7 @@ func TestEditDetailsSetsGenresAndTags(t *testing.T) {
 	e := newFixtureEnv(t)
 	show := e.saveFixture(t, "tv", "show", tvShow("5", "The Show"))
 	base := with(titleRows("en", "The Show"), "field.type", "series")
-	rec := e.postMultipart(t, "/tv/tvdata/5/edit", with(base, "genres", "Drama, drama\nMystery, <script>x</script>",
+	rec := e.postMultipart(t, "/tv/tvdata/5/edit", with(base, "genres", "Drama\ndrama\nMystery\n<script>x</script>",
 		"tags", "Time Travel:80!\nTwist\ntwist"), nil)
 	if rec.Code != 303 {
 		t.Fatalf("%d %s", rec.Code, rec.Body.String())
@@ -188,13 +189,13 @@ func TestEditDetailsSetsGenresAndTags(t *testing.T) {
 	mustContain(t, b, "&lt;script&gt;x&lt;/script&gt;", "Time Travel")
 	mustNotContain(t, b, "<script>x")
 	edit := e.get("/tv/tvdata/5/edit").Body.String()
-	mustContain(t, edit, "Drama, Mystery, &lt;script&gt;x&lt;/script&gt;", "Time Travel:80!\nTwist")
+	mustContain(t, edit, "Drama\nMystery\n&lt;script&gt;x&lt;/script&gt;", "Time Travel:80!\nTwist")
 	many := make([]string, 51)
 	for i := range many {
 		many[i] = "g" + idStr(int64(i))
 	}
 	for name, form := range map[string]url.Values{
-		"51 genres":     with(base, "genres", strings.Join(many, ",")),
+		"51 genres":     with(base, "genres", strings.Join(many, "\n")),
 		"rank":          with(base, "tags", "x:101"),
 		"rank sign":     with(base, "tags", "x:-5"),
 		"long tag":      with(base, "tags", strings.Repeat("t", 61)),
@@ -514,4 +515,194 @@ func TestOverviewOffersEditDetailsForSavedItemsOnly(t *testing.T) {
 	e.addFixture(t, "tv", "show", tvShow("6", "Listed"), library.Entry{Status: library.Active})
 	b := e.get("/tv/tvdata/6").Body.String()
 	mustContain(t, b, "Edit details", ">Edit<")
+}
+
+var (
+	formTokenRe = regexp.MustCompile(`(?s)<input [^>]*>|<textarea [^>]*>.*?</textarea>|<select [^>]*>.*?</select>`)
+	formAttrRe  = regexp.MustCompile(`([a-z_-]+)="([^"]*)"`)
+	formOptRe   = regexp.MustCompile(`<option value="([^"]*)"( selected)?>`)
+)
+
+func formAttrs(tag string) map[string]string {
+	head := tag
+	if i := strings.Index(tag, ">"); i >= 0 {
+		head = tag[:i]
+	}
+	out := map[string]string{}
+	for _, m := range formAttrRe.FindAllStringSubmatch(head, -1) {
+		out[m[1]] = html.UnescapeString(m[2])
+	}
+	if strings.Contains(head, " checked") {
+		out["checked"] = "1"
+	}
+	return out
+}
+
+// browserForm extracts what a browser submits for the page's form, in
+// document order: inputs (no file or unchecked checkbox), textareas (the
+// newline right after the start tag dropped, newlines sent as CRLF) and
+// selects (the selected option, else the first).
+func browserForm(t *testing.T, page string) url.Values {
+	t.Helper()
+	v := url.Values{}
+	for _, tok := range formTokenRe.FindAllString(page, -1) {
+		a := formAttrs(tok)
+		name := a["name"]
+		if name == "" {
+			continue
+		}
+		switch {
+		case strings.HasPrefix(tok, "<input"):
+			if a["type"] == "file" || (a["type"] == "checkbox" && a["checked"] == "") {
+				continue
+			}
+			v.Add(name, a["value"])
+		case strings.HasPrefix(tok, "<textarea"):
+			body := tok[strings.Index(tok, ">")+1 : strings.LastIndex(tok, "</textarea>")]
+			body = strings.TrimPrefix(html.UnescapeString(body), "\n")
+			v.Add(name, strings.ReplaceAll(body, "\n", "\r\n"))
+		default:
+			opts := formOptRe.FindAllStringSubmatch(tok, -1)
+			if len(opts) == 0 {
+				continue
+			}
+			val := opts[0][1]
+			for _, o := range opts {
+				if o[2] != "" {
+					val = o[1]
+					break
+				}
+			}
+			v.Add(name, html.UnescapeString(val))
+		}
+	}
+	return v
+}
+
+// richTV gives the tv fixture one more field of every type: a text-section
+// synopsis, a one-line note, a list, a fractional score, a date and a url.
+func richTV(_, tv *plugintest.Plugin) {
+	k := &tv.M.Kinds[0]
+	k.Fields = append(k.Fields,
+		plugin.FieldDef{Key: "synopsis", Label: "Synopsis", Type: plugin.FieldText, Editable: true},
+		plugin.FieldDef{Key: "note", Label: "Note", Type: plugin.FieldText, Editable: true},
+		plugin.FieldDef{Key: "tagline", Label: "Tagline", Type: plugin.FieldText, Editable: true},
+		plugin.FieldDef{Key: "networks", Label: "Networks", Type: plugin.FieldList, Editable: true},
+		plugin.FieldDef{Key: "score", Label: "Score", Type: plugin.FieldNumber, Editable: true},
+		plugin.FieldDef{Key: "aired", Label: "Aired", Type: plugin.FieldDate, Editable: true},
+		plugin.FieldDef{Key: "homepage", Label: "Homepage", Type: plugin.FieldURL, Editable: true},
+	)
+	k.Sections[1].Field = "synopsis"
+}
+
+// richShow saves a sourced show whose data the form can only reproduce by
+// keeping it verbatim: odd tags, a genre with a comma, multi-line text, a
+// newline in a one-line field, values over the form's limits.
+func richShow(t *testing.T, e *env) (int64, library.Item) {
+	t.Helper()
+	nets := make([]string, 60) // the form accepts 50, the library 1000
+	for i := range nets {
+		nets[i] = "net" + idStr(int64(i))
+	}
+	aired := time.Date(2017, 12, 1, 0, 0, 0, 0, time.UTC)
+	d := tvShow("5", "The Show")
+	d.Titles = append(d.Titles, plugin.Title{Lang: "original", Text: "Original"})
+	d.Fields["type"] = plugin.FieldValue{Text: "miniseries"}
+	d.Fields["episodes"] = plugin.FieldValue{Num: num(12)}
+	d.Fields["score"] = plugin.FieldValue{Num: num(12.5)}
+	d.Fields["year"] = plugin.FieldValue{Num: num(1234567890123456789)}
+	d.Fields["synopsis"] = plugin.FieldValue{Text: "Line one.\nLine two.\n\n  Indented."}
+	d.Fields["note"] = plugin.FieldValue{Text: "first line\nsecond line"}
+	d.Fields["tagline"] = plugin.FieldValue{Text: strings.Repeat("t", 1500)}
+	d.Fields["networks"] = plugin.FieldValue{List: nets}
+	d.Fields["aired"] = plugin.FieldValue{Date: &aired}
+	d.Fields["homepage"] = plugin.FieldValue{Text: "https://tv.example/home"}
+	d.Genres = []string{"Sci-Fi, Fantasy", "Drama"}
+	d.Tags = []plugin.Tag{{Name: "Wow!"}, {Name: "Season:2"}, {Name: "Re:Zero"}, {Name: "Plot Twist", Rank: ip(90), Spoiler: true}}
+	d.CoverURL = "https://img.example/show.jpg"
+	id := e.addFixture(t, "tv", "show", d, library.Entry{Status: library.Active})
+	return id, e.item(t, id)
+}
+
+func TestEditDetailsKeepsUntouchedDataVerbatim(t *testing.T) {
+	e := newFixtureEnv(t, richTV)
+	id, before := richShow(t, e.env)
+	form := browserForm(t, e.get("/tv/tvdata/5/edit").Body.String())
+	if form.Get("title") != "The Show" {
+		t.Fatalf("form %v", form)
+	}
+	form["title"][0] = "Renamed"
+	if rec := e.postMultipart(t, "/tv/tvdata/5/edit", form, nil); rec.Code != 303 {
+		t.Fatalf("%d %s", rec.Code, rec.Body.String())
+	}
+	after := e.item(t, id)
+	if !reflect.DeepEqual(after.Titles, []plugin.Title{{Lang: "en", Text: "Renamed"}, {Lang: "original", Text: "Original"}}) {
+		t.Fatalf("titles %+v", after.Titles)
+	}
+	for k, v := range before.Fields {
+		if !reflect.DeepEqual(after.Fields[k], v) {
+			t.Errorf("field %s: %+v -> %+v", k, v, after.Fields[k])
+		}
+	}
+	if len(after.Fields) != len(before.Fields) {
+		t.Errorf("fields %v -> %v", before.Fields, after.Fields)
+	}
+	if !reflect.DeepEqual(after.Genres, before.Genres) || !reflect.DeepEqual(after.Tags, before.Tags) || after.CoverPath != before.CoverPath {
+		t.Fatalf("terms or cover changed:\n%+v %+v %q\n%+v %+v %q", before.Genres, before.Tags, before.CoverPath, after.Genres, after.Tags, after.CoverPath)
+	}
+}
+
+func TestEditDetailsChangingOneFieldKeepsTheRest(t *testing.T) {
+	e := newFixtureEnv(t, richTV)
+	id, before := richShow(t, e.env)
+	form := browserForm(t, e.get("/tv/tvdata/5/edit").Body.String())
+	form.Set("field.episodes", "13")
+	if rec := e.postMultipart(t, "/tv/tvdata/5/edit", form, nil); rec.Code != 303 {
+		t.Fatalf("%d %s", rec.Code, rec.Body.String())
+	}
+	after := e.item(t, id)
+	want := before.Fields
+	want["episodes"] = plugin.FieldValue{Num: num(13)}
+	if !reflect.DeepEqual(after.Fields, want) || !reflect.DeepEqual(after.Titles, before.Titles) ||
+		!reflect.DeepEqual(after.Genres, before.Genres) || !reflect.DeepEqual(after.Tags, before.Tags) {
+		t.Fatalf("\n%+v\n%+v", want, after)
+	}
+	// an edited tags text follows the documented syntax
+	form.Set("tags", "Wow!\nSeason:2")
+	if rec := e.postMultipart(t, "/tv/tvdata/5/edit", form, nil); rec.Code != 303 {
+		t.Fatal(rec.Code)
+	}
+	if it := e.item(t, id); !reflect.DeepEqual(it.Tags, []plugin.Tag{{Name: "Wow", Spoiler: true}, {Name: "Season", Rank: ip(2)}}) {
+		t.Fatalf("tags %+v", it.Tags)
+	}
+}
+
+// A required field the source never filled does not block an edit; clearing
+// a required field that has a value is refused; the HTML required attribute
+// follows the same rule.
+func TestEditDetailsRequiredOnlyWhenStored(t *testing.T) {
+	e := newFixtureEnv(t)
+	id := e.saveFixture(t, "anime", "anime", plugin.ItemData{ItemSummary: plugin.ItemSummary{Source: "anilist", ID: "7",
+		Titles: ttl("Typo")}})
+	b := e.get("/anime/anilist/7/edit").Body.String()
+	mustContain(t, b, `<select name="field.type" class=`)
+	if rec := e.postMultipart(t, "/anime/anilist/7/edit", titleRows("en", "Fixed"), nil); rec.Code != 303 {
+		t.Fatalf("%d %s", rec.Code, rec.Body.String())
+	}
+	if it := e.item(t, id); it.Titles[0].Text != "Fixed" || len(it.Fields) != 0 {
+		t.Fatalf("%+v", it)
+	}
+	if rec := e.postMultipart(t, "/anime/anilist/7/edit", with(titleRows("en", "Fixed"), "field.type", "TV"), nil); rec.Code != 303 {
+		t.Fatal(rec.Code)
+	}
+	mustContain(t, e.get("/anime/anilist/7/edit").Body.String(), `<select name="field.type" required`)
+	rec := e.postMultipart(t, "/anime/anilist/7/edit", with(titleRows("en", "Fixed"), "field.type", ""), nil)
+	if rec.Code != 422 {
+		t.Fatalf("cleared required: %d", rec.Code)
+	}
+	mustContain(t, rec.Body.String(), "Please choose a type")
+	if it := e.item(t, id); it.Fields["type"].Text != "TV" {
+		t.Fatal("cleared")
+	}
+	mustContain(t, e.get("/anime/manual/new").Body.String(), `<select name="field.type" required`)
 }

@@ -192,3 +192,55 @@ func TestProgressTypesAreClosedEnum(t *testing.T) {
 
 func tv() plugin.Manifest   { return plugintest.TVPlugin().Manifest() }
 func book() plugin.Manifest { return plugintest.BookPlugin().Manifest() }
+
+// URL patterns follow the matcher's rules; a pattern the matcher would skip
+// is refused with its path.
+func TestValidateURLPatterns(t *testing.T) {
+	for pat, want := range map[string]string{
+		"books.example/work/{id}":         "",
+		"www.books.example/w/{id}/info":   "",
+		"books.example/x":                 `must contain "{id}"`,
+		"books.example/{id}/{id}":         `must contain "{id}"`,
+		"{id}.example/work/1":             "host",
+		"books.example:8080/work/{id}":    "host",
+		"user@books.example/work/{id}":    "host",
+		"/work/{id}":                      "host",
+		"https://books.example/work/{id}": "scheme",
+		"//books.example/work/{id}":       "scheme",
+		"books.example/work/{id}?x=1":     "query",
+		"books.example/work/{id}#x":       "query",
+		"books.example/work//{id}":        "empty path segment",
+		"books.example/work/x{id}":        "{id}",
+		"books.example/wo rk/{id}":        "space",
+		"books.example\\work/{id}":        "space",
+	} {
+		m := book()
+		m.Sources[0].URLPatterns = []string{"books.example/ok/{id}", pat}
+		err := plugin.Validate(m)
+		if want == "" {
+			if err != nil {
+				t.Errorf("%q: %v", pat, err)
+			}
+			continue
+		}
+		if err == nil || !strings.Contains(err.Error(), "sources[0].url_patterns[1]: ") || !strings.Contains(err.Error(), want) {
+			t.Errorf("%q: error %v, want sources[0].url_patterns[1] and %q", pat, err, want)
+		}
+	}
+}
+
+func TestValidateImporterExternalIDLabel(t *testing.T) {
+	for label, want := range map[string]string{
+		"":                      "",
+		"MyAnimeList":           "",
+		"My\nList":              `importers[0].external_id_label: must be a single line without control characters`,
+		strings.Repeat("é", 41): `importers[0].external_id_label: longer than 40 characters`,
+	} {
+		m := book()
+		m.Importers[0].ExternalIDLabel = label
+		err := plugin.Validate(m)
+		if (want == "") != (err == nil) || (err != nil && !strings.Contains(err.Error(), want)) {
+			t.Errorf("%q: %v, want %q", label, err, want)
+		}
+	}
+}

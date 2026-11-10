@@ -9,8 +9,12 @@ import (
 	"unicode/utf8"
 )
 
-// maxUnitRunes is the longest FieldDef.Unit.
-const maxUnitRunes = 20
+// maxUnitRunes is the longest FieldDef.Unit; maxIDLabelRunes the longest
+// ImporterInfo.ExternalIDLabel.
+const (
+	maxUnitRunes    = 20
+	maxIDLabelRunes = 40
+)
 
 var (
 	// idRe: plugin, kind, source, importer and exporter ids are lower-case
@@ -76,8 +80,8 @@ func Validate(m Manifest) error {
 			p.add(path+".requests_per_minute", "must be positive")
 		}
 		for j, pat := range s.URLPatterns {
-			if !strings.Contains(pat, "{id}") {
-				p.add(fmt.Sprintf("%s.url_patterns[%d]", path, j), `must contain "{id}"`)
+			if err := checkURLPattern(pat); err != nil {
+				p.add(fmt.Sprintf("%s.url_patterns[%d]", path, j), "%v", err)
 			}
 		}
 	}
@@ -87,6 +91,12 @@ func Validate(m Manifest) error {
 		checkID(&p, path+".id", im.ID, importers)
 		if im.Name == "" {
 			p.add(path+".name", "required")
+		}
+		switch l := im.ExternalIDLabel; {
+		case !utf8.ValidString(l) || strings.IndexFunc(l, isControl) >= 0:
+			p.add(path+".external_id_label", "must be a single line without control characters")
+		case utf8.RuneCountInString(l) > maxIDLabelRunes:
+			p.add(path+".external_id_label", "longer than %d characters", maxIDLabelRunes)
 		}
 		if im.ResolveVia != "" && !sources[im.ResolveVia] {
 			p.add(path+".resolve_via", "unknown source %q", im.ResolveVia)

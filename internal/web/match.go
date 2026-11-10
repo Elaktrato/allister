@@ -2,8 +2,9 @@ package web
 
 // Matching a manual item to a source: GET /{plugin}/manual/{id}/match (the
 // dialog), GET .../match/search?q= (results partial, the source's Search)
-// and POST .../match (field source_ref, a pasted URL or bare id, or pick, a
-// search result's id; pick wins). URLs are matched against the source's
+// and POST .../match (field source_ref, a pasted URL or bare id following the
+// source's URL patterns, or pick, a search result's id, any valid path id;
+// pick wins). URLs are matched against the source's
 // declared URLPatterns by the core (plugin.MatchRef); no plugin code parses
 // URLs. The source's Details is fetched FIRST, so a source failure never
 // touches the database; then library.ConvertToSource converts the item in
@@ -28,9 +29,14 @@ type matchView struct {
 	Action, SearchURL, CancelURL                string
 	Heading, RefLabel, Placeholder, SearchLabel string
 	// Title is the item's resolved title; ExternalIDs its importer ids
-	// ("<type> <value>").
+	// ("<label> #<value>", the label from ImporterInfo.ExternalIDLabel, else
+	// the id type).
 	Title       string
 	ExternalIDs []string
+	// Kind is the item's kind for the no-JS search form (only when the
+	// plugin has several kinds: browsers drop the action's query on a GET
+	// submit).
+	Kind string
 	// Source is the chosen source id (posted with every match); Sources
 	// links the dialog of every source (only when there are several).
 	Source  string
@@ -118,9 +124,19 @@ func (s *server) newMatchView(r *http.Request, t *matchTarget, si plugin.SourceI
 	if len(si.URLPatterns) > 0 {
 		v.Placeholder = "https://" + strings.Replace(si.URLPatterns[0], "{id}", "123", 1)
 	}
+	if len(m.Kinds) > 1 {
+		v.Kind = t.ref.Kind
+	}
 	v.Search.EmptyHint = "Type a title to search " + si.Name + "."
 	for typ, val := range t.item.ExternalIDs {
-		v.ExternalIDs = append(v.ExternalIDs, typ+" "+val)
+		label := typ
+		for _, imp := range m.Importers {
+			if imp.ExternalIDType == typ && imp.ExternalIDLabel != "" {
+				label = imp.ExternalIDLabel
+				break
+			}
+		}
+		v.ExternalIDs = append(v.ExternalIDs, label+" #"+val)
 	}
 	sort.Strings(v.ExternalIDs)
 	if len(m.Sources) > 1 {
@@ -209,10 +225,12 @@ func (s *server) postMatch(w http.ResponseWriter, r *http.Request, pluginID stri
 	var id string
 	switch {
 	case pick != "":
-		if id, ok = plugin.MatchRef(nil, pick); !ok {
+		// any valid path id: the source's Details verifies it
+		if !validPathID(pick) {
 			fail(http.StatusUnprocessableEntity, "That search result is not a valid "+si.Name+" id.")
 			return
 		}
+		id = pick
 	case raw == "":
 		fail(http.StatusUnprocessableEntity, "Paste a "+si.Name+" URL or id, or pick a search result.")
 		return
@@ -237,7 +255,7 @@ func (s *server) postMatch(w http.ResponseWriter, r *http.Request, pluginID stri
 	switch {
 	case err == nil:
 	case errors.Is(err, plugin.ErrNotFound):
-		fail(http.StatusUnprocessableEntity, "No item with that id at "+si.Name+".")
+		fail(http.StatusUnprocessableEntity, si.Name+" has no "+strings.ToLower(t.kind.Label)+" with that id.")
 		return
 	case errors.Is(err, plugin.ErrRateLimited), errors.Is(err, plugin.ErrUnavailable):
 		log.Printf("match %s/%s: fetch %s/%s: %v", t.man.ID, t.ref.ID, si.ID, id, err)

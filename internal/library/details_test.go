@@ -71,7 +71,7 @@ func TestUpdateDetailsReplacesEditableFieldsOnly(t *testing.T) {
 	}
 	if !reflect.DeepEqual(it.Genres, before.Genres) || !reflect.DeepEqual(it.ExternalIDs, before.ExternalIDs) ||
 		!reflect.DeepEqual(it.Relations, before.Relations) || it.Source != before.Source || it.SourceID != before.SourceID ||
-		it.CoverPath != "" || it.SyncState != before.SyncState || !reflect.DeepEqual(it.ProgressKeys, before.ProgressKeys) {
+		it.CoverPath != before.CoverPath || it.SyncState != before.SyncState || !reflect.DeepEqual(it.ProgressKeys, before.ProgressKeys) {
 		t.Fatalf("other parts touched:\n%+v\n%+v", before, it)
 	}
 	if after := mustEntry(t, e.lib, id); !reflect.DeepEqual(after, entryBefore) {
@@ -125,8 +125,8 @@ func TestUpdateDetailsValidatesLikeSaveItem(t *testing.T) {
 		"required gone":   {func(u *DetailsUpdate) { delete(u.Fields, "author") }, "required"},
 		"control in list": {func(u *DetailsUpdate) { u.Fields["translators"] = plugin.FieldValue{List: []string{"a\tb"}} }, "control"},
 		"long genre":      {func(u *DetailsUpdate) { u.Genres = []string{strings.Repeat("g", 61)} }, ""},
-		"bad cover":       {func(u *DetailsUpdate) { u.CoverPath = "../etc/passwd" }, "cover"},
-		"js cover":        {func(u *DetailsUpdate) { u.CoverPath = "javascript:alert(1)" }, "cover"},
+		"bad cover":       {func(u *DetailsUpdate) { u.CoverPath = sp("../etc/passwd") }, "cover"},
+		"js cover":        {func(u *DetailsUpdate) { u.CoverPath = sp("javascript:alert(1)") }, "cover"},
 	} {
 		u := baseUpdate()
 		c.mod(&u)
@@ -168,7 +168,7 @@ func TestUpdateDetailsTermsAndCover(t *testing.T) {
 		Fields:    map[string]plugin.FieldValue{"type": {Text: "miniseries"}, "episodes": {Num: fp(6)}},
 		Genres:    []string{"Drama", "drama", " Mystery "},
 		Tags:      []plugin.Tag{{Name: "Time Travel", Rank: ip(80), Spoiler: true}, {Name: "Twist"}},
-		CoverPath: "abc.png",
+		CoverPath: sp("abc.png"),
 	}
 	if err := e.lib.UpdateDetails(bg, id, u); err != nil {
 		t.Fatal(err)
@@ -185,7 +185,7 @@ func TestUpdateDetailsTermsAndCover(t *testing.T) {
 		t.Fatalf("item %+v", it)
 	}
 	// clearing: no terms, no cover
-	u.Genres, u.Tags, u.CoverPath = nil, nil, ""
+	u.Genres, u.Tags, u.CoverPath = nil, nil, sp("")
 	if err := e.lib.UpdateDetails(bg, id, u); err != nil {
 		t.Fatal(err)
 	}
@@ -224,7 +224,7 @@ func TestUpdateDetailsIsAtomic(t *testing.T) {
 				t.Fatal(err)
 			}
 			u := DetailsUpdate{Titles: []plugin.Title{{Lang: "en", Text: "New"}},
-				Fields: map[string]plugin.FieldValue{"episodes": {Num: fp(3)}}, Genres: []string{"New"}, CoverPath: "n.png"}
+				Fields: map[string]plugin.FieldValue{"episodes": {Num: fp(3)}}, Genres: []string{"New"}, CoverPath: sp("n.png")}
 			if err := e.lib.UpdateDetails(bg, id, u); err == nil || errors.Is(err, ErrInvalid) {
 				t.Fatalf("want a database error, got %v", err)
 			}
@@ -266,5 +266,90 @@ func TestUpdateDetailsBumpsUpdatedAtAndSearchSeesNewTitle(t *testing.T) {
 		if search(old) != 0 {
 			t.Fatalf("removed title %q still found", old)
 		}
+	}
+}
+
+func sp(s string) *string { return &s }
+
+// A required field the item never had (a source may lack it) does not block
+// an edit; clearing a required field that has a stored value is refused.
+func TestUpdateDetailsRequiresOnlyFieldsThatHaveAValue(t *testing.T) {
+	e := newEnv(t)
+	d := bookWith("b1", fp(300))
+	delete(d.Fields, "author") // richBook: author is required
+	id := mustSave(t, e.lib, "book", "book", d)
+	u := DetailsUpdate{Titles: []plugin.Title{{Lang: "en", Text: "Renamed"}}}
+	if err := e.lib.UpdateDetails(bg, id, u); err != nil {
+		t.Fatalf("rename without the never-set required field: %v", err)
+	}
+	u.Fields = map[string]plugin.FieldValue{"author": {Text: "Someone"}}
+	if err := e.lib.UpdateDetails(bg, id, u); err != nil {
+		t.Fatal(err)
+	}
+	u.Fields = nil
+	wantInvalid(t, e.lib.UpdateDetails(bg, id, u), "required")
+	wantInvalid(t, e.lib.ValidateDetails(bg, id, u), "required")
+	// manual create still requires it
+	wantInvalid(t, e.lib.ValidateItem("book", "book", d), "required")
+}
+
+// A nil CoverPath keeps the current cover, even one set after the form was
+// read (a sync job finishing a download meanwhile).
+func TestUpdateDetailsNilCoverKeepsCurrent(t *testing.T) {
+	e := newEnv(t)
+	id := addBook(t, e.lib, "b1", fp(300), Entry{Status: Planned})
+	if err := e.lib.SetCoverPath(bg, id, "downloaded.png"); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.lib.UpdateDetails(bg, id, baseUpdate()); err != nil {
+		t.Fatal(err)
+	}
+	if it := mustItem(t, e.lib, id); it.CoverPath != "downloaded.png" {
+		t.Fatalf("cover %q", it.CoverPath)
+	}
+}
+
+func TestSetCoverPathIfComparesAndSets(t *testing.T) {
+	e := newEnv(t)
+	id := addBook(t, e.lib, "b1", fp(300), Entry{Status: Planned}) // cover https://img.example/b1.jpg
+	if ok, err := e.lib.SetCoverPathIf(bg, id, "https://img.example/other.jpg", "x.png"); ok || err != nil {
+		t.Fatalf("mismatch: %v %v", ok, err)
+	}
+	if it := mustItem(t, e.lib, id); it.CoverPath != "https://img.example/b1.jpg" {
+		t.Fatalf("changed: %q", it.CoverPath)
+	}
+	if ok, err := e.lib.SetCoverPathIf(bg, id, "https://img.example/b1.jpg", "x.png"); !ok || err != nil {
+		t.Fatalf("match: %v %v", ok, err)
+	}
+	if it := mustItem(t, e.lib, id); it.CoverPath != "x.png" {
+		t.Fatalf("not set: %q", it.CoverPath)
+	}
+	if ok, err := e.lib.SetCoverPathIf(bg, 9999, "", "x.png"); ok || err != nil {
+		t.Fatalf("unknown item: %v %v", ok, err)
+	}
+	if _, err := e.lib.SetCoverPathIf(bg, id, "x.png", "../x"); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("bad name: %v", err)
+	}
+}
+
+func TestSetPersonImagePathIfComparesAndSets(t *testing.T) {
+	e := newEnv(t)
+	id := addBook(t, e.lib, "b1", fp(300), Entry{Status: Planned})
+	if err := e.lib.SaveCredits(bg, id, []plugin.Credit{{Role: "author", Person: plugin.PersonRef{ID: "p1", Name: "P", ImageURL: "https://img.example/p.jpg"}}}); err != nil {
+		t.Fatal(err)
+	}
+	ps, err := e.lib.ItemPeople(bg, id)
+	if err != nil || len(ps) != 1 {
+		t.Fatal(ps, err)
+	}
+	pid := ps[0].ID
+	if ok, err := e.lib.SetPersonImagePathIf(bg, pid, "https://other", "p.png"); ok || err != nil {
+		t.Fatalf("mismatch: %v %v", ok, err)
+	}
+	if ok, err := e.lib.SetPersonImagePathIf(bg, pid, "https://img.example/p.jpg", "p.png"); !ok || err != nil {
+		t.Fatalf("match: %v %v", ok, err)
+	}
+	if p, _ := e.lib.Person(bg, pid); p.ImagePath != "p.png" {
+		t.Fatalf("image %q", p.ImagePath)
 	}
 }

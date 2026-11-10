@@ -74,7 +74,7 @@ func titleLangs(k plugin.KindDef) []string {
 // when the kind offers it, else the kind's first; status planned.
 func (s *server) newManualForm(r *http.Request, m plugin.Manifest, k plugin.KindDef, vals map[string]string, v entryValues) manualForm {
 	langs := titleLangs(k)
-	f := manualForm{itemForm: s.newItemForm(k, vals), entryValues: v, TitleLang: langs[0]}
+	f := manualForm{itemForm: s.newItemForm(k, vals, nil), entryValues: v, TitleLang: langs[0]}
 	if pref := s.deps.Settings.TitleLang(r.Context()); slices.Contains(langs, pref) {
 		f.TitleLang = pref
 	}
@@ -124,14 +124,14 @@ func (s *server) postManualNew(w http.ResponseWriter, r *http.Request, pluginID 
 	}
 	defer cleanupForm(r)
 	ctx := r.Context()
-	vals, fields, msg := parseFields(k, r)
+	vals, fields, msg := parseFields(k, r, nil)
 	ev, entry, emsg := s.parseEntryForm(k, k.Progress.Defaults, r)
 	f := s.newManualForm(r, m, k, vals, ev)
 	f.Title = strings.TrimSpace(r.PostFormValue("title"))
 	if l := strings.TrimSpace(r.PostFormValue("title_lang")); l != "" {
 		f.TitleLang = l
 	}
-	genres, tags, tmsg := parseTerms(k, r, &f.itemForm)
+	genres, tags, tmsg := parseTerms(k, r, &f.itemForm, nil)
 	fh := coverUpload(r)
 	f.FileDropped = fh != nil
 	f.finish(k, fields)
