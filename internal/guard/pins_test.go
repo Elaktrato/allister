@@ -374,6 +374,38 @@ func TestDockerRunImageParser(t *testing.T) {
 	}
 }
 
+// TestTailwindSumsMatchPinsDocByArchitecture: each Dockerfile Tailwind
+// checksum is the one PINS.md records for that same architecture — the
+// containment check above cannot catch a swapped pair (both sums would
+// still appear in both files).
+func TestTailwindSumsMatchPinsDocByArchitecture(t *testing.T) {
+	arg := regexp.MustCompile(`(?m)^ARG (TAILWIND_SHA256_(AMD64|ARM64))=([0-9a-f]{64})$`)
+	args := map[string]string{}
+	for _, m := range arg.FindAllStringSubmatch(readRoot(t, "Dockerfile"), -1) {
+		args[m[2]] = m[3]
+	}
+	row := regexp.MustCompile(`(?m)^\| (amd64|arm64) \| ` + "`" + `tailwindcss-linux-(x64|arm64)` + "`" + ` \| ` + "`" + `([0-9a-f]{64})` + "`" + ` \|`)
+	doc, asset := map[string]string{}, map[string]string{}
+	for _, m := range row.FindAllStringSubmatch(readRoot(t, "PINS.md"), -1) {
+		doc[m[1]] = m[3]
+		asset[m[1]] = m[2]
+	}
+	if len(args) != 2 || len(doc) != 2 {
+		t.Fatalf("tailwind pins: %d ARGs, %d PINS.md rows (want 2 each)", len(args), len(doc))
+	}
+	if asset["amd64"] != "x64" || asset["arm64"] != "arm64" {
+		t.Fatalf("PINS.md rows name the wrong assets: %v", asset)
+	}
+	if doc["amd64"] == doc["arm64"] {
+		t.Fatal("both architectures record the same checksum")
+	}
+	for _, arch := range []string{"amd64", "arm64"} {
+		if a := args[strings.ToUpper(arch)]; a == "" || a != doc[arch] {
+			t.Errorf("%s: Dockerfile ARG %q does not match PINS.md %q", arch, a, doc[arch])
+		}
+	}
+}
+
 func TestReadmeHelperImagesPinned(t *testing.T) {
 	seen := map[string]bool{}
 	for n, line := range strings.Split(readRoot(t, "README.md"), "\n") {
