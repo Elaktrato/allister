@@ -1,6 +1,6 @@
-// Package yamtrack imports a Yamtrack CSV export: Parse reads the file, the
-// Importer stores the parsed rows and a background job resolves each row on
-// AniList and saves it to the list.
+// Package yamtrack parses a Yamtrack CSV export (Parse). The anime plugin's
+// Yamtrack importer wraps it; the generic runner (package importer) stores
+// and resolves the rows. The parser moves into the anime plugin later.
 package yamtrack
 
 import (

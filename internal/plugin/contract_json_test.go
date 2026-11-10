@@ -97,7 +97,7 @@ func TestRuntimeDataJSONRoundTrip(t *testing.T) {
 	}
 	roundTrip(t, "parsedentry", entry)
 	roundTrip(t, "skipped", plugin.SkippedRow{Line: 4, Title: "T", Reason: "bad"})
-	roundTrip(t, "parseresult", plugin.ParseResult{Entries: []plugin.ParsedEntry{entry}, Skipped: []plugin.SkippedRow{{Line: 1, Reason: "r"}}})
+	roundTrip(t, "parseresult", plugin.ParseResult{Entries: []plugin.ParsedEntry{entry}, Skipped: []plugin.SkippedRow{{Line: 1, Reason: "r"}}, Ignored: 2})
 	roundTrip(t, "exportentry", plugin.ExportEntry{
 		Kind: "k", Titles: []plugin.Title{{Lang: "en", Text: "T"}}, ExternalIDs: map[string]string{"a": "b"},
 		Status: plugin.Dropped, Rating: iptr(7), Progress: map[string]float64{"p": 1}, StartedOn: &day, FinishedOn: &day, Comment: "c",

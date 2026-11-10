@@ -1,0 +1,971 @@
+// Package importer runs imports generically for every plugin: Submit parses
+// an uploaded file ONCE through a plugin importer and stores its rows, and a
+// background job (KindRun) resolves each row through the importer's
+// ResolveVia source (Lookup by external id, paced by the source's
+// RequestsPerMinute) and saves it to the list through the library.
+//
+// Row outcomes: pending (not processed yet), imported (also for rows that
+// were adjusted to pass validation; the adjustment is in the message),
+// unmatched (not known to the source, saved as a manual item that keeps its
+// external id), skipped (already in the list, or not importable) and failed.
+// Every outcome is recorded at once, so an interrupted job continues with the
+// unfinished rows. One import is active (pending or running) at a time.
+package importer
+
+import (
+	"context"
+	"database/sql"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"log"
+	"math"
+	"path/filepath"
+	"slices"
+	"sort"
+	"strings"
+	"sync"
+	"time"
+	"unicode/utf8"
+
+	"github.com/allister/allister/internal/ids"
+	"github.com/allister/allister/internal/jobs"
+	"github.com/allister/allister/internal/library"
+	"github.com/allister/allister/internal/plugin"
+)
+
+// KindRun is the job kind handled by Runner.Handler.
+const KindRun = "import_run"
+
+const (
+	// maxRetries is how often one row is retried in-process after the source
+	// answered rate limited or unavailable, before the job gives up for now.
+	maxRetries = 5
+	// rateLimitWait is the pause before such a retry (rate limit windows are
+	// usually a minute).
+	rateLimitWait = time.Minute
+	// listCap bounds each list of rows in a Report.
+	listCap = 200
+
+	maxFilenameRunes = 200
+	maxTitleRunes    = 300
+	maxNoteRunes     = 500
+	manualSource     = "manual"
+	nowSQL           = `strftime('%Y-%m-%dT%H:%M:%SZ','now')`
+
+	// legacyNote is the note of an import made by the single-plugin importer
+	// of an older version (importer_id ''): its rows cannot be read any more.
+	legacyNote = "created by an older version; upload the file again"
+)
+
+// Import states.
+const (
+	statePending   = "pending"
+	stateRunning   = "running"
+	stateDone      = "done"
+	stateFailed    = "failed"
+	stateCancelled = "cancelled"
+)
+
+// Row outcomes (import_rows.outcome).
+const (
+	outcomePending   = "pending"
+	outcomeImported  = "imported"
+	outcomeUnmatched = "unmatched"
+	outcomeSkipped   = "skipped"
+	outcomeFailed    = "failed"
+)
+
+var (
+	// ErrBadFile is matched by *BadFileError: the importer said the file is
+	// not in its format (plugin.ErrBadInput).
+	ErrBadFile = errors.New("the file is not in the importer's format")
+	// ErrNoRows is matched by *NoRowsError: the file holds nothing importable.
+	ErrNoRows = errors.New("the file contains no importable rows")
+	// ErrUnknownImporter: the plugin is not installed or not enabled, or it
+	// does not declare the importer.
+	ErrUnknownImporter = errors.New("unknown or disabled importer")
+	// ErrActive is wrapped by *ActiveError: another import is pending or running.
+	ErrActive = errors.New("another import is still active")
+	// ErrNothingToResume: the latest import is not failed or cancelled, has no
+	// pending rows, or was made by an older version.
+	ErrNothingToResume = errors.New("there is nothing to resume")
+
+	// errStopped: the import was cancelled while a row was being retried.
+	errStopped = errors.New("import stopped")
+)
+
+// BadFileError is the importer's reason why a file is not in its format. It
+// matches ErrBadFile and unwraps to the importer's error.
+type BadFileError struct {
+	// Reason is a single line of at most 300 characters taken from the
+	// importer's error (without the "plugin: bad input" prefix); it is plugin
+	// text and must be escaped when shown.
+	Reason string
+	Err    error
+}
+
+func (e *BadFileError) Error() string        { return e.Reason }
+func (e *BadFileError) Unwrap() error        { return e.Err }
+func (e *BadFileError) Is(target error) bool { return target == ErrBadFile }
+
+// NoRowsError names what the file lacks ("books": the kind's plural
+// label, lower-cased, or the plugin's name for a plugin with several kinds).
+type NoRowsError struct{ What string }
+
+func (e *NoRowsError) Error() string {
+	return "the file contains no importable " + e.What + " rows"
+}
+func (e *NoRowsError) Is(target error) bool { return target == ErrNoRows }
+
+// ActiveError carries the id of the import that blocks a new upload.
+type ActiveError struct{ ID int64 }
+
+func (e *ActiveError) Error() string { return fmt.Sprintf("import %d is still active", e.ID) }
+func (e *ActiveError) Unwrap() error { return ErrActive }
+
+// Payload is the payload of an import_run job. PluginID lets the queue's
+// plugin gate pause the job while the plugin is disabled (jobs.WithPluginGate).
+type Payload struct {
+	ImportID int64  `json:"import_id"`
+	PluginID string `json:"plugin_id"`
+}
+
+// Queue is the part of jobs.Queue the runner needs.
+type Queue interface {
+	Enqueue(ctx context.Context, kind string, payload any) error
+}
+
+// Deps are the runner's dependencies.
+type Deps struct {
+	DB       *sql.DB
+	Library  *library.Library
+	Registry *plugin.Registry
+	Queue    Queue
+	// SyncJobs maps a plugin id to the sync job of a newly saved item, like
+	// web.Deps.SyncJobs (cmd/allister builds one map for both). A plugin
+	// without an entry gets no sync job.
+	SyncJobs map[string]func(itemID int64) (kind string, payload any)
+	// Now and Sleep replace time.Now and a context-aware sleep (tests); nil
+	// gets the real ones.
+	Now   func() time.Time
+	Sleep func(ctx context.Context, d time.Duration) error
+	// Logf logs problems that cannot be returned; nil gets log.Printf.
+	Logf func(format string, args ...any)
+}
+
+// Runner stores uploaded files as imports and runs the import job.
+type Runner struct {
+	d     Deps
+	now   func() time.Time
+	sleep func(ctx context.Context, d time.Duration) error
+	logf  func(format string, args ...any)
+
+	mu   sync.Mutex
+	last map[string]time.Time // per plugin/source: time of the last request, for pacing
+
+	// opMu serialises Submit, Resume and reconcile: between committing an
+	// import and enqueuing its job the import has no job, and reconcile must
+	// not mistake that for a stalled import.
+	opMu sync.Mutex
+}
+
+// New returns a Runner.
+func New(d Deps) *Runner {
+	r := &Runner{d: d, now: d.Now, sleep: d.Sleep, logf: d.Logf, last: map[string]time.Time{}}
+	if r.now == nil {
+		r.now = time.Now
+	}
+	if r.sleep == nil {
+		r.sleep = sleepCtx
+	}
+	if r.logf == nil {
+		r.logf = log.Printf
+	}
+	return r
+}
+
+func sleepCtx(ctx context.Context, d time.Duration) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-t.C:
+		return nil
+	}
+}
+
+// importerRef is a resolved importer of an installed plugin.
+type importerRef struct {
+	plugin   plugin.Plugin
+	manifest plugin.Manifest
+	info     plugin.ImporterInfo
+	// source and srcInfo are the ResolveVia source; source is nil when the
+	// importer resolves through none (or the plugin does not provide it).
+	source  plugin.Source
+	srcInfo plugin.SourceInfo
+}
+
+// resolve finds the importer of an installed plugin (enabled or not).
+func (r *Runner) resolve(pluginID, importerID string) (*importerRef, bool) {
+	m, ok := r.d.Registry.Manifest(pluginID)
+	if !ok {
+		return nil, false
+	}
+	p, ok := r.d.Registry.Get(pluginID)
+	if !ok {
+		return nil, false
+	}
+	ref := &importerRef{plugin: p, manifest: m}
+	found := false
+	for _, im := range m.Importers {
+		if im.ID == importerID {
+			ref.info, found = im, true
+			break
+		}
+	}
+	if !found {
+		return nil, false
+	}
+	if ref.info.ResolveVia != "" {
+		for _, s := range m.Sources {
+			if s.ID == ref.info.ResolveVia {
+				ref.srcInfo = s
+				ref.source = p.Source(s.ID)
+			}
+		}
+	}
+	return ref, true
+}
+
+func (ref *importerRef) kind(key string) (plugin.KindDef, bool) {
+	for _, k := range ref.manifest.Kinds {
+		if k.Key == key {
+			return k, true
+		}
+	}
+	return plugin.KindDef{}, false
+}
+
+// idLabel names the importer's external id type (its label, else the type).
+func (ref *importerRef) idLabel() string {
+	if ref.info.ExternalIDLabel != "" {
+		return ref.info.ExternalIDLabel
+	}
+	return ref.info.ExternalIDType
+}
+
+// noRowsWhat is the NoRowsError subject of the plugin.
+func (ref *importerRef) noRowsWhat() string {
+	if len(ref.manifest.Kinds) == 1 && ref.manifest.Kinds[0].LabelPlural != "" {
+		return strings.ToLower(ref.manifest.Kinds[0].LabelPlural)
+	}
+	return strings.ToLower(ref.manifest.Name)
+}
+
+// storedRow is one row as written by Submit.
+type storedRow struct {
+	idType, id, title, outcome, message, data string
+}
+
+// Submit parses the file through the plugin's importer, stores its rows (the
+// parsed entries as pending, the importer's skipped rows and entries of an
+// unknown kind as skipped with their reasons) as a new import and enqueues
+// the job. Nothing is stored when the plugin or importer is unknown or
+// disabled (ErrUnknownImporter), the file is not in the format
+// (*BadFileError), holds nothing importable (*NoRowsError) or another import
+// is active (*ActiveError).
+func (r *Runner) Submit(ctx context.Context, pluginID, importerID, filename string, in io.Reader) (int64, error) {
+	ref, ok := r.resolve(pluginID, importerID)
+	if !ok || !r.d.Registry.IsEnabled(pluginID) {
+		return 0, ErrUnknownImporter
+	}
+	imp := ref.plugin.Importer(importerID)
+	if imp == nil {
+		return 0, ErrUnknownImporter
+	}
+	res, err := imp.Parse(ctx, in)
+	if err != nil {
+		if errors.Is(err, plugin.ErrBadInput) {
+			reason := strings.TrimPrefix(err.Error(), plugin.ErrBadInput.Error()+": ")
+			return 0, &BadFileError{Reason: plugin.SingleLine(reason, maxTitleRunes), Err: err}
+		}
+		return 0, fmt.Errorf("import: %w", err)
+	}
+	rows, entries, err := r.storedRows(ref, res)
+	if err != nil {
+		return 0, err
+	}
+	if entries == 0 {
+		return 0, &NoRowsError{What: ref.noRowsWhat()}
+	}
+	filename = truncate(filepath.Base(strings.ReplaceAll(filename, `\`, "/")), maxFilenameRunes)
+	filename = plugin.SingleLine(filename, maxFilenameRunes)
+
+	r.opMu.Lock()
+	defer r.opMu.Unlock()
+	tx, err := r.d.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, fmt.Errorf("import: %w", err)
+	}
+	defer tx.Rollback()
+	if err := r.activeCheck(ctx, tx); err != nil {
+		return 0, err
+	}
+	ins, err := tx.ExecContext(ctx, `INSERT INTO imports(filename, state, total, ignored, plugin_id, importer_id) VALUES (?,?,?,?,?,?)`,
+		filename, statePending, len(rows), max(res.Ignored, 0), pluginID, importerID)
+	if err != nil {
+		return 0, fmt.Errorf("import: %w", err)
+	}
+	id, err := ins.LastInsertId()
+	if err != nil {
+		return 0, fmt.Errorf("import: %w", err)
+	}
+	stmt, err := tx.PrepareContext(ctx, `INSERT INTO import_rows(import_id, seq, external_id_type, external_id, title, outcome, message, data) VALUES (?,?,?,?,?,?,?,?)`)
+	if err != nil {
+		return 0, fmt.Errorf("import: %w", err)
+	}
+	defer stmt.Close()
+	for i, row := range rows {
+		if _, err := stmt.ExecContext(ctx, id, i+1, row.idType, row.id, row.title, row.outcome, row.message, row.data); err != nil {
+			return 0, fmt.Errorf("import: %w", err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, fmt.Errorf("import: %w", err)
+	}
+	if err := r.d.Queue.Enqueue(ctx, KindRun, Payload{ImportID: id, PluginID: pluginID}); err != nil {
+		if _, uerr := r.d.DB.ExecContext(context.WithoutCancel(ctx),
+			`UPDATE imports SET state=?, finished_at=`+nowSQL+` WHERE id=?`, stateFailed, id); uerr != nil {
+			r.logf("import %d: mark failed: %v", id, uerr)
+		}
+		return 0, fmt.Errorf("import: enqueue: %w", err)
+	}
+	return id, nil
+}
+
+// storedRows turns a parse result into the rows to store, entries first (in
+// file order), then the importer's skipped rows. entries counts the rows that
+// will be processed.
+func (r *Runner) storedRows(ref *importerRef, res plugin.ParseResult) (rows []storedRow, entries int, err error) {
+	idType := ref.info.ExternalIDType
+	for _, e := range res.Entries {
+		value := ""
+		if idType != "" {
+			value = plugin.SingleLine(e.ExternalIDs[idType], maxTitleRunes)
+		}
+		e.Title = plugin.SingleLine(e.Title, maxTitleRunes)
+		if e.Title == "" && value != "" {
+			e.Title = ref.idLabel() + " #" + value
+			e.Notes = append(e.Notes, "no title in the file, using "+e.Title)
+		}
+		row := storedRow{idType: idType, id: value, title: e.Title}
+		if _, ok := ref.kind(e.Kind); !ok {
+			row.outcome, row.message = outcomeSkipped, fmt.Sprintf("unknown kind %q", plugin.SingleLine(e.Kind, 40))
+			rows = append(rows, row)
+			continue
+		}
+		b, err := json.Marshal(e)
+		if err != nil {
+			return nil, 0, fmt.Errorf("import: %w", err)
+		}
+		row.outcome, row.data = outcomePending, string(b)
+		rows = append(rows, row)
+		entries++
+	}
+	for _, s := range res.Skipped {
+		rows = append(rows, storedRow{title: plugin.SingleLine(s.Title, maxTitleRunes), outcome: outcomeSkipped,
+			message: plugin.SingleLine(s.Reason, maxNoteRunes)})
+	}
+	return rows, entries, nil
+}
+
+type queryer interface {
+	execer
+	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
+}
+
+type execer interface {
+	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+}
+
+// reconcile marks pending or running imports that have no live import_run
+// job (pending or running, matched by payload import_id) as failed: the
+// queue gave up on the job (or it is gone) and nothing else will ever finish
+// the import. The job's last_error becomes the import's note. Callers hold
+// opMu.
+func reconcile(ctx context.Context, x execer) error {
+	_, err := x.ExecContext(ctx, `UPDATE imports SET state=?, finished_at=`+nowSQL+`,
+		note = 'Stopped: ' || COALESCE((SELECT NULLIF(j.last_error, '') FROM jobs j
+			WHERE j.kind = ? AND json_extract(j.payload_json, '$.import_id') = imports.id
+			ORDER BY j.id DESC LIMIT 1), 'the import job is no longer queued')
+		WHERE state IN ('pending','running') AND NOT EXISTS (SELECT 1 FROM jobs j
+			WHERE j.kind = ? AND j.state IN ('pending','running')
+			AND json_extract(j.payload_json, '$.import_id') = imports.id)`, stateFailed, KindRun, KindRun)
+	if err != nil {
+		return fmt.Errorf("reconcile imports: %w", err)
+	}
+	return nil
+}
+
+// Reconcile fails stalled imports (see reconcile); Latest does this itself.
+func (r *Runner) Reconcile(ctx context.Context) error {
+	r.opMu.Lock()
+	defer r.opMu.Unlock()
+	return reconcile(ctx, r.d.DB)
+}
+
+// activeCheck reconciles, then returns *ActiveError when an import is still
+// pending or running. Callers hold opMu and pass their transaction.
+func (r *Runner) activeCheck(ctx context.Context, tx queryer) error {
+	if err := reconcile(ctx, tx); err != nil {
+		return err
+	}
+	var activeID int64
+	err := tx.QueryRowContext(ctx, `SELECT id FROM imports WHERE state IN ('pending','running') ORDER BY id DESC LIMIT 1`).Scan(&activeID)
+	if err == nil {
+		return &ActiveError{ID: activeID}
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return fmt.Errorf("import: %w", err)
+	}
+	return nil
+}
+
+// Resume puts the latest import back to pending when it is failed or
+// cancelled and still has pending rows, and enqueues a new job for it. It
+// returns *ActiveError while another import is active and ErrNothingToResume
+// when there is nothing to continue (also for an import of an older version).
+func (r *Runner) Resume(ctx context.Context) (int64, error) {
+	r.opMu.Lock()
+	defer r.opMu.Unlock()
+	tx, err := r.d.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, fmt.Errorf("resume import: %w", err)
+	}
+	defer tx.Rollback()
+	if err := r.activeCheck(ctx, tx); err != nil {
+		return 0, err
+	}
+	var id int64
+	var state, pluginID, importerID string
+	var pending int
+	err = tx.QueryRowContext(ctx, `SELECT i.id, i.state, i.plugin_id, i.importer_id,
+		(SELECT COUNT(*) FROM import_rows r WHERE r.import_id = i.id AND r.outcome = ?)
+		FROM imports i ORDER BY i.id DESC LIMIT 1`, outcomePending).Scan(&id, &state, &pluginID, &importerID, &pending)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, ErrNothingToResume
+	}
+	if err != nil {
+		return 0, fmt.Errorf("resume import: %w", err)
+	}
+	if (state != stateFailed && state != stateCancelled) || pending == 0 || importerID == "" {
+		return 0, ErrNothingToResume
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE imports SET state=?, finished_at=NULL, note='' WHERE id=?`, statePending, id); err != nil {
+		return 0, fmt.Errorf("resume import: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, fmt.Errorf("resume import: %w", err)
+	}
+	if err := r.d.Queue.Enqueue(ctx, KindRun, Payload{ImportID: id, PluginID: pluginID}); err != nil {
+		if _, uerr := r.d.DB.ExecContext(context.WithoutCancel(ctx),
+			`UPDATE imports SET state=?, finished_at=`+nowSQL+`, note=? WHERE id=?`, stateFailed, "Stopped: could not queue the job: "+err.Error(), id); uerr != nil {
+			r.logf("import %d: mark failed: %v", id, uerr)
+		}
+		return 0, fmt.Errorf("resume import: enqueue: %w", err)
+	}
+	return id, nil
+}
+
+// setNote sets (or with "" clears) the status line of a running import.
+func (r *Runner) setNote(ctx context.Context, id int64, note string) {
+	if _, err := r.d.DB.ExecContext(context.WithoutCancel(ctx), `UPDATE imports SET note=? WHERE id=? AND state=?`, note, id, stateRunning); err != nil {
+		r.logf("import %d: set note: %v", id, err)
+	}
+}
+
+// Cancel marks the active import cancelled; the job stops at the next row.
+// It does nothing when no import is active.
+func (r *Runner) Cancel(ctx context.Context) error {
+	_, err := r.d.DB.ExecContext(ctx, `UPDATE imports SET state=?, finished_at=`+nowSQL+`, note='' WHERE state IN ('pending','running')`, stateCancelled)
+	if err != nil {
+		return fmt.Errorf("cancel import: %w", err)
+	}
+	return nil
+}
+
+// fail ends an import that cannot run with a note.
+func (r *Runner) fail(ctx context.Context, id int64, note string) error {
+	_, err := r.d.DB.ExecContext(context.WithoutCancel(ctx),
+		`UPDATE imports SET state=?, finished_at=`+nowSQL+`, note=? WHERE id=? AND state IN ('pending','running')`, stateFailed, note, id)
+	if err != nil {
+		return fmt.Errorf("import %d: %w", id, err)
+	}
+	return nil
+}
+
+// Handler is the import_run job handler. It processes the pending rows of
+// the import in order, recording each outcome at once, so a re-run (after a
+// crash, shutdown or ErrRetryLater) continues with the unfinished rows. On
+// context cancellation it returns the context's error; when the source stays
+// unavailable it returns an error wrapping jobs.ErrRetryLater. An import of
+// an older version, or of an importer that is no longer installed, is failed
+// with a note.
+func (r *Runner) Handler() jobs.Handler {
+	return func(ctx context.Context, raw json.RawMessage) error {
+		var p Payload
+		if err := json.Unmarshal(raw, &p); err != nil {
+			return fmt.Errorf("import: bad payload: %w", err)
+		}
+		var state, pluginID, importerID string
+		err := r.d.DB.QueryRowContext(ctx, `SELECT state, plugin_id, importer_id FROM imports WHERE id=?`, p.ImportID).
+			Scan(&state, &pluginID, &importerID)
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil // deleted
+		}
+		if err != nil {
+			return fmt.Errorf("import %d: %w", p.ImportID, err)
+		}
+		if state == stateDone || state == stateFailed || state == stateCancelled {
+			return nil // already finished
+		}
+		if importerID == "" {
+			return r.fail(ctx, p.ImportID, legacyNote)
+		}
+		ref, ok := r.resolve(pluginID, importerID)
+		if !ok {
+			return r.fail(ctx, p.ImportID, "Stopped: the importer is no longer installed")
+		}
+		if _, err := r.d.DB.ExecContext(ctx, `UPDATE imports SET state=?, note='' WHERE id=? AND state=?`, stateRunning, p.ImportID, statePending); err != nil {
+			return fmt.Errorf("import %d: %w", p.ImportID, err)
+		}
+		for {
+			if err := ctx.Err(); err != nil {
+				return fmt.Errorf("import %d: %w", p.ImportID, err)
+			}
+			if state, err := r.state(ctx, p.ImportID); err != nil {
+				return err
+			} else if state != stateRunning {
+				return nil // cancelled
+			}
+			row, ok, err := r.nextPending(ctx, p.ImportID)
+			if err != nil {
+				return err
+			}
+			if !ok {
+				break
+			}
+			if err := r.process(ctx, ref, p.ImportID, row); errors.Is(err, errStopped) {
+				return nil // cancelled while retrying
+			} else if err != nil {
+				return err
+			}
+		}
+		_, err = r.d.DB.ExecContext(context.WithoutCancel(ctx),
+			`UPDATE imports SET state=?, finished_at=`+nowSQL+`, note='' WHERE id=? AND state IN ('pending','running')`, stateDone, p.ImportID)
+		if err != nil {
+			return fmt.Errorf("import %d: %w", p.ImportID, err)
+		}
+		return nil
+	}
+}
+
+func (r *Runner) state(ctx context.Context, id int64) (string, error) {
+	var s string
+	err := r.d.DB.QueryRowContext(ctx, `SELECT state FROM imports WHERE id=?`, id).Scan(&s)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("import %d: %w", id, err)
+	}
+	return s, nil
+}
+
+type pendingRow struct {
+	seq  int
+	data string
+}
+
+func (r *Runner) nextPending(ctx context.Context, id int64) (pendingRow, bool, error) {
+	var p pendingRow
+	err := r.d.DB.QueryRowContext(ctx, `SELECT seq, data FROM import_rows WHERE import_id=? AND outcome=? ORDER BY seq LIMIT 1`,
+		id, outcomePending).Scan(&p.seq, &p.data)
+	if errors.Is(err, sql.ErrNoRows) {
+		return p, false, nil
+	}
+	if err != nil {
+		return p, false, fmt.Errorf("import %d: %w", id, err)
+	}
+	return p, true, nil
+}
+
+func (r *Runner) record(ctx context.Context, importID int64, seq int, outcome string, itemID int64, msg string) error {
+	var iid any
+	if itemID != 0 {
+		iid = itemID
+	}
+	_, err := r.d.DB.ExecContext(context.WithoutCancel(ctx),
+		`UPDATE import_rows SET outcome=?, item_id=?, message=? WHERE import_id=? AND seq=?`, outcome, iid, msg, importID, seq)
+	if err != nil {
+		return fmt.Errorf("import %d: record row %d: %w", importID, seq, err)
+	}
+	return nil
+}
+
+// pace blocks until the next request to the source may be sent. The first
+// request to a source does not wait.
+func (r *Runner) pace(ctx context.Context, ref *importerRef) error {
+	key := ref.manifest.ID + "/" + ref.srcInfo.ID
+	interval := time.Minute / time.Duration(max(ref.srcInfo.RequestsPerMinute, 1))
+	r.mu.Lock()
+	last := r.last[key]
+	r.mu.Unlock()
+	if !last.IsZero() {
+		if wait := interval - r.now().Sub(last); wait > 0 {
+			if err := r.sleep(ctx, wait); err != nil {
+				return err
+			}
+		}
+	}
+	r.mu.Lock()
+	r.last[key] = r.now()
+	r.mu.Unlock()
+	return nil
+}
+
+// rowCtx is one row being processed.
+type rowCtx struct {
+	ref      *importerRef
+	importID int64
+	seq      int
+	entry    plugin.ParsedEntry
+	kind     plugin.KindDef
+	idType   string
+	value    string
+}
+
+func (rc *rowCtx) pluginID() string { return rc.ref.manifest.ID }
+
+// process handles one row. It returns an error only when the job must stop:
+// context cancellation, the source staying unavailable, or a database failure.
+func (r *Runner) process(ctx context.Context, ref *importerRef, importID int64, pr pendingRow) error {
+	rc := &rowCtx{ref: ref, importID: importID, seq: pr.seq, idType: ref.info.ExternalIDType}
+	if err := json.Unmarshal([]byte(pr.data), &rc.entry); err != nil {
+		return r.record(ctx, importID, pr.seq, outcomeFailed, 0, "stored row is unreadable: "+err.Error())
+	}
+	kind, ok := ref.kind(rc.entry.Kind)
+	if !ok {
+		return r.record(ctx, importID, pr.seq, outcomeSkipped, 0, fmt.Sprintf("unknown kind %q", plugin.SingleLine(rc.entry.Kind, 40)))
+	}
+	rc.kind = kind
+	if rc.idType != "" {
+		rc.value = plugin.SingleLine(rc.entry.ExternalIDs[rc.idType], maxTitleRunes)
+	}
+	if rc.value == "" {
+		return r.record(ctx, importID, pr.seq, outcomeSkipped, 0,
+			joinNotes("no "+ref.idLabel()+" id in the row, it cannot be matched"))
+	}
+	if saved, err := r.d.Library.ItemByExternalID(ctx, rc.pluginID(), kind.Key, rc.idType, rc.value); err != nil {
+		return fmt.Errorf("import %d: %w", importID, err)
+	} else if saved != nil {
+		return r.handleSaved(ctx, rc, saved)
+	}
+	if ref.source == nil {
+		return r.saveUnmatched(context.WithoutCancel(ctx), rc, "saved as a manual entry")
+	}
+
+	var data plugin.ItemData
+	notFound := false
+	name := ref.srcInfo.Name
+	for attempt := 0; ; attempt++ {
+		if attempt > 0 { // a Cancel during the wait must stop the retries
+			if state, err := r.state(ctx, importID); err != nil {
+				return err
+			} else if state != stateRunning {
+				return errStopped
+			}
+		}
+		if err := r.pace(ctx, ref); err != nil {
+			return fmt.Errorf("import %d: %w", importID, err)
+		}
+		d, err := ref.source.Lookup(ctx, kind.Key, rc.idType, rc.value)
+		if err == nil {
+			data = d
+			break
+		}
+		if ctx.Err() != nil {
+			return fmt.Errorf("import %d: %w", importID, ctx.Err())
+		}
+		if errors.Is(err, plugin.ErrNotFound) {
+			notFound = true
+			break
+		}
+		if errors.Is(err, plugin.ErrRateLimited) || errors.Is(err, plugin.ErrUnavailable) {
+			if attempt >= maxRetries {
+				r.setNote(ctx, importID, name+" is not answering, the import will be retried later")
+				return fmt.Errorf("import %d: %s %s: %s is not answering: %w: %w", importID, rc.idType, rc.value, name, jobs.ErrRetryLater, err)
+			}
+			r.setNote(ctx, importID, fmt.Sprintf("Waiting for %s (retry %d/%d)", name, attempt+1, maxRetries))
+			if err := r.sleep(ctx, rateLimitWait); err != nil {
+				return fmt.Errorf("import %d: %w", importID, err)
+			}
+			continue
+		}
+		return r.record(ctx, importID, pr.seq, outcomeFailed, 0, err.Error())
+	}
+
+	// The lookup is paid for: save and record even when shutdown has begun.
+	dctx := context.WithoutCancel(ctx)
+	r.setNote(dctx, importID, "")
+	if notFound {
+		return r.saveUnmatched(dctx, rc, "not found on "+name)
+	}
+	if data.Kind == "" {
+		data.Kind = kind.Key
+	}
+	if data.ExternalIDs[rc.idType] == "" {
+		ext := make(map[string]string, len(data.ExternalIDs)+1)
+		for k, v := range data.ExternalIDs {
+			ext[k] = v
+		}
+		ext[rc.idType] = rc.value
+		data.ExternalIDs = ext
+	}
+	entry, notes := buildEntry(kind, &library.Item{ProgressKeys: kind.Progress.Defaults, Fields: data.Fields}, rc.entry)
+	id, err := r.d.Library.AddToList(dctx, rc.pluginID(), kind.Key, data, entry)
+	var exists *library.AlreadySavedError
+	switch {
+	case errors.As(err, &exists):
+		saved, ferr := r.d.Library.Item(dctx, exists.ExistingID)
+		if ferr != nil {
+			return fmt.Errorf("import %d: %w", importID, ferr)
+		}
+		if saved == nil {
+			return r.record(dctx, importID, pr.seq, outcomeSkipped, 0, "already in your list")
+		}
+		return r.handleSaved(dctx, rc, saved)
+	case errors.Is(err, library.ErrAlreadySaved):
+		return r.record(dctx, importID, pr.seq, outcomeSkipped, 0, "already in your list")
+	case err != nil:
+		return r.record(dctx, importID, pr.seq, outcomeFailed, 0, err.Error())
+	}
+	return r.finishSaved(dctx, rc, id, outcomeImported, joinNotes(notes...))
+}
+
+// syncJob enqueues the sync job of a saved item; it returns a note when that
+// failed.
+func (r *Runner) syncJob(ctx context.Context, pluginID string, itemID int64) string {
+	mk := r.d.SyncJobs[pluginID]
+	if mk == nil {
+		return ""
+	}
+	kind, payload := mk(itemID)
+	if err := r.d.Queue.Enqueue(ctx, kind, payload); err != nil {
+		return "sync not queued: " + err.Error()
+	}
+	return ""
+}
+
+// handleSaved deals with a row whose item is already stored. When the item
+// has a list entry the row is skipped; when it has none (removed, or never
+// created) the entry is created from the row. Either way an item whose sync
+// never started (state pending, e.g. a crash before its job was enqueued)
+// gets a sync job.
+func (r *Runner) handleSaved(ctx context.Context, rc *rowCtx, saved *library.Item) error {
+	dctx := context.WithoutCancel(ctx)
+	le, err := r.d.Library.Entry(dctx, saved.ID)
+	if err != nil {
+		return fmt.Errorf("import %d: %w", rc.importID, err)
+	}
+	syncNote := ""
+	if saved.SyncState == "pending" {
+		syncNote = r.syncJob(dctx, rc.pluginID(), saved.ID)
+	}
+	if le != nil {
+		return r.record(dctx, rc.importID, rc.seq, outcomeSkipped, saved.ID, joinNotes("already in your list", syncNote))
+	}
+	entry, notes := buildEntry(rc.kind, saved, rc.entry)
+	entry.ItemID = saved.ID
+	err = r.d.Library.CreateEntry(dctx, entry)
+	switch {
+	case errors.Is(err, library.ErrEntryExists):
+		return r.record(dctx, rc.importID, rc.seq, outcomeSkipped, saved.ID, joinNotes("already in your list", syncNote))
+	case err != nil:
+		return r.record(dctx, rc.importID, rc.seq, outcomeFailed, saved.ID, err.Error())
+	}
+	label := strings.ToLower(rc.kind.Label)
+	return r.record(dctx, rc.importID, rc.seq, outcomeImported, saved.ID,
+		joinNotes(append([]string{"added to your list (" + label + " was already saved)"}, append(notes, syncNote)...)...))
+}
+
+func joinNotes(notes ...string) string {
+	var out []string
+	for _, n := range notes {
+		if n != "" {
+			out = append(out, n)
+		}
+	}
+	return strings.Join(out, "; ")
+}
+
+// saveUnmatched keeps a row the source does not know as a manual item: the
+// row's title in the importer's fallback language (default the kind's first
+// title language), its external id and its remote cover (downloaded by the
+// sync job).
+func (r *Runner) saveUnmatched(ctx context.Context, rc *rowCtx, reason string) error {
+	manualID, err := ids.NewManualID()
+	if err != nil {
+		return r.record(ctx, rc.importID, rc.seq, outcomeFailed, 0, err.Error())
+	}
+	lang := rc.ref.info.FallbackTitleLang
+	if lang == "" && len(rc.kind.TitleLanguages) > 0 {
+		lang = rc.kind.TitleLanguages[0]
+	}
+	title := rc.entry.Title
+	if title == "" {
+		title = rc.ref.idLabel() + " #" + rc.value
+	}
+	d := plugin.ItemData{
+		ItemSummary: plugin.ItemSummary{Source: manualSource, ID: manualID, Kind: rc.kind.Key,
+			Titles: []plugin.Title{{Lang: lang, Text: title}}},
+		ExternalIDs: map[string]string{rc.idType: rc.value},
+	}
+	if u := plugin.HTTPSURL(rc.entry.CoverURL); u != "" {
+		d.CoverURL = u
+	}
+	entry, notes := buildEntry(rc.kind, &library.Item{ProgressKeys: rc.kind.Progress.Defaults}, rc.entry)
+	id, err := r.d.Library.AddToList(ctx, rc.pluginID(), rc.kind.Key, d, entry, library.WithSyncState("pending"))
+	switch {
+	case errors.Is(err, library.ErrAlreadySaved):
+		return r.record(ctx, rc.importID, rc.seq, outcomeSkipped, 0, "already in your list")
+	case err != nil:
+		return r.record(ctx, rc.importID, rc.seq, outcomeFailed, 0, err.Error())
+	}
+	return r.finishSaved(ctx, rc, id, outcomeUnmatched, joinNotes(append([]string{reason}, notes...)...))
+}
+
+// finishSaved enqueues the sync job (cover, credits) for a saved item and
+// records the row.
+func (r *Runner) finishSaved(ctx context.Context, rc *rowCtx, itemID int64, outcome, msg string) error {
+	return r.record(ctx, rc.importID, rc.seq, outcome, itemID, joinNotes(msg, r.syncJob(ctx, rc.pluginID(), itemID)))
+}
+
+// buildEntry maps a parsed row to a list entry that passes library
+// validation for item (its active progress keys and, through the kind's total
+// fields, its totals), noting every adjustment: progress of keys that are not
+// active is dropped, invalid values are dropped, fractions are rounded down,
+// values above a known total (or above 100 percent) are clamped, an
+// out-of-range rating is dropped, a finish date before the start date drops
+// both dates, and an over-long comment is cut. Status and comment text are
+// left to the library to judge (a rejection fails the row).
+func buildEntry(kind plugin.KindDef, item *library.Item, e plugin.ParsedEntry) (library.Entry, []string) {
+	var notes []string
+	for _, n := range e.Notes {
+		if n = plugin.SingleLine(n, maxNoteRunes); n != "" {
+			notes = append(notes, n)
+		}
+	}
+	en := library.Entry{Status: library.Status(e.Status), Comment: e.Comment, Progress: map[string]float64{}}
+	if utf8.RuneCountInString(en.Comment) > library.MaxCommentRunes {
+		en.Comment = string([]rune(en.Comment)[:library.MaxCommentRunes])
+		notes = append(notes, fmt.Sprintf("comment cut to %d characters", library.MaxCommentRunes))
+	}
+	if e.Rating != nil {
+		if *e.Rating < 0 || *e.Rating > 10 {
+			notes = append(notes, fmt.Sprintf("rating %d is not between 0 and 10, left unrated", *e.Rating))
+		} else {
+			v := *e.Rating
+			en.Rating = &v
+		}
+	}
+	keys := make([]string, 0, len(e.Progress))
+	for k := range e.Progress {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		v := e.Progress[k]
+		def, eligible := progressDef(kind, k)
+		if !eligible || !slices.Contains(item.ProgressKeys, k) {
+			notes = append(notes, fmt.Sprintf("progress %q dropped (not an active progress)", plugin.SingleLine(k, 40)))
+			continue
+		}
+		if math.IsNaN(v) || math.IsInf(v, 0) || v < 0 || v > 1e12 {
+			notes = append(notes, fmt.Sprintf("invalid progress %q, using 0", k))
+			continue
+		}
+		if v != math.Trunc(v) {
+			v = math.Floor(v)
+			notes = append(notes, fmt.Sprintf("progress %q rounded down to %d", k, int64(v)))
+		}
+		if total, bounded := progressBound(def, item); bounded && v > total {
+			v = total
+			prefix := "progress"
+			if len(item.ProgressKeys) > 1 {
+				prefix = k + " progress"
+			}
+			notes = append(notes, fmt.Sprintf("%s clamped to %d", prefix, int64(total)))
+		}
+		en.Progress[k] = v
+	}
+	if e.StartedOn != nil {
+		en.StartedOn = validDay(*e.StartedOn, "start", &notes)
+	}
+	if e.FinishedOn != nil {
+		en.FinishedOn = validDay(*e.FinishedOn, "finish", &notes)
+	}
+	if en.StartedOn != nil && en.FinishedOn != nil && en.FinishedOn.Before(*en.StartedOn) {
+		en.StartedOn, en.FinishedOn = nil, nil
+		notes = append(notes, "dates dropped (finish date was before start date)")
+	}
+	return en, notes
+}
+
+// validDay returns the calendar day of t, or nil with a note when its year
+// is outside 1..9999.
+func validDay(t time.Time, what string, notes *[]string) *time.Time {
+	d := plugin.DateOnly(t)
+	if d.Year() < 1 || d.Year() > 9999 {
+		*notes = append(*notes, what+" date out of range, left empty")
+		return nil
+	}
+	return &d
+}
+
+func progressDef(kind plugin.KindDef, key string) (plugin.ProgressDef, bool) {
+	for _, d := range kind.Progress.Eligible {
+		if d.Key == key {
+			return d, true
+		}
+	}
+	return plugin.ProgressDef{}, false
+}
+
+// progressBound mirrors the library: percent is bounded at 100; a count,
+// pages or duration track only by a positive number in its total field.
+func progressBound(def plugin.ProgressDef, item *library.Item) (float64, bool) {
+	if def.Type == plugin.Percent {
+		return 100, true
+	}
+	if def.TotalField == "" {
+		return 0, false
+	}
+	if v, ok := item.Fields[def.TotalField]; ok && v.Num != nil && *v.Num > 0 {
+		return math.Floor(*v.Num), true
+	}
+	return 0, false
+}
+
+func truncate(s string, max int) string {
+	if utf8.RuneCountInString(s) <= max {
+		return s
+	}
+	return string([]rune(s)[:max])
+}

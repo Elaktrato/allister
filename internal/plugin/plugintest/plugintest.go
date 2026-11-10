@@ -5,7 +5,11 @@ package plugintest
 
 import (
 	"context"
+	"fmt"
 	"io"
+	"sort"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -293,5 +297,86 @@ func (s *MemEnabled) SetEnabled(ctx context.Context, id string, on bool) error {
 		s.m = map[string]bool{}
 	}
 	s.m[id] = on
+	return nil
+}
+
+// LookupSource is a FakeSource whose Lookup is answered by Fn (when set) and
+// records every looked-up value in order. The other operations behave like
+// FakeSource's.
+type LookupSource struct {
+	FakeSource
+	// Fn answers Lookup; n counts the calls for this value so far (1 for the
+	// first). Set it before use.
+	Fn func(ctx context.Context, kind, idType, value string, n int) (plugin.ItemData, error)
+
+	lmu    sync.Mutex
+	values []string
+}
+
+// Lookup records the value and asks Fn (FakeSource's Lookup when Fn is nil).
+func (s *LookupSource) Lookup(ctx context.Context, kind, idType, value string) (plugin.ItemData, error) {
+	s.lmu.Lock()
+	s.values = append(s.values, value)
+	n := 0
+	for _, v := range s.values {
+		if v == value {
+			n++
+		}
+	}
+	fn := s.Fn
+	s.lmu.Unlock()
+	if fn == nil {
+		return s.FakeSource.Lookup(ctx, kind, idType, value)
+	}
+	return fn(ctx, kind, idType, value, n)
+}
+
+// Looked returns the values passed to Lookup so far, in order.
+func (s *LookupSource) Looked() []string {
+	s.lmu.Lock()
+	defer s.lmu.Unlock()
+	return append([]string(nil), s.values...)
+}
+
+// ResetLooked forgets the recorded values (and the per-value call counts).
+func (s *LookupSource) ResetLooked() {
+	s.lmu.Lock()
+	s.values = nil
+	s.lmu.Unlock()
+}
+
+// FakeExporter writes one line per entry: "kind|first title|status|progress"
+// with the progress as sorted key=value pairs joined by ",". It fails with
+// Err (after writing Header) when set.
+type FakeExporter struct {
+	Header string
+	Err    error
+}
+
+func (f *FakeExporter) Export(ctx context.Context, entries []plugin.ExportEntry, w io.Writer) error {
+	if _, err := io.WriteString(w, f.Header); err != nil {
+		return err
+	}
+	if f.Err != nil {
+		return f.Err
+	}
+	for _, e := range entries {
+		title := ""
+		if len(e.Titles) > 0 {
+			title = e.Titles[0].Text
+		}
+		keys := make([]string, 0, len(e.Progress))
+		for k := range e.Progress {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		var prog []string
+		for _, k := range keys {
+			prog = append(prog, k+"="+strconv.FormatFloat(e.Progress[k], 'f', -1, 64))
+		}
+		if _, err := fmt.Fprintf(w, "%s|%s|%s|%s\n", e.Kind, title, e.Status, strings.Join(prog, ",")); err != nil {
+			return err
+		}
+	}
 	return nil
 }

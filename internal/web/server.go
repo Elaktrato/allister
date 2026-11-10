@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/allister/allister/internal/importer/yamtrack"
+	"github.com/allister/allister/internal/importer"
 	"github.com/allister/allister/internal/library"
 	"github.com/allister/allister/internal/plugin"
 	"github.com/allister/allister/internal/provider"
@@ -43,8 +43,9 @@ type Deps struct {
 	SyncJobs map[string]func(itemID int64) (kind string, payload any)
 	// CoversDir is DATA_DIR/covers; when empty /covers/ is not served.
 	CoversDir string
-	// Imports runs the Yamtrack import; when nil the import pages answer 404.
-	Imports *yamtrack.Importer
+	// Imports runs the imports of every plugin's importers (/settings/import);
+	// when nil the import pages answer 404.
+	Imports *importer.Runner
 	// Registry holds the installed plugins and their enabled flags. Required
 	// in production (cmd/allister builds it); when nil NewServer builds a
 	// default one with the anime plugin on top of Settings.

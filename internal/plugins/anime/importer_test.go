@@ -119,6 +119,9 @@ func TestImporterMapsRows(t *testing.T) {
 			t.Errorf("%q is another media type and must not be reported", title)
 		}
 	}
+	if res.Ignored != 3 {
+		t.Errorf("ignored = %d, want the 3 other-media rows counted", res.Ignored)
+	}
 	if !strings.Contains(reasons["Weird Status Sample"].Reason, "unknown status") {
 		t.Errorf("reason = %q", reasons["Weird Status Sample"].Reason)
 	}

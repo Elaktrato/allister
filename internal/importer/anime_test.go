@@ -1,4 +1,9 @@
-package yamtrack
+package importer
+
+// The legacy Yamtrack import suite, ported to the generic runner and run
+// with the REAL anime plugin (its Yamtrack importer and AniList source) over
+// a fake AniList-like provider. The assertions are the legacy ones; see
+// runner_test.go for the plugin-neutral tests on the book and tv fixtures.
 
 import (
 	"context"
@@ -14,9 +19,14 @@ import (
 	"time"
 
 	"github.com/allister/allister/internal/db"
+	"github.com/allister/allister/internal/importer/yamtrack"
 	"github.com/allister/allister/internal/jobs"
+	"github.com/allister/allister/internal/library"
+	"github.com/allister/allister/internal/plugin"
+	"github.com/allister/allister/internal/plugin/plugintest"
+	"github.com/allister/allister/internal/plugins/anime"
+	"github.com/allister/allister/internal/plugins/anime/animemap"
 	"github.com/allister/allister/internal/provider"
-	"github.com/allister/allister/internal/store"
 )
 
 // ---- fakes ----
@@ -27,7 +37,7 @@ type enq struct {
 }
 
 // fakeQueue records enqueued jobs and also writes them to the jobs table
-// (inner), because the importer reconciles imports against that table.
+// (inner), because the runner reconciles imports against that table.
 type fakeQueue struct {
 	mu    sync.Mutex
 	jobs  []enq
@@ -60,7 +70,8 @@ func (q *fakeQueue) ofKind(kind string) []enq {
 	return out
 }
 
-// fakeResolver answers AnimeByMALID from fn and records every call.
+// fakeResolver is an AniList-like provider: AnimeByMALID is answered by fn
+// and every call is recorded; the other operations are unavailable.
 type fakeResolver struct {
 	mu    sync.Mutex
 	calls []string
@@ -76,14 +87,32 @@ func (f *fakeResolver) AnimeByMALID(_ context.Context, malID string) (provider.A
 			n++
 		}
 	}
+	fn := f.fn
 	f.mu.Unlock()
-	return f.fn(malID, n)
+	return fn(malID, n)
+}
+
+func (f *fakeResolver) Name() provider.Source { return provider.AniList }
+func (f *fakeResolver) Search(context.Context, string) ([]provider.SearchResult, error) {
+	return nil, provider.ErrUnavailable
+}
+func (f *fakeResolver) Anime(context.Context, string) (provider.Anime, error) {
+	return provider.Anime{}, provider.ErrUnavailable
+}
+func (f *fakeResolver) Cast(context.Context, string) ([]provider.CastMember, error) {
+	return nil, provider.ErrUnavailable
 }
 
 func (f *fakeResolver) called() []string {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return append([]string(nil), f.calls...)
+}
+
+func (f *fakeResolver) reset() {
+	f.mu.Lock()
+	f.calls = nil
+	f.mu.Unlock()
 }
 
 // ani is the AniList anime for MAL id mal; AniList id is mal+100000.
@@ -144,26 +173,46 @@ func (c *clock) slept() time.Duration {
 	return s
 }
 
-type env struct {
-	t   *testing.T
-	d   *sql.DB
-	st  *store.Store
-	q   *fakeQueue
-	res *fakeResolver
-	clk *clock
-	im  *Importer
-}
-
-func newEnv(t *testing.T) *env {
+// openDB opens a fresh migrated database.
+func openDB(t *testing.T) *sql.DB {
 	t.Helper()
 	d, err := db.Open(filepath.Join(t.TempDir(), "t.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { d.Close() })
-	e := &env{t: t, d: d, st: store.New(d), q: &fakeQueue{inner: jobs.NewQueue(d)}, res: &fakeResolver{fn: found},
+	return d
+}
+
+type env struct {
+	t   *testing.T
+	d   *sql.DB
+	lib *library.Library
+	reg *plugin.Registry
+	q   *fakeQueue
+	res *fakeResolver
+	clk *clock
+	im  *Runner
+}
+
+const (
+	animeID    = "anime"
+	yamtrackID = "yamtrack"
+)
+
+func newEnv(t *testing.T) *env {
+	t.Helper()
+	d := openDB(t)
+	e := &env{t: t, d: d, q: &fakeQueue{inner: jobs.NewQueue(d)}, res: &fakeResolver{fn: found},
 		clk: &clock{t: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)}}
-	e.im = New(d, e.st, e.res, e.q, WithClock(e.clk.now, e.clk.sleep))
+	e.reg = plugin.NewRegistry(plugintest.NewMemEnabled())
+	if err := e.reg.Register(anime.New(anime.Options{Provider: e.res})); err != nil {
+		t.Fatal(err)
+	}
+	e.lib = library.New(d, e.reg)
+	e.im = New(Deps{DB: d, Library: e.lib, Registry: e.reg, Queue: e.q,
+		SyncJobs: map[string]func(int64) (string, any){animeID: jobs.SyncJobFor(animeID)},
+		Now:      e.clk.now, Sleep: e.clk.sleep})
 	return e
 }
 
@@ -183,9 +232,13 @@ func csvOf(rows ...string) string {
 	return b.String()
 }
 
+func (e *env) submitAs(name, content string) (int64, error) {
+	return e.im.Submit(context.Background(), animeID, yamtrackID, name, strings.NewReader(content))
+}
+
 func (e *env) submit(content string) int64 {
 	e.t.Helper()
-	id, err := e.im.Submit(context.Background(), "export.csv", strings.NewReader(content))
+	id, err := e.submitAs("export.csv", content)
 	if err != nil {
 		e.t.Fatalf("submit: %v", err)
 	}
@@ -197,7 +250,7 @@ func (e *env) run(id int64) error {
 }
 
 func (e *env) runCtx(ctx context.Context, id int64) error {
-	payload, _ := json.Marshal(Payload{ImportID: id})
+	payload, _ := json.Marshal(Payload{ImportID: id, PluginID: animeID})
 	return e.im.Handler()(ctx, payload)
 }
 
@@ -218,13 +271,14 @@ func (e *env) animeCount() int {
 	return n
 }
 
-func (e *env) entryByMAL(mal string) (*store.Saved, *store.ListEntry) {
+// entryByMAL returns the saved anime with MAL id mal and its list entry.
+func (e *env) entryByMAL(mal string) (*library.Item, *library.Entry) {
 	e.t.Helper()
-	s, err := e.st.FindByMALID(context.Background(), mal)
+	s, err := e.lib.ItemByExternalID(context.Background(), animeID, animeID, "mal", mal)
 	if err != nil || s == nil {
 		e.t.Fatalf("mal %s not saved: %v", mal, err)
 	}
-	le, err := e.st.GetListEntry(context.Background(), s.ID)
+	le, err := e.lib.Entry(context.Background(), s.ID)
 	if err != nil || le == nil {
 		e.t.Fatalf("no list entry for %s: %v", mal, err)
 	}
@@ -247,25 +301,37 @@ func (e *env) outcomes(id int64) map[string]string {
 	return m
 }
 
+// addAnime saves the anime with a list entry (the legacy store.AddToList).
+func (e *env) addAnime(a provider.Anime, en library.Entry, opts ...library.SaveOption) int64 {
+	e.t.Helper()
+	id, err := e.lib.AddToList(context.Background(), animeID, animeID, animemap.ItemData(a), en, opts...)
+	if err != nil {
+		e.t.Fatal(err)
+	}
+	return id
+}
+
+func episode(e *library.Entry) float64 { return e.Progress["episode"] }
+
 // ---- tests ----
 
 func TestImportSavesEntriesAndEnqueuesSync(t *testing.T) {
 	e := newEnv(t)
 	id := e.submit(csvOf("1|One|Completed|8.0|12", "2|Two|Planning||0", "3|Three|In progress|7.0|4"))
-	if jobsq := e.q.ofKind(KindImport); len(jobsq) != 1 || jobsq[0].Payload.(Payload) != (Payload{ImportID: id, PluginID: "anime"}) {
+	if jobsq := e.q.ofKind(KindRun); len(jobsq) != 1 || jobsq[0].Payload.(Payload) != (Payload{ImportID: id, PluginID: "anime"}) {
 		t.Fatalf("import job not enqueued: %+v", e.q.jobs)
 	}
 	if err := e.run(id); err != nil {
 		t.Fatal(err)
 	}
 	s, le := e.entryByMAL("1")
-	if s.Source != provider.AniList || s.ID == 0 || le.Status != store.Completed || le.Rating == nil || *le.Rating != 8 || le.Progress != 12 {
+	if s.Source != "anilist" || s.ID == 0 || le.Status != library.Completed || le.Rating == nil || *le.Rating != 8 || episode(le) != 12 {
 		t.Errorf("entry 1: %+v %+v", s, le)
 	}
 	if s.SyncState != "pending" {
 		t.Errorf("sync state = %q", s.SyncState)
 	}
-	if _, le3 := e.entryByMAL("3"); le3.Status != store.Watching || le3.Progress != 4 {
+	if _, le3 := e.entryByMAL("3"); le3.Status != library.Active || episode(le3) != 4 {
 		t.Errorf("entry 3: %+v", le3)
 	}
 	syncs := e.q.ofKind(jobs.KindSyncItem)
@@ -278,6 +344,9 @@ func TestImportSavesEntriesAndEnqueuesSync(t *testing.T) {
 	r := e.report()
 	if r.State != "done" || r.Total != 3 || r.Imported != 3 || r.Processed != 3 || r.Remaining != 0 || r.Active {
 		t.Errorf("report: %+v", r)
+	}
+	if r.PluginID != "anime" || r.ImporterID != "yamtrack" {
+		t.Errorf("report ids: %q %q", r.PluginID, r.ImporterID)
 	}
 }
 
@@ -329,9 +398,7 @@ func TestImportResumesAfterInterruption(t *testing.T) {
 	if got := e.outcomes(id); got["1"] != "imported" || got["2"] != "pending" || got["3"] != "pending" {
 		t.Fatalf("after interruption: %v", got)
 	}
-	e.res.mu.Lock()
-	e.res.calls = nil
-	e.res.mu.Unlock()
+	e.res.reset()
 	if err := e.run(id); err != nil {
 		t.Fatal(err)
 	}
@@ -343,13 +410,12 @@ func TestImportResumesAfterInterruption(t *testing.T) {
 	}
 }
 
-func TestImportSkipsAlreadySavedByMALID(t *testing.T) {
+// TestImportSkipsAlreadySavedByExternalID was TestImportSkipsAlreadySavedByMALID.
+func TestImportSkipsAlreadySavedByExternalID(t *testing.T) {
 	e := newEnv(t)
 	pre := ani("1", 12)
 	pre.ID = "777" // saved earlier under another AniList id
-	if _, err := e.st.AddToList(context.Background(), pre, store.ListEntry{Status: store.Completed}); err != nil {
-		t.Fatal(err)
-	}
+	e.addAnime(pre, library.Entry{Status: library.Completed})
 	id := e.submit(csvOf("1|One|Planning||0", "2|Two|Planning||0"))
 	if err := e.run(id); err != nil {
 		t.Fatal(err)
@@ -357,7 +423,7 @@ func TestImportSkipsAlreadySavedByMALID(t *testing.T) {
 	if got := e.res.called(); len(got) != 1 || got[0] != "2" {
 		t.Fatalf("requests = %v, want only 2", got)
 	}
-	if _, le := e.entryByMAL("1"); le.Status != store.Completed {
+	if _, le := e.entryByMAL("1"); le.Status != library.Completed {
 		t.Errorf("existing entry overwritten: %+v", le)
 	}
 	r := e.report()
@@ -393,10 +459,10 @@ func TestImportSavesUnmatchedAsManualEntry(t *testing.T) {
 		t.Fatal(err)
 	}
 	s, le := e.entryByMAL("55")
-	if s.Source != provider.Manual || s.Anime.ID == "" || s.MALID != "55" {
+	if s.Source != "manual" || s.SourceID == "" || s.ExternalIDs["mal"] != "55" {
 		t.Errorf("saved: %+v", s)
 	}
-	if len(s.Titles) != 1 || s.Titles[0] != (provider.Title{Lang: "ja-latn", Text: "Lost Show"}) {
+	if len(s.Titles) != 1 || s.Titles[0] != (plugin.Title{Lang: "ja-latn", Text: "Lost Show"}) {
 		t.Errorf("titles = %+v", s.Titles)
 	}
 	if s.CoverPath != "https://img.example/55.jpg" {
@@ -405,7 +471,7 @@ func TestImportSavesUnmatchedAsManualEntry(t *testing.T) {
 	if s.SyncState != "pending" {
 		t.Errorf("sync state = %q", s.SyncState)
 	}
-	if le.Status != store.Dropped || le.Rating == nil || *le.Rating != 6 || le.Progress != 3 {
+	if le.Status != library.Dropped || le.Rating == nil || *le.Rating != 6 || episode(le) != 3 {
 		t.Errorf("entry: %+v", le)
 	}
 	syncs := e.q.ofKind(jobs.KindSyncItem)
@@ -440,31 +506,12 @@ func TestImportUnmatchedStillCountedAndListed(t *testing.T) {
 	}
 	u := r.UnmatchedRows[0]
 	s, _ := e.entryByMAL("55")
-	if u.Title != "Lost Show" || u.AnimeID != s.ID || u.SourceID != s.Anime.ID {
+	if u.Title != "Lost Show" || u.ItemID != s.ID || u.SourceID != s.SourceID || u.Kind != "anime" {
 		t.Errorf("item = %+v, saved %+v", u, s)
 	}
 	e.run(e.submit(content))
 	if e.animeCount() != 2 {
 		t.Errorf("re-run duplicated: %d", e.animeCount())
-	}
-}
-
-func TestImportContinuesAfterOneRowFails(t *testing.T) {
-	e := newEnv(t)
-	e.res.fn = func(mal string, n int) (provider.Anime, error) {
-		if mal == "2" {
-			return provider.Anime{}, errors.New("graphql error \"boom\"")
-		}
-		return found(mal, n)
-	}
-	id := e.submit(csvOf("1|One|Planning||0", "2|Two|Planning||0", "3|Three|Planning||0"))
-	if err := e.run(id); err != nil {
-		t.Fatal(err)
-	}
-	r := e.report()
-	if r.State != "done" || r.Imported != 2 || r.Failed != 1 || len(r.FailedRows) != 1 ||
-		r.FailedRows[0].Title != "Two" || !strings.Contains(r.FailedRows[0].Message, "boom") {
-		t.Fatalf("report: %+v", r)
 	}
 }
 
@@ -479,13 +526,13 @@ func TestImportAdjustsRowsInsteadOfLosingThem(t *testing.T) {
 	if err := e.run(id); err != nil {
 		t.Fatal(err)
 	}
-	if _, le := e.entryByMAL("1"); le.Progress != 12 || le.StartedOn == nil || le.FinishedOn == nil {
+	if _, le := e.entryByMAL("1"); episode(le) != 12 || le.StartedOn == nil || le.FinishedOn == nil {
 		t.Errorf("clamp: %+v", le)
 	}
-	if _, le := e.entryByMAL("2"); le.StartedOn != nil || le.FinishedOn != nil || le.Progress != 12 {
+	if _, le := e.entryByMAL("2"); le.StartedOn != nil || le.FinishedOn != nil || episode(le) != 12 {
 		t.Errorf("dates not dropped: %+v", le)
 	}
-	if _, le := e.entryByMAL("3"); le.Status != store.Completed || le.Progress != 0 {
+	if _, le := e.entryByMAL("3"); le.Status != library.Completed || episode(le) != 0 {
 		t.Errorf("completed with 0 progress changed: %+v", le)
 	}
 	r := e.report()
@@ -515,12 +562,14 @@ func TestImportKeepsWrittenCalendarDayInStore(t *testing.T) {
 	}
 }
 
-func TestImportPacesRequestsNotSkippedRows(t *testing.T) {
+// anilistRequestsPerMinute is the anime manifest's AniList limit.
+const anilistRequestsPerMinute = 30
+
+// TestImportPacesBySourceLimit was TestImportPacesRequestsNotSkippedRows; the
+// limit now comes from the source's manifest (AniList, 30 per minute).
+func TestImportPacesBySourceLimit(t *testing.T) {
 	e := newEnv(t)
-	pre := ani("1", 12)
-	if _, err := e.st.AddToList(context.Background(), pre, store.ListEntry{Status: store.Completed}); err != nil {
-		t.Fatal(err)
-	}
+	e.addAnime(ani("1", 12), library.Entry{Status: library.Completed})
 	id := e.submit(csvOf("1|Saved|Planning||0", "2|A|Planning||0", "3|B|Planning||0", "4|C|Planning||0"))
 	if err := e.run(id); err != nil {
 		t.Fatal(err)
@@ -534,6 +583,10 @@ func TestImportPacesRequestsNotSkippedRows(t *testing.T) {
 	}
 	if interval := time.Minute / anilistRequestsPerMinute; interval != 2*time.Second {
 		t.Errorf("interval = %v", interval)
+	}
+	m, _ := e.reg.Manifest(animeID)
+	if m.Sources[0].RequestsPerMinute != anilistRequestsPerMinute {
+		t.Errorf("manifest limit = %d", m.Sources[0].RequestsPerMinute)
 	}
 }
 
@@ -562,8 +615,11 @@ func TestImportRetriesRateLimitThenSucceeds(t *testing.T) {
 
 func TestImportRateLimitExhaustedRetriesJobLater(t *testing.T) {
 	e := newEnv(t)
+	var mu sync.Mutex
 	limited := true
 	e.res.fn = func(mal string, n int) (provider.Anime, error) {
+		mu.Lock()
+		defer mu.Unlock()
 		if mal == "2" && limited {
 			return provider.Anime{}, fmt.Errorf("anilist: request failed: %w", provider.ErrUnavailable)
 		}
@@ -589,7 +645,12 @@ func TestImportRateLimitExhaustedRetriesJobLater(t *testing.T) {
 	if r := e.report(); r.State != "running" || !r.Active || r.Failed != 0 {
 		t.Errorf("report: %+v", r)
 	}
+	if r := e.report(); !strings.Contains(r.Note, "AniList is not answering") {
+		t.Errorf("note = %q", r.Note)
+	}
+	mu.Lock()
 	limited = false
+	mu.Unlock()
 	if err := e.run(id); err != nil {
 		t.Fatal(err)
 	}
@@ -649,22 +710,10 @@ func TestImportContextCancelStopsPromptlyAndKeepsRows(t *testing.T) {
 	}
 }
 
-func TestSleepCtxReturnsOnCancel(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-	start := time.Now()
-	if err := sleepCtx(ctx, time.Hour); !errors.Is(err, context.Canceled) || time.Since(start) > time.Second {
-		t.Fatalf("err=%v after %v", err, time.Since(start))
-	}
-	if err := sleepCtx(context.Background(), time.Millisecond); err != nil {
-		t.Fatal(err)
-	}
-}
-
 func TestSubmitAllowsOnlyOneActiveImport(t *testing.T) {
 	e := newEnv(t)
 	first := e.submit(csvOf("1|One|Planning||0"))
-	_, err := e.im.Submit(context.Background(), "again.csv", strings.NewReader(csvOf("2|Two|Planning||0")))
+	_, err := e.submitAs("again.csv", csvOf("2|Two|Planning||0"))
 	var active *ActiveError
 	if !errors.Is(err, ErrActive) || !errors.As(err, &active) || active.ID != first {
 		t.Fatalf("err = %v", err)
@@ -674,14 +723,14 @@ func TestSubmitAllowsOnlyOneActiveImport(t *testing.T) {
 	if n != 1 {
 		t.Errorf("imports = %d", n)
 	}
-	if len(e.q.ofKind(KindImport)) != 1 {
+	if len(e.q.ofKind(KindRun)) != 1 {
 		t.Errorf("second job enqueued")
 	}
 	// once finished (or cancelled) a new upload is fine
 	if err := e.im.Cancel(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := e.im.Submit(context.Background(), "again.csv", strings.NewReader(csvOf("2|Two|Planning||0"))); err != nil {
+	if _, err := e.submitAs("again.csv", csvOf("2|Two|Planning||0")); err != nil {
 		t.Fatalf("after cancel: %v", err)
 	}
 }
@@ -692,15 +741,21 @@ func TestSubmitRejectsBadFilesAndStoresNothing(t *testing.T) {
 		in   string
 		want error
 	}{
-		"missing columns": {"foo,bar\n1,2\n", ErrBadFormat},
-		"empty":           {"", ErrBadFormat},
-		"no anime rows":   {csvHeader + `1,igdb,game,G,,,Completed,,,,0` + "\n", ErrNoAnimeRows},
-		"header only":     {csvHeader, ErrNoAnimeRows},
+		"missing columns": {"foo,bar\n1,2\n", yamtrack.ErrBadFormat},
+		"empty":           {"", yamtrack.ErrBadFormat},
+		"no anime rows":   {csvHeader + `1,igdb,game,G,,,Completed,,,,0` + "\n", ErrNoRows},
+		"header only":     {csvHeader, ErrNoRows},
 	}
 	for name, c := range cases {
-		_, err := e.im.Submit(context.Background(), "x.csv", strings.NewReader(c.in))
+		_, err := e.submitAs("x.csv", c.in)
 		if !errors.Is(err, c.want) {
 			t.Errorf("%s: err = %v, want %v", name, err, c.want)
+		}
+		if c.want == yamtrack.ErrBadFormat && !errors.Is(err, ErrBadFile) {
+			t.Errorf("%s: err = %v, want ErrBadFile too", name, err)
+		}
+		if c.want == ErrNoRows && !strings.Contains(err.Error(), "no importable anime rows") {
+			t.Errorf("%s: message %q", name, err)
 		}
 	}
 	var n, m int
@@ -714,14 +769,14 @@ func TestSubmitRejectsBadFilesAndStoresNothing(t *testing.T) {
 func TestSubmitEnqueueFailureMarksImportFailed(t *testing.T) {
 	e := newEnv(t)
 	e.q.err = errors.New("queue down")
-	if _, err := e.im.Submit(context.Background(), "x.csv", strings.NewReader(csvOf("1|One|Planning||0"))); err == nil {
+	if _, err := e.submitAs("x.csv", csvOf("1|One|Planning||0")); err == nil {
 		t.Fatal("expected error")
 	}
 	if r := e.report(); r.State != "failed" || r.Active {
 		t.Errorf("report: %+v", r)
 	}
 	e.q.err = nil
-	if _, err := e.im.Submit(context.Background(), "x.csv", strings.NewReader(csvOf("1|One|Planning||0"))); err != nil {
+	if _, err := e.submitAs("x.csv", csvOf("1|One|Planning||0")); err != nil {
 		t.Fatalf("a failed import must not block the next: %v", err)
 	}
 }
@@ -744,50 +799,13 @@ func TestSubmitStoresParserSkipsAndCountsIgnored(t *testing.T) {
 	}
 }
 
-func TestReportCapsListsAt200(t *testing.T) {
-	e := newEnv(t)
-	var rows []string
-	for i := 1; i <= 250; i++ {
-		rows = append(rows, fmt.Sprintf("%d|Show %d|Planning||0", i, i))
-	}
-	e.res.fn = func(string, int) (provider.Anime, error) { return provider.Anime{}, errors.New("nope") }
-	id := e.submit(csvOf(rows...))
-	if err := e.run(id); err != nil {
-		t.Fatal(err)
-	}
-	r := e.report()
-	if r.Failed != 250 || len(r.FailedRows) != 200 || r.MoreFailed != 50 {
-		t.Fatalf("failed=%d listed=%d more=%d", r.Failed, len(r.FailedRows), r.MoreFailed)
-	}
-	if r.FailedRows[0].Title != "Show 1" {
-		t.Errorf("order: %+v", r.FailedRows[0])
-	}
-}
-
-func TestHandlerIgnoresMissingImportAndRejectsBadPayload(t *testing.T) {
-	e := newEnv(t)
-	if err := e.run(999); err != nil {
-		t.Errorf("missing import: %v", err)
-	}
-	if err := e.im.Handler()(context.Background(), json.RawMessage(`{`)); err == nil {
-		t.Error("bad payload accepted")
-	}
-}
-
-func TestLatestWithoutImportIsNil(t *testing.T) {
-	e := newEnv(t)
-	if r, err := e.im.Latest(context.Background()); r != nil || err != nil {
-		t.Fatalf("%v %v", r, err)
-	}
-}
-
 // ---- fix round 1 ----
 
-// jobState sets the state of the import job(s) of an import in the jobs table.
+// setJobState sets the state of the import job(s) of an import in the jobs table.
 func (e *env) setJobState(id int64, state, lastErr string) {
 	e.t.Helper()
 	_, err := e.d.Exec(`UPDATE jobs SET state=?, last_error=? WHERE kind=? AND json_extract(payload_json,'$.import_id')=?`,
-		state, lastErr, KindImport, id)
+		state, lastErr, KindRun, id)
 	if err != nil {
 		e.t.Fatal(err)
 	}
@@ -802,7 +820,7 @@ func TestStuckImportIsReconciledToFailed(t *testing.T) {
 		t.Fatalf("report: %+v", r)
 	}
 	// the one-active-import rule no longer blocks an upload
-	if _, err := e.im.Submit(context.Background(), "n.csv", strings.NewReader(csvOf("3|Three|Planning||0"))); err != nil {
+	if _, err := e.submitAs("n.csv", csvOf("3|Three|Planning||0")); err != nil {
 		t.Fatalf("submit after stall: %v", err)
 	}
 }
@@ -826,7 +844,7 @@ func TestSubmitAfterReconcileIsRaceSafe(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			_, errs[i] = e.im.Submit(context.Background(), "x.csv", strings.NewReader(csvOf(fmt.Sprintf("%d|S|Planning||0", i+1))))
+			_, errs[i] = e.submitAs("x.csv", csvOf(fmt.Sprintf("%d|S|Planning||0", i+1)))
 		}()
 	}
 	// readers reconciling at the same time must not fail a freshly submitted import
@@ -857,8 +875,11 @@ func TestSubmitAfterReconcileIsRaceSafe(t *testing.T) {
 
 func TestResumeEnqueuesNewJobAndProcessesOnlyPendingRows(t *testing.T) {
 	e := newEnv(t)
+	var mu sync.Mutex
 	limited := true
 	e.res.fn = func(mal string, n int) (provider.Anime, error) {
+		mu.Lock()
+		defer mu.Unlock()
 		if mal == "2" && limited {
 			return provider.Anime{}, fmt.Errorf("x: %w", provider.ErrUnavailable)
 		}
@@ -872,16 +893,19 @@ func TestResumeEnqueuesNewJobAndProcessesOnlyPendingRows(t *testing.T) {
 	if r := e.report(); r.State != "failed" || !r.CanResume {
 		t.Fatalf("report: %+v", r)
 	}
+	mu.Lock()
 	limited = false
-	e.res.mu.Lock()
-	e.res.calls = nil
-	e.res.mu.Unlock()
+	mu.Unlock()
+	e.res.reset()
 	rid, err := e.im.Resume(context.Background())
 	if err != nil || rid != id {
 		t.Fatalf("resume: %d %v", rid, err)
 	}
-	if n := len(e.q.ofKind(KindImport)); n != 2 {
+	if n := len(e.q.ofKind(KindRun)); n != 2 {
 		t.Fatalf("import jobs enqueued = %d, want 2", n)
+	}
+	if p := e.q.ofKind(KindRun)[1].Payload.(Payload); p != (Payload{ImportID: id, PluginID: "anime"}) {
+		t.Fatalf("resume payload = %+v", p)
 	}
 	if r := e.report(); r.State != "pending" || !r.Active || r.Note != "" || r.CanResume {
 		t.Fatalf("after resume: %+v", r)
@@ -974,7 +998,7 @@ func TestCancelDuringRetryLoopStopsBeforeNextAttempt(t *testing.T) {
 
 func savedNoEntry(t *testing.T, e *env, a provider.Anime, state string) int64 {
 	t.Helper()
-	id, err := e.st.SaveAnime(context.Background(), a, store.WithSyncState(state))
+	id, err := e.lib.SaveItem(context.Background(), animeID, animeID, animemap.ItemData(a), library.WithSyncState(state))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -995,12 +1019,12 @@ func TestSavedButUnlistedRowGetsListEntry(t *testing.T) {
 	if err := e.run(id); err != nil {
 		t.Fatal(err)
 	}
-	le1, _ := e.st.GetListEntry(context.Background(), id1)
-	le2, _ := e.st.GetListEntry(context.Background(), id2)
-	if le1 == nil || le1.Status != store.Completed || le1.Rating == nil || *le1.Rating != 8 || le1.Progress != 5 {
+	le1, _ := e.lib.Entry(context.Background(), id1)
+	le2, _ := e.lib.Entry(context.Background(), id2)
+	if le1 == nil || le1.Status != library.Completed || le1.Rating == nil || *le1.Rating != 8 || episode(le1) != 5 {
 		t.Errorf("entry 1: %+v", le1)
 	}
-	if le2 == nil || le2.Status != store.Watching || le2.Progress != 12 {
+	if le2 == nil || le2.Status != library.Active || episode(le2) != 12 {
 		t.Errorf("entry 2 (progress clamped): %+v", le2)
 	}
 	r := e.report()
@@ -1019,17 +1043,14 @@ func TestSavedButUnlistedRowGetsListEntry(t *testing.T) {
 
 func TestSavedAndListedRowStaysSkipped(t *testing.T) {
 	e := newEnv(t)
-	pre := ani("1", 12)
-	if _, err := e.st.AddToList(context.Background(), pre, store.ListEntry{Status: store.Dropped}, store.WithSyncState("done")); err != nil {
-		t.Fatal(err)
-	}
+	e.addAnime(ani("1", 12), library.Entry{Status: library.Dropped}, library.WithSyncState("done"))
 	id := e.submit(csvOf("1|One|Completed|8.0|5"))
 	e.run(id)
 	r := e.report()
 	if r.Skipped != 1 || r.Imported != 0 || r.SkippedRows[0].Message != "already in your list" {
 		t.Fatalf("report: %+v", r)
 	}
-	if _, le := e.entryByMAL("1"); le.Status != store.Dropped {
+	if _, le := e.entryByMAL("1"); le.Status != library.Dropped {
 		t.Errorf("entry overwritten: %+v", le)
 	}
 }
@@ -1037,16 +1058,11 @@ func TestSavedAndListedRowStaysSkipped(t *testing.T) {
 func TestSavedRowWithPendingSyncGetsOneSyncJob(t *testing.T) {
 	e := newEnv(t)
 	// listed (skipped) with sync still pending, e.g. a crash before the job was enqueued
-	if _, err := e.st.AddToList(context.Background(), ani("1", 12), store.ListEntry{Status: store.Dropped}); err != nil {
-		t.Fatal(err)
-	}
+	e.addAnime(ani("1", 12), library.Entry{Status: library.Dropped})
 	// unlisted with sync pending
-	pre := ani("2", 12)
-	savedNoEntry(t, e, pre, "pending")
+	savedNoEntry(t, e, ani("2", 12), "pending")
 	// listed with sync done: no job
-	if _, err := e.st.AddToList(context.Background(), ani("3", 12), store.ListEntry{Status: store.Dropped}, store.WithSyncState("done")); err != nil {
-		t.Fatal(err)
-	}
+	e.addAnime(ani("3", 12), library.Entry{Status: library.Dropped}, library.WithSyncState("done"))
 	e.run(e.submit(csvOf("1|One|Planning||0", "2|Two|Planning||0", "3|Three|Planning||0")))
 	syncs := e.q.ofKind(jobs.KindSyncItem)
 	if len(syncs) != 2 {
@@ -1070,7 +1086,7 @@ func TestImperfectFieldsKeepEntryAndAppendNotes(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, le := e.entryByMAL("1")
-	if le.Rating != nil || le.Progress != 0 || le.StartedOn != nil {
+	if le.Rating != nil || episode(le) != 0 || le.StartedOn != nil {
 		t.Errorf("entry 1: %+v", le)
 	}
 	s2, _ := e.entryByMAL("2")

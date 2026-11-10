@@ -15,10 +15,10 @@ import (
 // yamtrackImporter adapts yamtrack.Parse to plugin.Importer. Text taken from
 // the file (titles, comments, notes, cover urls) is sanitised so a row can
 // never make the entry unsaveable; rows of other media types, which the
-// legacy parser marks as ignored, are not reported. Only a file that is not
+// legacy parser marks as ignored, are not listed, only counted (Ignored). Only a file that is not
 // in the format (yamtrack.ErrBadFormat) is plugin.ErrBadInput; a read error
 // keeps its own cause. The importer reads the WHOLE stream: capping the upload
-// size is the web layer's job (Task 12 must enforce it).
+// size is the web layer's job (POST /settings/import caps it at 20 MiB).
 type yamtrackImporter struct{}
 
 var statusClass = map[store.Status]plugin.StatusClass{
@@ -77,6 +77,7 @@ func (yamtrackImporter) Parse(ctx context.Context, r io.Reader) (plugin.ParseRes
 	}
 	for _, s := range skipped {
 		if s.Ignored {
+			res.Ignored++
 			continue
 		}
 		res.Skipped = append(res.Skipped, plugin.SkippedRow{

@@ -39,7 +39,7 @@ Settings has a title language: Japanese (default), romaji or English. Further la
 ## Importing from Yamtrack
 
 1. In Yamtrack, export the general CSV.
-2. In Allister, open Settings, then Import from Yamtrack, and upload the file.
+2. In Allister, open Settings, then Import from Yamtrack CSV, and upload the file (up to 20 MiB).
 
 Only anime rows with MyAnimeList ids are used. Each id is looked up on AniList at 30 requests per minute, so about 830 entries take about 30 minutes. Cast and cover downloads then continue in the background for another hour or two.
 
@@ -116,7 +116,7 @@ Layout:
 - `internal/store`, `internal/db`: SQLite access and migrations
 - `internal/provider`: provider interface and the AniList client
 - `internal/jobs`: background queue and anime sync
-- `internal/importer/yamtrack`: CSV import
+- `internal/importer`: the generic import runner (every plugin's importers); `internal/importer/yamtrack`: the Yamtrack CSV parser
 - `internal/covers`, `internal/settings`, `internal/titles`, `internal/config`: small helpers
 
 ## Roadmap

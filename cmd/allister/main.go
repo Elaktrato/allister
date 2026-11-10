@@ -15,7 +15,7 @@ import (
 
 	"github.com/allister/allister/internal/config"
 	"github.com/allister/allister/internal/db"
-	"github.com/allister/allister/internal/importer/yamtrack"
+	"github.com/allister/allister/internal/importer"
 	"github.com/allister/allister/internal/jobs"
 	"github.com/allister/allister/internal/library"
 	"github.com/allister/allister/internal/plugin"
@@ -74,8 +74,11 @@ func run() error {
 		Registry:  registry,
 		CoversDir: coversDir,
 	}))
-	importer := yamtrack.New(database, st, aniClient, queue)
-	queue.Register(yamtrack.KindImport, importer.Handler())
+	syncJobsByPlugin := syncJobs(registry)
+	imports := importer.New(importer.Deps{
+		DB: database, Library: lib, Registry: registry, Queue: queue, SyncJobs: syncJobsByPlugin,
+	})
+	queue.Register(importer.KindRun, imports.Handler())
 	// Reset crashed jobs first, then re-queue items whose sync never finished
 	// (jobs that gave up, or were lost) so the "partially synced" state heals.
 	if err := queue.Recover(workerCtx); err != nil {
@@ -101,9 +104,9 @@ func run() error {
 			Store:     st,
 			Providers: providers,
 			Jobs:      queue,
-			SyncJobs:  syncJobs(registry),
+			SyncJobs:  syncJobsByPlugin,
 			CoversDir: coversDir,
-			Imports:   importer,
+			Imports:   imports,
 			Library:   lib,
 		}),
 		ReadHeaderTimeout: 10 * time.Second,

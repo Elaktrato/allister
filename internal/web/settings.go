@@ -52,7 +52,7 @@ func (s *server) getSettings(w http.ResponseWriter, r *http.Request) {
 	s.render(w, r, "settings", map[string]any{
 		"Options":  opts,
 		"Selected": s.deps.Settings.TitleLang(r.Context()),
-		"Imports":  s.deps.Imports != nil,
+		"Import":   s.importLinkLabel(),
 		"Plugins":  s.pluginRows(),
 		"Problems": s.deps.Registry.Problems(),
 	})
@@ -84,4 +84,19 @@ func (s *server) postSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	http.Redirect(w, r, "/settings", http.StatusSeeOther)
+}
+
+// importLinkLabel is the text of the Settings link to the import page, or ""
+// when there is no import page or no enabled plugin offers an importer.
+func (s *server) importLinkLabel() string {
+	if s.deps.Imports == nil {
+		return ""
+	}
+	switch opts := s.importerOptions(""); len(opts) {
+	case 0:
+		return ""
+	case 1:
+		return "Import from " + opts[0].Name
+	}
+	return "Import a file"
 }

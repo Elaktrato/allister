@@ -6,15 +6,19 @@ import (
 	"log"
 	"mime/multipart"
 	"net/http"
+	"strings"
 	"time"
 
-	"github.com/allister/allister/internal/importer/yamtrack"
-	"github.com/allister/allister/internal/provider"
+	"github.com/allister/allister/internal/importer"
+	"github.com/allister/allister/internal/plugin"
 )
 
 const (
+	// maxImportBody caps the upload: plugin importers read the whole stream,
+	// so this is the only size limit.
 	maxImportBody   = 20 << 20
 	maxImportMemory = 1 << 20
+	manualSourceID  = "manual"
 )
 
 var importStateLabels = map[string]string{
@@ -26,14 +30,25 @@ type importLine struct {
 	Title, Message, URL string
 }
 
+// importerOption is one importer of an enabled plugin on the upload form.
+// Value is "<plugin id>/<importer id>"; every text comes from the manifest.
+type importerOption struct {
+	Value, Name, PluginName, FileHint, Accept, SourceName string
+	Selected                                              bool
+}
+
 // importPage is the data of the import page and of its progress fragment.
 type importPage struct {
 	Error string
 	// Conflict shows a link to the progress of the running import.
 	Conflict bool
-	Report   *yamtrack.Report
-	State    string
-	ETA      string
+	// Importers lists the importers of the enabled plugins; Single is the
+	// only one when there is exactly one (the form then needs no choice).
+	Importers []importerOption
+	Single    *importerOption
+	Report    *importer.Report
+	State     string
+	ETA       string
 	// Lists holds the non-empty row lists (unmatched, failed, skipped).
 	Lists []importList
 }
@@ -45,12 +60,33 @@ type importList struct {
 	Rows          []importLine
 }
 
-func importLines(items []yamtrack.Item, link bool) []importLine {
+// importerOptions lists the importers of the enabled plugins in registry
+// order; selected ("<plugin>/<importer>") is marked.
+func (s *server) importerOptions(selected string) []importerOption {
+	var out []importerOption
+	for _, m := range s.deps.Registry.Manifests() {
+		if !s.deps.Registry.IsEnabled(m.ID) {
+			continue
+		}
+		for _, im := range m.Importers {
+			o := importerOption{Value: m.ID + "/" + im.ID, Name: im.Name, PluginName: m.Name, FileHint: im.FileHint,
+				Accept: strings.Join(im.Accept, ",")}
+			if si, ok := sourceInfo(m, im.ResolveVia); ok {
+				o.SourceName = si.Name
+			}
+			o.Selected = o.Value == selected
+			out = append(out, o)
+		}
+	}
+	return out
+}
+
+func importLines(m plugin.Manifest, items []importer.Item, link bool) []importLine {
 	out := make([]importLine, 0, len(items))
 	for _, it := range items {
 		l := importLine{Title: it.Title, Message: it.Message}
-		if link && it.SourceID != "" {
-			l.URL = animeURL(string(provider.Manual), it.SourceID)
+		if link && it.SourceID != "" && m.ID != "" {
+			l.URL = itemURL(m, manualSourceID, it.SourceID, it.Kind)
 		}
 		out = append(out, l)
 	}
@@ -69,23 +105,46 @@ func formatETA(d time.Duration) string {
 	return fmt.Sprintf("about %.1f h", d.Hours())
 }
 
+// unmatchedNote explains the unmatched list with the names of the import's
+// source and importer (from its plugin's manifest).
+func unmatchedNote(m plugin.Manifest, importerID string) string {
+	src, from := "the source", "the file"
+	for _, im := range m.Importers {
+		if im.ID != importerID {
+			continue
+		}
+		from = im.Name
+		if si, ok := sourceInfo(m, im.ResolveVia); ok {
+			src = si.Name
+		}
+	}
+	return "Not found on " + src + ": added as manual entries with the data from " + from + "."
+}
+
 func (s *server) loadImport(r *http.Request, p importPage) (importPage, error) {
+	if p.Importers == nil {
+		p.Importers = s.importerOptions("")
+	}
+	if len(p.Importers) == 1 {
+		p.Single = &p.Importers[0]
+	}
 	rep, err := s.deps.Imports.Latest(r.Context())
 	if err != nil {
 		return p, err
 	}
 	p.Report = rep
 	if rep != nil {
+		m, _ := s.deps.Registry.Manifest(rep.PluginID)
 		p.State = importStateLabels[rep.State]
 		add := func(l importList) {
 			if len(l.Rows) > 0 {
 				p.Lists = append(p.Lists, l)
 			}
 		}
-		add(importList{Heading: "Unmatched", Count: rep.Unmatched, More: rep.MoreUnmatched, Rows: importLines(rep.UnmatchedRows, true),
-			Note: "Not found on AniList: added as manual entries with the data from Yamtrack."})
-		add(importList{Heading: "Failed", Count: rep.Failed, More: rep.MoreFailed, Rows: importLines(rep.FailedRows, false)})
-		add(importList{Heading: "Skipped", Count: rep.Skipped, More: rep.MoreSkipped, Rows: importLines(rep.SkippedRows, false)})
+		add(importList{Heading: "Unmatched", Count: rep.Unmatched, More: rep.MoreUnmatched, Rows: importLines(m, rep.UnmatchedRows, true),
+			Note: unmatchedNote(m, rep.ImporterID)})
+		add(importList{Heading: "Failed", Count: rep.Failed, More: rep.MoreFailed, Rows: importLines(m, rep.FailedRows, false)})
+		add(importList{Heading: "Skipped", Count: rep.Skipped, More: rep.MoreSkipped, Rows: importLines(m, rep.SkippedRows, false)})
 		if rep.Active {
 			p.ETA = formatETA(rep.ETA)
 		}
@@ -110,6 +169,25 @@ func (s *server) getImport(w http.ResponseWriter, r *http.Request) {
 	s.render(w, r, "import", p)
 }
 
+// chosenImporter resolves the form's importer field ("<plugin>/<importer>")
+// against the enabled importers. An empty field means the only enabled
+// importer when there is exactly one (a client that posts only the file).
+func chosenImporter(opts []importerOption, value string) (pluginID, importerID string, ok bool) {
+	if value == "" {
+		if len(opts) != 1 {
+			return "", "", false
+		}
+		value = opts[0].Value
+	}
+	for _, o := range opts {
+		if o.Value == value {
+			pluginID, importerID, _ = strings.Cut(o.Value, "/")
+			return pluginID, importerID, true
+		}
+	}
+	return "", "", false
+}
+
 func (s *server) postImport(w http.ResponseWriter, r *http.Request) {
 	if s.deps.Imports == nil {
 		http.NotFound(w, r)
@@ -129,7 +207,13 @@ func (s *server) postImport(w http.ResponseWriter, r *http.Request) {
 	if r.MultipartForm != nil {
 		defer r.MultipartForm.RemoveAll()
 	}
+	value := ""
+	if r.MultipartForm != nil && len(r.MultipartForm.Value["importer"]) > 0 {
+		value = r.MultipartForm.Value["importer"][0]
+	}
+	opts := s.importerOptions(value)
 	reject := func(status int, p importPage) {
+		p.Importers = opts
 		p, lerr := s.loadImport(r, p)
 		if lerr != nil {
 			s.fail(w, r, lerr, "")
@@ -137,9 +221,22 @@ func (s *server) postImport(w http.ResponseWriter, r *http.Request) {
 		}
 		s.renderStatus(w, r, status, "import", p)
 	}
+	pluginID, importerID, ok := chosenImporter(opts, value)
+	if !ok {
+		msg := "This importer is not available."
+		if value == "" {
+			msg = "Please choose what to import from."
+		}
+		reject(http.StatusUnprocessableEntity, importPage{Error: msg})
+		return
+	}
 	fh := firstFile(r, "file")
 	if fh == nil {
-		reject(http.StatusUnprocessableEntity, importPage{Error: "Please choose the Yamtrack CSV file to upload."})
+		msg := "Please choose the file to upload."
+		if len(opts) == 1 {
+			msg = "Please choose the " + opts[0].Name + " file to upload."
+		}
+		reject(http.StatusUnprocessableEntity, importPage{Error: msg})
 		return
 	}
 	f, err := fh.Open()
@@ -148,15 +245,20 @@ func (s *server) postImport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer f.Close()
-	_, err = s.deps.Imports.Submit(r.Context(), fh.Filename, f)
-	var active *yamtrack.ActiveError
+	_, err = s.deps.Imports.Submit(r.Context(), pluginID, importerID, fh.Filename, f)
+	var active *importer.ActiveError
+	var bad *importer.BadFileError
 	switch {
 	case err == nil:
 		http.Redirect(w, r, "/settings/import", http.StatusSeeOther)
 	case errors.As(err, &active):
 		reject(http.StatusConflict, importPage{Conflict: true, Error: "An import is already running. Wait for it to finish or cancel it first."})
-	case errors.Is(err, yamtrack.ErrBadFormat), errors.Is(err, yamtrack.ErrNoAnimeRows):
-		reject(http.StatusUnprocessableEntity, importPage{Error: uploadMessage(err)})
+	case errors.As(err, &bad):
+		reject(http.StatusUnprocessableEntity, importPage{Error: uploadMessage(bad.Reason)})
+	case errors.Is(err, importer.ErrNoRows):
+		reject(http.StatusUnprocessableEntity, importPage{Error: uploadMessage(err.Error())})
+	case errors.Is(err, importer.ErrUnknownImporter):
+		reject(http.StatusUnprocessableEntity, importPage{Error: "This importer is not available."})
 	default:
 		log.Printf("import upload: %v", err)
 		s.fail(w, r, err, "")
@@ -173,8 +275,8 @@ func firstFile(r *http.Request, field string) *multipart.FileHeader {
 	return nil
 }
 
-func uploadMessage(err error) string {
-	return "This file cannot be imported: " + err.Error() + "."
+func uploadMessage(reason string) string {
+	return "This file cannot be imported: " + reason + "."
 }
 
 func (s *server) postImportCancel(w http.ResponseWriter, r *http.Request) {
@@ -195,7 +297,7 @@ func (s *server) postImportResume(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_, err := s.deps.Imports.Resume(r.Context())
-	var active *yamtrack.ActiveError
+	var active *importer.ActiveError
 	reject := func(status int, p importPage) {
 		p, lerr := s.loadImport(r, p)
 		if lerr != nil {
@@ -209,7 +311,7 @@ func (s *server) postImportResume(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/settings/import", http.StatusSeeOther)
 	case errors.As(err, &active):
 		reject(http.StatusConflict, importPage{Conflict: true, Error: "An import is already running. Wait for it to finish or cancel it first."})
-	case errors.Is(err, yamtrack.ErrNothingToResume):
+	case errors.Is(err, importer.ErrNothingToResume):
 		reject(http.StatusUnprocessableEntity, importPage{Error: "There is nothing to resume."})
 	default:
 		s.fail(w, r, err, "")

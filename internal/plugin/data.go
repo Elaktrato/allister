@@ -113,10 +113,15 @@ type SkippedRow struct {
 	Reason string `json:"reason"`
 }
 
-// ParseResult is the output of an importer.
+// ParseResult is the output of an importer. Skipped lists the rows the user
+// should hear about; Ignored only counts rows that are not meant for this
+// importer at all (another media type in a mixed export) and are not worth
+// listing. Ignored is optional (omitted when 0), so it does not change the
+// contract version.
 type ParseResult struct {
 	Entries []ParsedEntry `json:"entries,omitempty"`
 	Skipped []SkippedRow  `json:"skipped,omitempty"`
+	Ignored int           `json:"ignored,omitempty"`
 }
 
 // ExportEntry is one list entry handed to an exporter.
