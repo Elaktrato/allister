@@ -716,7 +716,8 @@ func TestNavigationAndSettingsWithThreePlugins(t *testing.T) {
 		last = i
 	}
 	mustContain(t, nav, ">Anime<", ">Books<", ">Shows<")
-	// Settings lists the three plugins with their sources and importers and a toggle each
+	b = e.page(t, "/settings/plugins")
+	// Settings > Plugins lists the three plugins with their sources and importers and a toggle each
 	for _, p := range []struct{ id, name, source, importer string }{
 		{"anime", "Anime", "AniList", "Yamtrack CSV"}, {"book", "Books", "Fake Books", "Books CSV"}, {"tv", "TV", "Fake TV", "TV JSON"}} {
 		i := strings.Index(b, `data-plugin="`+p.id+`"`)
@@ -766,7 +767,7 @@ func TestNavigationAndSettingsWithThreePlugins(t *testing.T) {
 		}
 	}
 	// with all three off the nav has only Settings and every row offers Enable
-	b = e.page(t, "/settings")
+	b = e.page(t, "/settings/plugins")
 	nav = navOf(t, b)
 	mustNotContain(t, nav, `href="/anime"`, `href="/book"`, `href="/tv"`)
 	if n := strings.Count(b, `name="enabled" value="1"`); n != 3 {

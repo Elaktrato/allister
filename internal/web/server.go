@@ -89,17 +89,17 @@ type server struct {
 
 // pageNames lists every page template (templates/<name>.html). Add a page by
 // dropping its file in templates/ and listing it here.
-var pageNames = []string{"settings", "search", "item", "list", "person", "manual_form", "details_form", "import", "error", "recommendations", "backup"}
+var pageNames = []string{"settings", "settings_plugins_page", "search", "item", "list", "person", "manual_form", "details_form", "import", "error", "recommendations", "backup"}
 
 // pagePartials lists extra template files a page needs (also rendered alone
 // for htmx requests).
 var pagePartials = map[string][]string{
-	"search":       {"templates/search_results.html"},
-	"settings":     {"templates/settings_plugins.html"},
-	"item":         {"templates/sections.html", "templates/add_dialog.html", "templates/progress_inputs.html", "templates/match_dialog.html"},
-	"list":         {"templates/list_row.html", "templates/filter_bar.html", "templates/entry_dialog.html", "templates/progress_inputs.html"},
-	"manual_form":  {"templates/item_inputs.html", "templates/progress_inputs.html"},
-	"details_form": {"templates/item_inputs.html"},
+	"search":                {"templates/search_results.html"},
+	"settings_plugins_page": {"templates/settings_plugins.html"},
+	"item":                  {"templates/sections.html", "templates/add_dialog.html", "templates/progress_inputs.html", "templates/match_dialog.html"},
+	"list":                  {"templates/list_row.html", "templates/filter_bar.html", "templates/entry_dialog.html", "templates/progress_inputs.html"},
+	"manual_form":           {"templates/item_inputs.html", "templates/progress_inputs.html"},
+	"details_form":          {"templates/item_inputs.html"},
 }
 
 // parsePages builds one template set per page, each cloned from base.html plus
@@ -142,6 +142,7 @@ func newServer(deps Deps, now func() time.Time) (*server, http.Handler) {
 	mux.HandleFunc("POST /settings/import", s.postImport)
 	mux.HandleFunc("POST /settings/import/cancel", s.postImportCancel)
 	mux.HandleFunc("POST /settings/import/resume", s.postImportResume)
+	mux.HandleFunc("GET /settings/plugins", s.getPlugins)
 	mux.HandleFunc("POST /settings/plugins/{id}", s.postPlugin)
 	mux.HandleFunc("GET /settings/backup", s.getBackup)
 	mux.HandleFunc("GET /settings/backup/download", s.getBackupDownload)
@@ -206,17 +207,35 @@ func (s *server) executeFor(w http.ResponseWriter, r *http.Request, status int, 
 	}
 	out := buf.Bytes()
 	if r != nil && name == "base.html" {
-		var nav bytes.Buffer
-		if err := navTemplate.ExecuteTemplate(&nav, "nav.html", s.navItems(r)); err != nil {
+		var err error
+		if out, err = s.fillMarkers(r, out); err != nil {
 			log.Printf("render nav: %v", err)
 			http.Error(w, "internal error", http.StatusInternalServerError)
 			return
 		}
-		out = bytes.Replace(out, []byte(navMarker), nav.Bytes(), 1)
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(status)
 	w.Write(out)
+}
+
+// fillMarkers replaces the markers of a full page with what is prepared per
+// request: the sidebar (navMarker) and, on a settings page, the settings
+// section tabs (settingsTabsMarker).
+func (s *server) fillMarkers(r *http.Request, out []byte) ([]byte, error) {
+	var nav bytes.Buffer
+	if err := navTemplate.ExecuteTemplate(&nav, "nav.html", s.navItems(r)); err != nil {
+		return nil, err
+	}
+	out = bytes.Replace(out, []byte(navMarker), nav.Bytes(), 1)
+	if bytes.Contains(out, []byte(settingsTabsMarker)) {
+		var tabs bytes.Buffer
+		if err := settingsTabsTemplate.ExecuteTemplate(&tabs, "settings_tabs.html", s.settingsTabs(r)); err != nil {
+			return nil, err
+		}
+		out = bytes.Replace(out, []byte(settingsTabsMarker), tabs.Bytes(), 1)
+	}
+	return out, nil
 }
 
 // index redirects the home page to the first enabled plugin's list, or to

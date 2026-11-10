@@ -308,7 +308,9 @@ func TestSearchUsesFixturePluginSource(t *testing.T) {
 	mustContain(t, b, "A Wizard of Earthsea", "Ursula K. Le Guin", `href="/book/books/42"`, "Search books",
 		`action="/book/search"`, `href="/book/manual/new"`, "Can't find it? Add manually", "Search Fake Books")
 	// pages is not a Show field; a single source shows no badge or switch
-	mustNotContain(t, b, "300", `name="source"`, "data-source-badge")
+	// (the sidebar's classes, such as text-slate-300, are not the field)
+	mustNotContain(t, b[strings.Index(b, "</header>"):], "300")
+	mustNotContain(t, b, `name="source"`, "data-source-badge")
 	mustNotContain(t, b, "AniList")
 	// the empty state names the source too
 	mustContain(t, e.get("/book/search").Body.String(), "Type a title to search Fake Books.")

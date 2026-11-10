@@ -1,0 +1,12 @@
+{{/* The settings sections as a tab column (a row on small screens): plain
+     links, the current one with aria-current="true" (the sidebar's Settings
+     row carries aria-current="page"). Rendered per request (see executeFor). */}}
+<nav aria-label="Settings sections" class="mb-6 md:mb-0 md:w-44 md:shrink-0">
+  <ul class="flex flex-wrap gap-1 md:flex-col">
+    <li>{{template "settings_tab" (tab "/settings" "General" "tune" .Current)}}</li>
+    <li>{{template "settings_tab" (tab "/settings/plugins" "Plugins" "extension" .Current)}}</li>
+    {{if .Import}}<li>{{template "settings_tab" (tab "/settings/import" "Import" "upload_file" .Current)}}</li>{{end}}
+    <li>{{template "settings_tab" (tab "/settings/backup" "Backup" "backup" .Current)}}</li>
+  </ul>
+</nav>
+{{define "settings_tab"}}<a href="{{.Href}}"{{if .Active}} aria-current="true"{{end}} class="group flex items-center gap-2.5 rounded-md px-3 py-1.5 text-sm font-medium focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 md:py-2 {{if .Active}}bg-slate-800 text-white{{else}}text-slate-400 hover:bg-slate-800/60 hover:text-slate-100{{end}}"><span class="icon text-lg {{if .Active}}text-indigo-400{{else}}text-slate-500 group-hover:text-slate-300{{end}}" aria-hidden="true">{{.Icon}}</span><span>{{.Label}}</span></a>{{end}}

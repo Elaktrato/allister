@@ -32,7 +32,7 @@ Unknown or invalid parameters are ignored, and a notice names them.
 | `/anime/export/json` | The JSON export |
 | `/list/{id}/edit` | The list entry's Edit dialog (status, rating, progress, dates, comment) |
 | `/people/{id}` | Person page |
-| `/settings`, `/settings/import`, `/settings/backup` | Settings, import, backup and restore |
+| `/settings`, `/settings/plugins`, `/settings/import`, `/settings/backup` | Settings sections: General (title language), Plugins (switch plugins on and off), Import, Backup and restore |
 | `/healthz` | Answers `ok`, for monitoring |
 
 Changes from the first version: a data volume from the first (pre-plugin) preview build starts empty after the upgrade (its anime tables are dropped, not copied); make a cold backup of the volume first if it holds data you want (see the README). List statuses are the core's status classes, so a bookmark like `/anime?status=watching` now opens the All tab with a notice (use `status=active`). The list's search and filter parameters are new. Edit details (`/anime/{source}/{id}/edit`) and the recommendations fragment (`/anime/{source}/{id}/recommendations`, loaded by the overview) are new routes.

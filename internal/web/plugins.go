@@ -174,20 +174,41 @@ func (defaultEnabled) IsEnabled(_ context.Context, _ string, def bool) (bool, er
 }
 func (defaultEnabled) SetEnabled(context.Context, string, bool) error { return nil }
 
-// navItem is one entry of the header navigation.
+// navItem is one row of the sidebar navigation.
 type navItem struct {
 	Label  string
 	Href   string
+	Icon   string // the manifest's icon name ("" = the template's default)
 	Active bool
-	Right  bool // pushed to the right edge (Settings)
 }
 
-// navItems prepares the navigation for r: one item per enabled plugin (its
-// first kind's plural label, linking to /{plugin-id}) followed by Settings.
-// The active item has a path under its prefix. Labels come from plugin
-// manifests and are escaped by the template.
-func (s *server) navItems(r *http.Request) []navItem {
-	var items []navItem
+// navView is the sidebar: one row per enabled plugin, Settings at the bottom.
+type navView struct {
+	Items    []navItem
+	Settings navItem
+}
+
+// navCtxKey keys the plugin id a page belongs to when its path is outside
+// the plugin's prefix (a person page, a list entry route): see withNavPlugin.
+type navCtxKey struct{}
+
+// withNavPlugin marks r as a page of plugin id, so the sidebar highlights it.
+func withNavPlugin(r *http.Request, id string) *http.Request {
+	return r.WithContext(context.WithValue(r.Context(), navCtxKey{}, id))
+}
+
+// navItems prepares the sidebar for r: one row per enabled plugin in
+// registry order (its first kind's plural label and its manifest icon,
+// linking to /{plugin-id}) and Settings. The active row has a path under its
+// prefix, or is the plugin r was marked with (withNavPlugin, or the item of
+// an entry route). Labels and icons come from plugin manifests and are
+// escaped by the template.
+func (s *server) navItems(r *http.Request) navView {
+	var v navView
+	marked, _ := r.Context().Value(navCtxKey{}).(string)
+	if marked == "" {
+		marked = entryOf(r).PluginID
+	}
 	for _, m := range s.deps.Registry.Manifests() {
 		if !s.deps.Registry.IsEnabled(m.ID) {
 			continue
@@ -197,9 +218,10 @@ func (s *server) navItems(r *http.Request) []navItem {
 			label = m.Kinds[0].LabelPlural
 		}
 		href := "/" + m.ID
-		items = append(items, navItem{Label: label, Href: href, Active: underPrefix(r.URL.Path, href)})
+		v.Items = append(v.Items, navItem{Label: label, Href: href, Icon: m.Icon, Active: underPrefix(r.URL.Path, href) || marked == m.ID})
 	}
-	return append(items, navItem{Label: "Settings", Href: "/settings", Active: underPrefix(r.URL.Path, "/settings"), Right: true})
+	v.Settings = navItem{Label: "Settings", Href: "/settings", Active: underPrefix(r.URL.Path, "/settings")}
+	return v
 }
 
 func underPrefix(path, prefix string) bool {
@@ -275,5 +297,5 @@ func (s *server) postPlugin(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
-	http.Redirect(w, r, "/settings", http.StatusSeeOther)
+	http.Redirect(w, r, "/settings/plugins", http.StatusSeeOther)
 }

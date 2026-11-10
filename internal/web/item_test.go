@@ -625,7 +625,7 @@ func TestHostileNavMarkerIsEscaped(t *testing.T) {
 	}
 	b := e.get("/anime/anilist/1535").Body.String()
 	mustContain(t, b, "T&lt;!--allister-nav--&gt;", "S&lt;!--allister-nav--&gt;", "C&lt;!--allister-nav--&gt;")
-	if n := strings.Count(b, ">Settings</a>"); n != 1 {
+	if n := strings.Count(b, "<span>Settings</span></a>"); n != 1 {
 		t.Fatalf("navigation rendered %d times", n)
 	}
 	if strings.Contains(b, navMarker) {

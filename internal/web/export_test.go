@@ -162,12 +162,12 @@ func TestExportLinksOnListAndSettings(t *testing.T) {
 	mustContain(t, list, `href="/book/export/lines"`, "Export Lines", `href="/book/export/odd"`)
 	mustNotContain(t, list, `href="/book/export/ghost"`)
 	mustNotContain(t, e.get("/tv").Body.String(), "/export/")
-	settings := e.get("/settings").Body.String()
+	settings := e.get("/settings/plugins").Body.String()
 	mustContain(t, settings, `href="/book/export/lines"`)
 	if err := e.reg.SetEnabled(context.Background(), "book", false); err != nil {
 		t.Fatal(err)
 	}
-	mustNotContain(t, e.get("/settings").Body.String(), `href="/book/export/lines"`)
+	mustNotContain(t, e.get("/settings/plugins").Body.String(), `href="/book/export/lines"`)
 	// the anime plugin's exporter is linked too
 	mustContain(t, e.get("/anime").Body.String(), `href="/anime/export/json"`, "Export JSON")
 }

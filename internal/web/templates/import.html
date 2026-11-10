@@ -49,37 +49,41 @@
 </section>{{end}}
 
 {{define "content"}}
-<h1 class="mb-6 text-2xl font-semibold">{{if .Single}}Import from {{.Single.Name}}{{else}}Import{{end}}</h1>
-{{if .Error}}
-<div class="mb-4 max-w-2xl rounded border border-amber-700 bg-amber-950 p-3 text-amber-200" role="alert">
-  <p>{{.Error}}</p>
-  {{if .Conflict}}<p class="mt-1"><a href="/settings/import" class="underline">View progress</a></p>{{end}}
-</div>
-{{end}}
-{{if .Importers}}
-<div class="mb-4 max-w-2xl text-sm text-slate-400">
-  {{range .Importers}}
-  <p class="mb-1" data-importer="{{.Value}}"><span class="font-medium text-slate-300">{{.Name}}</span>{{if not $.Single}} ({{.PluginName}}){{end}}{{if .FileHint}}: {{.FileHint}}{{end}}{{if .SourceName}} Rows are matched on {{.SourceName}}, a few per minute, so a large file takes a while.{{end}}</p>
-  {{end}}
-  <p>You can leave this page; the import continues in the background.</p>
-</div>
-<form method="post" action="/settings/import" enctype="multipart/form-data" class="flex max-w-xl flex-col gap-3 sm:flex-row sm:items-end">
-  {{if .Single}}<input type="hidden" name="importer" value="{{.Single.Value}}">
-  {{else}}<label class="block text-sm">Import from
-    <select name="importer" required class="mt-1 w-full rounded border border-slate-700 bg-slate-950 px-3 py-2">
-      <option value="">Choose...</option>
-      {{range .Importers}}<option value="{{.Value}}"{{if .Selected}} selected{{end}}>{{.Name}} ({{.PluginName}})</option>
+<div class="md:flex md:items-start md:gap-8">
+  {{settingsTabsMarker}}
+  <div class="min-w-0 flex-1">
+    <h1 class="mb-6 text-2xl font-semibold">{{if .Single}}Import from {{.Single.Name}}{{else}}Import{{end}}</h1>
+    {{if .Error}}
+    <div class="mb-4 max-w-2xl rounded border border-amber-700 bg-amber-950 p-3 text-amber-200" role="alert">
+      <p>{{.Error}}</p>
+      {{if .Conflict}}<p class="mt-1"><a href="/settings/import" class="underline">View progress</a></p>{{end}}
+    </div>
+    {{end}}
+    {{if .Importers}}
+    <div class="mb-4 max-w-2xl text-sm text-slate-400">
+      {{range .Importers}}
+      <p class="mb-1" data-importer="{{.Value}}"><span class="font-medium text-slate-300">{{.Name}}</span>{{if not $.Single}} ({{.PluginName}}){{end}}{{if .FileHint}}: {{.FileHint}}{{end}}{{if .SourceName}} Rows are matched on {{.SourceName}}, a few per minute, so a large file takes a while.{{end}}</p>
       {{end}}
-    </select>
-  </label>{{end}}
-  <label class="block flex-1 text-sm">{{if .Single}}{{.Single.Name}} file{{else}}File{{end}} (up to 20 MiB)
-    <input type="file" name="file"{{if .Single}}{{if .Single.Accept}} accept="{{.Single.Accept}}"{{end}}{{end}} required class="mt-1 w-full rounded border border-slate-700 bg-slate-950 px-3 py-2">
-  </label>
-  <button type="submit" class="rounded bg-indigo-600 px-4 py-2 font-medium hover:bg-indigo-500">Upload and import</button>
-</form>
-{{else}}
-<p class="mb-4 max-w-2xl text-sm text-slate-400" data-no-importers>No enabled plugin offers an importer. Enable a plugin in Settings to import a file.</p>
-{{end}}
-{{template "import_progress" .}}
-<p class="mt-8"><a href="/settings" class="text-sm text-slate-400 underline hover:text-slate-200">Back to settings</a></p>
+      <p>You can leave this page; the import continues in the background.</p>
+    </div>
+    <form method="post" action="/settings/import" enctype="multipart/form-data" class="flex max-w-xl flex-col gap-3 sm:flex-row sm:items-end">
+      {{if .Single}}<input type="hidden" name="importer" value="{{.Single.Value}}">
+      {{else}}<label class="block text-sm">Import from
+        <select name="importer" required class="mt-1 w-full rounded border border-slate-700 bg-slate-950 px-3 py-2">
+          <option value="">Choose...</option>
+          {{range .Importers}}<option value="{{.Value}}"{{if .Selected}} selected{{end}}>{{.Name}} ({{.PluginName}})</option>
+          {{end}}
+        </select>
+      </label>{{end}}
+      <label class="block flex-1 text-sm">{{if .Single}}{{.Single.Name}} file{{else}}File{{end}} (up to 20 MiB)
+        <input type="file" name="file"{{if .Single}}{{if .Single.Accept}} accept="{{.Single.Accept}}"{{end}}{{end}} required class="mt-1 w-full rounded border border-slate-700 bg-slate-950 px-3 py-2">
+      </label>
+      <button type="submit" class="rounded bg-indigo-600 px-4 py-2 font-medium hover:bg-indigo-500">Upload and import</button>
+    </form>
+    {{else}}
+    <p class="mb-4 max-w-2xl text-sm text-slate-400" data-no-importers>No enabled plugin offers an importer. Enable a plugin in Settings to import a file.</p>
+    {{end}}
+    {{template "import_progress" .}}
+  </div>
+</div>
 {{end}}

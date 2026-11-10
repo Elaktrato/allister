@@ -27,18 +27,18 @@ All data lives in the named volume `allister-data`, mounted at `/data`. It holds
 
 A plugin adds one media type: what its entries look like (fields, statuses, progress tracks, the blocks of the overview page), where the data comes from (a source such as AniList), and how lists get in and out (importers and exporters). Plugins are data only: they never ship HTML or JavaScript. The core draws every page, runs search, filters, imports, exports and backups, and stores everything in one database. Plugins are compiled into the binary. There is no marketplace or runtime installation yet.
 
-Settings lists the installed plugins with their version, kinds, sources, importers and exporters, plus a Disable or Enable button. Disabling a plugin hides its navigation entry, pages, person pages, import choices and export links (they answer 404), and pauses its background jobs and imports. All its data stays, and enabling it brings everything back. The home page opens the first enabled plugin's list, or Settings when none is enabled.
+The sidebar on the left (a top bar on phones) has one entry per enabled plugin, with the plugin's icon, and Settings at the bottom. Settings has its own column of sections: General (title language), Plugins, Import and Backup. Settings > Plugins lists the installed plugins with their version, kinds, sources, importers and exporters, plus a Disable or Enable button. Disabling a plugin hides its sidebar entry, pages, person pages, import choices and export links (they answer 404), and pauses its background jobs and imports. All its data stays, and enabling it brings everything back. The home page opens the first enabled plugin's list, or Settings when none is enabled.
 
 The **anime plugin** is on by default. It provides the anime kind (type, episodes, year, studio, synopsis, source, start and end dates, genres and tags), the AniList source (30 requests per minute), the Yamtrack CSV importer and the JSON exporter. Its pages live under `/anime`. To write a plugin, see [docs/plugins.md](docs/plugins.md).
 
 ## Title language
 
-Settings has a title language: Japanese (default), romaji or English. Further languages (for example German, French, Spanish) appear in the dropdown once a saved entry has a title in them. If the chosen language is missing for an entry, Allister falls back to Japanese, romaji, English, then any title.
+Settings > General has a title language: Japanese (default), romaji or English. Further languages (for example German, French, Spanish) appear in the dropdown once a saved entry has a title in them. If the chosen language is missing for an entry, Allister falls back to Japanese, romaji, English, then any title.
 
 ## Importing from Yamtrack
 
 1. In Yamtrack, export the general CSV.
-2. In Allister, open Settings, then Import from Yamtrack CSV, and upload the file (up to 20 MiB).
+2. In Allister, open Settings > Import and upload the file (up to 20 MiB).
 
 Only anime rows with MyAnimeList ids are used. Each id is looked up on AniList at 30 requests per minute, so about 830 entries take about 30 minutes. Cast and cover downloads then continue in the background for another hour or two.
 
@@ -60,7 +60,7 @@ Open an unmatched entry (or any manual entry) and press "Match to AniList". Past
 
 ## URLs
 
-Anime pages live under `/anime` (list, `/anime/search`, overviews at `/anime/anilist/{id}`, manual entries at `/anime/manual/{id}`, each with `/edit` for Edit details). List entries are edited at `/list/{id}/edit`, people at `/people/{id}`, and Settings, import and backup under `/settings`. A bookmark like `/anime?status=watching` from the first version now opens the All tab with a notice: statuses are the core's classes (`status=active`). The full table is in [docs/usage.md](docs/usage.md#urls).
+Anime pages live under `/anime` (list, `/anime/search`, overviews at `/anime/anilist/{id}`, manual entries at `/anime/manual/{id}`, each with `/edit` for Edit details). List entries are edited at `/list/{id}/edit`, people at `/people/{id}`, and Settings under `/settings` (sections `/settings/plugins`, `/settings/import`, `/settings/backup`). A bookmark like `/anime?status=watching` from the first version now opens the All tab with a notice: statuses are the core's classes (`status=active`). The full table is in [docs/usage.md](docs/usage.md#urls).
 
 ## Updating and stopping
 
@@ -72,7 +72,7 @@ Every image (the build and runtime base images and the helper images in the comm
 
 There are two ways out of the app:
 
-- **Per-plugin export**: the "Export JSON" link on the list page (and the plugin's row in Settings) downloads all entries of the anime list (status, rating, progress, dates, comment, titles and external ids) as `anime-json-<date>.json`, built in memory (fine for a few thousand entries). It is for using your list elsewhere and cannot be restored.
+- **Per-plugin export**: the "Export JSON" link on the list page (and the plugin's row in Settings > Plugins) downloads all entries of the anime list (status, rating, progress, dates, comment, titles and external ids) as `anime-json-<date>.json`, built in memory (fine for a few thousand entries). It is for using your list elsewhere and cannot be restored.
 - **Universal backup** (Settings > Backup): downloads `allister-backup-YYYY-MM-DD.zip` with every item of every installed plugin (also disabled ones), including your edits, people and credits, relations, external ids, genres and tags, your list entries with progress, and every local item cover. A cover's remote URL is not kept once it is downloaded, so the file itself is saved. Settings, plugin choices, jobs, import history and person photos are not included. Photos are fetched again by the background sync after a restore.
 
 To restore, upload the zip on the same page (up to 512 MiB). Items you do not have yet are added, items you already have (same plugin, source and id) are skipped, and nothing is overwritten or deleted, so restoring the same file twice is harmless. A backup from a newer Allister is refused. Items of a plugin that is not installed are counted and skipped. A cover larger than 10 MiB in the archive is restored without its cover. For a full copy of the data volume, use the commands below.

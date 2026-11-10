@@ -1,2 +1,16 @@
-{{range .}}<a href="{{.Href}}" class="rounded px-2 py-1 hover:bg-slate-800{{if .Right}} ml-auto{{end}}{{if .Active}} bg-slate-800{{end}}"{{if .Active}} aria-current="page"{{end}}>{{.Label}}</a>
-{{end}}
+{{/* The sidebar (a top bar on small screens): one row per enabled plugin,
+     Settings at the bottom. Rendered per request into base.html's header
+     (see executeFor); exactly one row carries aria-current="page". */}}
+<div class="flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-3 lg:h-full lg:flex-col lg:flex-nowrap lg:items-stretch lg:gap-0 lg:px-3 lg:py-5">
+  <a href="/" class="flex items-center gap-2 rounded-md px-1 text-lg font-semibold tracking-tight text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 lg:mb-6 lg:px-3"><span class="icon text-indigo-400" aria-hidden="true">collections_bookmark</span><span>Allister</span></a>
+  <nav aria-label="Main" class="flex flex-1 flex-wrap items-center gap-1 lg:flex-col lg:flex-nowrap lg:items-stretch">
+    <ul class="flex flex-wrap gap-1 lg:flex-col">
+      {{range .Items}}<li>{{template "nav_row" .}}</li>
+      {{end}}
+    </ul>
+    <ul class="ml-auto flex gap-1 lg:mt-auto lg:ml-0 lg:flex-col lg:border-t lg:border-slate-800 lg:pt-3">
+      <li>{{template "nav_row" .Settings}}</li>
+    </ul>
+  </nav>
+</div>
+{{define "nav_row"}}<a href="{{.Href}}"{{if .Active}} aria-current="page"{{end}} class="group flex items-center gap-3 rounded-md px-2.5 py-1.5 text-sm font-medium focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 lg:px-3 lg:py-2 {{if .Active}}bg-slate-800 text-white{{else}}text-slate-400 hover:bg-slate-800/60 hover:text-slate-100{{end}}"><span class="icon {{if .Active}}text-indigo-400{{else}}text-slate-500 group-hover:text-slate-300{{end}}" aria-hidden="true">{{if eq .Href "/settings"}}settings{{else}}{{with .Icon}}{{.}}{{else}}category{{end}}{{end}}</span><span>{{.Label}}</span></a>{{end}}

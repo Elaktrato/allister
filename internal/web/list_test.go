@@ -66,18 +66,20 @@ func TestListTabsShowCountsAndCurrent(t *testing.T) {
 	mustContain(t, b, `href="/anime"`, `href="/anime?status=active"`, `href="/anime?status=completed"`,
 		`href="/anime?status=planned"`, `href="/anime?status=paused"`, `href="/anime?status=dropped"`,
 		"All (3)", "Watching (2)", "Dropped (1)", "Completed (0)", "Plan to watch (0)", "Paused (0)")
-	// the header nav marks the plugin itself; the tabs live in the main content
+	// the sidebar marks the plugin itself (aria-current="page"); the tabs
+	// live in the main content and mark theirs with aria-current="true"
 	b = b[strings.Index(b, "</header>"):]
-	if n := strings.Count(b, `aria-current="page"`); n != 1 {
+	if n := strings.Count(b, `aria-current="true"`); n != 1 {
 		t.Fatalf("aria-current count %d", n)
 	}
-	i := strings.Index(b, `aria-current="page"`)
+	mustNotContain(t, b, `aria-current="page"`)
+	i := strings.Index(b, `aria-current="true"`)
 	if !strings.Contains(b[i:i+200], "Watching (2)") {
 		t.Fatalf("wrong tab current: %s", b[i:i+200])
 	}
 	all := e.get("/anime").Body.String()
 	all = all[strings.Index(all, "</header>"):]
-	j := strings.Index(all, `aria-current="page"`)
+	j := strings.Index(all, `aria-current="true"`)
 	if !strings.Contains(all[j:j+100], "All (3)") {
 		t.Fatal("All not current")
 	}
