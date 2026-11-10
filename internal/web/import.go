@@ -71,6 +71,9 @@ func (s *server) importerOptions(selected string) []importerOption {
 			continue
 		}
 		for _, im := range m.Importers {
+			if im.AccountLabel != "" {
+				continue // account importers live on the plugin's settings page
+			}
 			o := importerOption{Value: m.ID + "/" + im.ID, Name: im.Name, PluginName: m.Name, FileHint: im.FileHint,
 				Accept: strings.Join(im.Accept, ",")}
 			if si, ok := sourceInfo(m, im.ResolveVia); ok {

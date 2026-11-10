@@ -159,6 +159,7 @@ const (
 	OpDetails         = "details"
 	OpPeople          = "people"
 	OpSchedule        = "schedule"
+	OpAccount         = "account"
 	OpRecommendations = "recommendations"
 	OpLookup          = "lookup"
 )
@@ -255,8 +256,17 @@ func (f *FakeSource) Lookup(ctx context.Context, kind, idType, value string) (pl
 
 // FakeImporter returns a canned ParseResult (or Err) and ignores the input.
 type FakeImporter struct {
-	Result plugin.ParseResult
-	Err    error
+	// AccountRows is the ImportAccount result.
+	AccountRows []plugin.ParsedEntry
+	Result      plugin.ParseResult
+	Err         error
+}
+
+func (f *FakeImporter) ImportAccount(ctx context.Context, account string) (plugin.ParseResult, error) {
+	if f.Err != nil {
+		return plugin.ParseResult{}, f.Err
+	}
+	return plugin.ParseResult{Entries: f.AccountRows}, nil
 }
 
 func (f *FakeImporter) Parse(ctx context.Context, r io.Reader) (plugin.ParseResult, error) {

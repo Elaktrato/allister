@@ -9,7 +9,11 @@ const (
 	KindAnime  = "anime"
 	SourceID   = "anilist"
 	ImporterID = "yamtrack"
-	ExporterID = "json"
+	// AniListImporter imports an AniList account's list by username;
+	// MALImporter parses MyAnimeList's XML export file.
+	AniListImporter = "anilist-user"
+	MALImporter     = "mal-xml"
+	ExporterID      = "json"
 )
 
 func num(f float64) *float64 { return &f }
@@ -85,7 +89,7 @@ func manifest() plugin.Manifest {
 			ID:                SourceID,
 			Name:              "AniList",
 			RequestsPerMinute: 30,
-			ExternalIDTypes:   []string{"mal"},
+			ExternalIDTypes:   []string{"mal", "anilist"},
 			SupportsLookup:    true,
 			SupportsSchedule:  true,
 			LinkLabel:         "View on AniList",
@@ -101,6 +105,25 @@ func manifest() plugin.Manifest {
 			ResolveVia:        SourceID,
 			FallbackTitleLang: "ja-latn",
 			UnmatchedNote:     "Imported from Yamtrack; AniList had no match for MyAnimeList #{id}.",
+		}, {
+			ID:                AniListImporter,
+			Name:              "AniList account",
+			AccountLabel:      "AniList username",
+			ExternalIDType:    "anilist",
+			ExternalIDLabel:   "AniList",
+			ResolveVia:        SourceID,
+			FallbackTitleLang: "ja-latn",
+			UnmatchedNote:     "Imported from AniList; AniList had no match for #{id}.",
+		}, {
+			ID:                MALImporter,
+			Name:              "MyAnimeList XML export",
+			FileHint:          "Export your list on MyAnimeList (List, then Export) and upload the XML file.",
+			Accept:            []string{".xml"},
+			ExternalIDType:    "mal",
+			ExternalIDLabel:   "MyAnimeList",
+			ResolveVia:        SourceID,
+			FallbackTitleLang: "ja-latn",
+			UnmatchedNote:     "Imported from MyAnimeList; AniList had no match for MyAnimeList #{id}.",
 		}},
 		Exporters: []plugin.ExporterInfo{{
 			ID: ExporterID, Name: "JSON", Extension: ".json", MIME: "application/json",

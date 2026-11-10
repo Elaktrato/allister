@@ -34,6 +34,8 @@ func route(query string) string {
 	switch {
 	case strings.Contains(query, "characters("):
 		return "cast.json"
+	case strings.Contains(query, "MediaListCollection"):
+		return "account.json"
 	case strings.Contains(query, "airingSchedule"):
 		return "schedule.json"
 	case strings.Contains(query, "Page("):
@@ -319,7 +321,7 @@ func isPlain(err error) bool {
 func TestSourceLookupUnsupportedIDTypeIsPlainError(t *testing.T) {
 	var queries []string
 	s := newSource(t, nil, 0, &queries)
-	for _, idType := range []string{"tmdb", "", "anilist"} {
+	for _, idType := range []string{"tmdb", "", "tvdb"} {
 		_, err := s.Lookup(ctx(), "anime", idType, "154587")
 		if !isPlain(err) || !strings.Contains(err.Error(), "cannot look up") {
 			t.Errorf("Lookup(%q) err = %v, want a plain error", idType, err)

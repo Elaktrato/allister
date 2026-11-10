@@ -232,8 +232,11 @@ type ImporterInfo struct {
 	ResolveVia        string   // a declared source id; "" = manual-only
 	FallbackTitleLang string   // title language of an unmatched row's manual item
 	UnmatchedNote     string   // <= 200 characters, "{id}" is replaced by the id
+	AccountLabel      string   // non-empty: the importer takes an account name, not a file
 }
 ```
+
+An importer may also implement the optional `AccountImporter` capability (`ImportAccount(ctx, account string) (ParseResult, error)`) and declare it with `AccountLabel` (for example "Username"): the plugin settings page then offers a name field instead of the file picker, and the generic import page leaves it out. The rows are the same `ParsedEntry` values; a row may carry `UpdatedAt` (the entry's source-side modification time) so the user can choose to update existing entries only when the source is newer.
 
 `Parse` receives the uploaded file (at most 20 MiB) and returns `ParseResult{Entries, Skipped, Ignored}`. Each `ParsedEntry` holds the kind, title, external ids, status class, rating (0 to 10), progress per track key, calendar-day dates (UTC midnight, see `plugin.DateOnly`), comment, optional cover URL and notes. `Skipped` lists rows the user should hear about. `Ignored` only counts rows meant for another media type. Return `ErrBadInput` (wrapped, with a readable reason) when the file is not in your format.
 

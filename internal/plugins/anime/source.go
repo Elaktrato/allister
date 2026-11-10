@@ -170,11 +170,14 @@ func (s *source) Schedule(ctx context.Context, kind, id string) ([]plugin.Airing
 	return out, nil
 }
 
-// Lookup finds an anime by external id; only the MyAnimeList id ("mal") is
-// supported.
+// Lookup finds an anime by an external id: its MyAnimeList id ("mal") or its
+// own AniList id ("anilist", which details reads directly).
 func (s *source) Lookup(ctx context.Context, kind, idType, value string) (plugin.ItemData, error) {
 	if err := checkKind(kind); err != nil {
 		return plugin.ItemData{}, err
+	}
+	if idType == "anilist" {
+		return s.Details(ctx, kind, value)
 	}
 	// An id type the source cannot look up fails alike for every row: a plain
 	// error (the import fails the row), neither not found nor unavailable.

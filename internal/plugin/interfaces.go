@@ -65,6 +65,14 @@ type Importer interface {
 	Parse(ctx context.Context, r io.Reader) (ParseResult, error)
 }
 
+// AccountImporter is the optional capability of an importer that fetches an
+// account's list by name (a profile name on the source's site) instead of
+// parsing a file. ImporterInfo.AccountLabel (non-empty) declares it and names
+// the UI field.
+type AccountImporter interface {
+	ImportAccount(ctx context.Context, account string) (ParseResult, error)
+}
+
 // Exporter writes entries to a file format.
 type Exporter interface {
 	Export(ctx context.Context, entries []ExportEntry, w io.Writer) error

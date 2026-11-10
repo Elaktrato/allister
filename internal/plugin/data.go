@@ -103,7 +103,10 @@ type ParsedEntry struct {
 	FinishedOn  *time.Time         `json:"finished_on,omitempty"` // calendar day, UTC midnight by convention (see DateOnly)
 	Comment     string             `json:"comment,omitempty"`
 	CoverURL    string             `json:"cover_url,omitempty"`
-	Notes       []string           `json:"notes,omitempty"`
+	// UpdatedAt is the entry's source-side modification time when the source
+	// knows one (an account import does; a file export usually does not).
+	UpdatedAt *time.Time `json:"updated_at,omitempty"`
+	Notes     []string   `json:"notes,omitempty"`
 }
 
 // SkippedRow reports an input row an importer could not use.
