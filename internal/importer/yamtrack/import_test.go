@@ -233,7 +233,7 @@ func (e *env) entryByMAL(mal string) (*store.Saved, *store.ListEntry) {
 
 func (e *env) outcomes(id int64) map[string]string {
 	e.t.Helper()
-	rows, err := e.d.Query(`SELECT mal_id, outcome FROM import_rows WHERE import_id=?`, id)
+	rows, err := e.d.Query(`SELECT external_id, outcome FROM import_rows WHERE import_id=?`, id)
 	if err != nil {
 		e.t.Fatal(err)
 	}
@@ -1008,7 +1008,7 @@ func TestSavedButUnlistedRowGetsListEntry(t *testing.T) {
 		t.Fatalf("report: %+v", r)
 	}
 	var msg string
-	e.d.QueryRow(`SELECT message FROM import_rows WHERE import_id=? AND mal_id='2'`, id).Scan(&msg)
+	e.d.QueryRow(`SELECT message FROM import_rows WHERE import_id=? AND external_id='2'`, id).Scan(&msg)
 	if !strings.Contains(msg, "added to your list (anime was already saved)") || !strings.Contains(msg, "progress clamped to 12") {
 		t.Errorf("message = %q", msg)
 	}
@@ -1078,8 +1078,8 @@ func TestImperfectFieldsKeepEntryAndAppendNotes(t *testing.T) {
 		t.Errorf("titles = %+v", s2.Titles)
 	}
 	var m1, m2 string
-	e.d.QueryRow(`SELECT message FROM import_rows WHERE import_id=? AND mal_id='1'`, id).Scan(&m1)
-	e.d.QueryRow(`SELECT message FROM import_rows WHERE import_id=? AND mal_id='2'`, id).Scan(&m2)
+	e.d.QueryRow(`SELECT message FROM import_rows WHERE import_id=? AND external_id='1'`, id).Scan(&m1)
+	e.d.QueryRow(`SELECT message FROM import_rows WHERE import_id=? AND external_id='2'`, id).Scan(&m2)
 	for _, w := range []string{"score", "progress", "start date"} {
 		if !strings.Contains(m1, w) {
 			t.Errorf("message 1 %q lacks %q", m1, w)

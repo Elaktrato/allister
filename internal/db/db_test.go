@@ -221,8 +221,8 @@ func TestMigrationsApplyOnEmptyAndExistingVolume(t *testing.T) {
 		t.Errorf("jobs rows %d", n)
 	}
 	var msg string
-	var animeID sql.NullInt64
-	if err := d.QueryRow(`SELECT message, anime_id FROM import_rows WHERE import_id=1 AND seq=1`).Scan(&msg, &animeID); err != nil || msg != "m" || animeID.Valid {
+	var animeID sql.NullInt64 // anime_id is item_id since 00010
+	if err := d.QueryRow(`SELECT message, item_id FROM import_rows WHERE import_id=1 AND seq=1`).Scan(&msg, &animeID); err != nil || msg != "m" || animeID.Valid {
 		t.Fatalf("import row: %q %v %v", msg, animeID, err)
 	}
 	if n := rowCount(t, d, `SELECT count(*) FROM sqlite_master WHERE type='index' AND name='idx_import_rows_outcome'`); n != 1 {
@@ -311,14 +311,15 @@ func TestImportRowsReferenceItems(t *testing.T) {
 	defer d.Close()
 	mustExec(t, d, `INSERT INTO imports(id, filename) VALUES(1,'y.csv')`)
 	mustExec(t, d, `INSERT INTO items(id, plugin_id, kind, source, source_id) VALUES(5,'anime','anime','anilist','1')`)
-	mustExec(t, d, `INSERT INTO import_rows(import_id, seq, anime_id) VALUES(1,1,5)`)
-	if _, err := d.Exec(`INSERT INTO import_rows(import_id, seq, anime_id) VALUES(1,2,77)`); err == nil {
+	// anime_id is item_id since 00010
+	mustExec(t, d, `INSERT INTO import_rows(import_id, seq, item_id) VALUES(1,1,5)`)
+	if _, err := d.Exec(`INSERT INTO import_rows(import_id, seq, item_id) VALUES(1,2,77)`); err == nil {
 		t.Fatal("import_rows accepted a missing item")
 	}
 	mustExec(t, d, `DELETE FROM items WHERE id=5`)
 	var id sql.NullInt64
-	if err := d.QueryRow(`SELECT anime_id FROM import_rows WHERE seq=1`).Scan(&id); err != nil || id.Valid {
-		t.Fatalf("anime_id after item delete: %v %v", id, err)
+	if err := d.QueryRow(`SELECT item_id FROM import_rows WHERE seq=1`).Scan(&id); err != nil || id.Valid {
+		t.Fatalf("item_id after item delete: %v %v", id, err)
 	}
 }
 
@@ -332,7 +333,7 @@ func TestDropLegacyDownRestoresEmptyLegacyTables(t *testing.T) {
 	mustExec(t, d, `INSERT INTO people(id, plugin_id, source, source_id, name) VALUES(1,'anime','anilist','c1','C')`)
 	mustExec(t, d, `INSERT INTO credits(item_id, seq, person_id) VALUES(1,0,1)`)
 	mustExec(t, d, `INSERT INTO imports(id) VALUES(1)`)
-	mustExec(t, d, `INSERT INTO import_rows(import_id, seq, anime_id) VALUES(1,1,1)`)
+	mustExec(t, d, `INSERT INTO import_rows(import_id, seq, item_id) VALUES(1,1,1)`) // anime_id again after the down of 00010
 	if err := goose.DownTo(d, "migrations", 6); err != nil {
 		t.Fatal(err)
 	}

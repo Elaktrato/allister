@@ -20,7 +20,7 @@ import (
 )
 
 // KindImport is the job kind handled by Importer.Handler.
-const KindImport = "import_yamtrack"
+const KindImport = "import_run"
 
 const (
 	// anilistRequestsPerMinute is AniList's currently degraded rate limit.
@@ -174,8 +174,8 @@ func (im *Importer) Submit(ctx context.Context, filename string, r io.Reader) (i
 			stored++
 		}
 	}
-	res, err := tx.ExecContext(ctx, `INSERT INTO imports(filename, state, total, ignored) VALUES (?,?,?,?)`,
-		filename, statePending, len(rows)+stored, ignored)
+	res, err := tx.ExecContext(ctx, `INSERT INTO imports(filename, state, total, ignored, plugin_id) VALUES (?,?,?,?,?)`,
+		filename, statePending, len(rows)+stored, ignored, pluginID)
 	if err != nil {
 		return 0, fmt.Errorf("import: %w", err)
 	}
@@ -183,7 +183,7 @@ func (im *Importer) Submit(ctx context.Context, filename string, r io.Reader) (i
 	if err != nil {
 		return 0, fmt.Errorf("import: %w", err)
 	}
-	stmt, err := tx.PrepareContext(ctx, `INSERT INTO import_rows(import_id, seq, mal_id, title, outcome, message, data) VALUES (?,?,?,?,?,?,?)`)
+	stmt, err := tx.PrepareContext(ctx, `INSERT INTO import_rows(import_id, seq, external_id_type, external_id, title, outcome, message, data) VALUES (?,?,'mal',?,?,?,?,?)`)
 	if err != nil {
 		return 0, fmt.Errorf("import: %w", err)
 	}
@@ -416,7 +416,7 @@ func (im *Importer) record(ctx context.Context, importID int64, seq int, outcome
 		aid = animeID
 	}
 	_, err := im.db.ExecContext(context.WithoutCancel(ctx),
-		`UPDATE import_rows SET outcome=?, anime_id=?, message=? WHERE import_id=? AND seq=?`, outcome, aid, msg, importID, seq)
+		`UPDATE import_rows SET outcome=?, item_id=?, message=? WHERE import_id=? AND seq=?`, outcome, aid, msg, importID, seq)
 	if err != nil {
 		return fmt.Errorf("import %d: record row %d: %w", importID, seq, err)
 	}

@@ -9,7 +9,7 @@ import (
 // latestVersion is the newest migration. 00008 is unused; later migrations
 // continue at 00010 (goose cannot apply a lower number to a database already
 // at a higher version).
-const latestVersion = 9
+const latestVersion = 10
 
 func TestMigrationRewritesLegacySyncJobs(t *testing.T) {
 	path := tempPath(t)
@@ -29,8 +29,10 @@ func TestMigrationRewritesLegacySyncJobs(t *testing.T) {
 		{5, "sync_anime", `not json`, "pending", "sync_anime", `not json`},
 		{6, "sync_anime", `{"plugin_id":"anime"}`, "pending", "sync_anime", `{"plugin_id":"anime"}`},
 		{7, "sync_anime", `{"anime_id":"x"}`, "pending", "sync_anime", `{"anime_id":"x"}`},
-		// other kinds are not touched
-		{8, "import_yamtrack", `{"import_id":1}`, "pending", "import_yamtrack", `{"import_id":1}`},
+		// other kinds are not touched by 00009 (00010 then rewrites a legacy
+		// import job to import_run, see import_plugin_test.go)
+		{8, "import_yamtrack", `{"import_id":1}`, "pending", "import_run", `{"import_id":1,"plugin_id":"anime"}`},
+		{9, "other_kind", `{"anime_id":1}`, "pending", "other_kind", `{"anime_id":1}`},
 	}
 	for _, r := range rows {
 		mustExec(t, old, `INSERT INTO jobs(id, kind, payload_json, state) VALUES(?, ?, ?, ?)`, r.id, r.kind, r.payload, r.state)
