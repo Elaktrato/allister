@@ -18,7 +18,7 @@ import (
 	"github.com/allister/allister/internal/importer"
 	"github.com/allister/allister/internal/library"
 	"github.com/allister/allister/internal/plugin"
-	"github.com/allister/allister/internal/provider"
+	"github.com/allister/allister/internal/plugins/anime/anilist"
 	"github.com/allister/allister/internal/settings"
 	"github.com/allister/allister/internal/store"
 )
@@ -35,7 +35,7 @@ var templateFS embed.FS
 type Deps struct {
 	Settings  *settings.Store
 	Store     *store.Store
-	Providers map[provider.Source]provider.Provider
+	Providers map[anilist.Source]anilist.Provider
 	// Jobs enqueues background jobs (see package jobs).
 	Jobs JobQueue
 	// SyncJobs maps a plugin id to the sync job of a newly saved item of

@@ -6,7 +6,7 @@ import (
 	"fmt"
 
 	"github.com/allister/allister/internal/library"
-	"github.com/allister/allister/internal/provider"
+	"github.com/allister/allister/internal/plugins/anime/anilist"
 )
 
 // ErrNotFound: no anime row with the given id.
@@ -46,8 +46,8 @@ func (e *AlreadySavedError) Is(target error) bool { return target == ErrAlreadyS
 // Errors: ErrNotFound (no such row), ErrInvalid (row is not a manual entry, or
 // a is not a usable target), *AlreadySavedError (a belongs to another entry).
 // Any failure rolls everything back.
-func (s *Store) ConvertToSource(ctx context.Context, animeID int64, a provider.Anime) error {
-	if a.Source == "" || a.Source == provider.Manual || a.ID == "" {
+func (s *Store) ConvertToSource(ctx context.Context, animeID int64, a anilist.Anime) error {
+	if a.Source == "" || a.Source == anilist.Manual || a.ID == "" {
 		return invalid("the match target needs a provider source and id")
 	}
 	d, err := itemData(a)

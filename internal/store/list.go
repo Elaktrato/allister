@@ -5,7 +5,7 @@ import (
 	"errors"
 
 	"github.com/allister/allister/internal/library"
-	"github.com/allister/allister/internal/provider"
+	"github.com/allister/allister/internal/plugins/anime/anilist"
 )
 
 // UpsertListEntry inserts or replaces the list entry of e.AnimeID and sets
@@ -51,7 +51,7 @@ func ValidateListEntry(e ListEntry, episodes *int) error {
 // the new anime id. e.AnimeID is ignored. An invalid entry (see
 // ValidateListEntry, checked against a.Episodes) wraps ErrInvalid and saves
 // nothing; an existing (source, source_id) returns ErrAlreadySaved.
-func (s *Store) AddToList(ctx context.Context, a provider.Anime, e ListEntry, opts ...SaveOption) (int64, error) {
+func (s *Store) AddToList(ctx context.Context, a anilist.Anime, e ListEntry, opts ...SaveOption) (int64, error) {
 	if err := ValidateListEntry(e, a.Episodes); err != nil {
 		return 0, err
 	}

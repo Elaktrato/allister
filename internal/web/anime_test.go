@@ -16,30 +16,30 @@ import (
 	"github.com/allister/allister/internal/db"
 	"github.com/allister/allister/internal/jobs"
 	"github.com/allister/allister/internal/library"
-	"github.com/allister/allister/internal/provider"
+	"github.com/allister/allister/internal/plugins/anime/anilist"
 	"github.com/allister/allister/internal/settings"
 	"github.com/allister/allister/internal/store"
 )
 
 type animeProvider struct {
 	mu                   sync.Mutex
-	anime                provider.Anime
-	cast                 []provider.CastMember
+	anime                anilist.Anime
+	cast                 []anilist.CastMember
 	animeErr, castErr    error
 	animeCalls, castCall int
 }
 
-func (f *animeProvider) Name() provider.Source { return provider.AniList }
-func (f *animeProvider) Search(ctx context.Context, q string) ([]provider.SearchResult, error) {
+func (f *animeProvider) Name() anilist.Source { return anilist.AniList }
+func (f *animeProvider) Search(ctx context.Context, q string) ([]anilist.SearchResult, error) {
 	return nil, nil
 }
-func (f *animeProvider) Anime(ctx context.Context, id string) (provider.Anime, error) {
+func (f *animeProvider) Anime(ctx context.Context, id string) (anilist.Anime, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.animeCalls++
 	return f.anime, f.animeErr
 }
-func (f *animeProvider) Cast(ctx context.Context, id string) ([]provider.CastMember, error) {
+func (f *animeProvider) Cast(ctx context.Context, id string) ([]anilist.CastMember, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.castCall++
@@ -103,7 +103,7 @@ func newEnvWith(t *testing.T, mk func(es plugin.EnabledStore) *plugin.Registry) 
 	}
 	e.srv, e.h = newServer(Deps{
 		Settings: e.set, Store: e.st, Jobs: e.jobs, SyncJobs: testSyncJobs(), CoversDir: e.covers, DataDir: filepath.Dir(e.covers), Registry: e.reg,
-		Providers: map[provider.Source]provider.Provider{provider.AniList: e.fp},
+		Providers: map[anilist.Source]anilist.Provider{anilist.AniList: e.fp},
 	}, func() time.Time { return *e.now })
 	e.reg = e.srv.deps.Registry
 	e.lib = e.srv.deps.Library
@@ -122,25 +122,25 @@ func sampleAnimeProvider() *animeProvider {
 	start := time.Date(2006, 10, 4, 0, 0, 0, 0, time.UTC)
 	end := time.Date(2007, 6, 27, 0, 0, 0, 0, time.UTC)
 	return &animeProvider{
-		anime: provider.Anime{
-			SearchResult: provider.SearchResult{
-				Source: provider.AniList, ID: "1535",
-				Titles: []provider.Title{{Lang: "ja", Text: "デスノート"}, {Lang: "ja-latn", Text: "Death Note"}, {Lang: "en", Text: "Death Note EN"}, {Lang: "de", Text: "Todesnotiz"}},
+		anime: anilist.Anime{
+			SearchResult: anilist.SearchResult{
+				Source: anilist.AniList, ID: "1535",
+				Titles: []anilist.Title{{Lang: "ja", Text: "デスノート"}, {Lang: "ja-latn", Text: "Death Note"}, {Lang: "en", Text: "Death Note EN"}, {Lang: "de", Text: "Todesnotiz"}},
 				Type:   "TV", Episodes: ip(37), Year: ip(2006), Studio: "Madhouse",
 				Synopsis: "Line one.\nLine two.", CoverURL: "https://img.example/c.jpg",
 			},
 			StartDate: &start, EndDate: &end, SourceMaterial: "MANGA", ExternalURL: "https://anilist.co/anime/1535",
-			Relations: []provider.Relation{
-				{Kind: "sequel", Source: provider.AniList, ID: "2000", Titles: []provider.Title{{Lang: "en", Text: "Sequel Title"}}, Type: "TV"},
-				{Kind: "source", Source: provider.AniList, ID: "30021", Titles: []provider.Title{{Lang: "en", Text: "Manga Title"}}, Type: "MANGA"},
+			Relations: []anilist.Relation{
+				{Kind: "sequel", Source: anilist.AniList, ID: "2000", Titles: []anilist.Title{{Lang: "en", Text: "Sequel Title"}}, Type: "TV"},
+				{Kind: "source", Source: anilist.AniList, ID: "30021", Titles: []anilist.Title{{Lang: "en", Text: "Manga Title"}}, Type: "MANGA"},
 			},
-			Recommendations: []provider.Recommendation{
-				{Source: provider.AniList, ID: "3000", Titles: []provider.Title{{Lang: "en", Text: "Rec Title"}}, CoverURL: "https://img.example/r.jpg"},
+			Recommendations: []anilist.Recommendation{
+				{Source: anilist.AniList, ID: "3000", Titles: []anilist.Title{{Lang: "en", Text: "Rec Title"}}, CoverURL: "https://img.example/r.jpg"},
 			},
 		},
-		cast: []provider.CastMember{{
-			Character: provider.Person{Source: provider.AniList, ID: "c1", Name: "Light Yagami", ImageURL: "https://img.example/l.jpg", URL: "https://anilist.co/character/c1"},
-			Actor:     &provider.Person{Source: provider.AniList, ID: "a1", Name: "Mamoru Miyano", ImageURL: "https://img.example/m.jpg", URL: "https://anilist.co/staff/a1"},
+		cast: []anilist.CastMember{{
+			Character: anilist.Person{Source: anilist.AniList, ID: "c1", Name: "Light Yagami", ImageURL: "https://img.example/l.jpg", URL: "https://anilist.co/character/c1"},
+			Actor:     &anilist.Person{Source: anilist.AniList, ID: "a1", Name: "Mamoru Miyano", ImageURL: "https://img.example/m.jpg", URL: "https://anilist.co/staff/a1"},
 			Role:      "MAIN",
 		}},
 	}

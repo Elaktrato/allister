@@ -21,27 +21,27 @@ import (
 	"github.com/allister/allister/internal/plugin"
 	"github.com/allister/allister/internal/plugin/plugintest"
 	"github.com/allister/allister/internal/plugins/anime"
-	"github.com/allister/allister/internal/provider"
+	"github.com/allister/allister/internal/plugins/anime/anilist"
 	"github.com/allister/allister/internal/settings"
 	"github.com/allister/allister/internal/store"
 )
 
 // fnResolver is an AniList-like provider for the anime plugin: its MAL id
 // lookup is the function, everything else is unavailable.
-type fnResolver func(malID string) (provider.Anime, error)
+type fnResolver func(malID string) (anilist.Anime, error)
 
-func (f fnResolver) AnimeByMALID(_ context.Context, malID string) (provider.Anime, error) {
+func (f fnResolver) AnimeByMALID(_ context.Context, malID string) (anilist.Anime, error) {
 	return f(malID)
 }
-func (f fnResolver) Name() provider.Source { return provider.AniList }
-func (f fnResolver) Search(context.Context, string) ([]provider.SearchResult, error) {
-	return nil, provider.ErrUnavailable
+func (f fnResolver) Name() anilist.Source { return anilist.AniList }
+func (f fnResolver) Search(context.Context, string) ([]anilist.SearchResult, error) {
+	return nil, anilist.ErrUnavailable
 }
-func (f fnResolver) Anime(context.Context, string) (provider.Anime, error) {
-	return provider.Anime{}, provider.ErrUnavailable
+func (f fnResolver) Anime(context.Context, string) (anilist.Anime, error) {
+	return anilist.Anime{}, anilist.ErrUnavailable
 }
-func (f fnResolver) Cast(context.Context, string) ([]provider.CastMember, error) {
-	return nil, provider.ErrUnavailable
+func (f fnResolver) Cast(context.Context, string) ([]anilist.CastMember, error) {
+	return nil, anilist.ErrUnavailable
 }
 
 // dbJobs records jobs in the fake and also writes them to the jobs table: the
@@ -185,14 +185,14 @@ func (e *impEnv) runJob(t *testing.T) {
 }
 
 func notFoundExcept(ok ...string) fnResolver {
-	return func(mal string) (provider.Anime, error) {
+	return func(mal string) (anilist.Anime, error) {
 		for _, o := range ok {
 			if o == mal {
-				return provider.Anime{SearchResult: provider.SearchResult{Source: provider.AniList, ID: "9" + mal,
-					Titles: []provider.Title{{Lang: "en", Text: "T" + mal}}}, MALID: mal}, nil
+				return anilist.Anime{SearchResult: anilist.SearchResult{Source: anilist.AniList, ID: "9" + mal,
+					Titles: []anilist.Title{{Lang: "en", Text: "T" + mal}}}, MALID: mal}, nil
 			}
 		}
-		return provider.Anime{}, provider.ErrNotFound
+		return anilist.Anime{}, anilist.ErrNotFound
 	}
 }
 

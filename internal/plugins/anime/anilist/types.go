@@ -1,5 +1,4 @@
-// Package provider defines the types shared with metadata providers.
-package provider
+package anilist
 
 import (
 	"context"

@@ -7,16 +7,16 @@ import (
 	"testing"
 
 	"github.com/allister/allister/internal/plugin"
-	"github.com/allister/allister/internal/provider"
+	"github.com/allister/allister/internal/plugins/anime/anilist"
 	"github.com/allister/allister/internal/store"
 )
 
-func pperson(id, name, img, ext string) provider.Person {
-	return provider.Person{Source: provider.AniList, ID: id, Name: name, ImageURL: img, URL: ext}
+func pperson(id, name, img, ext string) anilist.Person {
+	return anilist.Person{Source: anilist.AniList, ID: id, Name: name, ImageURL: img, URL: ext}
 }
 
 // withCast saves cast for animeID.
-func (e *env) withCast(t *testing.T, animeID int64, cast ...provider.CastMember) {
+func (e *env) withCast(t *testing.T, animeID int64, cast ...anilist.CastMember) {
 	t.Helper()
 	if err := e.st.SaveCast(context.Background(), animeID, cast); err != nil {
 		t.Fatal(err)
@@ -41,15 +41,15 @@ func (e *env) personPath(t *testing.T, sourceID string) string {
 	return ""
 }
 
-func titleEn(s string) []provider.Title { return []provider.Title{{Lang: "en", Text: s}} }
+func titleEn(s string) []anilist.Title { return []anilist.Title{{Lang: "en", Text: s}} }
 
 func TestPersonPageListsSavedAnimeOnly(t *testing.T) {
 	e := newEnv(t)
-	a := e.addEntry(t, provider.AniList, "1", nil, store.Watching, 0, titleEn("Saved Show")...)
-	b := e.addEntry(t, provider.AniList, "2", nil, store.Watching, 0, titleEn("Other Show")...)
+	a := e.addEntry(t, anilist.AniList, "1", nil, store.Watching, 0, titleEn("Saved Show")...)
+	b := e.addEntry(t, anilist.AniList, "2", nil, store.Watching, 0, titleEn("Other Show")...)
 	va := pperson("v1", "Voice One", "", "")
-	e.withCast(t, a, provider.CastMember{Character: pperson("c1", "Hero", "", ""), Actor: &va})
-	e.withCast(t, b, provider.CastMember{Character: pperson("c2", "Villain", "", ""), Actor: &provider.Person{Source: provider.AniList, ID: "v2", Name: "Voice Two"}})
+	e.withCast(t, a, anilist.CastMember{Character: pperson("c1", "Hero", "", ""), Actor: &va})
+	e.withCast(t, b, anilist.CastMember{Character: pperson("c2", "Villain", "", ""), Actor: &anilist.Person{Source: anilist.AniList, ID: "v2", Name: "Voice Two"}})
 	rec := e.get(e.personPath(t, "v1"))
 	if rec.Code != 200 {
 		t.Fatal(rec.Code)
@@ -61,18 +61,18 @@ func TestPersonPageListsSavedAnimeOnly(t *testing.T) {
 
 func TestVoiceActorShowsCharacter(t *testing.T) {
 	e := newEnv(t)
-	a := e.addEntry(t, provider.AniList, "1", nil, store.Watching, 0, titleEn("Show")...)
+	a := e.addEntry(t, anilist.AniList, "1", nil, store.Watching, 0, titleEn("Show")...)
 	va := pperson("v1", "Voice One", "", "")
-	e.withCast(t, a, provider.CastMember{Character: pperson("c1", "Hero", "", ""), Actor: &va})
+	e.withCast(t, a, anilist.CastMember{Character: pperson("c1", "Hero", "", ""), Actor: &va})
 	body := e.get(e.personPath(t, "v1")).Body.String()
 	mustContain(t, body, "as Hero")
 }
 
 func TestCharacterPageShowsAnimeWithoutCharacterLine(t *testing.T) {
 	e := newEnv(t)
-	a := e.addEntry(t, provider.AniList, "1", nil, store.Watching, 0, titleEn("Show")...)
+	a := e.addEntry(t, anilist.AniList, "1", nil, store.Watching, 0, titleEn("Show")...)
 	va := pperson("v1", "Voice One", "", "")
-	e.withCast(t, a, provider.CastMember{Character: pperson("c1", "Hero", "", ""), Actor: &va})
+	e.withCast(t, a, anilist.CastMember{Character: pperson("c1", "Hero", "", ""), Actor: &va})
 	body := e.get(e.personPath(t, "c1")).Body.String()
 	mustContain(t, body, "Hero", "Show", `href="/anime/anilist/1"`)
 	mustNotContain(t, body, "as Hero", "Voice One")
@@ -80,11 +80,11 @@ func TestCharacterPageShowsAnimeWithoutCharacterLine(t *testing.T) {
 
 func TestActorTwoCharactersInOneAnime(t *testing.T) {
 	e := newEnv(t)
-	a := e.addEntry(t, provider.AniList, "1", nil, store.Watching, 0, titleEn("Show")...)
+	a := e.addEntry(t, anilist.AniList, "1", nil, store.Watching, 0, titleEn("Show")...)
 	va := pperson("v1", "Voice One", "", "")
 	e.withCast(t, a,
-		provider.CastMember{Character: pperson("c1", "Hero", "", ""), Actor: &va},
-		provider.CastMember{Character: pperson("c2", "Sidekick", "", ""), Actor: &va})
+		anilist.CastMember{Character: pperson("c1", "Hero", "", ""), Actor: &va},
+		anilist.CastMember{Character: pperson("c2", "Sidekick", "", ""), Actor: &va})
 	body := e.get(e.personPath(t, "v1")).Body.String()
 	mustContain(t, body, "as Hero", "as Sidekick")
 	if n := strings.Count(body, "<li "); n != 2 {
@@ -94,20 +94,20 @@ func TestActorTwoCharactersInOneAnime(t *testing.T) {
 
 func TestActorAcrossTwoAnime(t *testing.T) {
 	e := newEnv(t)
-	a := e.addEntry(t, provider.AniList, "11", nil, store.Watching, 0, titleEn("Alpha")...)
-	b := e.addEntry(t, provider.AniList, "22", nil, store.Watching, 0, titleEn("Beta")...)
+	a := e.addEntry(t, anilist.AniList, "11", nil, store.Watching, 0, titleEn("Alpha")...)
+	b := e.addEntry(t, anilist.AniList, "22", nil, store.Watching, 0, titleEn("Beta")...)
 	va := pperson("v1", "Voice One", "", "")
-	e.withCast(t, a, provider.CastMember{Character: pperson("c1", "Hero", "", ""), Actor: &va})
-	e.withCast(t, b, provider.CastMember{Character: pperson("c2", "Other", "", ""), Actor: &va})
+	e.withCast(t, a, anilist.CastMember{Character: pperson("c1", "Hero", "", ""), Actor: &va})
+	e.withCast(t, b, anilist.CastMember{Character: pperson("c2", "Other", "", ""), Actor: &va})
 	body := e.get(e.personPath(t, "v1")).Body.String()
 	mustContain(t, body, `href="/anime/anilist/11"`, `href="/anime/anilist/22"`, "Alpha", "Beta")
 }
 
 func TestRemovedAnimeDisappearsAndEmptyPageRenders(t *testing.T) {
 	e := newEnv(t)
-	a := e.addEntry(t, provider.AniList, "1", nil, store.Watching, 0, titleEn("Gone Show")...)
+	a := e.addEntry(t, anilist.AniList, "1", nil, store.Watching, 0, titleEn("Gone Show")...)
 	va := pperson("v1", "Voice One", "", "")
-	e.withCast(t, a, provider.CastMember{Character: pperson("c1", "Hero", "", ""), Actor: &va})
+	e.withCast(t, a, anilist.CastMember{Character: pperson("c1", "Hero", "", ""), Actor: &va})
 	path := e.personPath(t, "v1")
 	mustContain(t, e.get(path).Body.String(), "Gone Show")
 	if err := e.st.DeleteAnime(context.Background(), a); err != nil {
@@ -123,12 +123,12 @@ func TestRemovedAnimeDisappearsAndEmptyPageRenders(t *testing.T) {
 
 func TestPersonWithNoCastRowsRendersFriendlyMessage(t *testing.T) {
 	e := newEnv(t)
-	a := e.addEntry(t, provider.AniList, "1", nil, store.Watching, 0, titleEn("Show")...)
+	a := e.addEntry(t, anilist.AniList, "1", nil, store.Watching, 0, titleEn("Show")...)
 	va := pperson("v1", "Lonely", "", "")
-	e.withCast(t, a, provider.CastMember{Character: pperson("c1", "Hero", "", ""), Actor: &va})
+	e.withCast(t, a, anilist.CastMember{Character: pperson("c1", "Hero", "", ""), Actor: &va})
 	path := e.personPath(t, "v1")
 	// re-sync the cast without the person: the people row stays, appearances go
-	e.withCast(t, a, provider.CastMember{Character: pperson("c1", "Hero", "", "")})
+	e.withCast(t, a, anilist.CastMember{Character: pperson("c1", "Hero", "", "")})
 	rec := e.get(path)
 	if rec.Code != 200 {
 		t.Fatal(rec.Code)
@@ -138,18 +138,18 @@ func TestPersonWithNoCastRowsRendersFriendlyMessage(t *testing.T) {
 
 func TestPersonPageHasExternalLink(t *testing.T) {
 	e := newEnv(t)
-	a := e.addEntry(t, provider.AniList, "1", nil, store.Watching, 0, titleEn("Show")...)
+	a := e.addEntry(t, anilist.AniList, "1", nil, store.Watching, 0, titleEn("Show")...)
 	va := pperson("v1", "Voice One", "", "https://anilist.co/staff/1")
-	e.withCast(t, a, provider.CastMember{Character: pperson("c1", "Hero", "", ""), Actor: &va})
+	e.withCast(t, a, anilist.CastMember{Character: pperson("c1", "Hero", "", ""), Actor: &va})
 	mustContain(t, e.get(e.personPath(t, "v1")).Body.String(), `href="https://anilist.co/staff/1"`, "View on AniList", `rel="noopener noreferrer"`)
 }
 
 func TestPersonPageNonHTTPSExternalURLNoLink(t *testing.T) {
 	for _, u := range []string{"javascript:alert(1)", "http://anilist.co/staff/1", "//evil.example/x", "data:text/html,x"} {
 		e := newEnv(t)
-		a := e.addEntry(t, provider.AniList, "1", nil, store.Watching, 0, titleEn("Show")...)
+		a := e.addEntry(t, anilist.AniList, "1", nil, store.Watching, 0, titleEn("Show")...)
 		va := pperson("v1", "Voice One", "", u)
-		e.withCast(t, a, provider.CastMember{Character: pperson("c1", "Hero", "", ""), Actor: &va})
+		e.withCast(t, a, anilist.CastMember{Character: pperson("c1", "Hero", "", ""), Actor: &va})
 		// the store cleans or drops such URLs before storing them; put the
 		// hostile value in the row anyway, the page must still not link it
 		if _, err := e.d.Exec(`UPDATE people SET external_url = ? WHERE source_id = 'v1'`, u); err != nil {
@@ -175,10 +175,10 @@ func TestUnknownPerson404(t *testing.T) {
 
 func TestPersonPagePreferredTitleLanguage(t *testing.T) {
 	e := newEnv(t)
-	a := e.addEntry(t, provider.AniList, "1", nil, store.Watching, 0,
-		provider.Title{Lang: "en", Text: "English Name"}, provider.Title{Lang: "ja", Text: "Japanese Name"})
+	a := e.addEntry(t, anilist.AniList, "1", nil, store.Watching, 0,
+		anilist.Title{Lang: "en", Text: "English Name"}, anilist.Title{Lang: "ja", Text: "Japanese Name"})
 	va := pperson("v1", "Voice One", "", "")
-	e.withCast(t, a, provider.CastMember{Character: pperson("c1", "Hero", "", ""), Actor: &va})
+	e.withCast(t, a, anilist.CastMember{Character: pperson("c1", "Hero", "", ""), Actor: &va})
 	path := e.personPath(t, "v1")
 	for lang, want := range map[string]string{"en": "English Name", "ja": "Japanese Name"} {
 		if err := e.set.Set(context.Background(), "title_lang", lang); err != nil {
@@ -196,9 +196,9 @@ func TestPersonPagePreferredTitleLanguage(t *testing.T) {
 
 func TestPersonPageImages(t *testing.T) {
 	e := newEnv(t)
-	a := e.addEntry(t, provider.AniList, "1", nil, store.Watching, 0, titleEn("Show")...)
+	a := e.addEntry(t, anilist.AniList, "1", nil, store.Watching, 0, titleEn("Show")...)
 	va := pperson("v1", "Remote", "https://img.example/v.jpg", "")
-	e.withCast(t, a, provider.CastMember{Character: pperson("c1", "Hero", "", ""), Actor: &va})
+	e.withCast(t, a, anilist.CastMember{Character: pperson("c1", "Hero", "", ""), Actor: &va})
 	mustContain(t, e.get(e.personPath(t, "v1")).Body.String(), `src="https://img.example/v.jpg"`)
 
 	pid := e.personPath(t, "v1")
@@ -223,21 +223,21 @@ func TestPersonPageImages(t *testing.T) {
 
 func TestPersonPageAnimeCover(t *testing.T) {
 	e := newEnv(t)
-	a := provider.Anime{SearchResult: provider.SearchResult{Source: provider.AniList, ID: "1", Titles: titleEn("Show"), CoverURL: "https://img.example/c.jpg"}}
+	a := anilist.Anime{SearchResult: anilist.SearchResult{Source: anilist.AniList, ID: "1", Titles: titleEn("Show"), CoverURL: "https://img.example/c.jpg"}}
 	id, err := e.st.SaveAnime(context.Background(), a)
 	if err != nil {
 		t.Fatal(err)
 	}
 	va := pperson("v1", "Voice One", "", "")
-	e.withCast(t, id, provider.CastMember{Character: pperson("c1", "Hero", "", ""), Actor: &va})
+	e.withCast(t, id, anilist.CastMember{Character: pperson("c1", "Hero", "", ""), Actor: &va})
 	mustContain(t, e.get(e.personPath(t, "v1")).Body.String(), `src="https://img.example/c.jpg"`, `loading="lazy"`)
 }
 
 func TestPersonPageEscapesHostileText(t *testing.T) {
 	e := newEnv(t)
-	a := e.addEntry(t, provider.AniList, "1", nil, store.Watching, 0, titleEn(`<script>alert("t")</script>`)...)
+	a := e.addEntry(t, anilist.AniList, "1", nil, store.Watching, 0, titleEn(`<script>alert("t")</script>`)...)
 	va := pperson("v1", `<img src=x onerror=alert(1)>`, "", "")
-	e.withCast(t, a, provider.CastMember{Character: pperson("c1", `<b>Hero</b>`, "", ""), Actor: &va})
+	e.withCast(t, a, anilist.CastMember{Character: pperson("c1", `<b>Hero</b>`, "", ""), Actor: &va})
 	body := e.get(e.personPath(t, "v1")).Body.String()
 	mustNotContain(t, body, "<script>alert", "<img src=x", "<b>Hero</b>")
 	mustContain(t, body, "&lt;script&gt;", "&lt;img src=x", "&lt;b&gt;Hero&lt;/b&gt;")
@@ -246,12 +246,12 @@ func TestPersonPageEscapesHostileText(t *testing.T) {
 func TestPersonPageOrderIsDeterministicByTitle(t *testing.T) {
 	e := newEnv(t)
 	// insertion order differs from title order; mixed case sorts case-insensitively
-	c := e.addEntry(t, provider.AniList, "1", nil, store.Watching, 0, titleEn("charlie")...)
-	a := e.addEntry(t, provider.AniList, "2", nil, store.Watching, 0, titleEn("Alpha")...)
-	b := e.addEntry(t, provider.AniList, "3", nil, store.Watching, 0, titleEn("bravo")...)
+	c := e.addEntry(t, anilist.AniList, "1", nil, store.Watching, 0, titleEn("charlie")...)
+	a := e.addEntry(t, anilist.AniList, "2", nil, store.Watching, 0, titleEn("Alpha")...)
+	b := e.addEntry(t, anilist.AniList, "3", nil, store.Watching, 0, titleEn("bravo")...)
 	va := pperson("v1", "Voice One", "", "")
 	for _, id := range []int64{c, a, b} {
-		e.withCast(t, id, provider.CastMember{Character: pperson("c1", "Hero", "", ""), Actor: &va})
+		e.withCast(t, id, anilist.CastMember{Character: pperson("c1", "Hero", "", ""), Actor: &va})
 	}
 	path := e.personPath(t, "v1")
 	for i := 0; i < 3; i++ {
@@ -265,9 +265,9 @@ func TestPersonPageOrderIsDeterministicByTitle(t *testing.T) {
 
 func TestPersonPageIsFullPageForHTMX(t *testing.T) {
 	e := newEnv(t)
-	a := e.addEntry(t, provider.AniList, "1", nil, store.Watching, 0, titleEn("Show")...)
+	a := e.addEntry(t, anilist.AniList, "1", nil, store.Watching, 0, titleEn("Show")...)
 	va := pperson("v1", "Voice One", "", "")
-	e.withCast(t, a, provider.CastMember{Character: pperson("c1", "Hero", "", ""), Actor: &va})
+	e.withCast(t, a, anilist.CastMember{Character: pperson("c1", "Hero", "", ""), Actor: &va})
 	rec := e.do("GET", e.personPath(t, "v1"), nil, true)
 	mustContain(t, rec.Body.String(), "<html")
 	if rec.Header().Get("Vary") != "HX-Request" {
@@ -317,9 +317,9 @@ func TestGenericPersonPageForFixturePlugin(t *testing.T) {
 func TestPersonPageOfDisabledPlugin404(t *testing.T) {
 	e := newFixtureEnv(t)
 	actor, _, _ := tvPeople(t, e.env)
-	a := e.addEntry(t, provider.AniList, "77", nil, store.Watching, 0, titleEn("Anime Show")...)
+	a := e.addEntry(t, anilist.AniList, "77", nil, store.Watching, 0, titleEn("Anime Show")...)
 	va := pperson("v1", "Voice One", "", "")
-	e.withCast(t, a, provider.CastMember{Character: pperson("c9", "Hero", "", ""), Actor: &va})
+	e.withCast(t, a, anilist.CastMember{Character: pperson("c9", "Hero", "", ""), Actor: &va})
 	animePerson := e.personPath(t, "v1")
 	for _, p := range []string{actor, animePerson} {
 		if c := e.get(p).Code; c != 200 {

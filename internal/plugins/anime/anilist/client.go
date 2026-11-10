@@ -1,4 +1,6 @@
-// Package anilist is a provider.Provider backed by the AniList GraphQL API.
+// Package anilist is the AniList GraphQL client of the anime plugin (Client)
+// together with the types it returns (Anime, SearchResult, CastMember, ...)
+// and its error sentinels. Only the anime plugin uses it.
 package anilist
 
 import (
@@ -12,8 +14,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-
-	"github.com/allister/allister/internal/provider"
 )
 
 // DefaultURL is the production AniList GraphQL endpoint.
@@ -81,7 +81,7 @@ type Client struct {
 	maxBody int64
 }
 
-var _ provider.Provider = (*Client)(nil)
+var _ Provider = (*Client)(nil)
 
 // New returns a client for baseURL (use DefaultURL in production). A nil hc
 // gets a client with a 15 second timeout.
@@ -92,8 +92,8 @@ func New(baseURL string, hc *http.Client) *Client {
 	return &Client{baseURL: baseURL, hc: hc, maxBody: maxBodyBytes}
 }
 
-// Name implements provider.Provider.
-func (c *Client) Name() provider.Source { return provider.AniList }
+// Name implements Provider.
+func (c *Client) Name() Source { return AniList }
 
 type gqlError struct {
 	Message string `json:"message"`
@@ -122,39 +122,39 @@ func (c *Client) do(ctx context.Context, query string, vars map[string]any, out 
 		if ctx.Err() != nil {
 			return fmt.Errorf("anilist: request: %w", ctx.Err())
 		}
-		return fmt.Errorf("anilist: request failed: %w: %v", provider.ErrUnavailable, err)
+		return fmt.Errorf("anilist: request failed: %w: %v", ErrUnavailable, err)
 	}
 	defer resp.Body.Close()
 	body, err := io.ReadAll(io.LimitReader(resp.Body, c.maxBody+1))
 	if err != nil {
-		return fmt.Errorf("anilist: read response: %w: %v", provider.ErrUnavailable, err)
+		return fmt.Errorf("anilist: read response: %w: %v", ErrUnavailable, err)
 	}
 	if int64(len(body)) > c.maxBody {
-		return fmt.Errorf("anilist: response exceeds %d bytes: %w", c.maxBody, provider.ErrUnavailable)
+		return fmt.Errorf("anilist: response exceeds %d bytes: %w", c.maxBody, ErrUnavailable)
 	}
 
 	var r gqlResponse
 	jsonErr := json.Unmarshal(body, &r)
 	switch {
 	case resp.StatusCode == http.StatusTooManyRequests:
-		return fmt.Errorf("anilist: http 429: %w", provider.ErrRateLimited)
+		return fmt.Errorf("anilist: http 429: %w", ErrRateLimited)
 	case resp.StatusCode >= 500:
-		return fmt.Errorf("anilist: http %d: %w", resp.StatusCode, provider.ErrUnavailable)
+		return fmt.Errorf("anilist: http %d: %w", resp.StatusCode, ErrUnavailable)
 	}
 	if notFound(resp.StatusCode, r.Errors) {
-		return fmt.Errorf("anilist: %w", provider.ErrNotFound)
+		return fmt.Errorf("anilist: %w", ErrNotFound)
 	}
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("anilist: unexpected http %d: %w", resp.StatusCode, provider.ErrUnavailable)
+		return fmt.Errorf("anilist: unexpected http %d: %w", resp.StatusCode, ErrUnavailable)
 	}
 	if jsonErr != nil {
-		return fmt.Errorf("anilist: malformed response: %w: %v", provider.ErrUnavailable, jsonErr)
+		return fmt.Errorf("anilist: malformed response: %w: %v", ErrUnavailable, jsonErr)
 	}
 	if len(r.Errors) > 0 {
-		return fmt.Errorf("anilist: graphql error %q: %w", r.Errors[0].Message, provider.ErrUnavailable)
+		return fmt.Errorf("anilist: graphql error %q: %w", r.Errors[0].Message, ErrUnavailable)
 	}
 	if err := json.Unmarshal(r.Data, out); err != nil {
-		return fmt.Errorf("anilist: malformed data: %w: %v", provider.ErrUnavailable, err)
+		return fmt.Errorf("anilist: malformed data: %w: %v", ErrUnavailable, err)
 	}
 	return nil
 }
@@ -177,11 +177,11 @@ type apiTitle struct {
 	Native  *string `json:"native"`
 }
 
-func (t apiTitle) titles() []provider.Title {
-	var out []provider.Title
+func (t apiTitle) titles() []Title {
+	var out []Title
 	add := func(lang string, s *string) {
 		if s != nil && *s != "" {
-			out = append(out, provider.Title{Lang: lang, Text: *s})
+			out = append(out, Title{Lang: lang, Text: *s})
 		}
 	}
 	add("ja", t.Native)
@@ -255,15 +255,15 @@ type apiMedia struct {
 	} `json:"recommendations"`
 }
 
-func (m apiMedia) searchResult() provider.SearchResult {
-	r := provider.SearchResult{
-		Source:   provider.AniList,
+func (m apiMedia) searchResult() SearchResult {
+	r := SearchResult{
+		Source:   AniList,
 		ID:       strconv.Itoa(m.ID),
 		Titles:   m.Title.titles(),
 		Type:     m.Format,
 		Episodes: m.Episodes,
 		Year:     m.SeasonYear,
-		Synopsis: provider.PlainText(m.Description),
+		Synopsis: PlainText(m.Description),
 		CoverURL: m.CoverImage.Large,
 	}
 	if r.Year == nil {
@@ -275,12 +275,12 @@ func (m apiMedia) searchResult() provider.SearchResult {
 	return r
 }
 
-// Search implements provider.Provider. An empty query returns no results
+// Search implements Provider. An empty query returns no results
 // without contacting AniList; results are capped at 20.
-func (c *Client) Search(ctx context.Context, q string) ([]provider.SearchResult, error) {
+func (c *Client) Search(ctx context.Context, q string) ([]SearchResult, error) {
 	q = strings.TrimSpace(q)
 	if q == "" {
-		return []provider.SearchResult{}, nil
+		return []SearchResult{}, nil
 	}
 	var data struct {
 		Page struct {
@@ -290,7 +290,7 @@ func (c *Client) Search(ctx context.Context, q string) ([]provider.SearchResult,
 	if err := c.do(ctx, searchQuery, map[string]any{"q": q, "perPage": maxResults}, &data); err != nil {
 		return nil, err
 	}
-	out := make([]provider.SearchResult, 0, len(data.Page.Media))
+	out := make([]SearchResult, 0, len(data.Page.Media))
 	for _, m := range data.Page.Media {
 		if len(out) == maxResults {
 			break
@@ -303,7 +303,7 @@ func (c *Client) Search(ctx context.Context, q string) ([]provider.SearchResult,
 func parseID(id string) (int, error) {
 	n, err := strconv.Atoi(strings.TrimSpace(id))
 	if err != nil || n <= 0 {
-		return 0, fmt.Errorf("anilist: invalid id %q: %w", id, provider.ErrNotFound)
+		return 0, fmt.Errorf("anilist: invalid id %q: %w", id, ErrNotFound)
 	}
 	return n, nil
 }
@@ -329,20 +329,20 @@ func relationKind(relType, mediaType string) (string, bool) {
 	return "other", true
 }
 
-// Anime implements provider.Provider.
-func (c *Client) Anime(ctx context.Context, id string) (provider.Anime, error) {
+// Anime implements Provider.
+func (c *Client) Anime(ctx context.Context, id string) (Anime, error) {
 	n, err := parseID(id)
 	if err != nil {
-		return provider.Anime{}, err
+		return Anime{}, err
 	}
 	return c.fetchAnime(ctx, animeQuery, map[string]any{"id": n, "recs": recsPageSize}, "anime "+strconv.Itoa(n))
 }
 
 // AnimeByMALID looks an anime up by its MyAnimeList id (AniList
 // Media(idMal:, type: ANIME)) and maps it exactly like Anime. A malformed id
-// (anything but 1 to 2147483647 in ASCII digits) is provider.ErrNotFound
+// (anything but 1 to 2147483647 in ASCII digits) is ErrNotFound
 // without a request, as is a response without a media id.
-func (c *Client) AnimeByMALID(ctx context.Context, malID string) (provider.Anime, error) {
+func (c *Client) AnimeByMALID(ctx context.Context, malID string) (Anime, error) {
 	malID = strings.TrimSpace(malID)
 	n, err := strconv.Atoi(malID)
 	for _, r := range malID {
@@ -351,27 +351,27 @@ func (c *Client) AnimeByMALID(ctx context.Context, malID string) (provider.Anime
 		}
 	}
 	if err != nil || n <= 0 || n > math.MaxInt32 {
-		return provider.Anime{}, fmt.Errorf("anilist: invalid MAL id %q: %w", malID, provider.ErrNotFound)
+		return Anime{}, fmt.Errorf("anilist: invalid MAL id %q: %w", malID, ErrNotFound)
 	}
 	return c.fetchAnime(ctx, animeByMALQuery, map[string]any{"idMal": n, "recs": recsPageSize}, "MAL anime "+malID)
 }
 
 // fetchAnime runs a Media query shaped like animeFields and maps the result.
-func (c *Client) fetchAnime(ctx context.Context, query string, vars map[string]any, what string) (provider.Anime, error) {
+func (c *Client) fetchAnime(ctx context.Context, query string, vars map[string]any, what string) (Anime, error) {
 	var data struct {
 		Media *apiMedia `json:"Media"`
 	}
 	if err := c.do(ctx, query, vars, &data); err != nil {
-		return provider.Anime{}, err
+		return Anime{}, err
 	}
 	if data.Media == nil || data.Media.ID <= 0 {
-		return provider.Anime{}, fmt.Errorf("anilist: %s: %w", what, provider.ErrNotFound)
+		return Anime{}, fmt.Errorf("anilist: %s: %w", what, ErrNotFound)
 	}
 	return data.Media.anime(), nil
 }
 
-func (m *apiMedia) anime() provider.Anime {
-	a := provider.Anime{
+func (m *apiMedia) anime() Anime {
+	a := Anime{
 		SearchResult:   m.searchResult(),
 		StartDate:      m.StartDate.time(),
 		EndDate:        m.EndDate.time(),
@@ -391,7 +391,7 @@ func (m *apiMedia) anime() provider.Anime {
 		if name == "" {
 			continue
 		}
-		tag := provider.Tag{Name: name, Spoiler: t.IsMediaSpoiler}
+		tag := Tag{Name: name, Spoiler: t.IsMediaSpoiler}
 		if t.Rank != nil && *t.Rank >= 0 && *t.Rank <= 100 {
 			r := *t.Rank
 			tag.Rank = &r
@@ -403,9 +403,9 @@ func (m *apiMedia) anime() provider.Anime {
 		if !ok {
 			continue
 		}
-		a.Relations = append(a.Relations, provider.Relation{
+		a.Relations = append(a.Relations, Relation{
 			Kind:   kind,
-			Source: provider.AniList,
+			Source: AniList,
 			ID:     strconv.Itoa(e.Node.ID),
 			Titles: e.Node.Title.titles(),
 			Type:   e.Node.Format,
@@ -415,8 +415,8 @@ func (m *apiMedia) anime() provider.Anime {
 		if r.MediaRecommendation == nil {
 			continue
 		}
-		a.Recommendations = append(a.Recommendations, provider.Recommendation{
-			Source:   provider.AniList,
+		a.Recommendations = append(a.Recommendations, Recommendation{
+			Source:   AniList,
 			ID:       strconv.Itoa(r.MediaRecommendation.ID),
 			Titles:   r.MediaRecommendation.Title.titles(),
 			CoverURL: r.MediaRecommendation.CoverImage.Large,
@@ -439,9 +439,9 @@ type apiPerson struct {
 	SiteURL string `json:"siteUrl"`
 }
 
-func (p apiPerson) person() provider.Person {
-	return provider.Person{
-		Source:   provider.AniList,
+func (p apiPerson) person() Person {
+	return Person{
+		Source:   AniList,
 		ID:       strconv.Itoa(p.ID),
 		Name:     p.Name.Full,
 		ImageURL: p.Image.Medium,
@@ -449,9 +449,9 @@ func (p apiPerson) person() provider.Person {
 	}
 }
 
-// Cast implements provider.Provider: the first 25 characters sorted by ROLE
+// Cast implements Provider: the first 25 characters sorted by ROLE
 // (main before supporting), each with its first Japanese voice actor.
-func (c *Client) Cast(ctx context.Context, id string) ([]provider.CastMember, error) {
+func (c *Client) Cast(ctx context.Context, id string) ([]CastMember, error) {
 	n, err := parseID(id)
 	if err != nil {
 		return nil, err
@@ -471,11 +471,11 @@ func (c *Client) Cast(ctx context.Context, id string) ([]provider.CastMember, er
 		return nil, err
 	}
 	if data.Media == nil {
-		return nil, fmt.Errorf("anilist: anime %d: %w", n, provider.ErrNotFound)
+		return nil, fmt.Errorf("anilist: anime %d: %w", n, ErrNotFound)
 	}
-	out := make([]provider.CastMember, 0, len(data.Media.Characters.Edges))
+	out := make([]CastMember, 0, len(data.Media.Characters.Edges))
 	for _, e := range data.Media.Characters.Edges {
-		cm := provider.CastMember{Character: e.Node.person(), Role: e.Role}
+		cm := CastMember{Character: e.Node.person(), Role: e.Role}
 		if len(e.VoiceActors) > 0 {
 			a := e.VoiceActors[0].person()
 			cm.Actor = &a

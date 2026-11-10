@@ -12,7 +12,7 @@ import (
 	"github.com/allister/allister/internal/library"
 	"github.com/allister/allister/internal/plugin"
 	"github.com/allister/allister/internal/plugins/anime"
-	"github.com/allister/allister/internal/provider"
+	"github.com/allister/allister/internal/plugins/anime/anilist"
 )
 
 // animePluginID is the id of the built-in anime plugin.
@@ -171,8 +171,8 @@ func defaultRegistry(deps Deps) *plugin.Registry {
 		store = deps.Settings
 	}
 	reg := plugin.NewRegistry(store)
-	var p provider.Provider = unavailableProvider{}
-	if ap := deps.Providers[provider.AniList]; ap != nil {
+	var p anilist.Provider = unavailableProvider{}
+	if ap := deps.Providers[anilist.AniList]; ap != nil {
 		p = ap
 	}
 	if err := reg.Register(anime.New(anime.Options{Provider: p})); err != nil {
@@ -181,17 +181,17 @@ func defaultRegistry(deps Deps) *plugin.Registry {
 	return reg
 }
 
-// unavailableProvider answers every call with provider.ErrUnavailable.
+// unavailableProvider answers every call with anilist.ErrUnavailable.
 type unavailableProvider struct{}
 
-func (unavailableProvider) Name() provider.Source { return provider.AniList }
-func (unavailableProvider) Search(context.Context, string) ([]provider.SearchResult, error) {
+func (unavailableProvider) Name() anilist.Source { return anilist.AniList }
+func (unavailableProvider) Search(context.Context, string) ([]anilist.SearchResult, error) {
 	return nil, errNoProvider
 }
-func (unavailableProvider) Anime(context.Context, string) (provider.Anime, error) {
-	return provider.Anime{}, errNoProvider
+func (unavailableProvider) Anime(context.Context, string) (anilist.Anime, error) {
+	return anilist.Anime{}, errNoProvider
 }
-func (unavailableProvider) Cast(context.Context, string) ([]provider.CastMember, error) {
+func (unavailableProvider) Cast(context.Context, string) ([]anilist.CastMember, error) {
 	return nil, errNoProvider
 }
 

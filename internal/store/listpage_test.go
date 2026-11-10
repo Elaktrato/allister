@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/allister/allister/internal/provider"
+	"github.com/allister/allister/internal/plugins/anime/anilist"
 )
 
 func TestListPageLimitOffsetKeepsOrder(t *testing.T) {
@@ -14,7 +14,7 @@ func TestListPageLimitOffsetKeepsOrder(t *testing.T) {
 	ctx := context.Background()
 	var ids []int64
 	for i := 0; i < 5; i++ {
-		id := mustSave(t, s, sample(provider.AniList, fmt.Sprint(i), nil))
+		id := mustSave(t, s, sample(anilist.AniList, fmt.Sprint(i), nil))
 		s.UpsertListEntry(ctx, ListEntry{AnimeID: id, Status: Watching})
 		s.db.Exec(`UPDATE entries SET updated_at = ? WHERE item_id = ?`, fmt.Sprintf("2024-01-0%dT00:00:00Z", i+1), id)
 		ids = append(ids, id)
@@ -42,10 +42,10 @@ func TestListPageLimitOffsetKeepsOrder(t *testing.T) {
 func TestListRowCarriesSourceAndMALID(t *testing.T) {
 	s := newStore(t)
 	ctx := context.Background()
-	a := sample(provider.Manual, "m1", nil)
+	a := sample(anilist.Manual, "m1", nil)
 	a.MALID = "777"
 	id := mustSave(t, s, a)
-	b := mustSave(t, s, sample(provider.AniList, "9", nil))
+	b := mustSave(t, s, sample(anilist.AniList, "9", nil))
 	s.UpsertListEntry(ctx, ListEntry{AnimeID: id, Status: Watching})
 	s.UpsertListEntry(ctx, ListEntry{AnimeID: b, Status: Watching})
 	rows, _ := s.List(ctx, nil)
@@ -53,10 +53,10 @@ func TestListRowCarriesSourceAndMALID(t *testing.T) {
 	for _, r := range rows {
 		got[r.AnimeID] = r
 	}
-	if r := got[id]; r.Source != provider.Manual || r.SourceID != "m1" || r.MALID != "777" {
+	if r := got[id]; r.Source != anilist.Manual || r.SourceID != "m1" || r.MALID != "777" {
 		t.Fatalf("%+v", r)
 	}
-	if r := got[b]; r.Source != provider.AniList || r.SourceID != "9" || r.MALID != "" {
+	if r := got[b]; r.Source != anilist.AniList || r.SourceID != "9" || r.MALID != "" {
 		t.Fatalf("%+v", r)
 	}
 }
@@ -64,7 +64,7 @@ func TestListRowCarriesSourceAndMALID(t *testing.T) {
 func TestGetListRow(t *testing.T) {
 	s := newStore(t)
 	ctx := context.Background()
-	id := mustSave(t, s, sample(provider.AniList, "1", intp(12)))
+	id := mustSave(t, s, sample(anilist.AniList, "1", intp(12)))
 	if r, err := s.GetListRow(ctx, id); r != nil || err != nil {
 		t.Fatalf("%v %v", r, err)
 	}
@@ -78,13 +78,13 @@ func TestGetListRow(t *testing.T) {
 func TestDeleteAnimeCascades(t *testing.T) {
 	s := newStore(t)
 	ctx := context.Background()
-	a := sample(provider.AniList, "1", nil)
-	a.Relations = []provider.Relation{{Kind: "sequel", Source: provider.AniList, ID: "2", Titles: []provider.Title{{Lang: "en", Text: "S"}}}}
+	a := sample(anilist.AniList, "1", nil)
+	a.Relations = []anilist.Relation{{Kind: "sequel", Source: anilist.AniList, ID: "2", Titles: []anilist.Title{{Lang: "en", Text: "S"}}}}
 	id := mustSave(t, s, a)
-	other := mustSave(t, s, sample(provider.AniList, "3", nil))
+	other := mustSave(t, s, sample(anilist.AniList, "3", nil))
 	s.UpsertListEntry(ctx, ListEntry{AnimeID: id, Status: Watching})
 	s.UpsertListEntry(ctx, ListEntry{AnimeID: other, Status: Watching})
-	if err := s.SaveCast(ctx, id, []provider.CastMember{{Character: provider.Person{Source: provider.AniList, ID: "c1", Name: "Char"}, Role: "MAIN"}}); err != nil {
+	if err := s.SaveCast(ctx, id, []anilist.CastMember{{Character: anilist.Person{Source: anilist.AniList, ID: "c1", Name: "Char"}, Role: "MAIN"}}); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.DeleteAnime(ctx, id); err != nil {

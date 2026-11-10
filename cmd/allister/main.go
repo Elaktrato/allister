@@ -21,8 +21,7 @@ import (
 	"github.com/allister/allister/internal/library"
 	"github.com/allister/allister/internal/plugin"
 	"github.com/allister/allister/internal/plugins/anime"
-	"github.com/allister/allister/internal/provider"
-	"github.com/allister/allister/internal/provider/anilist"
+	"github.com/allister/allister/internal/plugins/anime/anilist"
 	"github.com/allister/allister/internal/settings"
 	"github.com/allister/allister/internal/store"
 	"github.com/allister/allister/internal/web"
@@ -49,8 +48,8 @@ func run() error {
 
 	st := store.New(database)
 	aniClient := anilist.New(anilist.DefaultURL, nil)
-	providers := map[provider.Source]provider.Provider{
-		provider.AniList: aniClient,
+	providers := map[anilist.Source]anilist.Provider{
+		anilist.AniList: aniClient,
 	}
 
 	sigCtx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)

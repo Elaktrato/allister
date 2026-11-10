@@ -6,8 +6,8 @@ import (
 	"fmt"
 
 	"github.com/allister/allister/internal/plugin"
+	"github.com/allister/allister/internal/plugins/anime/anilist"
 	"github.com/allister/allister/internal/plugins/anime/animemap"
-	"github.com/allister/allister/internal/provider"
 )
 
 // Limits of the importer (the source's limits live in animemap).
@@ -22,12 +22,12 @@ const (
 // returns goes through animemap, which sanitises it, so a quirk of the
 // AniList data can never make an item unsaveable in the library.
 type source struct {
-	c provider.Provider
+	c anilist.Provider
 }
 
 // malLookup is the optional MAL id lookup of a provider (anilist.Client).
 type malLookup interface {
-	AnimeByMALID(ctx context.Context, malID string) (provider.Anime, error)
+	AnimeByMALID(ctx context.Context, malID string) (anilist.Anime, error)
 }
 
 // maxIDDigits is the longest AniList id accepted.
@@ -64,9 +64,9 @@ func mapErr(err error) error {
 	switch {
 	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
 		return err
-	case errors.Is(err, provider.ErrNotFound):
+	case errors.Is(err, anilist.ErrNotFound):
 		target = plugin.ErrNotFound
-	case errors.Is(err, provider.ErrRateLimited):
+	case errors.Is(err, anilist.ErrRateLimited):
 		target = plugin.ErrRateLimited
 	default:
 		target = plugin.ErrUnavailable

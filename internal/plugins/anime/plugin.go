@@ -8,9 +8,8 @@ import (
 	"net/http"
 
 	"github.com/allister/allister/internal/plugin"
+	"github.com/allister/allister/internal/plugins/anime/anilist"
 	"github.com/allister/allister/internal/plugins/anime/animedef"
-	"github.com/allister/allister/internal/provider"
-	"github.com/allister/allister/internal/provider/anilist"
 )
 
 // Plugin and source ids and the one kind key of this plugin.
@@ -31,7 +30,7 @@ type Options struct {
 	// Provider, when set, replaces the AniList client (AniListURL and HTTP
 	// are then ignored): the server shares its one client this way, and tests
 	// inject a fake. Lookup needs a provider with an AnimeByMALID method.
-	Provider provider.Provider
+	Provider anilist.Provider
 }
 
 type animePlugin struct {

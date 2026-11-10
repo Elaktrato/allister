@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/allister/allister/internal/provider"
+	"github.com/allister/allister/internal/plugins/anime/anilist"
 )
 
 func day(y int, m time.Month, d int) *time.Time {
@@ -16,7 +16,7 @@ func day(y int, m time.Month, d int) *time.Time {
 
 func TestUpsertRejectsRatingOutOfRange(t *testing.T) {
 	s := newStore(t)
-	id := mustSave(t, s, sample(provider.AniList, "1", nil))
+	id := mustSave(t, s, sample(anilist.AniList, "1", nil))
 	for _, r := range []int{-1, 11} {
 		err := s.UpsertListEntry(context.Background(), ListEntry{AnimeID: id, Status: Watching, Rating: intp(r)})
 		if !errors.Is(err, ErrInvalid) {
@@ -31,7 +31,7 @@ func TestUpsertRejectsRatingOutOfRange(t *testing.T) {
 func TestUpsertAcceptsZeroRating(t *testing.T) {
 	s := newStore(t)
 	ctx := context.Background()
-	id := mustSave(t, s, sample(provider.AniList, "1", nil))
+	id := mustSave(t, s, sample(anilist.AniList, "1", nil))
 	if err := s.UpsertListEntry(ctx, ListEntry{AnimeID: id, Status: Completed, Rating: intp(0)}); err != nil {
 		t.Fatal(err)
 	}
@@ -44,7 +44,7 @@ func TestUpsertAcceptsZeroRating(t *testing.T) {
 func TestUpsertAcceptsNilRating(t *testing.T) {
 	s := newStore(t)
 	ctx := context.Background()
-	id := mustSave(t, s, sample(provider.AniList, "1", nil))
+	id := mustSave(t, s, sample(anilist.AniList, "1", nil))
 	if err := s.UpsertListEntry(ctx, ListEntry{AnimeID: id, Status: Completed}); err != nil {
 		t.Fatal(err)
 	}
@@ -57,7 +57,7 @@ func TestUpsertAcceptsNilRating(t *testing.T) {
 func TestUpsertRejectsProgressAboveTotal(t *testing.T) {
 	s := newStore(t)
 	ctx := context.Background()
-	id := mustSave(t, s, sample(provider.AniList, "1", intp(12)))
+	id := mustSave(t, s, sample(anilist.AniList, "1", intp(12)))
 	if err := s.UpsertListEntry(ctx, ListEntry{AnimeID: id, Status: Watching, Progress: 13}); !errors.Is(err, ErrInvalid) {
 		t.Fatal(err)
 	}
@@ -67,7 +67,7 @@ func TestUpsertRejectsProgressAboveTotal(t *testing.T) {
 	if err := s.UpsertListEntry(ctx, ListEntry{AnimeID: id, Status: Watching, Progress: 12}); err != nil {
 		t.Fatal(err)
 	}
-	unk := mustSave(t, s, sample(provider.AniList, "2", nil))
+	unk := mustSave(t, s, sample(anilist.AniList, "2", nil))
 	if err := s.UpsertListEntry(ctx, ListEntry{AnimeID: unk, Status: Watching, Progress: 500}); err != nil {
 		t.Fatal(err)
 	}
@@ -76,7 +76,7 @@ func TestUpsertRejectsProgressAboveTotal(t *testing.T) {
 func TestUpsertRejectsFinishBeforeStart(t *testing.T) {
 	s := newStore(t)
 	ctx := context.Background()
-	id := mustSave(t, s, sample(provider.AniList, "1", nil))
+	id := mustSave(t, s, sample(anilist.AniList, "1", nil))
 	err := s.UpsertListEntry(ctx, ListEntry{AnimeID: id, Status: Completed, StartedOn: day(2024, 5, 2), FinishedOn: day(2024, 5, 1)})
 	if !errors.Is(err, ErrInvalid) {
 		t.Fatal(err)
@@ -93,7 +93,7 @@ func TestUpsertRejectsFinishBeforeStart(t *testing.T) {
 func TestUpsertRejectsUnknownStatusAndMissingAnime(t *testing.T) {
 	s := newStore(t)
 	ctx := context.Background()
-	id := mustSave(t, s, sample(provider.AniList, "1", nil))
+	id := mustSave(t, s, sample(anilist.AniList, "1", nil))
 	if err := s.UpsertListEntry(ctx, ListEntry{AnimeID: id, Status: "bogus"}); !errors.Is(err, ErrInvalid) {
 		t.Fatal(err)
 	}
@@ -105,7 +105,7 @@ func TestUpsertRejectsUnknownStatusAndMissingAnime(t *testing.T) {
 func TestUpsertUpdatesExisting(t *testing.T) {
 	s := newStore(t)
 	ctx := context.Background()
-	id := mustSave(t, s, sample(provider.AniList, "1", nil))
+	id := mustSave(t, s, sample(anilist.AniList, "1", nil))
 	s.UpsertListEntry(ctx, ListEntry{AnimeID: id, Status: Watching, Comment: "a"})
 	s.UpsertListEntry(ctx, ListEntry{AnimeID: id, Status: Dropped, Comment: "b", Rating: intp(3)})
 	e, _ := s.GetListEntry(ctx, id)
@@ -120,7 +120,7 @@ func TestUpsertUpdatesExisting(t *testing.T) {
 func TestIncrementStopsAtTotal(t *testing.T) {
 	s := newStore(t)
 	ctx := context.Background()
-	id := mustSave(t, s, sample(provider.AniList, "1", intp(2)))
+	id := mustSave(t, s, sample(anilist.AniList, "1", intp(2)))
 	s.UpsertListEntry(ctx, ListEntry{AnimeID: id, Status: Watching, Progress: 1})
 	for i := 0; i < 3; i++ {
 		if err := s.IncrementProgress(ctx, id); err != nil {
@@ -136,7 +136,7 @@ func TestIncrementStopsAtTotal(t *testing.T) {
 func TestIncrementUnknownTotalKeepsCounting(t *testing.T) {
 	s := newStore(t)
 	ctx := context.Background()
-	id := mustSave(t, s, sample(provider.AniList, "1", nil))
+	id := mustSave(t, s, sample(anilist.AniList, "1", nil))
 	s.UpsertListEntry(ctx, ListEntry{AnimeID: id, Status: Watching})
 	for i := 0; i < 5; i++ {
 		s.IncrementProgress(ctx, id)
@@ -149,7 +149,7 @@ func TestIncrementUnknownTotalKeepsCounting(t *testing.T) {
 
 func TestIncrementWithoutEntry(t *testing.T) {
 	s := newStore(t)
-	id := mustSave(t, s, sample(provider.AniList, "1", nil))
+	id := mustSave(t, s, sample(anilist.AniList, "1", nil))
 	if err := s.IncrementProgress(context.Background(), id); !errors.Is(err, ErrNoEntry) {
 		t.Fatal(err)
 	}
@@ -158,7 +158,7 @@ func TestIncrementWithoutEntry(t *testing.T) {
 func TestRemoveListEntryKeepsAnime(t *testing.T) {
 	s := newStore(t)
 	ctx := context.Background()
-	id := mustSave(t, s, sample(provider.AniList, "1", nil))
+	id := mustSave(t, s, sample(anilist.AniList, "1", nil))
 	s.UpsertListEntry(ctx, ListEntry{AnimeID: id, Status: Watching})
 	if err := s.RemoveListEntry(ctx, id); err != nil {
 		t.Fatal(err)
@@ -166,7 +166,7 @@ func TestRemoveListEntryKeepsAnime(t *testing.T) {
 	if e, _ := s.GetListEntry(ctx, id); e != nil {
 		t.Fatal("entry remains")
 	}
-	if a, _ := s.FindBySource(ctx, provider.AniList, "1"); a == nil {
+	if a, _ := s.FindBySource(ctx, anilist.AniList, "1"); a == nil {
 		t.Fatal("anime removed")
 	}
 }
@@ -174,9 +174,9 @@ func TestRemoveListEntryKeepsAnime(t *testing.T) {
 func TestListFiltersAndOrders(t *testing.T) {
 	s := newStore(t)
 	ctx := context.Background()
-	a := mustSave(t, s, sample(provider.AniList, "1", intp(12)))
-	b := mustSave(t, s, sample(provider.AniList, "2", nil))
-	c := mustSave(t, s, sample(provider.AniList, "3", nil))
+	a := mustSave(t, s, sample(anilist.AniList, "1", intp(12)))
+	b := mustSave(t, s, sample(anilist.AniList, "2", nil))
+	c := mustSave(t, s, sample(anilist.AniList, "3", nil))
 	for _, id := range []int64{a, b, c} {
 		st := Watching
 		if id == c {
@@ -207,7 +207,7 @@ func TestCounts(t *testing.T) {
 	s := newStore(t)
 	ctx := context.Background()
 	for i, st := range []Status{Watching, Watching, Dropped} {
-		id := mustSave(t, s, sample(provider.AniList, string(rune('a'+i)), nil))
+		id := mustSave(t, s, sample(anilist.AniList, string(rune('a'+i)), nil))
 		s.UpsertListEntry(ctx, ListEntry{AnimeID: id, Status: st})
 	}
 	m, err := s.Counts(ctx)
@@ -225,7 +225,7 @@ func TestDatesStoredByCalendarDayAnyZone(t *testing.T) {
 	s := newStore(t)
 	ctx := context.Background()
 	jst, pst := time.FixedZone("JST", 9*3600), time.FixedZone("PST", -8*3600)
-	id := mustSave(t, s, sample(provider.AniList, "1", nil))
+	id := mustSave(t, s, sample(anilist.AniList, "1", nil))
 	if err := s.UpsertListEntry(ctx, ListEntry{AnimeID: id, Status: Completed,
 		StartedOn: zoned(jst, 2024, 5, 1), FinishedOn: zoned(pst, 2024, 5, 2)}); err != nil {
 		t.Fatal(err)
@@ -239,7 +239,7 @@ func TestDatesStoredByCalendarDayAnyZone(t *testing.T) {
 
 func TestFinishSameCalendarDayMixedZonesAccepted(t *testing.T) {
 	s := newStore(t)
-	id := mustSave(t, s, sample(provider.AniList, "1", nil))
+	id := mustSave(t, s, sample(anilist.AniList, "1", nil))
 	jst, pst := time.FixedZone("JST", 9*3600), time.FixedZone("PST", -8*3600)
 	err := s.UpsertListEntry(context.Background(), ListEntry{AnimeID: id, Status: Completed,
 		StartedOn: day(2024, 5, 1), FinishedOn: zoned(jst, 2024, 5, 1)})
@@ -255,7 +255,7 @@ func TestFinishSameCalendarDayMixedZonesAccepted(t *testing.T) {
 
 func TestFinishOneDayBeforeStartMixedZonesRejected(t *testing.T) {
 	s := newStore(t)
-	id := mustSave(t, s, sample(provider.AniList, "1", nil))
+	id := mustSave(t, s, sample(anilist.AniList, "1", nil))
 	jst, pst := time.FixedZone("JST", 9*3600), time.FixedZone("PST", -8*3600)
 	err := s.UpsertListEntry(context.Background(), ListEntry{AnimeID: id, Status: Completed,
 		StartedOn: zoned(pst, 2024, 5, 2), FinishedOn: zoned(jst, 2024, 5, 1)})
@@ -266,10 +266,10 @@ func TestFinishOneDayBeforeStartMixedZonesRejected(t *testing.T) {
 
 func TestAnimeDatesStoredByCalendarDayAnyZone(t *testing.T) {
 	s := newStore(t)
-	a := sample(provider.AniList, "1", nil)
+	a := sample(anilist.AniList, "1", nil)
 	a.StartDate = zoned(time.FixedZone("JST", 9*3600), 2020, 4, 5)
 	mustSave(t, s, a)
-	got, _ := s.FindBySource(context.Background(), provider.AniList, "1")
+	got, _ := s.FindBySource(context.Background(), anilist.AniList, "1")
 	if got.StartDate.Format(dateLayout) != "2020-04-05" {
 		t.Fatal(got.StartDate)
 	}

@@ -7,7 +7,7 @@ import (
 	"testing"
 	"unicode/utf8"
 
-	"github.com/allister/allister/internal/provider"
+	"github.com/allister/allister/internal/plugins/anime/anilist"
 )
 
 func TestAdapterKeepsLegacyStatusStrings(t *testing.T) {
@@ -16,7 +16,7 @@ func TestAdapterKeepsLegacyStatusStrings(t *testing.T) {
 	core := map[Status]string{Watching: "active", PlanToWatch: "planned", Paused: "paused", Completed: "completed", Dropped: "dropped"}
 	ids := map[Status]int64{}
 	for i, st := range []Status{Watching, PlanToWatch, Paused, Completed, Dropped} {
-		id, err := s.AddToList(ctx, sample(provider.AniList, string(rune('a'+i)), nil), ListEntry{Status: st})
+		id, err := s.AddToList(ctx, sample(anilist.AniList, string(rune('a'+i)), nil), ListEntry{Status: st})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -58,14 +58,14 @@ func TestAdapterKeepsLegacyStatusStrings(t *testing.T) {
 func TestAdapterStoresGenericRows(t *testing.T) {
 	s := newStore(t)
 	ctx := context.Background()
-	a := sample(provider.AniList, "1", intp(12))
+	a := sample(anilist.AniList, "1", intp(12))
 	a.Year, a.MALID = intp(2020), "5"
-	a.Relations = []provider.Relation{{Kind: "sequel", Source: provider.AniList, ID: "2", Type: "TV"}}
+	a.Relations = []anilist.Relation{{Kind: "sequel", Source: anilist.AniList, ID: "2", Type: "TV"}}
 	id, err := s.AddToList(ctx, a, ListEntry{Status: Watching, Progress: 3})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := s.SaveCast(ctx, id, []provider.CastMember{cast("1", "1")}); err != nil {
+	if err := s.SaveCast(ctx, id, []anilist.CastMember{cast("1", "1")}); err != nil {
 		t.Fatal(err)
 	}
 	for tbl, want := range map[string]int{"items": 1, "item_titles": 2, "item_fields": 3, "external_ids": 1, "relations": 1,
@@ -113,7 +113,7 @@ func TestLegacyTablesDropped(t *testing.T) {
 func TestAdapterMalIDIsExternalID(t *testing.T) {
 	s := newStore(t)
 	ctx := context.Background()
-	a := sample(provider.AniList, "1", nil)
+	a := sample(anilist.AniList, "1", nil)
 	a.MALID = "0123" // legacy stored an integer: leading zeros vanish
 	id := mustSave(t, s, a)
 	var typ, val string
@@ -128,12 +128,12 @@ func TestAdapterMalIDIsExternalID(t *testing.T) {
 	if got, err := s.FindByMALID(ctx, "abc"); got != nil || err != nil {
 		t.Fatalf("non-numeric: %+v %v", got, err)
 	}
-	b := sample(provider.AniList, "2", nil)
+	b := sample(anilist.AniList, "2", nil)
 	b.MALID = "12x"
 	if _, err := s.SaveAnime(ctx, b); !errors.Is(err, ErrInvalid) {
 		t.Fatalf("non-numeric MAL id saved: %v", err)
 	}
-	if got, _ := s.FindBySource(ctx, provider.AniList, "2"); got != nil {
+	if got, _ := s.FindBySource(ctx, anilist.AniList, "2"); got != nil {
 		t.Fatal("item saved despite the bad MAL id")
 	}
 }
@@ -141,14 +141,14 @@ func TestAdapterMalIDIsExternalID(t *testing.T) {
 func TestAdapterUnmatchedSemantics(t *testing.T) {
 	s := newStore(t)
 	ctx := context.Background()
-	m := sample(provider.Manual, "m1", nil)
+	m := sample(anilist.Manual, "m1", nil)
 	m.MALID = "42"
 	unmatched, err := s.AddToList(ctx, m, ListEntry{Status: PlanToWatch}, WithSyncState("done"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	plain, _ := s.AddToList(ctx, sample(provider.Manual, "m2", nil), ListEntry{Status: PlanToWatch}, WithSyncState("done"))
-	sourced := sample(provider.AniList, "9", nil)
+	plain, _ := s.AddToList(ctx, sample(anilist.Manual, "m2", nil), ListEntry{Status: PlanToWatch}, WithSyncState("done"))
+	sourced := sample(anilist.AniList, "9", nil)
 	sourced.MALID = "43"
 	matched, _ := s.AddToList(ctx, sourced, ListEntry{Status: PlanToWatch})
 	for id, want := range map[int64]bool{unmatched: true, plain: false, matched: false} {
@@ -157,7 +157,7 @@ func TestAdapterUnmatchedSemantics(t *testing.T) {
 			t.Fatal(r, err)
 		}
 		// the legacy meaning: a manual entry carrying a MAL id
-		if got := r.Source == provider.Manual && r.MALID != ""; got != want {
+		if got := r.Source == anilist.Manual && r.MALID != ""; got != want {
 			t.Errorf("row %d unmatched=%v, want %v (%+v)", id, got, want, r)
 		}
 		// and the library flags the same rows
@@ -171,9 +171,9 @@ func TestAdapterUnmatchedSemantics(t *testing.T) {
 func TestAdapterCastBecomesCredits(t *testing.T) {
 	s := newStore(t)
 	ctx := context.Background()
-	id := mustSave(t, s, sample(provider.AniList, "1", nil))
-	noActor := provider.CastMember{Character: provider.Person{Source: provider.AniList, ID: "cz", Name: "Z"}, Role: "SUPPORTING"}
-	if err := s.SaveCast(ctx, id, []provider.CastMember{cast("1", "1"), noActor}); err != nil {
+	id := mustSave(t, s, sample(anilist.AniList, "1", nil))
+	noActor := anilist.CastMember{Character: anilist.Person{Source: anilist.AniList, ID: "cz", Name: "Z"}, Role: "SUPPORTING"}
+	if err := s.SaveCast(ctx, id, []anilist.CastMember{cast("1", "1"), noActor}); err != nil {
 		t.Fatal(err)
 	}
 	rows, err := s.db.Query(`SELECT c.role, c.detail, p.source_id, COALESCE(w.source_id, ''), c.counterpart_role
@@ -204,7 +204,7 @@ func TestAdapterCastBecomesCredits(t *testing.T) {
 func TestAdapterProgressIsEpisodeKey(t *testing.T) {
 	s := newStore(t)
 	ctx := context.Background()
-	id, err := s.AddToList(ctx, sample(provider.AniList, "1", intp(12)), ListEntry{Status: Watching, Progress: 3})
+	id, err := s.AddToList(ctx, sample(anilist.AniList, "1", intp(12)), ListEntry{Status: Watching, Progress: 3})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -242,12 +242,12 @@ func TestAdapterSanitisesOddProviderData(t *testing.T) {
 	s := newStore(t)
 	ctx := context.Background()
 	long := strings.Repeat("あ", 400)
-	a := sample(provider.AniList, "1", intp(12))
-	a.Titles = []provider.Title{{Lang: "ja", Text: long}, {Lang: "en", Text: "Ti\ttle"}}
+	a := sample(anilist.AniList, "1", intp(12))
+	a.Titles = []anilist.Title{{Lang: "ja", Text: long}, {Lang: "en", Text: "Ti\ttle"}}
 	a.Synopsis = "line one\x07\nline two"
 	a.CoverURL = "//cdn.example/x.jpg"
 	a.Genres = []string{"Ac\ttion", "  "}
-	a.Tags = []provider.Tag{{Name: "Ranked", Rank: intp(500)}}
+	a.Tags = []anilist.Tag{{Name: "Ranked", Rank: intp(500)}}
 	id, err := s.SaveAnime(ctx, a)
 	if err != nil {
 		t.Fatalf("odd provider data rejected: %v", err)
@@ -267,12 +267,12 @@ func TestAdapterSanitisesOddProviderData(t *testing.T) {
 func TestAdapterSkipsUnusableCastMembers(t *testing.T) {
 	s := newStore(t)
 	ctx := context.Background()
-	id := mustSave(t, s, sample(provider.AniList, "1", nil))
-	nameless := provider.CastMember{Character: provider.Person{Source: provider.AniList, ID: "c0", Name: ""}, Role: "MAIN"}
-	silentActor := provider.CastMember{
-		Character: provider.Person{Source: provider.AniList, ID: "c2", Name: "Two"},
-		Actor:     &provider.Person{Source: provider.AniList, ID: "v2", Name: ""}, Role: "SUPPORTING"}
-	if err := s.SaveCast(ctx, id, []provider.CastMember{nameless, cast("1", "1"), silentActor}); err != nil {
+	id := mustSave(t, s, sample(anilist.AniList, "1", nil))
+	nameless := anilist.CastMember{Character: anilist.Person{Source: anilist.AniList, ID: "c0", Name: ""}, Role: "MAIN"}
+	silentActor := anilist.CastMember{
+		Character: anilist.Person{Source: anilist.AniList, ID: "c2", Name: "Two"},
+		Actor:     &anilist.Person{Source: anilist.AniList, ID: "v2", Name: ""}, Role: "SUPPORTING"}
+	if err := s.SaveCast(ctx, id, []anilist.CastMember{nameless, cast("1", "1"), silentActor}); err != nil {
 		t.Fatalf("cast rejected: %v", err)
 	}
 	c, err := s.Cast(ctx, id)

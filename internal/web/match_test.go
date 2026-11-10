@@ -15,7 +15,7 @@ import (
 	"github.com/allister/allister/internal/library"
 	"github.com/allister/allister/internal/plugin"
 	"github.com/allister/allister/internal/plugin/plugintest"
-	"github.com/allister/allister/internal/provider"
+	"github.com/allister/allister/internal/plugins/anime/anilist"
 )
 
 // matchProvider is the sample provider with a counted search.
@@ -24,10 +24,10 @@ type matchProvider struct {
 	mu        sync.Mutex
 	searches  []string
 	searchErr error
-	results   []provider.SearchResult
+	results   []anilist.SearchResult
 }
 
-func (m *matchProvider) Search(ctx context.Context, q string) ([]provider.SearchResult, error) {
+func (m *matchProvider) Search(ctx context.Context, q string) ([]anilist.SearchResult, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.searches = append(m.searches, q)
@@ -44,10 +44,10 @@ type matchEnv struct {
 func newMatchEnv(t *testing.T) *matchEnv {
 	t.Helper()
 	e := newEnv(t)
-	mp := &matchProvider{animeProvider: e.fp, results: []provider.SearchResult{e.fp.anime.SearchResult}}
+	mp := &matchProvider{animeProvider: e.fp, results: []anilist.SearchResult{e.fp.anime.SearchResult}}
 	e.srv, e.h = newServer(Deps{
 		Settings: e.set, Store: e.st, Jobs: e.jobs, SyncJobs: testSyncJobs(), CoversDir: e.covers,
-		Providers: map[provider.Source]provider.Provider{provider.AniList: mp},
+		Providers: map[anilist.Source]anilist.Provider{anilist.AniList: mp},
 	}, func() time.Time { return *e.now })
 	e.reg, e.lib = e.srv.deps.Registry, e.srv.deps.Library
 	return &matchEnv{env: e, mp: mp}
@@ -231,7 +231,7 @@ func TestMatchUnknownIDShowsError(t *testing.T) {
 	e := newMatchEnv(t)
 	id := e.unmatched(t)
 	before, enB := e.snapshot(t, id)
-	e.fp.animeErr = provider.ErrNotFound
+	e.fp.animeErr = anilist.ErrNotFound
 	rec := e.do("POST", matchURL, url.Values{"source_ref": {"999999"}}, true)
 	if rec.Code != 422 {
 		t.Fatalf("%d", rec.Code)
@@ -244,7 +244,7 @@ func TestMatchUnknownIDShowsError(t *testing.T) {
 }
 
 func TestMatchProviderDownChangesNothing(t *testing.T) {
-	for name, perr := range map[string]error{"unavailable": provider.ErrUnavailable, "rate limited": provider.ErrRateLimited} {
+	for name, perr := range map[string]error{"unavailable": anilist.ErrUnavailable, "rate limited": anilist.ErrRateLimited} {
 		t.Run(name, func(t *testing.T) {
 			e := newMatchEnv(t)
 			id := e.unmatched(t)
@@ -351,10 +351,10 @@ func TestMatchSearchPartial(t *testing.T) {
 func TestMatchSearchErrors(t *testing.T) {
 	e := newMatchEnv(t)
 	e.unmatched(t)
-	e.mp.searchErr = provider.ErrRateLimited
+	e.mp.searchErr = anilist.ErrRateLimited
 	b := e.do("GET", matchURL+"/search?q=x", nil, true).Body.String()
 	mustContain(t, b, "rate limiting")
-	e.mp.searchErr = provider.ErrUnavailable
+	e.mp.searchErr = anilist.ErrUnavailable
 	b = e.do("GET", matchURL+"/search?q=x", nil, true).Body.String()
 	mustContain(t, b, "unavailable")
 	e.mp.searchErr, e.mp.results = nil, nil

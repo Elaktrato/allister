@@ -7,8 +7,8 @@ import (
 	"io"
 	"unicode/utf8"
 
-	"github.com/allister/allister/internal/importer/yamtrack"
 	"github.com/allister/allister/internal/plugin"
+	"github.com/allister/allister/internal/plugins/anime/yamtrack"
 	"github.com/allister/allister/internal/store"
 )
 

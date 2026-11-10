@@ -16,8 +16,8 @@ import (
 	"slices"
 
 	"github.com/allister/allister/internal/plugin"
+	"github.com/allister/allister/internal/plugins/anime/anilist"
 	"github.com/allister/allister/internal/plugins/anime/animedef"
-	"github.com/allister/allister/internal/provider"
 )
 
 // Limits that keep the output inside what the library accepts.
@@ -57,7 +57,7 @@ var (
 func keep(s string, _ int) string { return s }
 
 // sourceOf is the item source: the provider's source, AniList when unset.
-func sourceOf(s provider.Source) string {
+func sourceOf(s anilist.Source) string {
 	if s == "" {
 		return animedef.SourceID
 	}
@@ -65,9 +65,9 @@ func sourceOf(s provider.Source) string {
 }
 
 // Titles cleans the titles and drops the empty ones (nil when none is left).
-func Titles(ts []provider.Title) []plugin.Title { return fromSource.titles(ts) }
+func Titles(ts []anilist.Title) []plugin.Title { return fromSource.titles(ts) }
 
-func (c cleaner) titles(ts []provider.Title) []plugin.Title {
+func (c cleaner) titles(ts []anilist.Title) []plugin.Title {
 	var out []plugin.Title
 	for _, t := range ts {
 		if text := c.single(t.Text, MaxTitleRunes); text != "" {
@@ -87,7 +87,7 @@ func (c cleaner) numField(v *int, lo, hi int) (plugin.FieldValue, bool) {
 	return plugin.FieldValue{Num: &f}, true
 }
 
-func (c cleaner) summaryFields(r provider.SearchResult) map[string]plugin.FieldValue {
+func (c cleaner) summaryFields(r anilist.SearchResult) map[string]plugin.FieldValue {
 	f := map[string]plugin.FieldValue{}
 	if r.Type != "" && (!c.guard || slices.Contains(animedef.TypeValues(), r.Type)) {
 		f["type"] = plugin.FieldValue{Text: r.Type}
@@ -108,9 +108,9 @@ func (c cleaner) summaryFields(r provider.SearchResult) map[string]plugin.FieldV
 }
 
 // Summary maps a search result.
-func Summary(r provider.SearchResult) plugin.ItemSummary { return fromSource.summary(r) }
+func Summary(r anilist.SearchResult) plugin.ItemSummary { return fromSource.summary(r) }
 
-func (c cleaner) summary(r provider.SearchResult) plugin.ItemSummary {
+func (c cleaner) summary(r anilist.SearchResult) plugin.ItemSummary {
 	return plugin.ItemSummary{
 		Source:   sourceOf(r.Source),
 		ID:       c.single(r.ID, MaxIDRunes),
@@ -126,14 +126,14 @@ func (c cleaner) summary(r provider.SearchResult) plugin.ItemSummary {
 // "source" relation points at a manga, every other one at an anime;
 // relations without an id or a kind are dropped). Recommendations are not
 // part of it (see Recommendations).
-func ItemData(a provider.Anime) plugin.ItemData { return fromSource.itemData(a) }
+func ItemData(a anilist.Anime) plugin.ItemData { return fromSource.itemData(a) }
 
 // UserItemData is ItemData for what a user typed (a manual entry): the same
 // mapping, but nothing is rewritten, truncated or dropped, so the library
 // rejects invalid input instead of the input being silently changed.
-func UserItemData(a provider.Anime) plugin.ItemData { return fromUser.itemData(a) }
+func UserItemData(a anilist.Anime) plugin.ItemData { return fromUser.itemData(a) }
 
-func (c cleaner) itemData(a provider.Anime) plugin.ItemData {
+func (c cleaner) itemData(a anilist.Anime) plugin.ItemData {
 	d := plugin.ItemData{
 		ItemSummary: c.summary(a.SearchResult),
 		ExternalURL: c.url(a.ExternalURL),
@@ -204,7 +204,7 @@ func relationURL(source, itemKind, id string) string {
 }
 
 // Recommendations maps recommendations, dropping those without an id.
-func Recommendations(rs []provider.Recommendation) []plugin.ItemSummary {
+func Recommendations(rs []anilist.Recommendation) []plugin.ItemSummary {
 	out := make([]plugin.ItemSummary, 0, len(rs))
 	for _, r := range rs {
 		sid := plugin.SingleLine(r.ID, MaxIDRunes)
@@ -221,7 +221,7 @@ func Recommendations(rs []provider.Recommendation) []plugin.ItemSummary {
 
 // PersonRef maps a person; ok is false when it has no usable id or name. URL
 // and image are cleaned with plugin.HTTPSURL ("" when not an http(s) URL).
-func PersonRef(p provider.Person) (plugin.PersonRef, bool) {
+func PersonRef(p anilist.Person) (plugin.PersonRef, bool) {
 	r := plugin.PersonRef{
 		ID:       plugin.SingleLine(p.ID, MaxIDRunes),
 		Name:     plugin.SingleLine(p.Name, MaxNameRunes),
@@ -235,7 +235,7 @@ func PersonRef(p provider.Person) (plugin.PersonRef, bool) {
 // role such as MAIN as Detail) with its voice actor as the counterpart
 // ("Voice actor"). A character without a usable id or name is dropped; an
 // unusable voice actor only loses the counterpart. At most MaxCredits.
-func Credits(cast []provider.CastMember) []plugin.Credit {
+func Credits(cast []anilist.CastMember) []plugin.Credit {
 	out := make([]plugin.Credit, 0, len(cast))
 	for _, m := range cast {
 		ch, ok := PersonRef(m.Character)
@@ -256,10 +256,10 @@ func Credits(cast []provider.CastMember) []plugin.Credit {
 // LegacyAnime maps item data of the anime kind back to the legacy provider
 // type (the reverse of ItemData; recommendations are not part of it). The
 // legacy add flow uses it to save what the generic overview fetched.
-func LegacyAnime(d plugin.ItemData) provider.Anime {
-	a := provider.Anime{
-		SearchResult: provider.SearchResult{
-			Source: provider.Source(d.Source), ID: d.ID, Titles: legacyTitles(d.Titles),
+func LegacyAnime(d plugin.ItemData) anilist.Anime {
+	a := anilist.Anime{
+		SearchResult: anilist.SearchResult{
+			Source: anilist.Source(d.Source), ID: d.ID, Titles: legacyTitles(d.Titles),
 			Type: d.Fields["type"].Text, Episodes: intOf(d.Fields["episodes"]), Year: intOf(d.Fields["year"]),
 			Studio: d.Fields["studio"].Text, Synopsis: d.Fields["synopsis"].Text, CoverURL: d.CoverURL,
 		},
@@ -268,19 +268,19 @@ func LegacyAnime(d plugin.ItemData) provider.Anime {
 		Genres: append([]string(nil), d.Genres...),
 	}
 	for _, r := range d.Relations {
-		a.Relations = append(a.Relations, provider.Relation{Kind: r.Kind, Source: provider.Source(r.Item.Source), ID: r.Item.ID,
+		a.Relations = append(a.Relations, anilist.Relation{Kind: r.Kind, Source: anilist.Source(r.Item.Source), ID: r.Item.ID,
 			Titles: legacyTitles(r.Item.Titles), Type: r.Item.Fields["type"].Text})
 	}
 	for _, t := range d.Tags {
-		a.Tags = append(a.Tags, provider.Tag{Name: t.Name, Rank: t.Rank, Spoiler: t.Spoiler})
+		a.Tags = append(a.Tags, anilist.Tag{Name: t.Name, Rank: t.Rank, Spoiler: t.Spoiler})
 	}
 	return a
 }
 
-func legacyTitles(ts []plugin.Title) []provider.Title {
-	var out []provider.Title
+func legacyTitles(ts []plugin.Title) []anilist.Title {
+	var out []anilist.Title
 	for _, t := range ts {
-		out = append(out, provider.Title{Lang: t.Lang, Text: t.Text})
+		out = append(out, anilist.Title{Lang: t.Lang, Text: t.Text})
 	}
 	return out
 }

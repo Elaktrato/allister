@@ -11,8 +11,6 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
-
-	"github.com/allister/allister/internal/provider"
 )
 
 func fixture(t *testing.T, name string) []byte {
@@ -44,7 +42,7 @@ func serve(t *testing.T, status int, body []byte, got *string) *Client {
 	return New(srv.URL, srv.Client())
 }
 
-func titleMap(ts []provider.Title) map[string]string {
+func titleMap(ts []Title) map[string]string {
 	m := map[string]string{}
 	for _, t := range ts {
 		m[t.Lang] = t.Text
@@ -53,7 +51,7 @@ func titleMap(ts []provider.Title) map[string]string {
 }
 
 func TestName(t *testing.T) {
-	if New("x", nil).Name() != provider.AniList {
+	if New("x", nil).Name() != AniList {
 		t.Fatal("Name() must be anilist")
 	}
 }
@@ -69,7 +67,7 @@ func TestSearchMapsResults(t *testing.T) {
 		t.Fatalf("len = %d, want 3", len(res))
 	}
 	r := res[0]
-	if r.Source != provider.AniList || r.ID != "154587" || r.Type != "TV" {
+	if r.Source != AniList || r.ID != "154587" || r.Type != "TV" {
 		t.Errorf("bad identity: %+v", r)
 	}
 	tm := titleMap(r.Titles)
@@ -142,7 +140,7 @@ func TestSearchCapsAtTwenty(t *testing.T) {
 func TestOversizedResponseMapsUnavailable(t *testing.T) {
 	c := serve(t, 200, []byte(`{"data":{"Page":{"media":[]}}}`+strings.Repeat(" ", 100)), nil)
 	c.maxBody = 64
-	if _, err := c.Search(context.Background(), "x"); !errors.Is(err, provider.ErrUnavailable) {
+	if _, err := c.Search(context.Background(), "x"); !errors.Is(err, ErrUnavailable) {
 		t.Fatalf("err = %v", err)
 	}
 	// a body of exactly the limit is still accepted
@@ -160,7 +158,7 @@ func TestAnimeMapsTitlesRelationsRecsMALID(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if a.ID != "154587" || a.Source != provider.AniList || a.MALID != "52991" {
+	if a.ID != "154587" || a.Source != AniList || a.MALID != "52991" {
 		t.Errorf("identity: %+v", a.SearchResult)
 	}
 	if a.ExternalURL != "https://anilist.co/anime/154587" || a.SourceMaterial != "MANGA" {
@@ -179,9 +177,9 @@ func TestAnimeMapsTitlesRelationsRecsMALID(t *testing.T) {
 		t.Errorf("synopsis has tags: %q", a.Synopsis)
 	}
 
-	kinds := map[string]provider.Relation{}
+	kinds := map[string]Relation{}
 	for _, r := range a.Relations {
-		if r.Source != provider.AniList {
+		if r.Source != AniList {
 			t.Errorf("relation source = %s", r.Source)
 		}
 		kinds[r.ID] = r
@@ -200,7 +198,7 @@ func TestAnimeMapsTitlesRelationsRecsMALID(t *testing.T) {
 		t.Fatal("no recommendations")
 	}
 	rec := a.Recommendations[0]
-	if rec.Source != provider.AniList || rec.ID != "21827" || rec.CoverURL == "" || titleMap(rec.Titles)["en"] != "Violet Evergarden" {
+	if rec.Source != AniList || rec.ID != "21827" || rec.CoverURL == "" || titleMap(rec.Titles)["en"] != "Violet Evergarden" {
 		t.Errorf("rec = %+v", rec)
 	}
 }
@@ -238,7 +236,7 @@ func TestCastMapsVoiceActors(t *testing.T) {
 		t.Fatalf("len = %d", len(cast))
 	}
 	m := cast[0]
-	if m.Role != "MAIN" || m.Character.Name != "Frieren" || m.Character.ID != "176754" || m.Character.Source != provider.AniList ||
+	if m.Role != "MAIN" || m.Character.Name != "Frieren" || m.Character.ID != "176754" || m.Character.Source != AniList ||
 		m.Character.URL != "https://anilist.co/character/176754" || m.Character.ImageURL == "" {
 		t.Errorf("character = %+v", m)
 	}
@@ -264,7 +262,7 @@ func TestCastActorNilWhenNone(t *testing.T) {
 func TestRateLimitedMapsError(t *testing.T) {
 	c := serve(t, 429, []byte(`{"errors":[{"message":"Too Many Requests.","status":429}]}`), nil)
 	_, err := c.Search(context.Background(), "x")
-	if !errors.Is(err, provider.ErrRateLimited) {
+	if !errors.Is(err, ErrRateLimited) {
 		t.Fatalf("err = %v", err)
 	}
 }
@@ -272,7 +270,7 @@ func TestRateLimitedMapsError(t *testing.T) {
 func TestServerErrorMapsUnavailable(t *testing.T) {
 	c := serve(t, 500, []byte(`oops`), nil)
 	_, err := c.Anime(context.Background(), "1")
-	if !errors.Is(err, provider.ErrUnavailable) {
+	if !errors.Is(err, ErrUnavailable) {
 		t.Fatalf("err = %v", err)
 	}
 }
@@ -280,18 +278,18 @@ func TestServerErrorMapsUnavailable(t *testing.T) {
 func TestNotFoundMapsErrNotFound(t *testing.T) {
 	// GraphQL-level "Not Found." (AniList answers this with HTTP 404)
 	c := serve(t, 404, fixture(t, "notfound.json"), nil)
-	if _, err := c.Anime(context.Background(), "99999999"); !errors.Is(err, provider.ErrNotFound) {
+	if _, err := c.Anime(context.Background(), "99999999"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("404: err = %v", err)
 	}
 	c = serve(t, 200, fixture(t, "notfound.json"), nil)
-	if _, err := c.Cast(context.Background(), "99999999"); !errors.Is(err, provider.ErrNotFound) {
+	if _, err := c.Cast(context.Background(), "99999999"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("200+errors: err = %v", err)
 	}
 }
 
 func TestMalformedJSONMapsUnavailable(t *testing.T) {
 	c := serve(t, 200, []byte(`{"data":`), nil)
-	if _, err := c.Search(context.Background(), "x"); !errors.Is(err, provider.ErrUnavailable) {
+	if _, err := c.Search(context.Background(), "x"); !errors.Is(err, ErrUnavailable) {
 		t.Fatalf("err = %v", err)
 	}
 }
@@ -300,7 +298,7 @@ func TestNetworkErrorMapsUnavailable(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
 	url := srv.URL
 	srv.Close()
-	if _, err := New(url, nil).Search(context.Background(), "x"); !errors.Is(err, provider.ErrUnavailable) {
+	if _, err := New(url, nil).Search(context.Background(), "x"); !errors.Is(err, ErrUnavailable) {
 		t.Fatalf("err = %v", err)
 	}
 }
@@ -321,7 +319,7 @@ func TestAnimeByMALIDMapsAnime(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if a.ID != "154587" || a.Source != provider.AniList || a.MALID != "52991" {
+	if a.ID != "154587" || a.Source != AniList || a.MALID != "52991" {
 		t.Errorf("identity: %+v", a.SearchResult)
 	}
 	if tm := titleMap(a.Titles); len(tm) != 3 || tm["ja-latn"] != "Sousou no Frieren" {
@@ -340,17 +338,17 @@ func TestAnimeByMALIDMapsAnime(t *testing.T) {
 
 func TestAnimeByMALIDNotFound(t *testing.T) {
 	c := serve(t, 404, fixture(t, "notfound_mal.json"), nil)
-	if _, err := c.AnimeByMALID(context.Background(), "99999999"); !errors.Is(err, provider.ErrNotFound) {
+	if _, err := c.AnimeByMALID(context.Background(), "99999999"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("err = %v", err)
 	}
 	// A null Media without errors is not found either.
 	c = serve(t, 200, []byte(`{"data":{"Media":null}}`), nil)
-	if _, err := c.AnimeByMALID(context.Background(), "5"); !errors.Is(err, provider.ErrNotFound) {
+	if _, err := c.AnimeByMALID(context.Background(), "5"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("null media: err = %v", err)
 	}
 	// A Media without an id is not found.
 	c = serve(t, 200, []byte(`{"data":{"Media":{"id":0}}}`), nil)
-	if _, err := c.AnimeByMALID(context.Background(), "5"); !errors.Is(err, provider.ErrNotFound) {
+	if _, err := c.AnimeByMALID(context.Background(), "5"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("no id: err = %v", err)
 	}
 }
@@ -363,7 +361,7 @@ func TestAnimeByMALIDRejectsNonDigitsWithoutRequest(t *testing.T) {
 	defer srv.Close()
 	c := New(srv.URL, srv.Client())
 	for _, id := range []string{"", "abc", "12a", "-5", "1.5", "0", "99999999999999999999", "１２"} {
-		if _, err := c.AnimeByMALID(context.Background(), id); !errors.Is(err, provider.ErrNotFound) {
+		if _, err := c.AnimeByMALID(context.Background(), id); !errors.Is(err, ErrNotFound) {
 			t.Errorf("%q: err = %v", id, err)
 		}
 	}
@@ -423,7 +421,7 @@ func TestAnimeGenresAndTagsAreCleaned(t *testing.T) {
 	if len(a.Genres) != 2 || a.Genres[0] != "Action" || a.Genres[1] != "Drama" {
 		t.Errorf("genres = %v", a.Genres)
 	}
-	rank := func(tg provider.Tag) int {
+	rank := func(tg Tag) int {
 		if tg.Rank == nil {
 			return -99
 		}

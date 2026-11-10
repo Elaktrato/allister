@@ -10,9 +10,9 @@ import (
 
 	"github.com/allister/allister/internal/library"
 	"github.com/allister/allister/internal/plugin"
+	"github.com/allister/allister/internal/plugins/anime/anilist"
 	"github.com/allister/allister/internal/plugins/anime/animedef"
 	"github.com/allister/allister/internal/plugins/anime/animemap"
-	"github.com/allister/allister/internal/provider"
 )
 
 // The mapping between the legacy anime types and the generic library.
@@ -150,10 +150,10 @@ func ignoreMissing(err error) error {
 
 // --- anime <-> item ---
 
-func providerTitles(ts []plugin.Title) []provider.Title {
-	var out []provider.Title
+func providerTitles(ts []plugin.Title) []anilist.Title {
+	var out []anilist.Title
 	for _, t := range ts {
-		out = append(out, provider.Title{Lang: t.Lang, Text: t.Text})
+		out = append(out, anilist.Title{Lang: t.Lang, Text: t.Text})
 	}
 	return out
 }
@@ -183,9 +183,9 @@ func canonicalMAL(id string) (string, bool) {
 // must be a number (the legacy schema stored an integer) and is stored in its
 // canonical decimal form, and a local cover file name (a manual upload, which
 // only the legacy path stores through SaveAnime) is kept.
-func itemData(a provider.Anime) (plugin.ItemData, error) {
+func itemData(a anilist.Anime) (plugin.ItemData, error) {
 	d := animemap.ItemData(a)
-	if a.Source == provider.Manual {
+	if a.Source == anilist.Manual {
 		d = animemap.UserItemData(a) // typed by the user: validated, never rewritten
 	}
 	if a.MALID != "" {
@@ -226,10 +226,10 @@ func saved(it *library.Item) *Saved {
 		return nil
 	}
 	sv := &Saved{ID: it.ID, CoverPath: it.CoverPath, SyncState: it.SyncState}
-	sv.Source, sv.Anime.ID = provider.Source(it.Source), it.SourceID
+	sv.Source, sv.Anime.ID = anilist.Source(it.Source), it.SourceID
 	sv.Titles = providerTitles(it.Titles)
 	if sv.Titles == nil {
-		sv.Titles = []provider.Title{}
+		sv.Titles = []anilist.Title{}
 	}
 	f := it.Fields
 	sv.Type, sv.Studio, sv.Synopsis = textField(f, fieldType), textField(f, fieldStudio), textField(f, fieldSynopsis)
@@ -238,14 +238,14 @@ func saved(it *library.Item) *Saved {
 	sv.StartDate, sv.EndDate = dateField(f, fieldStartedOn), dateField(f, fieldEndedOn)
 	sv.CoverURL, sv.ExternalURL, sv.MALID = it.CoverPath, it.ExternalURL, it.ExternalIDs[extMAL]
 	for _, r := range it.Relations {
-		sv.Relations = append(sv.Relations, provider.Relation{
-			Kind: r.Kind, Source: provider.Source(r.Item.Source), ID: r.Item.ID,
+		sv.Relations = append(sv.Relations, anilist.Relation{
+			Kind: r.Kind, Source: anilist.Source(r.Item.Source), ID: r.Item.ID,
 			Titles: providerTitles(r.Item.Titles), Type: r.Item.Fields[fieldType].Text,
 		})
 	}
 	sv.Genres = it.Genres
 	for _, t := range it.Tags {
-		sv.Tags = append(sv.Tags, provider.Tag{Name: t.Name, Rank: t.Rank, Spoiler: t.Spoiler})
+		sv.Tags = append(sv.Tags, anilist.Tag{Name: t.Name, Rank: t.Rank, Spoiler: t.Spoiler})
 	}
 	return sv
 }
@@ -272,7 +272,7 @@ func listRow(r library.Row) ListRow {
 	return ListRow{
 		AnimeID: r.Item.ID, Titles: providerTitles(r.Item.Titles), CoverPath: r.Item.CoverPath,
 		Type: textField(f, fieldType), Episodes: intField(f, fieldEpisodes), Entry: listEntry(r.Entry),
-		SyncState: r.Item.SyncState, Source: provider.Source(r.Item.Source), SourceID: r.Item.SourceID,
+		SyncState: r.Item.SyncState, Source: anilist.Source(r.Item.Source), SourceID: r.Item.SourceID,
 		MALID: r.Item.ExternalIDs[extMAL],
 	}
 }
@@ -309,7 +309,7 @@ func legacyEntryError(e ListEntry, episodes *int, libErr error) error {
 // --- people ---
 
 func person(p library.Person) Person {
-	return Person{ID: p.ID, Source: provider.Source(p.Source), SourceID: p.SourceID, Name: p.Name, ImagePath: p.ImagePath, ExternalURL: p.ExternalURL}
+	return Person{ID: p.ID, Source: anilist.Source(p.Source), SourceID: p.SourceID, Name: p.Name, ImagePath: p.ImagePath, ExternalURL: p.ExternalURL}
 }
 
 func animeQuery(status *library.Status) library.Query {

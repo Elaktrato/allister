@@ -11,7 +11,7 @@ import (
 	"github.com/allister/allister/internal/library"
 	"github.com/allister/allister/internal/plugin"
 	"github.com/allister/allister/internal/plugin/plugintest"
-	"github.com/allister/allister/internal/provider"
+	"github.com/allister/allister/internal/plugins/anime/anilist"
 	"github.com/allister/allister/internal/settings"
 	"github.com/allister/allister/internal/store"
 )
@@ -34,7 +34,7 @@ func TestOverviewLiveForUnsaved(t *testing.T) {
 	if e.fp.animeCalls != 1 || e.fp.castCall != 1 {
 		t.Fatalf("calls %d %d", e.fp.animeCalls, e.fp.castCall)
 	}
-	if ar, _ := e.st.FindBySource(context.Background(), provider.AniList, "1535"); ar != nil {
+	if ar, _ := e.st.FindBySource(context.Background(), anilist.AniList, "1535"); ar != nil {
 		t.Fatal("overview must not save")
 	}
 }
@@ -52,7 +52,7 @@ func TestOverviewFromDatabaseForSaved(t *testing.T) {
 	e := newEnv(t)
 	e.saved(t)
 	e.fp.anime.Synopsis = "LIVE CHANGED"
-	e.fp.castErr = provider.ErrUnavailable
+	e.fp.castErr = anilist.ErrUnavailable
 	rec := e.get("/anime/anilist/1535")
 	if rec.Code != 200 {
 		t.Fatalf("got %d", rec.Code)
@@ -66,7 +66,7 @@ func TestOverviewFromDatabaseForSaved(t *testing.T) {
 	// recommendations come live (loaded late from their endpoint), failures
 	// never break the page
 	mustContain(t, e.htmxGet("/anime/anilist/1535/recommendations").Body.String(), "Rec Title")
-	e.fp.animeErr = provider.ErrUnavailable
+	e.fp.animeErr = anilist.ErrUnavailable
 	rec = e.get("/anime/anilist/1535")
 	if rec.Code != 200 {
 		t.Fatalf("got %d", rec.Code)
@@ -104,7 +104,7 @@ func TestOverviewSynopsisHasNoRawHTML(t *testing.T) {
 
 func TestOverviewCastFailureStillRenders(t *testing.T) {
 	e := newEnv(t)
-	e.fp.castErr = provider.ErrUnavailable
+	e.fp.castErr = anilist.ErrUnavailable
 	rec := e.get("/anime/anilist/1535")
 	if rec.Code != 200 {
 		t.Fatalf("got %d", rec.Code)
@@ -116,7 +116,7 @@ func TestOverviewProviderErrors(t *testing.T) {
 	for _, tc := range []struct {
 		err  error
 		code int
-	}{{provider.ErrNotFound, 404}, {provider.ErrUnavailable, 503}, {provider.ErrRateLimited, 503}} {
+	}{{anilist.ErrNotFound, 404}, {anilist.ErrUnavailable, 503}, {anilist.ErrRateLimited, 503}} {
 		e := newEnv(t)
 		e.fp.animeErr = tc.err
 		rec := e.get("/anime/anilist/1535")
@@ -134,7 +134,7 @@ func TestOverviewProviderErrors(t *testing.T) {
 func TestOverviewNilProviderIs503(t *testing.T) {
 	d, _ := db.Open(filepath.Join(t.TempDir(), "t.db"))
 	t.Cleanup(func() { d.Close() })
-	h := NewServer(Deps{Settings: settings.New(d), Store: store.New(d), Providers: map[provider.Source]provider.Provider{}})
+	h := NewServer(Deps{Settings: settings.New(d), Store: store.New(d), Providers: map[anilist.Source]anilist.Provider{}})
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, httptest.NewRequest("GET", "/anime/anilist/1535", nil))
 	if rec.Code != 503 {
@@ -159,8 +159,8 @@ func TestOverviewManualFromDatabaseOnly(t *testing.T) {
 	if rec := e.get("/anime/manual/77"); rec.Code != 404 {
 		t.Fatalf("got %d", rec.Code)
 	}
-	m := provider.Anime{SearchResult: provider.SearchResult{Source: provider.Manual, ID: "77", Type: "OVA",
-		Titles: []provider.Title{{Lang: "en", Text: "My Manual Show"}}}}
+	m := anilist.Anime{SearchResult: anilist.SearchResult{Source: anilist.Manual, ID: "77", Type: "OVA",
+		Titles: []anilist.Title{{Lang: "en", Text: "My Manual Show"}}}}
 	if _, err := e.st.SaveAnime(context.Background(), m, store.WithSyncState("done")); err != nil {
 		t.Fatal(err)
 	}
@@ -611,7 +611,7 @@ func TestSectionsEscapeHostileValues(t *testing.T) {
 func TestHostileNavMarkerIsEscaped(t *testing.T) {
 	e := newEnv(t)
 	a := e.fp.anime
-	a.Titles = []provider.Title{{Lang: "ja", Text: "T" + navMarker}}
+	a.Titles = []anilist.Title{{Lang: "ja", Text: "T" + navMarker}}
 	a.Synopsis = "S" + navMarker
 	id, err := e.st.SaveAnime(context.Background(), a)
 	if err != nil {

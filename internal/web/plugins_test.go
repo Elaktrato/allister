@@ -14,7 +14,7 @@ import (
 	"github.com/allister/allister/internal/plugin"
 	"github.com/allister/allister/internal/plugin/plugintest"
 	"github.com/allister/allister/internal/plugins/anime"
-	"github.com/allister/allister/internal/provider"
+	"github.com/allister/allister/internal/plugins/anime/anilist"
 	"github.com/allister/allister/internal/store"
 )
 
@@ -81,7 +81,7 @@ func (e *env) disable(t *testing.T, id string) {
 
 func TestDisabledPluginRoutes404(t *testing.T) {
 	e := newEnv(t)
-	id := e.addEntry(t, provider.AniList, "1535", nil, store.Watching, 1)
+	id := e.addEntry(t, anilist.AniList, "1535", nil, store.Watching, 1)
 	if len(e.srv.pluginRoutes[animePluginID]) < 10 || len(e.srv.coreGuarded) < 4 {
 		t.Fatalf("route tables too small: %v %v", e.srv.pluginRoutes, e.srv.coreGuarded)
 	}
@@ -371,8 +371,8 @@ func TestReservedIDsNeverReachServeMux(t *testing.T) {
 func TestAllExistingAnimeURLsStillWork(t *testing.T) {
 	e := newEnv(t)
 	e.saved(t)
-	id := e.addEntry(t, provider.AniList, "1", nil, store.Watching, 0)
-	man := provider.Anime{SearchResult: provider.SearchResult{Source: provider.Manual, ID: "man1", Titles: []provider.Title{{Lang: "en", Text: "M"}}}}
+	id := e.addEntry(t, anilist.AniList, "1", nil, store.Watching, 0)
+	man := anilist.Anime{SearchResult: anilist.SearchResult{Source: anilist.Manual, ID: "man1", Titles: []anilist.Title{{Lang: "en", Text: "M"}}}}
 	if _, err := e.st.AddToList(context.Background(), man, store.ListEntry{Status: store.Watching}); err != nil {
 		t.Fatal(err)
 	}

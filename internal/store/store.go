@@ -18,7 +18,7 @@ import (
 	"time"
 
 	"github.com/allister/allister/internal/library"
-	"github.com/allister/allister/internal/provider"
+	"github.com/allister/allister/internal/plugins/anime/anilist"
 )
 
 var (
@@ -70,21 +70,21 @@ type ListEntry struct {
 // always empty. MALID is "" when unknown.
 type Saved struct {
 	ID int64
-	provider.Anime
+	anilist.Anime
 	CoverPath, SyncState string
 }
 
 // ListRow is one row of the list view.
 type ListRow struct {
 	AnimeID   int64
-	Titles    []provider.Title
+	Titles    []anilist.Title
 	CoverPath string
 	Type      string
 	Episodes  *int
 	Entry     ListEntry
 	SyncState string
 	// Source and SourceID identify the anime; MALID is "" when unknown.
-	Source   provider.Source
+	Source   anilist.Source
 	SourceID string
 	MALID    string
 }
@@ -92,7 +92,7 @@ type ListRow struct {
 // Person is a stored character or voice actor.
 type Person struct {
 	ID                                     int64
-	Source                                 provider.Source
+	Source                                 anilist.Source
 	SourceID, Name, ImagePath, ExternalURL string
 }
 
@@ -100,9 +100,9 @@ type Person struct {
 type PersonAppearance struct {
 	AnimeID int64
 	// Source and SourceID identify the anime at its provider.
-	Source    provider.Source
+	Source    anilist.Source
 	SourceID  string
-	Titles    []provider.Title
+	Titles    []anilist.Title
 	CoverPath string
 	// Character is the voiced character's name when AsActor, else the
 	// person's own name (the person is the character).

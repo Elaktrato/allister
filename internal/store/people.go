@@ -8,8 +8,8 @@ import (
 	"slices"
 
 	"github.com/allister/allister/internal/library"
+	"github.com/allister/allister/internal/plugins/anime/anilist"
 	"github.com/allister/allister/internal/plugins/anime/animemap"
-	"github.com/allister/allister/internal/provider"
 )
 
 // SaveCast replaces the cast of animeID in one transaction (existing cast
@@ -19,7 +19,7 @@ import (
 // (source, source_id): name and URL are updated; the remote ImageURL is
 // stored in image_path unless a local path (not starting with "http") is
 // already known.
-func (s *Store) SaveCast(ctx context.Context, animeID int64, cast []provider.CastMember) error {
+func (s *Store) SaveCast(ctx context.Context, animeID int64, cast []anilist.CastMember) error {
 	err := s.lib.SaveCredits(ctx, animeID, animemap.Credits(cast))
 	if errors.Is(err, library.ErrNoEntry) {
 		return fmt.Errorf("save cast: anime %d does not exist", animeID)
@@ -77,7 +77,7 @@ func (s *Store) PersonAnime(ctx context.Context, personID int64) ([]PersonAppear
 		if a.PluginID != animePlugin {
 			continue
 		}
-		pa := PersonAppearance{AnimeID: a.ItemID, Source: provider.Source(a.Source), SourceID: a.SourceID,
+		pa := PersonAppearance{AnimeID: a.ItemID, Source: anilist.Source(a.Source), SourceID: a.SourceID,
 			Titles: providerTitles(a.Titles), CoverPath: a.CoverPath}
 		switch {
 		case a.Role == roleCharacter: // the person is the credited character

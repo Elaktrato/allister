@@ -4,13 +4,13 @@ import (
 	"context"
 	"testing"
 
-	"github.com/allister/allister/internal/provider"
+	"github.com/allister/allister/internal/plugins/anime/anilist"
 )
 
-func cast(char, actor string) provider.CastMember {
-	return provider.CastMember{
-		Character: provider.Person{Source: provider.AniList, ID: "c" + char, Name: "Char " + char, ImageURL: "https://x/c" + char},
-		Actor:     &provider.Person{Source: provider.AniList, ID: "v" + actor, Name: "VA " + actor, ImageURL: "https://x/v" + actor, URL: "https://u/" + actor},
+func cast(char, actor string) anilist.CastMember {
+	return anilist.CastMember{
+		Character: anilist.Person{Source: anilist.AniList, ID: "c" + char, Name: "Char " + char, ImageURL: "https://x/c" + char},
+		Actor:     &anilist.Person{Source: anilist.AniList, ID: "v" + actor, Name: "VA " + actor, ImageURL: "https://x/v" + actor, URL: "https://u/" + actor},
 		Role:      "MAIN",
 	}
 }
@@ -27,9 +27,9 @@ func personID(t *testing.T, s *Store, src, sid string) int64 {
 func TestSaveCastLinksVoiceActors(t *testing.T) {
 	s := newStore(t)
 	ctx := context.Background()
-	id := mustSave(t, s, sample(provider.AniList, "1", nil))
-	noActor := provider.CastMember{Character: provider.Person{Source: provider.AniList, ID: "cz", Name: "Z"}}
-	if err := s.SaveCast(ctx, id, []provider.CastMember{cast("1", "1"), noActor}); err != nil {
+	id := mustSave(t, s, sample(anilist.AniList, "1", nil))
+	noActor := anilist.CastMember{Character: anilist.Person{Source: anilist.AniList, ID: "cz", Name: "Z"}}
+	if err := s.SaveCast(ctx, id, []anilist.CastMember{cast("1", "1"), noActor}); err != nil {
 		t.Fatal(err)
 	}
 	var n, nulls int
@@ -39,7 +39,7 @@ func TestSaveCastLinksVoiceActors(t *testing.T) {
 	}
 	va := personID(t, s, "anilist", "v1")
 	p, err := s.Person(ctx, va)
-	if err != nil || p == nil || p.Name != "VA 1" || p.ExternalURL != "https://u/1" || p.Source != provider.AniList || p.SourceID != "v1" || p.ImagePath != "https://x/v1" {
+	if err != nil || p == nil || p.Name != "VA 1" || p.ExternalURL != "https://u/1" || p.Source != anilist.AniList || p.SourceID != "v1" || p.ImagePath != "https://x/v1" {
 		t.Fatalf("%+v %v", p, err)
 	}
 	if p, err := s.Person(ctx, 9999); p != nil || err != nil {
@@ -59,9 +59,9 @@ func TestSaveCastLinksVoiceActors(t *testing.T) {
 func TestSaveCastIsIdempotent(t *testing.T) {
 	s := newStore(t)
 	ctx := context.Background()
-	id := mustSave(t, s, sample(provider.AniList, "1", nil))
+	id := mustSave(t, s, sample(anilist.AniList, "1", nil))
 	for i := 0; i < 2; i++ {
-		if err := s.SaveCast(ctx, id, []provider.CastMember{cast("1", "1"), cast("2", "2")}); err != nil {
+		if err := s.SaveCast(ctx, id, []anilist.CastMember{cast("1", "1"), cast("2", "2")}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -78,7 +78,7 @@ func TestSaveCastIsIdempotent(t *testing.T) {
 	}
 	m := cast("1", "1")
 	m.Actor.Name = "Renamed"
-	if err := s.SaveCast(ctx, id, []provider.CastMember{m}); err != nil {
+	if err := s.SaveCast(ctx, id, []anilist.CastMember{m}); err != nil {
 		t.Fatal(err)
 	}
 	p, _ := s.Person(ctx, va)
@@ -94,16 +94,16 @@ func TestSaveCastIsIdempotent(t *testing.T) {
 func TestPersonAnimeOnlyReturnsSavedAnime(t *testing.T) {
 	s := newStore(t)
 	ctx := context.Background()
-	a := mustSave(t, s, sample(provider.AniList, "1", nil))
-	b := mustSave(t, s, sample(provider.AniList, "2", nil))
-	s.SaveCast(ctx, a, []provider.CastMember{cast("1", "1")})
-	s.SaveCast(ctx, b, []provider.CastMember{cast("2", "2")})
+	a := mustSave(t, s, sample(anilist.AniList, "1", nil))
+	b := mustSave(t, s, sample(anilist.AniList, "2", nil))
+	s.SaveCast(ctx, a, []anilist.CastMember{cast("1", "1")})
+	s.SaveCast(ctx, b, []anilist.CastMember{cast("2", "2")})
 	apps, err := s.PersonAnime(ctx, personID(t, s, "anilist", "v1"))
 	if err != nil || len(apps) != 1 || apps[0].AnimeID != a {
 		t.Fatalf("%+v %v", apps, err)
 	}
 	// same actor in a second saved anime appears for both
-	s.SaveCast(ctx, b, []provider.CastMember{cast("2", "1")})
+	s.SaveCast(ctx, b, []anilist.CastMember{cast("2", "1")})
 	apps, _ = s.PersonAnime(ctx, personID(t, s, "anilist", "v1"))
 	if len(apps) != 2 {
 		t.Fatalf("%+v", apps)
@@ -113,12 +113,12 @@ func TestPersonAnimeOnlyReturnsSavedAnime(t *testing.T) {
 func TestAnimePeople(t *testing.T) {
 	s := newStore(t)
 	ctx := context.Background()
-	a := mustSave(t, s, sample(provider.AniList, "1", nil))
-	b := mustSave(t, s, sample(provider.AniList, "2", nil))
-	if err := s.SaveCast(ctx, a, []provider.CastMember{cast("1", "1"), cast("2", "1")}); err != nil {
+	a := mustSave(t, s, sample(anilist.AniList, "1", nil))
+	b := mustSave(t, s, sample(anilist.AniList, "2", nil))
+	if err := s.SaveCast(ctx, a, []anilist.CastMember{cast("1", "1"), cast("2", "1")}); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.SaveCast(ctx, b, []provider.CastMember{cast("9", "9")}); err != nil {
+	if err := s.SaveCast(ctx, b, []anilist.CastMember{cast("9", "9")}); err != nil {
 		t.Fatal(err)
 	}
 	ppl, err := s.AnimePeople(ctx, a)
@@ -142,11 +142,11 @@ func TestAnimePeople(t *testing.T) {
 func TestPersonAnimeSourceAndRole(t *testing.T) {
 	s := newStore(t)
 	ctx := context.Background()
-	a := mustSave(t, s, sample(provider.AniList, "10", nil))
-	b := mustSave(t, s, sample(provider.AniList, "20", nil))
+	a := mustSave(t, s, sample(anilist.AniList, "10", nil))
+	b := mustSave(t, s, sample(anilist.AniList, "20", nil))
 	// actor v1 voices two characters in a; character c1 appears in a and b
-	s.SaveCast(ctx, a, []provider.CastMember{cast("1", "1"), cast("2", "1"), cast("2", "1")})
-	s.SaveCast(ctx, b, []provider.CastMember{cast("1", "3")})
+	s.SaveCast(ctx, a, []anilist.CastMember{cast("1", "1"), cast("2", "1"), cast("2", "1")})
+	s.SaveCast(ctx, b, []anilist.CastMember{cast("1", "3")})
 
 	apps, err := s.PersonAnime(ctx, personID(t, s, "anilist", "v1"))
 	if err != nil || len(apps) != 2 {
@@ -154,13 +154,13 @@ func TestPersonAnimeSourceAndRole(t *testing.T) {
 	}
 	for i, ch := range []string{"Char 1", "Char 2"} {
 		x := apps[i]
-		if x.AnimeID != a || x.Source != provider.AniList || x.SourceID != "10" || !x.AsActor || x.Character != ch {
+		if x.AnimeID != a || x.Source != anilist.AniList || x.SourceID != "10" || !x.AsActor || x.Character != ch {
 			t.Fatalf("row %d: %+v", i, x)
 		}
 	}
 	apps, _ = s.PersonAnime(ctx, personID(t, s, "anilist", "c1"))
 	if len(apps) != 2 || apps[0].AsActor || apps[1].AsActor || apps[0].Character != "Char 1" ||
-		apps[0].SourceID != "10" || apps[1].SourceID != "20" || apps[1].Source != provider.AniList {
+		apps[0].SourceID != "10" || apps[1].SourceID != "20" || apps[1].Source != anilist.AniList {
 		t.Fatalf("%+v", apps)
 	}
 }
@@ -168,10 +168,10 @@ func TestPersonAnimeSourceAndRole(t *testing.T) {
 func TestPersonAnimeActorAndCharacterBothKinds(t *testing.T) {
 	s := newStore(t)
 	ctx := context.Background()
-	a := mustSave(t, s, sample(provider.AniList, "10", nil))
-	self := provider.Person{Source: provider.AniList, ID: "dual", Name: "Dual"}
-	other := provider.Person{Source: provider.AniList, ID: "o", Name: "Other"}
-	s.SaveCast(ctx, a, []provider.CastMember{
+	a := mustSave(t, s, sample(anilist.AniList, "10", nil))
+	self := anilist.Person{Source: anilist.AniList, ID: "dual", Name: "Dual"}
+	other := anilist.Person{Source: anilist.AniList, ID: "o", Name: "Other"}
+	s.SaveCast(ctx, a, []anilist.CastMember{
 		{Character: self, Actor: &other},
 		{Character: other, Actor: &self},
 	})

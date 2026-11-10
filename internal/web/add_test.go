@@ -14,7 +14,7 @@ import (
 	"github.com/allister/allister/internal/library"
 	"github.com/allister/allister/internal/plugin"
 	"github.com/allister/allister/internal/plugin/plugintest"
-	"github.com/allister/allister/internal/provider"
+	"github.com/allister/allister/internal/plugins/anime/anilist"
 	"github.com/allister/allister/internal/store"
 )
 
@@ -52,7 +52,7 @@ func TestAddCreatesEntryAndJob(t *testing.T) {
 		t.Fatalf("got %d %v", rec.Code, rec.Header())
 	}
 	ctx := context.Background()
-	sv, _ := e.st.FindBySource(ctx, provider.AniList, "1535")
+	sv, _ := e.st.FindBySource(ctx, anilist.AniList, "1535")
 	if sv == nil {
 		t.Fatal("not saved")
 	}
@@ -85,7 +85,7 @@ func TestAddRatingBlankAndZero(t *testing.T) {
 		if rec := e.post(f, true); rec.Code != 204 {
 			t.Fatalf("got %d", rec.Code)
 		}
-		sv, _ := e.st.FindBySource(context.Background(), provider.AniList, "1535")
+		sv, _ := e.st.FindBySource(context.Background(), anilist.AniList, "1535")
 		en, _ := e.st.GetListEntry(context.Background(), sv.ID)
 		if (tc.want == nil) != (en.Rating == nil) || (tc.want != nil && *tc.want != *en.Rating) {
 			t.Fatalf("%q -> %v", tc.in, en.Rating)
@@ -109,7 +109,7 @@ func TestAddRejectsInvalidRating(t *testing.T) {
 
 func assertNothingSaved(t *testing.T, e *env) {
 	t.Helper()
-	if sv, _ := e.st.FindBySource(context.Background(), provider.AniList, "1535"); sv != nil {
+	if sv, _ := e.st.FindBySource(context.Background(), anilist.AniList, "1535"); sv != nil {
 		t.Fatal("anime saved")
 	}
 	if len(e.jobs.got) != 0 {
@@ -147,7 +147,7 @@ func TestAddBlankProgressAndDatesAndCommentCap(t *testing.T) {
 	if rec := e.post(f, true); rec.Code != 204 {
 		t.Fatalf("got %d", rec.Code)
 	}
-	sv, _ := e.st.FindBySource(context.Background(), provider.AniList, "1535")
+	sv, _ := e.st.FindBySource(context.Background(), anilist.AniList, "1535")
 	en, _ := e.st.GetListEntry(context.Background(), sv.ID)
 	if en.Progress != 0 || en.StartedOn != nil || len([]rune(en.Comment)) != 2000 {
 		t.Fatalf("%+v", en)
@@ -206,7 +206,7 @@ func TestAddWithProviderDownUsesAlreadyFetchedDetails(t *testing.T) {
 	if rec := e.get("/anime/anilist/1535"); rec.Code != 200 {
 		t.Fatal(rec.Code)
 	}
-	e.fp.animeErr = provider.ErrUnavailable
+	e.fp.animeErr = anilist.ErrUnavailable
 	before := e.fp.animeCalls
 	rec := e.post(okAddForm(), true)
 	if rec.Code != 204 {
@@ -215,7 +215,7 @@ func TestAddWithProviderDownUsesAlreadyFetchedDetails(t *testing.T) {
 	if e.fp.animeCalls != before {
 		t.Fatal("provider was called again")
 	}
-	if sv, _ := e.st.FindBySource(context.Background(), provider.AniList, "1535"); sv == nil {
+	if sv, _ := e.st.FindBySource(context.Background(), anilist.AniList, "1535"); sv == nil {
 		t.Fatal("not saved")
 	}
 }
@@ -224,7 +224,7 @@ func TestAddCacheExpiresAfterTTL(t *testing.T) {
 	e := newEnv(t)
 	e.get("/anime/anilist/1535")
 	*e.now = e.now.Add(11 * time.Minute)
-	e.fp.animeErr = provider.ErrUnavailable
+	e.fp.animeErr = anilist.ErrUnavailable
 	rec := e.post(okAddForm(), true)
 	if rec.Code != 503 {
 		t.Fatalf("got %d", rec.Code)
@@ -235,7 +235,7 @@ func TestAddCacheExpiresAfterTTL(t *testing.T) {
 	e.fp.animeErr = nil
 	e.get("/anime/anilist/1535")
 	*e.now = e.now.Add(9 * time.Minute)
-	e.fp.animeErr = provider.ErrUnavailable
+	e.fp.animeErr = anilist.ErrUnavailable
 	if rec := e.post(okAddForm(), true); rec.Code != 204 {
 		t.Fatalf("got %d", rec.Code)
 	}
@@ -247,7 +247,7 @@ func TestAddCacheMissFetchesOnceAndNotFoundIs404(t *testing.T) {
 		t.Fatalf("got %d calls %d", rec.Code, e.fp.animeCalls)
 	}
 	e = newEnv(t)
-	e.fp.animeErr = provider.ErrNotFound
+	e.fp.animeErr = anilist.ErrNotFound
 	if rec := e.post(okAddForm(), true); rec.Code != 404 {
 		t.Fatalf("got %d", rec.Code)
 	}

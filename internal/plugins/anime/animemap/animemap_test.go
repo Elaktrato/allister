@@ -5,16 +5,16 @@ import (
 	"testing"
 	"time"
 
-	"github.com/allister/allister/internal/provider"
+	"github.com/allister/allister/internal/plugins/anime/anilist"
 )
 
 func TestItemDataRelationsAndSource(t *testing.T) {
-	a := provider.Anime{SearchResult: provider.SearchResult{Source: provider.Manual, ID: "m1", Titles: []provider.Title{{Lang: "en", Text: "T"}}}}
-	a.Relations = []provider.Relation{
-		{Kind: "source", Source: provider.AniList, ID: "1"},
-		{Kind: "", Source: provider.AniList, ID: "2"},       // no kind: dropped
-		{Kind: "sequel", Source: provider.AniList, ID: " "}, // no id: dropped
-		{Kind: "sequel", ID: "3", Type: "TV"},               // no source: AniList
+	a := anilist.Anime{SearchResult: anilist.SearchResult{Source: anilist.Manual, ID: "m1", Titles: []anilist.Title{{Lang: "en", Text: "T"}}}}
+	a.Relations = []anilist.Relation{
+		{Kind: "source", Source: anilist.AniList, ID: "1"},
+		{Kind: "", Source: anilist.AniList, ID: "2"},       // no kind: dropped
+		{Kind: "sequel", Source: anilist.AniList, ID: " "}, // no id: dropped
+		{Kind: "sequel", ID: "3", Type: "TV"},              // no source: AniList
 	}
 	d := ItemData(a)
 	if d.Source != "manual" || d.ID != "m1" || d.Kind != "anime" {
@@ -28,7 +28,7 @@ func TestItemDataRelationsAndSource(t *testing.T) {
 
 func TestItemDataGuardsFields(t *testing.T) {
 	zero, big, old := 0, 20000, 1800
-	a := provider.Anime{SearchResult: provider.SearchResult{ID: "1", Type: "tv", Episodes: &zero, Year: &old}}
+	a := anilist.Anime{SearchResult: anilist.SearchResult{ID: "1", Type: "tv", Episodes: &zero, Year: &old}}
 	if f := ItemData(a).Fields; len(f) != 0 {
 		t.Fatalf("out of range values kept: %+v", f)
 	}
@@ -39,11 +39,11 @@ func TestItemDataGuardsFields(t *testing.T) {
 }
 
 func TestCreditsDropUnusablePeople(t *testing.T) {
-	ok := provider.Person{ID: "c1", Name: "C"}
-	cs := Credits([]provider.CastMember{
-		{Character: provider.Person{ID: "c0", Name: " \n "}, Role: "MAIN"},
-		{Character: ok, Actor: &provider.Person{ID: "", Name: "V"}, Role: "MAIN"},
-		{Character: provider.Person{ID: "c2", Name: "D", URL: "javascript:x", ImageURL: "data:x"}, Role: "SUPPORTING"},
+	ok := anilist.Person{ID: "c1", Name: "C"}
+	cs := Credits([]anilist.CastMember{
+		{Character: anilist.Person{ID: "c0", Name: " \n "}, Role: "MAIN"},
+		{Character: ok, Actor: &anilist.Person{ID: "", Name: "V"}, Role: "MAIN"},
+		{Character: anilist.Person{ID: "c2", Name: "D", URL: "javascript:x", ImageURL: "data:x"}, Role: "SUPPORTING"},
 	})
 	if len(cs) != 2 || cs[0].With != nil || cs[0].WithRole != "" || cs[0].Detail != "MAIN" || cs[0].Role != RoleCharacter {
 		t.Fatalf("credits %+v", cs)
@@ -55,8 +55,8 @@ func TestCreditsDropUnusablePeople(t *testing.T) {
 
 func TestUserItemDataRewritesNothing(t *testing.T) {
 	zero := 0
-	a := provider.Anime{SearchResult: provider.SearchResult{Source: provider.Manual, ID: "m", Type: "tv", Episodes: &zero,
-		Titles: []provider.Title{{Lang: "en", Text: "My  Show"}}, Synopsis: "a\r\n\r\nb", CoverURL: "upload.png"}}
+	a := anilist.Anime{SearchResult: anilist.SearchResult{Source: anilist.Manual, ID: "m", Type: "tv", Episodes: &zero,
+		Titles: []anilist.Title{{Lang: "en", Text: "My  Show"}}, Synopsis: "a\r\n\r\nb", CoverURL: "upload.png"}}
 	d := UserItemData(a)
 	if d.Titles[0].Text != "My  Show" || d.Fields["synopsis"].Text != "a\r\n\r\nb" || d.Fields["type"].Text != "tv" ||
 		d.Fields["episodes"].Num == nil || d.CoverURL != "upload.png" {
@@ -69,12 +69,12 @@ func TestUserItemDataRewritesNothing(t *testing.T) {
 }
 
 func TestItemDataRelationURLs(t *testing.T) {
-	a := provider.Anime{SearchResult: provider.SearchResult{Source: provider.AniList, ID: "1"}}
-	a.Relations = []provider.Relation{
-		{Kind: "source", Source: provider.AniList, ID: "30021"},
-		{Kind: "sequel", Source: provider.AniList, ID: "2000"},
+	a := anilist.Anime{SearchResult: anilist.SearchResult{Source: anilist.AniList, ID: "1"}}
+	a.Relations = []anilist.Relation{
+		{Kind: "source", Source: anilist.AniList, ID: "30021"},
+		{Kind: "sequel", Source: anilist.AniList, ID: "2000"},
 		{Kind: "other", Source: "elsewhere", ID: "9"},
-		{Kind: "sequel", Source: provider.AniList, ID: "1/../x?y"},
+		{Kind: "sequel", Source: anilist.AniList, ID: "1/../x?y"},
 	}
 	d := ItemData(a)
 	want := []string{"https://anilist.co/manga/30021", "https://anilist.co/anime/2000", "", "https://anilist.co/anime/1%2F..%2Fx%3Fy"}
@@ -91,20 +91,20 @@ func TestItemDataRelationURLs(t *testing.T) {
 func TestLegacyAnimeRoundTrip(t *testing.T) {
 	start := time.Date(2006, 10, 4, 0, 0, 0, 0, time.UTC)
 	eps, year, rank := 37, 2006, 80
-	a := provider.Anime{
-		SearchResult: provider.SearchResult{Source: provider.AniList, ID: "1535", Titles: []provider.Title{{Lang: "ja", Text: "デスノート"}},
+	a := anilist.Anime{
+		SearchResult: anilist.SearchResult{Source: anilist.AniList, ID: "1535", Titles: []anilist.Title{{Lang: "ja", Text: "デスノート"}},
 			Type: "TV", Episodes: &eps, Year: &year, Studio: "Madhouse", Synopsis: "a\nb", CoverURL: "https://img.example/c.jpg"},
 		StartDate: &start, SourceMaterial: "MANGA", ExternalURL: "https://anilist.co/anime/1535", MALID: "1535",
-		Relations: []provider.Relation{{Kind: "source", Source: provider.AniList, ID: "2", Titles: []provider.Title{{Lang: "en", Text: "M"}}, Type: "MANGA"}},
+		Relations: []anilist.Relation{{Kind: "source", Source: anilist.AniList, ID: "2", Titles: []anilist.Title{{Lang: "en", Text: "M"}}, Type: "MANGA"}},
 		Genres:    []string{"Thriller"},
-		Tags:      []provider.Tag{{Name: "Detective", Rank: &rank, Spoiler: true}},
+		Tags:      []anilist.Tag{{Name: "Detective", Rank: &rank, Spoiler: true}},
 	}
 	d := ItemData(a)
 	back := LegacyAnime(d)
 	if !reflect.DeepEqual(ItemData(back), d) {
 		t.Fatalf("round trip:\n%+v\n%+v", ItemData(back), d)
 	}
-	if back.Source != provider.AniList || back.ID != "1535" || *back.Episodes != 37 || back.MALID != "1535" || back.Relations[0].Type != "MANGA" {
+	if back.Source != anilist.AniList || back.ID != "1535" || *back.Episodes != 37 || back.MALID != "1535" || back.Relations[0].Type != "MANGA" {
 		t.Fatalf("legacy %+v", back)
 	}
 }

@@ -14,14 +14,14 @@ import (
 	"time"
 
 	"github.com/allister/allister/internal/jobs"
-	"github.com/allister/allister/internal/provider"
+	"github.com/allister/allister/internal/plugins/anime/anilist"
 )
 
 // searchProvider is the sample provider with a working search.
 type searchProvider struct{ *animeProvider }
 
-func (s searchProvider) Search(ctx context.Context, q string) ([]provider.SearchResult, error) {
-	return []provider.SearchResult{s.anime.SearchResult}, nil
+func (s searchProvider) Search(ctx context.Context, q string) ([]anilist.SearchResult, error) {
+	return []anilist.SearchResult{s.anime.SearchResult}, nil
 }
 
 // newE2EEnv is newEnv with a provider that also answers searches.
@@ -30,7 +30,7 @@ func newE2EEnv(t *testing.T) *env {
 	e := newEnv(t)
 	_, e.h = newServer(Deps{
 		Settings: e.set, Store: e.st, Jobs: e.jobs, SyncJobs: testSyncJobs(), CoversDir: e.covers,
-		Providers: map[provider.Source]provider.Provider{provider.AniList: searchProvider{e.fp}},
+		Providers: map[anilist.Source]anilist.Provider{anilist.AniList: searchProvider{e.fp}},
 	}, func() time.Time { return *e.now })
 	return e
 }
@@ -280,7 +280,7 @@ func TestMatchRefusesAlreadySavedAnime(t *testing.T) {
 	if len(e.jobs.got) != 0 {
 		t.Fatalf("jobs: %+v", e.jobs.got)
 	}
-	if sv, _ := e.st.GetByID(context.Background(), existing); sv == nil || sv.Source != provider.AniList {
+	if sv, _ := e.st.GetByID(context.Background(), existing); sv == nil || sv.Source != anilist.AniList {
 		t.Fatal("existing entry touched")
 	}
 	mustContain(t, e.get("/anime").Body.String(), "unmatched")

@@ -10,7 +10,7 @@ import (
 
 	"github.com/allister/allister/internal/plugin"
 	"github.com/allister/allister/internal/plugin/plugintest"
-	"github.com/allister/allister/internal/provider"
+	"github.com/allister/allister/internal/plugins/anime/anilist"
 )
 
 const recsURL = "/tv/tvdata/1/recommendations"
@@ -211,7 +211,7 @@ func TestRecommendationsFailureIsNon500(t *testing.T) {
 	}
 	// the legacy anime provider failing: still a fragment, never a 500
 	a := newEnv(t)
-	a.fp.animeErr = provider.ErrUnavailable
+	a.fp.animeErr = anilist.ErrUnavailable
 	if rec := a.htmxGet("/anime/anilist/1535/recommendations"); rec.Code != 200 || !strings.Contains(rec.Body.String(), "unavailable right now") {
 		t.Fatalf("anime: %d %s", rec.Code, rec.Body.String())
 	}

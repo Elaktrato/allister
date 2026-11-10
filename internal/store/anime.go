@@ -5,7 +5,7 @@ import (
 	"fmt"
 
 	"github.com/allister/allister/internal/library"
-	"github.com/allister/allister/internal/provider"
+	"github.com/allister/allister/internal/plugins/anime/anilist"
 )
 
 // SaveOption customises SaveAnime.
@@ -32,7 +32,7 @@ func libOpts(opts []SaveOption) []library.SaveOption {
 // (source, source_id) exists. The cover URL is stored in cover_path (see the
 // package comment). The library's transaction is IMMEDIATE (see db.Open), so
 // the existence check and the insert cannot race.
-func (s *Store) SaveAnime(ctx context.Context, a provider.Anime, opts ...SaveOption) (int64, error) {
+func (s *Store) SaveAnime(ctx context.Context, a anilist.Anime, opts ...SaveOption) (int64, error) {
 	d, err := itemData(a)
 	if err != nil {
 		return 0, err
@@ -45,7 +45,7 @@ func (s *Store) SaveAnime(ctx context.Context, a provider.Anime, opts ...SaveOpt
 }
 
 // FindBySource returns the saved anime with titles and relations, or nil, nil.
-func (s *Store) FindBySource(ctx context.Context, source provider.Source, id string) (*Saved, error) {
+func (s *Store) FindBySource(ctx context.Context, source anilist.Source, id string) (*Saved, error) {
 	it, err := s.lib.ItemBySource(ctx, animePlugin, animeKind, string(source), id)
 	if err != nil {
 		return nil, wrapf("find anime", err)

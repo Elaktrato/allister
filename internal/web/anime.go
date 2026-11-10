@@ -9,12 +9,12 @@ import (
 
 	"github.com/allister/allister/internal/library"
 	"github.com/allister/allister/internal/plugin"
-	"github.com/allister/allister/internal/provider"
+	"github.com/allister/allister/internal/plugins/anime/anilist"
 )
 
 var (
 	errNoSuchAnime = errors.New("anime not found")
-	errNoProvider  = fmt.Errorf("%w: no provider configured", provider.ErrUnavailable)
+	errNoProvider  = fmt.Errorf("%w: no provider configured", anilist.ErrUnavailable)
 )
 
 type errorView struct {
@@ -47,7 +47,7 @@ func (s *server) errorPage(w http.ResponseWriter, r *http.Request, status int, t
 }
 
 func providerMessage(err error) string {
-	if errors.Is(err, provider.ErrRateLimited) {
+	if errors.Is(err, anilist.ErrRateLimited) {
 		return "AniList is rate limiting requests, please wait a moment and try again."
 	}
 	return "AniList is unavailable right now, please try again."
@@ -56,9 +56,9 @@ func providerMessage(err error) string {
 // fail writes the error page for a load error.
 func (s *server) fail(w http.ResponseWriter, r *http.Request, err error, retry string) {
 	switch {
-	case errors.Is(err, errNoSuchAnime), errors.Is(err, provider.ErrNotFound):
+	case errors.Is(err, errNoSuchAnime), errors.Is(err, anilist.ErrNotFound):
 		s.errorPage(w, r, http.StatusNotFound, "Not found", "There is no such anime.", "")
-	case errors.Is(err, provider.ErrRateLimited), errors.Is(err, provider.ErrUnavailable):
+	case errors.Is(err, anilist.ErrRateLimited), errors.Is(err, anilist.ErrUnavailable):
 		log.Printf("%s %s: %v", r.Method, r.URL.Path, err)
 		s.errorPage(w, r, http.StatusServiceUnavailable, "Temporarily unavailable", providerMessage(err), retry)
 	default:

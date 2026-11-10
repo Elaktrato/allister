@@ -15,29 +15,29 @@ import (
 	"github.com/allister/allister/internal/db"
 	"github.com/allister/allister/internal/plugin"
 	"github.com/allister/allister/internal/plugin/plugintest"
-	"github.com/allister/allister/internal/provider"
+	"github.com/allister/allister/internal/plugins/anime/anilist"
 	"github.com/allister/allister/internal/settings"
 )
 
 type fakeProvider struct {
 	mu      sync.Mutex
 	queries []string
-	results []provider.SearchResult
+	results []anilist.SearchResult
 	err     error
 }
 
-func (f *fakeProvider) Name() provider.Source { return provider.AniList }
-func (f *fakeProvider) Search(ctx context.Context, q string) ([]provider.SearchResult, error) {
+func (f *fakeProvider) Name() anilist.Source { return anilist.AniList }
+func (f *fakeProvider) Search(ctx context.Context, q string) ([]anilist.SearchResult, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.queries = append(f.queries, q)
 	return f.results, f.err
 }
-func (f *fakeProvider) Anime(ctx context.Context, id string) (provider.Anime, error) {
-	return provider.Anime{}, provider.ErrNotFound
+func (f *fakeProvider) Anime(ctx context.Context, id string) (anilist.Anime, error) {
+	return anilist.Anime{}, anilist.ErrNotFound
 }
-func (f *fakeProvider) Cast(ctx context.Context, id string) ([]provider.CastMember, error) {
-	return nil, provider.ErrNotFound
+func (f *fakeProvider) Cast(ctx context.Context, id string) ([]anilist.CastMember, error) {
+	return nil, anilist.ErrNotFound
 }
 
 func searchServer(t *testing.T, fp *fakeProvider) (http.Handler, *settings.Store) {
@@ -48,7 +48,7 @@ func searchServer(t *testing.T, fp *fakeProvider) (http.Handler, *settings.Store
 	}
 	t.Cleanup(func() { d.Close() })
 	st := settings.New(d)
-	return NewServer(Deps{Settings: st, Providers: map[provider.Source]provider.Provider{provider.AniList: fp}}), st
+	return NewServer(Deps{Settings: st, Providers: map[anilist.Source]anilist.Provider{anilist.AniList: fp}}), st
 }
 
 func doSearch(h http.Handler, q string, htmx bool) *httptest.ResponseRecorder {
@@ -63,17 +63,17 @@ func doSearch(h http.Handler, q string, htmx bool) *httptest.ResponseRecorder {
 
 func ip(i int) *int { return &i }
 
-func sampleResult() provider.SearchResult {
-	return provider.SearchResult{
-		Source: provider.AniList, ID: "1535",
-		Titles: []provider.Title{{Lang: "ja", Text: "デスノート"}, {Lang: "ja-latn", Text: "Death Note"}, {Lang: "en", Text: "Death Note EN"}},
+func sampleResult() anilist.SearchResult {
+	return anilist.SearchResult{
+		Source: anilist.AniList, ID: "1535",
+		Titles: []anilist.Title{{Lang: "ja", Text: "デスノート"}, {Lang: "ja-latn", Text: "Death Note"}, {Lang: "en", Text: "Death Note EN"}},
 		Type:   "TV", Episodes: ip(37), Year: ip(2006), Studio: "Madhouse",
 		Synopsis: "A notebook.", CoverURL: "https://img.example/c.jpg",
 	}
 }
 
 func TestSearchUsesPluginSource(t *testing.T) {
-	fp := &fakeProvider{results: []provider.SearchResult{sampleResult()}}
+	fp := &fakeProvider{results: []anilist.SearchResult{sampleResult()}}
 	h, _ := searchServer(t, fp)
 	rec := doSearch(h, "death note", false)
 	if rec.Code != 200 {
@@ -109,7 +109,7 @@ func TestSearchEmptyQueryMakesNoRequest(t *testing.T) {
 }
 
 func TestSearchShowsPreferredTitle(t *testing.T) {
-	fp := &fakeProvider{results: []provider.SearchResult{sampleResult()}}
+	fp := &fakeProvider{results: []anilist.SearchResult{sampleResult()}}
 	h, st := searchServer(t, fp)
 	if err := st.Set(context.Background(), settings.KeyTitleLang, "en"); err != nil {
 		t.Fatal(err)
@@ -124,7 +124,7 @@ func TestSearchShowsPreferredTitle(t *testing.T) {
 }
 
 func TestSearchProviderRateLimitedShowsMessage(t *testing.T) {
-	fp := &fakeProvider{err: provider.ErrRateLimited}
+	fp := &fakeProvider{err: anilist.ErrRateLimited}
 	h, _ := searchServer(t, fp)
 	rec := doSearch(h, "x", false)
 	if rec.Code != 200 {
@@ -137,7 +137,7 @@ func TestSearchProviderRateLimitedShowsMessage(t *testing.T) {
 }
 
 func TestSearchUnavailableShowsMessage(t *testing.T) {
-	for _, e := range []error{provider.ErrUnavailable, errors.New("boom")} {
+	for _, e := range []error{anilist.ErrUnavailable, errors.New("boom")} {
 		fp := &fakeProvider{err: e}
 		h, _ := searchServer(t, fp)
 		rec := doSearch(h, "x", false)
@@ -151,7 +151,7 @@ func TestSearchUnavailableShowsMessage(t *testing.T) {
 }
 
 func TestSearchNotFoundIsZeroResults(t *testing.T) {
-	fp := &fakeProvider{err: provider.ErrNotFound}
+	fp := &fakeProvider{err: anilist.ErrNotFound}
 	h, _ := searchServer(t, fp)
 	body := doSearch(h, "zzz", false).Body.String()
 	if !strings.Contains(body, "No results for") || !strings.Contains(body, "/anime/manual/new") {
@@ -160,7 +160,7 @@ func TestSearchNotFoundIsZeroResults(t *testing.T) {
 }
 
 func TestSearchPartialOnHTMX(t *testing.T) {
-	fp := &fakeProvider{results: []provider.SearchResult{sampleResult()}}
+	fp := &fakeProvider{results: []anilist.SearchResult{sampleResult()}}
 	h, _ := searchServer(t, fp)
 	part := doSearch(h, "x", true).Body.String()
 	full := doSearch(h, "x", false).Body.String()
@@ -188,7 +188,7 @@ func TestSearchHostileQueryEscaped(t *testing.T) {
 			t.Fatalf("htmx=%v unescaped query", htmx)
 		}
 	}
-	fp.err = provider.ErrRateLimited
+	fp.err = anilist.ErrRateLimited
 	if strings.Contains(doSearch(h, q, false).Body.String(), "<script>alert(1)") {
 		t.Fatal("unescaped in retry")
 	}
@@ -206,7 +206,7 @@ func TestSearchQueryCappedAt200Runes(t *testing.T) {
 func TestSearchSynopsisTruncatedAtRune(t *testing.T) {
 	r := sampleResult()
 	r.Synopsis = strings.Repeat("あ", 500)
-	fp := &fakeProvider{results: []provider.SearchResult{r}}
+	fp := &fakeProvider{results: []anilist.SearchResult{r}}
 	h, _ := searchServer(t, fp)
 	body := doSearch(h, "x", true).Body.String()
 	if !strings.Contains(body, strings.Repeat("あ", 200)+"…") || strings.Contains(body, strings.Repeat("あ", 201)) {
@@ -220,7 +220,7 @@ func TestSearchSynopsisTruncatedAtRune(t *testing.T) {
 func TestSearchOmitsNilFields(t *testing.T) {
 	// present: the episode count carries the field's unit
 	full := doSearch(func() http.Handler {
-		h, _ := searchServer(t, &fakeProvider{results: []provider.SearchResult{sampleResult()}})
+		h, _ := searchServer(t, &fakeProvider{results: []anilist.SearchResult{sampleResult()}})
 		return h
 	}(), "x", true).Body.String()
 	if !strings.Contains(full, "37 eps") {
@@ -228,7 +228,7 @@ func TestSearchOmitsNilFields(t *testing.T) {
 	}
 	r := sampleResult()
 	r.Episodes, r.Year, r.Studio, r.CoverURL = nil, nil, "", ""
-	fp := &fakeProvider{results: []provider.SearchResult{r}}
+	fp := &fakeProvider{results: []anilist.SearchResult{r}}
 	h, _ := searchServer(t, fp)
 	body := doSearch(h, "x", true).Body.String()
 	for _, bad := range []string{"eps", "Madhouse", "<img", "<nil>", "2006"} {
@@ -264,7 +264,7 @@ func TestIsPartialRequest(t *testing.T) {
 }
 
 func TestSearchHistoryRestoreGetsFullPage(t *testing.T) {
-	fp := &fakeProvider{results: []provider.SearchResult{sampleResult()}}
+	fp := &fakeProvider{results: []anilist.SearchResult{sampleResult()}}
 	h, _ := searchServer(t, fp)
 	req := httptest.NewRequest(http.MethodGet, "/anime/search?q=x", nil)
 	req.Header.Set("HX-Request", "true")

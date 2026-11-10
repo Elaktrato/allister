@@ -19,14 +19,14 @@ import (
 	"time"
 
 	"github.com/allister/allister/internal/db"
-	"github.com/allister/allister/internal/importer/yamtrack"
 	"github.com/allister/allister/internal/jobs"
 	"github.com/allister/allister/internal/library"
 	"github.com/allister/allister/internal/plugin"
 	"github.com/allister/allister/internal/plugin/plugintest"
 	"github.com/allister/allister/internal/plugins/anime"
+	"github.com/allister/allister/internal/plugins/anime/anilist"
 	"github.com/allister/allister/internal/plugins/anime/animemap"
-	"github.com/allister/allister/internal/provider"
+	"github.com/allister/allister/internal/plugins/anime/yamtrack"
 )
 
 // ---- fakes ----
@@ -75,10 +75,10 @@ func (q *fakeQueue) ofKind(kind string) []enq {
 type fakeResolver struct {
 	mu    sync.Mutex
 	calls []string
-	fn    func(malID string, n int) (provider.Anime, error)
+	fn    func(malID string, n int) (anilist.Anime, error)
 }
 
-func (f *fakeResolver) AnimeByMALID(_ context.Context, malID string) (provider.Anime, error) {
+func (f *fakeResolver) AnimeByMALID(_ context.Context, malID string) (anilist.Anime, error) {
 	f.mu.Lock()
 	f.calls = append(f.calls, malID)
 	n := 0
@@ -92,15 +92,15 @@ func (f *fakeResolver) AnimeByMALID(_ context.Context, malID string) (provider.A
 	return fn(malID, n)
 }
 
-func (f *fakeResolver) Name() provider.Source { return provider.AniList }
-func (f *fakeResolver) Search(context.Context, string) ([]provider.SearchResult, error) {
-	return nil, provider.ErrUnavailable
+func (f *fakeResolver) Name() anilist.Source { return anilist.AniList }
+func (f *fakeResolver) Search(context.Context, string) ([]anilist.SearchResult, error) {
+	return nil, anilist.ErrUnavailable
 }
-func (f *fakeResolver) Anime(context.Context, string) (provider.Anime, error) {
-	return provider.Anime{}, provider.ErrUnavailable
+func (f *fakeResolver) Anime(context.Context, string) (anilist.Anime, error) {
+	return anilist.Anime{}, anilist.ErrUnavailable
 }
-func (f *fakeResolver) Cast(context.Context, string) ([]provider.CastMember, error) {
-	return nil, provider.ErrUnavailable
+func (f *fakeResolver) Cast(context.Context, string) ([]anilist.CastMember, error) {
+	return nil, anilist.ErrUnavailable
 }
 
 func (f *fakeResolver) called() []string {
@@ -116,13 +116,13 @@ func (f *fakeResolver) reset() {
 }
 
 // ani is the AniList anime for MAL id mal; AniList id is mal+100000.
-func ani(mal string, episodes int) provider.Anime {
+func ani(mal string, episodes int) anilist.Anime {
 	n, _ := strconv.Atoi(mal)
 	eps := episodes
-	a := provider.Anime{
-		SearchResult: provider.SearchResult{
-			Source: provider.AniList, ID: strconv.Itoa(n + 100000), CoverURL: "https://cdn.example/" + mal + ".jpg",
-			Titles: []provider.Title{{Lang: "en", Text: "Anime " + mal}},
+	a := anilist.Anime{
+		SearchResult: anilist.SearchResult{
+			Source: anilist.AniList, ID: strconv.Itoa(n + 100000), CoverURL: "https://cdn.example/" + mal + ".jpg",
+			Titles: []anilist.Title{{Lang: "en", Text: "Anime " + mal}},
 		},
 		MALID: mal,
 	}
@@ -132,7 +132,7 @@ func ani(mal string, episodes int) provider.Anime {
 	return a
 }
 
-func found(malID string, _ int) (provider.Anime, error) { return ani(malID, 12), nil }
+func found(malID string, _ int) (anilist.Anime, error) { return ani(malID, 12), nil }
 
 // clock is a fake clock whose sleep advances time.
 type clock struct {
@@ -302,7 +302,7 @@ func (e *env) outcomes(id int64) map[string]string {
 }
 
 // addAnime saves the anime with a list entry (the legacy store.AddToList).
-func (e *env) addAnime(a provider.Anime, en library.Entry, opts ...library.SaveOption) int64 {
+func (e *env) addAnime(a anilist.Anime, en library.Entry, opts ...library.SaveOption) int64 {
 	e.t.Helper()
 	id, err := e.lib.AddToList(context.Background(), animeID, animeID, animemap.ItemData(a), en, opts...)
 	if err != nil {
@@ -353,9 +353,9 @@ func TestImportSavesEntriesAndEnqueuesSync(t *testing.T) {
 func TestImportTwiceCreatesNoDuplicates(t *testing.T) {
 	e := newEnv(t)
 	content := csvOf("1|One|Completed|8.0|12", "2|Two|Planning||0")
-	e.res.fn = func(mal string, n int) (provider.Anime, error) {
+	e.res.fn = func(mal string, n int) (anilist.Anime, error) {
 		if mal == "2" {
-			return provider.Anime{}, provider.ErrNotFound
+			return anilist.Anime{}, anilist.ErrNotFound
 		}
 		return found(mal, n)
 	}
@@ -383,11 +383,11 @@ func TestImportResumesAfterInterruption(t *testing.T) {
 	id := e.submit(csvOf("1|One|Completed|8.0|1", "2|Two|Planning||0", "3|Three|Planning||0"))
 	ctx, cancel := context.WithCancel(context.Background())
 	interrupted := false
-	e.res.fn = func(mal string, n int) (provider.Anime, error) {
+	e.res.fn = func(mal string, n int) (anilist.Anime, error) {
 		if mal == "2" && !interrupted {
 			interrupted = true
 			cancel()
-			return provider.Anime{}, fmt.Errorf("anilist: request: %w", ctx.Err())
+			return anilist.Anime{}, fmt.Errorf("anilist: request: %w", ctx.Err())
 		}
 		return found(mal, n)
 	}
@@ -434,7 +434,7 @@ func TestImportSkipsAlreadySavedByExternalID(t *testing.T) {
 
 func TestImportSkipsSameAniListIDUnderAnotherMALID(t *testing.T) {
 	e := newEnv(t)
-	e.res.fn = func(mal string, _ int) (provider.Anime, error) {
+	e.res.fn = func(mal string, _ int) (anilist.Anime, error) {
 		a := ani("1", 12) // every MAL id resolves to the same AniList anime
 		return a, nil
 	}
@@ -453,7 +453,7 @@ func TestImportSkipsSameAniListIDUnderAnotherMALID(t *testing.T) {
 
 func TestImportSavesUnmatchedAsManualEntry(t *testing.T) {
 	e := newEnv(t)
-	e.res.fn = func(string, int) (provider.Anime, error) { return provider.Anime{}, provider.ErrNotFound }
+	e.res.fn = func(string, int) (anilist.Anime, error) { return anilist.Anime{}, anilist.ErrNotFound }
 	id := e.submit(csvOf("55|Lost Show|Dropped|6.0|3"))
 	if err := e.run(id); err != nil {
 		t.Fatal(err)
@@ -482,7 +482,7 @@ func TestImportSavesUnmatchedAsManualEntry(t *testing.T) {
 
 func TestImportUnmatchedWithoutHTTPImageHasNoCover(t *testing.T) {
 	e := newEnv(t)
-	e.res.fn = func(string, int) (provider.Anime, error) { return provider.Anime{}, provider.ErrNotFound }
+	e.res.fn = func(string, int) (anilist.Anime, error) { return anilist.Anime{}, anilist.ErrNotFound }
 	content := csvHeader + `55,mal,anime,Lost,javascript:alert(1),,Planning,,,,0` + "\n"
 	e.run(e.submit(content))
 	if s, _ := e.entryByMAL("55"); s.CoverPath != "" {
@@ -492,9 +492,9 @@ func TestImportUnmatchedWithoutHTTPImageHasNoCover(t *testing.T) {
 
 func TestImportUnmatchedStillCountedAndListed(t *testing.T) {
 	e := newEnv(t)
-	e.res.fn = func(mal string, n int) (provider.Anime, error) {
+	e.res.fn = func(mal string, n int) (anilist.Anime, error) {
 		if mal == "55" {
-			return provider.Anime{}, provider.ErrNotFound
+			return anilist.Anime{}, anilist.ErrNotFound
 		}
 		return found(mal, n)
 	}
@@ -517,7 +517,7 @@ func TestImportUnmatchedStillCountedAndListed(t *testing.T) {
 
 func TestImportAdjustsRowsInsteadOfLosingThem(t *testing.T) {
 	e := newEnv(t)
-	e.res.fn = func(mal string, _ int) (provider.Anime, error) { return ani(mal, 12), nil }
+	e.res.fn = func(mal string, _ int) (anilist.Anime, error) { return ani(mal, 12), nil }
 	content := csvHeader +
 		`1,mal,anime,Over,,,Completed,,2024-01-01 10:00:00+00:00,2024-02-01 10:00:00+00:00,20` + "\n" +
 		`2,mal,anime,Backwards,,,Completed,,2024-03-01 10:00:00+00:00,2024-02-01 10:00:00+00:00,12` + "\n" +
@@ -592,9 +592,9 @@ func TestImportPacesBySourceLimit(t *testing.T) {
 
 func TestImportRetriesRateLimitThenSucceeds(t *testing.T) {
 	e := newEnv(t)
-	e.res.fn = func(mal string, n int) (provider.Anime, error) {
+	e.res.fn = func(mal string, n int) (anilist.Anime, error) {
 		if n <= 2 {
-			return provider.Anime{}, fmt.Errorf("anilist: http 429: %w", provider.ErrRateLimited)
+			return anilist.Anime{}, fmt.Errorf("anilist: http 429: %w", anilist.ErrRateLimited)
 		}
 		return found(mal, n)
 	}
@@ -617,17 +617,17 @@ func TestImportRateLimitExhaustedRetriesJobLater(t *testing.T) {
 	e := newEnv(t)
 	var mu sync.Mutex
 	limited := true
-	e.res.fn = func(mal string, n int) (provider.Anime, error) {
+	e.res.fn = func(mal string, n int) (anilist.Anime, error) {
 		mu.Lock()
 		defer mu.Unlock()
 		if mal == "2" && limited {
-			return provider.Anime{}, fmt.Errorf("anilist: request failed: %w", provider.ErrUnavailable)
+			return anilist.Anime{}, fmt.Errorf("anilist: request failed: %w", anilist.ErrUnavailable)
 		}
 		return found(mal, n)
 	}
 	id := e.submit(csvOf("1|One|Planning||0", "2|Two|Planning||0", "3|Three|Planning||0"))
 	err := e.run(id)
-	if !errors.Is(err, jobs.ErrRetryLater) || !errors.Is(err, provider.ErrUnavailable) {
+	if !errors.Is(err, jobs.ErrRetryLater) || !errors.Is(err, anilist.ErrUnavailable) {
 		t.Fatalf("err = %v, want ErrRetryLater wrapping ErrUnavailable", err)
 	}
 	row2 := 0
@@ -662,7 +662,7 @@ func TestImportRateLimitExhaustedRetriesJobLater(t *testing.T) {
 func TestImportCancelStopsAtNextRow(t *testing.T) {
 	e := newEnv(t)
 	id := e.submit(csvOf("1|One|Planning||0", "2|Two|Planning||0", "3|Three|Planning||0"))
-	e.res.fn = func(mal string, n int) (provider.Anime, error) {
+	e.res.fn = func(mal string, n int) (anilist.Anime, error) {
 		if mal == "1" {
 			if err := e.im.Cancel(context.Background()); err != nil {
 				t.Error(err)
@@ -690,7 +690,7 @@ func TestImportContextCancelStopsPromptlyAndKeepsRows(t *testing.T) {
 	e := newEnv(t)
 	id := e.submit(csvOf("1|One|Planning||0", "2|Two|Planning||0", "3|Three|Planning||0"))
 	ctx, cancel := context.WithCancel(context.Background())
-	e.res.fn = func(mal string, n int) (provider.Anime, error) {
+	e.res.fn = func(mal string, n int) (anilist.Anime, error) {
 		a, err := found(mal, n)
 		if mal == "2" {
 			cancel() // shutdown arrives while row 2 is being saved
@@ -877,11 +877,11 @@ func TestResumeEnqueuesNewJobAndProcessesOnlyPendingRows(t *testing.T) {
 	e := newEnv(t)
 	var mu sync.Mutex
 	limited := true
-	e.res.fn = func(mal string, n int) (provider.Anime, error) {
+	e.res.fn = func(mal string, n int) (anilist.Anime, error) {
 		mu.Lock()
 		defer mu.Unlock()
 		if mal == "2" && limited {
-			return provider.Anime{}, fmt.Errorf("x: %w", provider.ErrUnavailable)
+			return anilist.Anime{}, fmt.Errorf("x: %w", anilist.ErrUnavailable)
 		}
 		return found(mal, n)
 	}
@@ -954,9 +954,9 @@ func TestResumeCancelledImportAndRefusals(t *testing.T) {
 
 func TestRetryNoteIsSetWhileWaitingAndClearedAfter(t *testing.T) {
 	e := newEnv(t)
-	e.res.fn = func(mal string, n int) (provider.Anime, error) {
+	e.res.fn = func(mal string, n int) (anilist.Anime, error) {
 		if n <= 2 {
-			return provider.Anime{}, fmt.Errorf("x: %w", provider.ErrRateLimited)
+			return anilist.Anime{}, fmt.Errorf("x: %w", anilist.ErrRateLimited)
 		}
 		return found(mal, n)
 	}
@@ -980,8 +980,8 @@ func TestRetryNoteIsSetWhileWaitingAndClearedAfter(t *testing.T) {
 
 func TestCancelDuringRetryLoopStopsBeforeNextAttempt(t *testing.T) {
 	e := newEnv(t)
-	e.res.fn = func(string, int) (provider.Anime, error) {
-		return provider.Anime{}, fmt.Errorf("x: %w", provider.ErrRateLimited)
+	e.res.fn = func(string, int) (anilist.Anime, error) {
+		return anilist.Anime{}, fmt.Errorf("x: %w", anilist.ErrRateLimited)
 	}
 	e.clk.onSleep = func() { e.im.Cancel(context.Background()) }
 	id := e.submit(csvOf("1|One|Planning||0", "2|Two|Planning||0"))
@@ -996,7 +996,7 @@ func TestCancelDuringRetryLoopStopsBeforeNextAttempt(t *testing.T) {
 	}
 }
 
-func savedNoEntry(t *testing.T, e *env, a provider.Anime, state string) int64 {
+func savedNoEntry(t *testing.T, e *env, a anilist.Anime, state string) int64 {
 	t.Helper()
 	id, err := e.lib.SaveItem(context.Background(), animeID, animeID, animemap.ItemData(a), library.WithSyncState(state))
 	if err != nil {
@@ -1075,9 +1075,9 @@ func TestImperfectFieldsKeepEntryAndAppendNotes(t *testing.T) {
 	content := csvHeader +
 		`1,mal,anime,One,,abc,Completed,,junk,,zzz` + "\n" +
 		`2,mal,anime,"",,,Planning,,,,0` + "\n"
-	e.res.fn = func(mal string, n int) (provider.Anime, error) {
+	e.res.fn = func(mal string, n int) (anilist.Anime, error) {
 		if mal == "2" {
-			return provider.Anime{}, provider.ErrNotFound
+			return anilist.Anime{}, anilist.ErrNotFound
 		}
 		return found(mal, n)
 	}
