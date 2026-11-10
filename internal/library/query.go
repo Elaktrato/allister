@@ -45,10 +45,10 @@ type SortKind string
 const (
 	// SortUpdated sorts by the entry's last update.
 	SortUpdated SortKind = "updated"
-	// SortTitle sorts by the lower-cased title: the title in the caller's
-	// language when the item has one, else its first stored title. (The
-	// resolved display title, with the kind's declared fallbacks, is not
-	// available in SQL.) Lower-casing is ASCII-only.
+	// SortTitle sorts by the lower-cased title the row displays: the title
+	// in the caller's language when the item has one, else the kind's
+	// TitleFallback languages in order, else its first stored title.
+	// Lower-casing is ASCII-only.
 	SortTitle SortKind = "title"
 	// SortRating sorts by rating, unrated entries last.
 	SortRating SortKind = "rating"
@@ -687,9 +687,21 @@ func (c *compiled) orderBy(s Sort, lang string) (string, []any, error) {
 	case SortUpdated:
 		expr = `e.updated_at`
 	case SortTitle:
-		expr = `lower(COALESCE((SELECT t.text FROM item_titles t WHERE t.item_id = items.id AND t.lang = ? ORDER BY t.rowid LIMIT 1),
-			(SELECT t.text FROM item_titles t WHERE t.item_id = items.id ORDER BY t.rowid LIMIT 1), ''))`
-		args = []any{lang}
+		// The same chain ResolveTitle picks for the rows: the chosen
+		// language, the kind's TitleFallback in order, then the first
+		// stored title — so the rows sort by the titles they display.
+		langs := c.def.TitleFallback
+		if lang != "" {
+			langs = append([]string{lang}, langs...)
+		}
+		picks := make([]string, 0, len(langs)+2)
+		for _, l := range langs {
+			picks = append(picks, `(SELECT t.text FROM item_titles t WHERE t.item_id = items.id AND t.lang = ? ORDER BY t.rowid LIMIT 1)`)
+			args = append(args, l)
+		}
+		picks = append(picks,
+			`(SELECT t.text FROM item_titles t WHERE t.item_id = items.id ORDER BY t.rowid LIMIT 1)`, `''`)
+		expr = `lower(COALESCE(` + strings.Join(picks, ", ") + `))`
 	case SortRating:
 		expr, nullsLast = `e.rating`, true
 	case SortProgress:
