@@ -582,8 +582,9 @@ func TestMatchWithSeveralSources(t *testing.T) {
 	}
 }
 
-// A pick is any valid path id (the source's Details verifies it); only a
-// pasted reference follows the URL patterns' digit rule.
+// A pick and a pasted reference are both any valid source id (a bare id of
+// letters, digits, '_' and '-', or a URL matching the source's patterns);
+// the source's Details verifies it either way.
 func TestMatchPickAcceptsNonDigitIDs(t *testing.T) {
 	e := newFixtureEnv(t)
 	id := tvManual(t, e.env)
@@ -596,12 +597,17 @@ func TestMatchPickAcceptsNonDigitIDs(t *testing.T) {
 		t.Fatalf("%+v", it)
 	}
 	e2 := newFixtureEnv(t)
-	tvManual(t, e2.env)
-	if rec := e2.do("POST", "/tv/manual/m1/match", url.Values{"source_ref": {"tt-77"}}, true); rec.Code != 422 {
-		t.Fatalf("reference: %d", rec.Code)
+	id2 := tvManual(t, e2.env)
+	e2.tv.Data = tvShow("x", "Found")
+	if rec := e2.do("POST", "/tv/manual/m1/match", url.Values{"source_ref": {"tt-77"}}, true); rec.Code != 204 ||
+		rec.Header().Get("HX-Redirect") != "/tv/tvdata/tt-77" {
+		t.Fatalf("reference: %d %q %s", rec.Code, rec.Header().Get("HX-Redirect"), rec.Body.String())
 	}
-	if e2.tv.Calls(plugintest.OpDetails) != 0 {
-		t.Fatal("source called for an invalid reference")
+	if e2.tv.Calls(plugintest.OpDetails) != 1 {
+		t.Fatalf("source calls for the reference = %d", e2.tv.Calls(plugintest.OpDetails))
+	}
+	if it, _ := e2.snapshot(t, id2); it.SourceID != "tt-77" {
+		t.Fatalf("%+v", it)
 	}
 }
 

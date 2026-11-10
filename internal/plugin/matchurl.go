@@ -10,22 +10,48 @@ import (
 // (SourceInfo.URLPatterns, for example "example.org/item/{id}") and the core
 // matches what a person pastes against them, so no plugin code parses URLs.
 
-// maxIDDigits is the longest id {id} matches.
-const maxIDDigits = 12
+// maxIDDigits is the longest an all-digit id matches; maxIDBytes bounds an
+// id of any kind.
+const (
+	maxIDDigits = 12
+	maxIDBytes  = 64
+)
 
-// normalizeID accepts 1 to maxIDDigits ASCII digits, strips leading zeros
-// and rejects a value that is zero.
+// normalizeID accepts a source id: 1 to maxIDDigits ASCII digits (leading
+// zeros stripped, a value of zero rejected) or, for sources whose ids are
+// not numbers, 1 to maxIDBytes bytes of ASCII letters, digits, '_' and '-'
+// that starts and ends with an ASCII alphanumeric.
 func normalizeID(s string) (string, bool) {
-	if s == "" || len(s) > maxIDDigits {
+	if s == "" || len(s) > maxIDBytes {
 		return "", false
 	}
+	digits := true
 	for i := 0; i < len(s); i++ {
-		if s[i] < '0' || s[i] > '9' {
+		c := s[i]
+		switch {
+		case c >= '0' && c <= '9':
+		case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c == '_', c == '-':
+			digits = false
+		default:
 			return "", false
 		}
 	}
-	s = strings.TrimLeft(s, "0")
-	return s, s != ""
+	if digits {
+		if len(s) > maxIDDigits {
+			return "", false
+		}
+		s = strings.TrimLeft(s, "0")
+		return s, s != ""
+	}
+	if alnum(s[0]) && alnum(s[len(s)-1]) {
+		return s, true
+	}
+	return "", false
+}
+
+// alnum reports whether c is an ASCII alphanumeric.
+func alnum(c byte) bool {
+	return c >= '0' && c <= '9' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z'
 }
 
 // MatchURL reduces a pasted URL to the id of the first pattern it matches.
@@ -38,9 +64,10 @@ func normalizeID(s string) (string, bool) {
 //   - the host equals the pattern's host case-insensitively, with or without
 //     one "www." (no port, no userinfo, nothing else);
 //   - the path starts with the pattern's segments (literals compared exactly,
-//     {id} being 1 to 12 ASCII digits, not zero; leading zeros are removed
-//     from the returned id), optionally followed by one slug segment and/or
-//     a trailing slash, then an optional query and fragment.
+//     {id} being a source id as normalizeID accepts it: 1 to 12 digits with
+//     leading zeros removed, or 1 to 64 bytes of letters, digits, '_' and
+//     '-'), optionally followed by one slug segment and/or a trailing
+//     slash, then an optional query and fragment.
 //
 // Anything else, including control characters, spaces and backslashes
 // anywhere, yields "", false. Patterns that are malformed are skipped.
@@ -162,10 +189,10 @@ func matchPattern(pattern, host string, segs []string) (string, bool) {
 }
 
 // MatchRef reduces what a person types as a source reference to a source
-// id: a bare number (1 to 12 ASCII digits, not zero; leading zeros removed;
-// surrounding whitespace trimmed) or a URL matching one of the patterns
-// (MatchURL). With no patterns only a bare number is accepted, which is the
-// rule for a picked search result.
+// id: a bare id (a number of 1 to 12 digits, leading zeros removed, not
+// zero; or a non-numeric id as normalizeID accepts it) or a URL matching
+// one of the patterns (MatchURL). Without patterns a bare id is still
+// accepted, which is the rule for a picked search result.
 func MatchRef(patterns []string, raw string) (id string, ok bool) {
 	s := strings.TrimSpace(raw)
 	if id, ok := normalizeID(s); ok {

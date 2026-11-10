@@ -1,6 +1,9 @@
 package plugin
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 // The hostile-input table moved here from the legacy AniList URL parser
 // (removed in Task 13: nothing used it). Differences to the legacy rules,
@@ -48,8 +51,8 @@ func TestURLPatternMatcher(t *testing.T) {
 		{"https://anilist.co/anime/", "", false},
 		{"https://anilist.co/anime", "", false},
 		{"anilist.co/anime/", "", false},
-		{"https://anilist.co/anime/abc", "", false},
-		{"https://anilist.co/anime/12abc", "", false},
+		{"https://anilist.co/anime/abc", "abc", true}, // non-numeric ids match too
+		{"https://anilist.co/anime/12abc", "12abc", true},
 		{"https://anilist.co/anime/5/slug/more", "", false},
 		{"https://anilist.co/anime/5//", "", false},
 		{"https://anilist.co/", "", false},
@@ -87,6 +90,47 @@ func TestURLPatternMatcher(t *testing.T) {
 		if id != c.id || ok != c.ok {
 			t.Errorf("MatchURL(%q) = %q, %v; want %q, %v", c.in, id, ok, c.id, c.ok)
 		}
+	}
+}
+
+// TestMatchRefAcceptsNonNumericIds: sources whose ids are not numbers (an
+// IMDb-style id, an OpenLibrary-style work key) match by a bare id or a
+// pasted URL. All-digit ids keep their own rules (leading zeros stripped,
+// at most 12 digits, zero rejected); an id is 1 to 64 bytes of ASCII
+// letters, digits, '_' and '-' that starts and ends with an alphanumeric.
+func TestMatchRefAcceptsNonNumericIds(t *testing.T) {
+	pats := []string{"imdb.example/title/{id}", "books.example/work/{id}"}
+	id64 := strings.Repeat("ab", 32)
+	accept := map[string]string{
+		"tt0944947":                    "tt0944947",
+		"OL717W":                       "OL717W",
+		"a-b_c":                        "a-b_c",
+		"12abc":                        "12abc",
+		"imdb.example/title/tt0944947": "tt0944947",
+		"https://imdb.example/title/tt0944947/Slug": "tt0944947",
+		"books.example/work/OL717W":                 "OL717W",
+		id64:                                        id64,
+	}
+	for in, want := range accept {
+		if id, ok := MatchRef(pats, in); !ok || id != want {
+			t.Errorf("MatchRef(%q) = %q, %v; want %q", in, id, ok, want)
+		}
+	}
+	for in := range map[string]bool{
+		"-abc": true, "abc-": true, "_abc": true, "abc_": true,
+		"a b": true, "a/b": true, "a%20b": true, "a?b": true, "a#b": true, `a\b`: true,
+		"a.b": true, "12.5": true, "títulos": true, "１２": true,
+		strings.Repeat("a", 65): true,
+		"1234567890123":         true, // 13 digits keep the digit cap
+	} {
+		if id, ok := MatchRef(pats, in); ok {
+			t.Errorf("MatchRef(%q) = %q, %v; want rejected", in, id, ok)
+		}
+	}
+	// a bare non-numeric id is accepted without patterns too (the source's
+	// Details verifies it; the paste field is not a search)
+	if id, ok := MatchRef(nil, "tt0944947"); !ok || id != "tt0944947" {
+		t.Errorf("bare id without patterns = %q, %v", id, ok)
 	}
 }
 
@@ -133,7 +177,7 @@ func TestMatchRefAcceptsBareNumbersAndURLs(t *testing.T) {
 		"12.5":                            "",
 		"1 2":                             "",
 		"１２":                              "", // full-width digits are not ASCII
-		"12abc":                           "",
+		"12abc":                           "12abc",
 		"":                                "",
 		"https://anilist.co/manga/5":      "",
 	} {
