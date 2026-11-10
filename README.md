@@ -128,6 +128,7 @@ Layout:
 - `internal/backup`: the universal backup archive (download and merge restore)
 - `internal/importer`: the generic import runner (every plugin's importers)
 - `internal/plugins/anime`: the anime plugin; `anilist`: its AniList client, `yamtrack`: its Yamtrack CSV parser
+- `internal/guard`: tests that keep the core free of media-specific code and plugin imports
 - `internal/covers`, `internal/settings`, `internal/config`, `internal/ids`: small helpers
 
 ## Roadmap

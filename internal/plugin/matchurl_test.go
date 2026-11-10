@@ -3,7 +3,7 @@ package plugin
 import "testing"
 
 // The hostile-input table moved here from the legacy AniList URL parser
-// (internal/provider/anilist/url_test.go). Differences to the legacy rules,
+// (removed in Task 13: nothing used it). Differences to the legacy rules,
 // decided with the move: ids are 1 to 12 digits (was 9) and leading zeros are
 // normalised away (were rejected); "0" (also "000") is still rejected.
 func TestURLPatternMatcher(t *testing.T) {
