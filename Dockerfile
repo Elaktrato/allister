@@ -37,7 +37,14 @@ COPY go.mod go.sum* ./
 RUN go mod download
 COPY . .
 COPY --from=css /src/app.css internal/web/static/app.css
-RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /allister ./cmd/allister
+# Version information (GET /version, Settings > General); the release
+# workflow passes the tag, the commit and the build time.
+ARG VERSION=dev
+ARG COMMIT=unknown
+ARG DATE=unknown
+RUN CGO_ENABLED=0 go build -trimpath \
+      -ldflags="-s -w -X github.com/allister/allister/internal/version.Version=${VERSION} -X github.com/allister/allister/internal/version.Commit=${COMMIT} -X github.com/allister/allister/internal/version.Date=${DATE}" \
+      -o /allister ./cmd/allister
 
 # gcr.io/distroless/static-debian12:latest
 FROM gcr.io/distroless/static-debian12:latest@sha256:d75cdd72874d4790092fcb1b058493ecf6bb5bf2b2b897045b00ff01d91843f2

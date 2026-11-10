@@ -1,8 +1,11 @@
 package web
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -19,6 +22,38 @@ func TestHealthz(t *testing.T) {
 	rec := get(t, "/healthz")
 	if rec.Code != 200 || rec.Body.String() != "ok" {
 		t.Fatalf("got %d %q", rec.Code, rec.Body.String())
+	}
+}
+
+func TestVersionEndpoint(t *testing.T) {
+	rec := get(t, "/version")
+	if rec.Code != 200 {
+		t.Fatalf("got %d %q", rec.Code, rec.Body.String())
+	}
+	if ct := rec.Header().Get("Content-Type"); ct != "application/json" {
+		t.Errorf("Content-Type %q", ct)
+	}
+	if cc := rec.Header().Get("Cache-Control"); cc != "no-store" {
+		t.Errorf("Cache-Control %q", cc)
+	}
+	var got map[string]string
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("%v: %q", err, rec.Body.String())
+	}
+	want := map[string]string{"version": "dev", "commit": "unknown", "date": "unknown", "go": runtime.Version()}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("got %v, want %v", got, want)
+	}
+	// /healthz stays exactly "ok" for monitors
+	if rec := get(t, "/healthz"); rec.Body.String() != "ok" {
+		t.Errorf("healthz %q", rec.Body.String())
+	}
+}
+
+func TestSettingsShowsVersion(t *testing.T) {
+	body := get(t, "/settings").Body.String()
+	if !strings.Contains(body, `>Allister dev</p>`) {
+		t.Errorf("settings page lacks the version: %q", body)
 	}
 }
 

@@ -162,6 +162,7 @@ func newServer(deps Deps, now func() time.Time) (*server, http.Handler) {
 	mux.HandleFunc("GET /calendar.ics", s.getCalendar)
 	mux.HandleFunc("GET /calendar", s.getCalendarPage)
 	mux.HandleFunc("GET /stats", s.getStats)
+	mux.HandleFunc("GET /version", getVersion)
 	mux.Handle("GET /static/", staticHandler())
 	if deps.CoversDir != "" {
 		mux.Handle("GET /covers/", coversHandler(deps.CoversDir))

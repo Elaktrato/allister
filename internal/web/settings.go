@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/allister/allister/internal/plugin"
+	"github.com/allister/allister/internal/version"
 )
 
 // langNames are display names of common title language tags; any other tag
@@ -28,7 +29,7 @@ func (s *server) getSettings(w http.ResponseWriter, r *http.Request) {
 	for _, m := range s.deps.Registry.Manifests() {
 		ps = append(ps, generalPlugin{Name: m.Name, Href: pluginSettingsURL(m.ID)})
 	}
-	s.render(w, r, "settings", map[string]any{"Plugins": ps})
+	s.render(w, r, "settings", map[string]any{"Plugins": ps, "Version": version.Get().String()})
 }
 
 // getPlugins renders the plugins section of Settings: every installed plugin

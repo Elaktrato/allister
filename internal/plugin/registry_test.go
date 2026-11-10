@@ -26,7 +26,7 @@ func eq(a, b []string) bool { return strings.Join(a, ",") == strings.Join(b, ","
 
 func TestRegisterRejectsReservedAndDuplicateIDs(t *testing.T) {
 	r := plugin.NewRegistry(plugintest.NewMemEnabled())
-	for _, id := range []string{"list", "people", "settings", "covers", "static", "healthz", "api"} {
+	for _, id := range []string{"list", "people", "settings", "covers", "static", "healthz", "api", "version"} {
 		err := r.Register(plugintest.BookPlugin(plugintest.WithID(id)))
 		if err == nil || !strings.Contains(err.Error(), "reserved") {
 			t.Errorf("id %q: want reserved error, got %v", id, err)
@@ -42,7 +42,7 @@ func TestRegisterRejectsReservedAndDuplicateIDs(t *testing.T) {
 	if got := ids(r.Plugins()); !eq(got, []string{"book"}) {
 		t.Fatalf("plugins: %v", got)
 	}
-	if len(r.Problems()) != 8 {
+	if len(r.Problems()) != 9 {
 		t.Fatalf("problems: %v", r.Problems())
 	}
 }
