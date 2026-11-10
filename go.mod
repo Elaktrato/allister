@@ -1,8 +1,8 @@
 module github.com/allister/allister
 
-go 1.23.0
+go 1.27.0
 
-toolchain go1.23.12
+toolchain go1.27.3
 
 require (
 	github.com/pressly/goose/v3 v3.24.1

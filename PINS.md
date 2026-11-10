@@ -11,7 +11,7 @@ The digest is the multi-architecture index digest of the tag at the time of pinn
 | Where | Image |
 |---|---|
 | `Dockerfile` css stage | `debian:bookworm-slim@sha256:734a72b3d6142a71993b4bc580ca01d8ca687f77a2c422d96a961d3376b179bc` |
-| `Dockerfile` build stage, `scripts/go.sh` | `golang:1.23.12-bookworm@sha256:167053a2bb901972bf2c1611f8f52c44d5fe7e762e5cab213708d82c421614db` |
+| `Dockerfile` build stage, `scripts/go.sh` | `golang:1.27.3-bookworm@sha256:dc0963f32053e4bc451d24d87e3892d42d01021b61f093e98eb95c0352bb84b0` |
 | `Dockerfile` runtime | `gcr.io/distroless/static-debian12:latest@sha256:d75cdd72874d4790092fcb1b058493ecf6bb5bf2b2b897045b00ff01d91843f2` |
 | `README.md` backup helpers | `alpine:3.24.4@sha256:f59abe656b692d901e184be3445e084786602108599d2a51d229c0f5a48c71bf` |
 | `README.md` live backup helper | `keinos/sqlite3:3.54.1@sha256:b577e65892c6468d94b390097eda4488e05253470c161bdea68a05abb961fa17` |
@@ -20,8 +20,8 @@ Each digest was resolved with `docker buildx imagetools inspect <tag>` and cross
 
 ## Go
 
-- Toolchain: Go 1.23.12 (`toolchain go1.23.12` in `go.mod`, the `golang:1.23.12-bookworm` image above in the Dockerfile and `scripts/go.sh`).
-- `go.mod` keeps `go 1.23.0` as the language minimum: `go mod tidy` removes a `toolchain` line that equals the `go` line, so the exact patch lives in the `toolchain` line.
+- Toolchain: Go 1.27.3 (`toolchain go1.27.3` in `go.mod`, the `golang:1.27.3-bookworm` image above in the Dockerfile and `scripts/go.sh`).
+- `go.mod` keeps `go 1.27.0` as the language minimum: `go mod tidy` removes a `toolchain` line that equals the `go` line, so the exact patch lives in the `toolchain` line.
 
 ## Tailwind CLI
 
