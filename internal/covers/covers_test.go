@@ -235,6 +235,37 @@ func TestSaveSameBytesOneFile(t *testing.T) {
 	}
 }
 
+// TestSaveRestoredAcceptsAVIFByCompatibleBrand: files branded mif1 or miaf
+// (HEIF/MIAF containers) carry avif only as a compatible brand, and the
+// brand list is read clamped to the bytes actually sniffed (the box may
+// claim to be larger than the head).
+func TestSaveRestoredAcceptsAVIFByCompatibleBrand(t *testing.T) {
+	accept := map[string][]byte{
+		"mif1 major, avif compatible":  []byte("\x00\x00\x00\x18ftypmif1\x00\x00\x00\x00mif1avif"),
+		"miaf major, avif compatible":  []byte("\x00\x00\x00\x18ftypmiaf\x00\x00\x00\x00avif"),
+		"claimed size beyond the head": append([]byte("\x00\x00\xff\xffftypmif1\x00\x00\x00\x00avif"), make([]byte, 64)...),
+		"12 bytes, avif major":         []byte("\x00\x00\x00\x0cftypavif"),
+		"brands past the first 4":      []byte("\x00\x00\x00\x20ftypmif1\x00\x00\x00\x00mif1miafMA1Bavif"),
+	}
+	for name, body := range accept {
+		dir := t.TempDir()
+		rel, err := SaveRestored(dir, bytes.NewReader(body))
+		if err != nil || !strings.HasSuffix(rel, ".avif") {
+			t.Errorf("%s: %q %v", name, rel, err)
+		}
+	}
+	for name, body := range map[string][]byte{
+		"mif1 without avif":    []byte("\x00\x00\x00\x18ftypmif1\x00\x00\x00\x00mif1miaf"),
+		"12 bytes, mif1 major": []byte("\x00\x00\x00\x0cftypmif1"),
+		"truncated brand":      []byte("\x00\x00\x00\x18ftypmif1\x00\x00\x00\x00avi"),
+	} {
+		dir := t.TempDir()
+		if rel, err := SaveRestored(dir, bytes.NewReader(body)); !errors.Is(err, ErrNotImage) {
+			t.Errorf("%s: %q %v", name, rel, err)
+		}
+	}
+}
+
 // A cover a backup restores may be any type Download stores, AVIF included
 // (http.DetectContentType does not know AVIF, so Save alone would refuse it
 // and the restored item would lose its only copy of the cover).

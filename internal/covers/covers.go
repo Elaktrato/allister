@@ -9,6 +9,7 @@ package covers
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/binary"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -130,8 +131,9 @@ func Save(dir string, r io.Reader) (string, error) {
 // SaveRestored stores a cover file of a backup archive into dir like Save,
 // accepting every type Download stores: the sniffed types of Save plus AVIF,
 // which http.DetectContentType cannot recognise and which is checked by its
-// ISO-BMFF file type box (major brand avif or avis). A downloaded cover's
-// remote URL is not retained, so refusing its file would lose the cover.
+// ISO-BMFF file type box (avif or avis as the major or a compatible brand).
+// A downloaded cover's remote URL is not retained, so refusing its file
+// would lose the cover.
 func SaveRestored(dir string, r io.Reader) (string, error) {
 	name, err := writeHashed(dir, r, MaxUploadBytes, func(head []byte) (string, error) {
 		if ext, ok := uploadTypes[http.DetectContentType(head)]; ok {
@@ -149,13 +151,28 @@ func SaveRestored(dir string, r io.Reader) (string, error) {
 }
 
 // isAVIF reports whether head starts with an ISO-BMFF ftyp box whose major
-// brand is avif (still image) or avis (image sequence).
+// brand or any compatible brand is avif (still image) or avis (image
+// sequence): files branded mif1 or miaf (HEIF/MIAF containers) carry avif
+// only as a compatible brand. The brand list is read within the box's size,
+// clamped to len(head): a box may claim to be larger than the bytes sniffed.
 func isAVIF(head []byte) bool {
 	if len(head) < 12 || string(head[4:8]) != "ftyp" {
 		return false
 	}
-	brand := string(head[8:12])
-	return brand == "avif" || brand == "avis"
+	if b := string(head[8:12]); b == "avif" || b == "avis" {
+		return true
+	}
+	size := int(binary.BigEndian.Uint32(head[0:4]))
+	if size < 16 { // no compatible brands
+		return false
+	}
+	end := min(size, len(head))
+	for off := 16; off+4 <= end; off += 4 {
+		if b := string(head[off : off+4]); b == "avif" || b == "avis" {
+			return true
+		}
+	}
+	return false
 }
 
 // writeHashed reads r (at most limit bytes), asks pick for the extension given
