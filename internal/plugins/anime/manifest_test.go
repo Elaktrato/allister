@@ -29,6 +29,21 @@ func TestManifestMatchesBaseline(t *testing.T) {
 	if !reflect.DeepEqual(k.TitleLanguages, []string{"ja", "ja-latn", "en"}) {
 		t.Errorf("title languages = %v", k.TitleLanguages)
 	}
+	// the table columns: today's table by default (type, year, progress,
+	// score, status, updated), the other fields on offer
+	var cols, defaults []string
+	for _, c := range k.Columns {
+		cols = append(cols, c.Key)
+		if c.Default {
+			defaults = append(defaults, c.Key)
+		}
+	}
+	if want := []string{"type", "year", "progress", "rating", "status", "updated", "episodes", "studio", "source_material", "started_on", "ended_on"}; !reflect.DeepEqual(cols, want) {
+		t.Errorf("columns = %v", cols)
+	}
+	if want := []string{"type", "year", "progress", "rating", "status", "updated"}; !reflect.DeepEqual(defaults, want) {
+		t.Errorf("default columns = %v", defaults)
+	}
 	// the fallback order the core used to hard-code, now declared as data
 	if !reflect.DeepEqual(k.TitleFallback, []string{"ja", "ja-latn", "en"}) {
 		t.Errorf("title fallback = %v", k.TitleFallback)

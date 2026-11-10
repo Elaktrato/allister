@@ -39,10 +39,9 @@ type progressCell struct{ Label, Value string }
 // rowView is one table row; Return is the list URL the row's forms send back.
 type rowView struct {
 	Title, Href, Cover string
-	HasType            bool
-	Type, Status       string
-	Fields             []string // the sortFields columns, in order
-	Updated            string   // the day the entry was last changed (2006-01-02)
+	Status             string
+	Cells              []rowCell // the visible columns, in order
+	Updated            string    // the day the entry was last changed (2006-01-02)
 	Progress           []progressCell
 	ShowLabels         bool // more than one track: labels are visible
 	CanIncrement       bool
@@ -57,26 +56,25 @@ type rowView struct {
 	RemoveConfirm      string
 }
 
-// headView is one cell of the table head that can sort: Href ("" when the
-// column does not sort) sorts by the column, toggling the direction of the
-// sorted column; Sort is the aria-sort of the sorted column ("ascending" or
+// headView is one cell of the table head: Href ("" when the column does
+// not sort) sorts by the column, toggling the direction of the sorted
+// column; Sort is the aria-sort of the sorted column ("ascending" or
 // "descending", "" for the others).
 type headView struct {
 	Label, ID, Href, Sort string
-	Hide                  string // "md" or "lg": the column shows from that screen width on
+	Hide                  string // "sm", "md" or "lg": the column shows from that screen width on
 }
 
-// listHead is the table head: the core columns and one per sortField.
+// listHead is the table head: the title and the visible columns, in order.
 type listHead struct {
-	Title, Progress, Score, Updated headView
-	Fields                          []headView
+	Title   headView
+	Columns []headView
 }
 
 type listView struct {
 	Heading              string // the kind's plural label
 	AddLabel             string // "Add book": the search link's text
 	Kinds                []tabView
-	TypeHeader           string // "" without a type column
 	Head                 listHead
 	Tabs                 []tabView
 	TabsOOB              bool   // the tabs ride along with a rows partial
@@ -249,9 +247,10 @@ func primaryTrack(k plugin.KindDef, keys []string) (plugin.ProgressDef, bool) {
 	return def, true
 }
 
-// rowView builds the row of one list entry. It is THE row builder: the list
-// page and the +1 response both render its result with list_row.
-func (s *server) rowView(m plugin.Manifest, row library.Row, ret string) rowView {
+// rowView builds the row of one list entry with the columns cols. It is THE
+// row builder: the list page and the +1 response both render its result
+// with list_row.
+func (s *server) rowView(m plugin.Manifest, row library.Row, ret string, cols []listColumn) rowView {
 	k, ok := kindDef(m, row.Item.Kind)
 	if !ok {
 		k = m.Kinds[0]
@@ -269,12 +268,12 @@ func (s *server) rowView(m plugin.Manifest, row library.Row, ret string) rowView
 	if v.Title == "" {
 		v.Title = "(untitled)"
 	}
-	if fd, ok := typeField(k); ok {
-		v.HasType, v.Type = true, it.Fields[fd.Key].Text
-	}
-	for _, fd := range sortFields(k) {
-		text, _ := fieldText(fd, it.Fields[fd.Key])
-		v.Fields = append(v.Fields, text)
+	for _, c := range cols {
+		cell := rowCell{Core: c.Core, Hide: c.Hide}
+		if c.Core == "" {
+			cell.Text, _ = fieldText(c.Field, it.Fields[c.Key])
+		}
+		v.Cells = append(v.Cells, cell)
 	}
 	if !e.UpdatedAt.IsZero() {
 		v.Updated = e.UpdatedAt.Format("2006-01-02")
@@ -365,24 +364,21 @@ func (s *server) buildList(r *http.Request, m plugin.Manifest, lq listQuery) (li
 	if manual := "/" + m.ID + "/manual/new"; slices.Contains(s.pluginRoutes[m.ID], "GET "+manual) {
 		v.ManualURL = manual
 	}
-	if fd, ok := typeField(k); ok {
-		v.TypeHeader = fd.Label
-	}
 	v.AddLabel = "Add " + lowerFirst(k.Label)
-	head := func(key, label string) headView { return sortHead(m, k.Key, lq.Status, f, key, label) }
-	v.Head = listHead{Title: head("title", "Title"), Score: head("rating", "Score"), Updated: head("updated", "Updated"),
-		Progress: headView{Label: "Progress"}}
-	v.Head.Updated.Hide = "lg"
-	if k.Progress.PrimaryKey != "" {
-		v.Head.Progress = head("progress", "Progress")
-	}
-	for _, fd := range sortFields(k) {
-		h := head(fd.Key, fd.Label)
-		h.Hide = "md"
-		v.Head.Fields = append(v.Head.Fields, h)
+	// the head sorts only by visible columns; the compact sort control
+	// (sortOptions) keeps every sort key
+	cols := s.visibleColumns(ctx, m, k)
+	v.Head.Title = sortHead(m, k.Key, lq.Status, f, string(library.SortTitle), "Title")
+	for _, c := range cols {
+		h := headView{Label: c.Label}
+		if key := columnSort(k, c); key != "" {
+			h = sortHead(m, k.Key, lq.Status, f, key, c.Label)
+		}
+		h.Hide = c.Hide
+		v.Head.Columns = append(v.Head.Columns, h)
 	}
 	for _, row := range pg.Rows {
-		v.Rows = append(v.Rows, s.rowView(m, row, ret))
+		v.Rows = append(v.Rows, s.rowView(m, row, ret, cols))
 	}
 	if pg.Total > 0 {
 		v.From, v.To = (pg.PageNo-1)*listPageSize+1, (pg.PageNo-1)*listPageSize+len(pg.Rows)

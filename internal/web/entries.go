@@ -108,7 +108,7 @@ func (s *server) postIncrement(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	s.renderPartial(w, "list", "list_row", s.rowView(t.man, *t.row, ret))
+	s.renderPartial(w, "list", "list_row", s.rowView(t.man, *t.row, ret, s.visibleColumns(r.Context(), t.man, t.kind)))
 }
 
 // comboValue encodes a progress combination for the form.
