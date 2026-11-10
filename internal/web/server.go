@@ -6,6 +6,7 @@ import (
 	"context"
 	"embed"
 	"html/template"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -13,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/allister/allister/internal/backup"
 	"github.com/allister/allister/internal/importer"
 	"github.com/allister/allister/internal/library"
 	"github.com/allister/allister/internal/plugin"
@@ -84,6 +86,8 @@ type server struct {
 	restoreMu     sync.Mutex
 	maxBackupBody int64
 	spoolHook     func(path string)
+	// backupWrite produces the download (backup.Write; tests replace it).
+	backupWrite func(ctx context.Context, w io.Writer, lib *library.Library, plugins []backup.PluginVersion, coversDir string, now time.Time) error
 }
 
 // pageNames lists every page template (templates/<name>.html). Add a page by
@@ -128,7 +132,7 @@ func newServer(deps Deps, now func() time.Time) (*server, http.Handler) {
 		deps.Library = library.New(deps.Store.DB(), deps.Registry)
 	}
 	s := &server{deps: deps, pages: parsePages(), cache: newAnimeCache(now, cacheMaxEntries, cacheTTL),
-		recs: newRecCache(now, recCacheMaxEntries, cacheTTL), recTimeout: recTimeout, now: now, maxBackupBody: maxBackupBody}
+		recs: newRecCache(now, recCacheMaxEntries, cacheTTL), recTimeout: recTimeout, now: now, maxBackupBody: maxBackupBody, backupWrite: backup.Write}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("ok"))

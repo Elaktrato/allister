@@ -412,6 +412,11 @@ type RestoreOptions struct {
 	// error is fatal: RestoreItem returns it and writes nothing. When nil,
 	// local covers are left empty with a note.
 	ResolveCover func(ctx context.Context, name string) (stored, note string, err error)
+	// ReleaseCover is called with a name ResolveCover returned when the
+	// item was not written after all (skipped, failed or an error) and no
+	// item or person references the stored file, so the caller can delete
+	// it. It may be nil.
+	ReleaseCover func(ctx context.Context, stored string)
 }
 
 // RestoreResult reports one restored backup item. ItemID and SyncPending are
@@ -443,16 +448,21 @@ type restorePlan struct {
 // entries (status, rating, comment, dates, progress of every stored key:
 // active keys like ValidateEntry, inactive ones must be eligible and in
 // range), plus caps on titles and external ids and RFC 3339 time stamps.
+// Manual items additionally need their required fields (as ValidateItem),
+// and every credited person needs a name.
 //
 // Outcomes: a plugin that is not installed is RestoreUnknownPlugin (nothing
 // written); invalid data is RestoreFailed with the reason (nothing written);
 // an item whose (plugin, kind, source, source id) exists is RestoreSkipped
 // and left untouched (no entry is added either); otherwise the item with all
-// its parts, its credits (people upserted as by SaveCredits), its entry with
-// all progress values and its time stamps is written in ONE transaction and
-// the result is RestoreCreated. Its sync state is "done" for manual items and
-// "pending" otherwise (SyncPending), so the normal sync refetches credits'
-// photos and fills gaps. The plugin need not be enabled.
+// its parts, its credits (existing people are linked unchanged, missing
+// ones created), its entry with all progress values and its time stamps is
+// written in ONE transaction and the result is RestoreCreated. Its sync
+// state is "done" for manual items without a remote cover and "pending"
+// otherwise (SyncPending), so the normal sync refetches credits' photos,
+// downloads remote covers and fills gaps. When the item is not written
+// after its cover was stored, ReleaseCover gets the unreferenced file.
+// The plugin need not be enabled.
 //
 // The returned error is reserved for failures that are not about the item
 // (database errors, a ResolveCover error, context cancellation).
@@ -476,8 +486,9 @@ func (l *Library) RestoreItem(ctx context.Context, bi BackupItem, opts RestoreOp
 	if !errors.Is(err, sql.ErrNoRows) {
 		return res, fmt.Errorf("restore item: %w", err)
 	}
+	stored := ""
 	if bi.Cover != "" {
-		stored, note := "", "the cover file is not part of the backup: restored without a cover"
+		note := "the cover file is not part of the backup: restored without a cover"
 		if opts.ResolveCover != nil {
 			if stored, note, err = opts.ResolveCover(ctx, bi.Cover); err != nil {
 				return res, err
@@ -485,15 +496,22 @@ func (l *Library) RestoreItem(ctx context.Context, bi BackupItem, opts RestoreOp
 		}
 		if stored != "" && checkImageRef("cover", stored) == nil {
 			plan.data.CoverURL = stored
-		} else if note != "" {
-			res.Notes = append(res.Notes, note)
+		} else {
+			stored = ""
+			if note != "" {
+				res.Notes = append(res.Notes, note)
+			}
 		}
 	}
+	// manual items have nothing to sync, except a remote cover to download
 	syncState := "pending"
-	if plan.p.source == manualSource {
+	if plan.p.source == manualSource && !isRemote(plan.data.CoverURL) {
 		syncState = "done"
 	}
 	id, err := l.writeRestore(ctx, bi, plan, syncState)
+	if err != nil && stored != "" {
+		l.releaseCover(ctx, opts, stored)
+	}
 	var dup *AlreadySavedError
 	switch {
 	case errors.As(err, &dup):
@@ -506,6 +524,18 @@ func (l *Library) RestoreItem(ctx context.Context, bi BackupItem, opts RestoreOp
 	}
 	res.Outcome, res.ItemID, res.SyncPending = RestoreCreated, id, syncState == "pending"
 	return res, nil
+}
+
+// releaseCover hands a stored cover back to the caller when nothing
+// references it (the item that would have used it was not written).
+func (l *Library) releaseCover(ctx context.Context, opts RestoreOptions, stored string) {
+	if opts.ReleaseCover == nil {
+		return
+	}
+	// the request context may be the reason the write failed
+	if ref, err := l.ImageReferenced(context.WithoutCancel(ctx), stored); err == nil && !ref {
+		opts.ReleaseCover(ctx, stored)
+	}
 }
 
 func failedRestore(res RestoreResult, err error) (RestoreResult, error) {
@@ -545,6 +575,13 @@ func (l *Library) planRestore(bi BackupItem) (*restorePlan, error) {
 	if err != nil {
 		return nil, err
 	}
+	// the manual rules (ValidateItem): a manual item needs its required
+	// fields; sourced items may lack them, as in a normal save
+	if p.source == manualSource {
+		if miss := requiredMissing(p.def, p.fields); len(miss) > 0 {
+			return nil, invalid("required field(s) missing: %s", strings.Join(miss, ", "))
+		}
+	}
 	plan := &restorePlan{p: p, data: d}
 	if plan.createdAt, err = restoreStamp("created_at", bi.CreatedAt); err != nil {
 		return nil, err
@@ -553,6 +590,11 @@ func (l *Library) planRestore(bi BackupItem) (*restorePlan, error) {
 		return nil, err
 	}
 	for _, c := range bi.Credits {
+		// every person needs a name: a new one is created from it, and the
+		// transaction must not fail on it after the cover was stored
+		if strings.TrimSpace(c.Person.Name) == "" || (c.With != nil && strings.TrimSpace(c.With.Name) == "") {
+			return nil, invalid("credited person %q needs a name", truncateRunes(c.Person.SourceID, 40))
+		}
 		pc := plugin.Credit{Role: c.Role, Detail: c.Detail, WithRole: c.WithRole, Person: personRef(c.Person)}
 		if err := checkRemoteImage("credit person image", c.Person.ImageURL); err != nil {
 			return nil, err
@@ -688,7 +730,7 @@ func (l *Library) writeRestore(ctx context.Context, bi BackupItem, plan *restore
 			return 0, fmt.Errorf("restore item: %w", err)
 		}
 	}
-	if err := insertCredits(ctx, tx, id, bi.PluginID, plan.p.source, plan.credits); err != nil {
+	if err := restoreCredits(ctx, tx, id, bi.PluginID, plan.p.source, plan.credits); err != nil {
 		return 0, err
 	}
 	if plan.entry != nil {
@@ -703,6 +745,48 @@ func (l *Library) writeRestore(ctx context.Context, bi BackupItem, plan *restore
 	}
 	if err := tx.Commit(); err != nil {
 		return 0, fmt.Errorf("restore item: %w", err)
+	}
+	return id, nil
+}
+
+// restoreCredits writes the credits of a restored item. Unlike SaveCredits
+// it never changes an existing person: a person with the same (plugin,
+// source, source id) is linked as it is (name, URL and image stay; the
+// normal sync refreshes sourced people), a missing one is created from the
+// backup's data.
+func restoreCredits(ctx context.Context, tx *sql.Tx, itemID int64, pluginID, source string, credits []plugin.Credit) error {
+	for i, c := range credits {
+		pid, err := restorePerson(ctx, tx, pluginID, source, c.Person)
+		if err != nil {
+			return err
+		}
+		var with any
+		if c.With != nil {
+			id, err := restorePerson(ctx, tx, pluginID, source, *c.With)
+			if err != nil {
+				return err
+			}
+			with = id
+		}
+		if _, err := tx.ExecContext(ctx, `INSERT INTO credits(item_id, seq, role, detail, person_id, counterpart_person_id, counterpart_role)
+			VALUES (?,?,?,?,?,?,?)`, itemID, i, c.Role, c.Detail, pid, with, c.WithRole); err != nil {
+			return fmt.Errorf("restore credits: %w", err)
+		}
+	}
+	return nil
+}
+
+func restorePerson(ctx context.Context, tx *sql.Tx, pluginID, source string, p plugin.PersonRef) (int64, error) {
+	sid := strings.TrimSpace(p.ID)
+	if _, err := tx.ExecContext(ctx, `INSERT INTO `+tablePeople+`(plugin_id, source, source_id, name, image_path, external_url)
+		VALUES (?,?,?,?,?,?) ON CONFLICT(plugin_id, source, source_id) DO NOTHING`,
+		pluginID, source, sid, strings.TrimSpace(p.Name), p.ImageURL, p.URL); err != nil {
+		return 0, fmt.Errorf("restore person: %w", err)
+	}
+	var id int64
+	if err := tx.QueryRowContext(ctx, `SELECT id FROM `+tablePeople+` WHERE plugin_id = ? AND source = ? AND source_id = ?`,
+		pluginID, source, sid).Scan(&id); err != nil {
+		return 0, fmt.Errorf("restore person: %w", err)
 	}
 	return id, nil
 }

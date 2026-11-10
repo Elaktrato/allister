@@ -76,9 +76,17 @@ func (s *server) getBackup(w http.ResponseWriter, r *http.Request) {
 	s.render(w, r, "backup", s.backupPage(backupPage{}))
 }
 
-// getBackupDownload streams the backup zip. It is read-only. Headers are
-// sent before the archive is produced, so a failure part way can only be
-// logged (the client sees a truncated download).
+// getBackupDownload streams the backup zip. It is read-only.
+//
+// Failure handling: headers and the first bytes go out while the archive is
+// still being produced. When producing it fails before anything was written
+// the answer is a plain 500. After bytes were sent a status can no longer be
+// changed, and returning normally would let net/http end the response
+// cleanly, so the browser would save the truncated zip as a finished
+// download. Instead the handler panics with http.ErrAbortHandler, the
+// standard way to make net/http abort the response (the connection is reset
+// and the download is marked failed) without logging a stack trace. A client
+// that went away needs neither.
 func (s *server) getBackupDownload(w http.ResponseWriter, r *http.Request) {
 	if s.deps.Library == nil {
 		http.NotFound(w, r)
@@ -94,9 +102,33 @@ func (s *server) getBackupDownload(w http.ResponseWriter, r *http.Request) {
 	h.Set("Content-Disposition", `attachment; filename="allister-backup-`+now.UTC().Format("2006-01-02")+`.zip"`)
 	h.Set("X-Content-Type-Options", "nosniff")
 	h.Set("Cache-Control", "no-store")
-	if err := backup.Write(r.Context(), w, s.deps.Library, plugins, s.deps.CoversDir, now); err != nil {
-		log.Printf("backup download: %v", err)
+	cw := &countingWriter{w: w}
+	err := s.backupWrite(r.Context(), cw, s.deps.Library, plugins, s.deps.CoversDir, now)
+	if err == nil {
+		return
 	}
+	log.Printf("backup download: %v", err)
+	switch {
+	case r.Context().Err() != nil:
+		return // the client is gone
+	case cw.n == 0:
+		h.Del("Content-Disposition")
+		http.Error(w, "The backup could not be created (see the log).", http.StatusInternalServerError)
+	default:
+		panic(http.ErrAbortHandler)
+	}
+}
+
+// countingWriter counts the bytes written through it.
+type countingWriter struct {
+	w io.Writer
+	n int64
+}
+
+func (c *countingWriter) Write(p []byte) (int, error) {
+	n, err := c.w.Write(p)
+	c.n += int64(n)
+	return n, err
 }
 
 // postBackupRestore restores an uploaded backup (multipart field "file") by

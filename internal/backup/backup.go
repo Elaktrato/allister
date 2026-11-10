@@ -16,6 +16,16 @@
 // again. An item whose local cover file is missing at backup time carries
 // "cover": "" and "cover_missing": true.
 //
+// In backup.json "format" and "format_version" must come before "items",
+// and each of the three members appears once; a restore refuses anything
+// else (before restoring an item where it can be detected that early). One
+// item's JSON is limited to Limits.MaxItemBytes.
+//
+// Before the archive is opened its central directory is walked the way
+// archive/zip will read it, and an archive with more entries than
+// Limits.MaxEntries, or whose directory does not match its end record, is
+// refused without loading it.
+//
 // A restore MERGES (see library.RestoreItem): existing items are skipped,
 // nothing is overwritten or deleted. Only backup.json and covers/<name>
 // entries are read; names must satisfy library.ValidFileName. Nothing is
@@ -78,11 +88,13 @@ type Limits struct {
 	MaxEntries int
 	// MaxItems caps the number of items in backup.json (default 100,000).
 	MaxItems int
+	// MaxItemBytes caps one item's JSON (default 4 MiB).
+	MaxItemBytes int64
 }
 
 // DefaultLimits returns the production limits.
 func DefaultLimits() Limits {
-	return Limits{MaxJSONBytes: 256 << 20, MaxTotalBytes: 2 << 30, MaxEntries: 200_000, MaxItems: 100_000}
+	return Limits{MaxJSONBytes: 256 << 20, MaxTotalBytes: 2 << 30, MaxEntries: 200_000, MaxItems: 100_000, MaxItemBytes: 4 << 20}
 }
 
 func (l Limits) withDefaults() Limits {
@@ -98,6 +110,9 @@ func (l Limits) withDefaults() Limits {
 	}
 	if l.MaxItems <= 0 {
 		l.MaxItems = d.MaxItems
+	}
+	if l.MaxItemBytes <= 0 {
+		l.MaxItemBytes = d.MaxItemBytes
 	}
 	return l
 }
@@ -266,6 +281,7 @@ func addRow(list *[]Row, more *int, r Row) {
 var (
 	errJSONTooLarge  = errors.New("backup.json too large")
 	errTotalTooLarge = errors.New("archive too large")
+	errItemTooLarge  = errors.New("item too large")
 	// errStopped unwinds the decoder after abort recorded Report.Aborted.
 	errStopped = errors.New("restore stopped")
 )
@@ -304,12 +320,37 @@ func (c *capReader) Read(p []byte) (int, error) {
 
 // restorer holds the state of one restore.
 type restorer struct {
-	opts   Options
-	lim    Limits
-	covers map[string]*zip.File
-	done   map[string]coverResult
-	budget *budget
-	rep    *Report
+	opts    Options
+	lim     Limits
+	covers  map[string]*zip.File
+	done    map[string]coverResult
+	budget  *budget
+	rep     *Report
+	limiter *itemLimiter
+}
+
+// itemLimiter bounds the bytes the decoder may read while one item is being
+// decoded: reads are shortened so the decoder never gets more than limit
+// bytes in total (stream offset), and an item that does not end before the
+// limit fails with errItemTooLarge. A negative limit means no limit.
+type itemLimiter struct {
+	r           io.Reader
+	read, limit int64
+}
+
+func (l *itemLimiter) Read(p []byte) (int, error) {
+	if l.limit >= 0 {
+		allowed := l.limit - l.read
+		if allowed <= 0 {
+			return 0, errItemTooLarge
+		}
+		if int64(len(p)) > allowed {
+			p = p[:allowed]
+		}
+	}
+	n, err := l.r.Read(p)
+	l.read += int64(n)
+	return n, err
 }
 
 type coverResult struct{ stored, note string }
@@ -324,8 +365,16 @@ type coverResult struct{ stored, note string }
 func Restore(ctx context.Context, ra io.ReaderAt, size int64, opts Options) (*Report, error) {
 	rs := &restorer{opts: opts, lim: opts.Limits.withDefaults(), done: map[string]coverResult{}, rep: &Report{}}
 	rs.budget = &budget{left: rs.lim.MaxTotalBytes}
-	if n, ok := entryCount(ra, size); ok && n > uint64(rs.lim.MaxEntries) {
+	walked, declared, err := scanDirectory(ra, size, rs.lim.MaxEntries)
+	switch {
+	case errors.Is(err, errNotZip):
+		return rs.rep, reject("%s (it is not a zip archive).", notBackup)
+	case err != nil:
+		return rs.rep, err
+	case walked > uint64(rs.lim.MaxEntries):
 		return rs.rep, reject("The archive holds more than %d files: it is not an Allister backup.", rs.lim.MaxEntries)
+	case walked != declared:
+		return rs.rep, reject("The archive's file directory does not match its end record (%d entries, %d declared): it is not an Allister backup.", walked, declared)
 	}
 	zr, err := zip.NewReader(ra, size)
 	if err != nil && !(errors.Is(err, zip.ErrInsecurePath) && zr != nil) {
@@ -343,8 +392,8 @@ func Restore(ctx context.Context, ra io.ReaderAt, size int64, opts Options) (*Re
 		return rs.rep, reject("%s: backup.json cannot be read.", notBackup)
 	}
 	defer rc.Close()
-	in := &capReader{r: budgetReader{r: rc, b: rs.budget}, left: rs.lim.MaxJSONBytes}
-	if err := rs.decode(ctx, json.NewDecoder(in)); err != nil && !errors.Is(err, errStopped) {
+	rs.limiter = &itemLimiter{r: &capReader{r: budgetReader{r: rc, b: rs.budget}, left: rs.lim.MaxJSONBytes}, limit: -1}
+	if err := rs.decode(ctx, json.NewDecoder(rs.limiter)); err != nil && !errors.Is(err, errStopped) {
 		return rs.rep, err
 	}
 	return rs.rep, nil
@@ -371,8 +420,9 @@ func (rs *restorer) index(zr *zip.Reader) *zip.File {
 	return jsonFile
 }
 
-// decode reads backup.json token by token: the header members must come
-// before "items" (as Write puts them); items are decoded one by one.
+// decode reads backup.json token by token: "format" and "format_version"
+// must come before "items" (as Write puts them) and each of the three may
+// appear once; items are decoded one by one.
 func (rs *restorer) decode(ctx context.Context, dec *json.Decoder) error {
 	dec.UseNumber()
 	tok, err := dec.Token()
@@ -397,12 +447,24 @@ func (rs *restorer) decode(ctx context.Context, dec *json.Decoder) error {
 		}
 		return nil
 	}
+	seen := map[string]bool{}
 	for dec.More() {
 		tok, err := dec.Token()
 		if err != nil {
 			return rs.syntax(err)
 		}
 		key, _ := tok.(string)
+		switch key {
+		case "format", "format_version", "items":
+			if seen[key] {
+				msg := fmt.Sprintf("backup.json has more than one %q member", key)
+				if !seen["items"] {
+					return reject("%s: %s.", notBackup, msg)
+				}
+				return rs.abort(msg) // items were restored already
+			}
+			seen[key] = true
+		}
 		switch key {
 		case "format":
 			var s any
@@ -422,6 +484,10 @@ func (rs *restorer) decode(ctx context.Context, dec *json.Decoder) error {
 				version = "of an unknown kind"
 			}
 		case "items":
+			// refused before any item is restored
+			if !seen["format"] || !seen["format_version"] {
+				return reject(`%s: "format" and "format_version" must come before "items".`, notBackup)
+			}
 			if err := header(); err != nil {
 				return err
 			}
@@ -469,8 +535,14 @@ func (rs *restorer) items(ctx context.Context, dec *json.Decoder) error {
 			return rs.abort(fmt.Sprintf("backup.json holds more than %d items", rs.lim.MaxItems))
 		}
 		var raw json.RawMessage
-		if err := dec.Decode(&raw); err != nil {
+		rs.limiter.limit = dec.InputOffset() + rs.lim.MaxItemBytes
+		err := dec.Decode(&raw)
+		rs.limiter.limit = -1
+		if err != nil {
 			return rs.syntax(err)
+		}
+		if int64(len(raw)) > rs.lim.MaxItemBytes {
+			return rs.abort(rs.limitMessage(errItemTooLarge))
 		}
 		n++
 		if err := rs.item(ctx, n, raw); err != nil {
@@ -505,7 +577,7 @@ func (rs *restorer) item(ctx context.Context, index int, raw json.RawMessage) er
 			Source: clip(id.Source, 60), SourceID: clip(id.SourceID, 100), Reason: clip("the item cannot be read: "+err.Error(), 300)})
 		return nil
 	}
-	res, err := rs.opts.Library.RestoreItem(ctx, bi, library.RestoreOptions{ResolveCover: rs.resolver()})
+	res, err := rs.opts.Library.RestoreItem(ctx, bi, library.RestoreOptions{ResolveCover: rs.resolver(), ReleaseCover: rs.release})
 	if err != nil {
 		if errors.Is(err, errTotalTooLarge) {
 			return rs.abort(rs.limitMessage(err))
@@ -566,6 +638,23 @@ func (rs *restorer) resolver() func(ctx context.Context, name string) (string, s
 	}
 }
 
+// release deletes a stored cover the library found unreferenced after the
+// item that wanted it was not written, and forgets it, so a later item with
+// the same archive cover stores it again.
+func (rs *restorer) release(_ context.Context, stored string) {
+	if rs.opts.CoversDir == "" || !library.ValidFileName(stored) {
+		return
+	}
+	if err := os.Remove(filepath.Join(rs.opts.CoversDir, stored)); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		log.Printf("backup restore: remove unused cover %s: %v", stored, err)
+	}
+	for name, r := range rs.done {
+		if r.stored == stored {
+			delete(rs.done, name)
+		}
+	}
+}
+
 func (rs *restorer) storeCover(name string) (coverResult, error) {
 	what := "the cover file covers/" + name
 	f := rs.covers[name]
@@ -601,6 +690,8 @@ func (rs *restorer) limitMessage(err error) string {
 		return fmt.Sprintf("backup.json is larger than %s", size(rs.lim.MaxJSONBytes))
 	case errors.Is(err, errTotalTooLarge):
 		return fmt.Sprintf("the archive unpacks to more than %s", size(rs.lim.MaxTotalBytes))
+	case errors.Is(err, errItemTooLarge):
+		return fmt.Sprintf("an item in backup.json is larger than %s", size(rs.lim.MaxItemBytes))
 	}
 	return ""
 }
@@ -651,43 +742,120 @@ func clip(s string, n int) string {
 	return s
 }
 
-// entryCount reads the entry count from the zip's end of central directory
-// record (zip64 aware) without loading the directory, so a directory with
-// millions of entries is refused before zip.NewReader allocates for it.
-// ok is false when the record cannot be found (zip.NewReader then decides).
-func entryCount(ra io.ReaderAt, size int64) (n uint64, ok bool) {
-	const eocdLen, maxComment = 22, 65535
-	tail := min(size, eocdLen+maxComment)
-	if tail < eocdLen {
+// errNotZip: archive/zip would not read the archive either.
+var errNotZip = errors.New("not a zip archive")
+
+// scanDirectory finds the end of central directory record exactly the way
+// zip.NewReader does (the last signature within the last 1 KiB, then 65 KiB,
+// whose comment fits; bytes after it are allowed; zip64 records; the base
+// offset of prepended data) and walks the central directory headers the
+// way it reads them (until the first header without the signature), without
+// keeping anything. It returns the number of headers walked (it stops
+// counting at max+1) and the number the end record declares. archive/zip
+// compares only the low 16 bits of the two, so a directory can hold far
+// more headers than declared; the caller refuses both a count over the cap
+// and a mismatch before zip.NewReader allocates anything.
+func scanDirectory(ra io.ReaderAt, size int64, max int) (walked, declared uint64, err error) {
+	le := binary.LittleEndian
+	const endLen = 22
+	var buf []byte
+	var endOff int64
+	for i, bLen := range []int64{1024, 65 * 1024} {
+		bLen = min(bLen, size)
+		buf = make([]byte, bLen)
+		if _, err := ra.ReadAt(buf, size-bLen); err != nil && err != io.EOF {
+			return 0, 0, err
+		}
+		if p := findEndSignature(buf); p >= 0 {
+			buf, endOff = buf[p:], size-bLen+int64(p)
+			break
+		}
+		if i == 1 || bLen == size {
+			return 0, 0, errNotZip
+		}
+	}
+	declared = uint64(le.Uint16(buf[10:]))
+	dirSize := uint64(le.Uint32(buf[12:]))
+	dirOffset := uint64(le.Uint32(buf[16:]))
+	if declared == 0xffff || dirSize == 0xffff || dirOffset == 0xffffffff {
+		if p, ok := zip64Locator(ra, endOff); ok {
+			rec := make([]byte, 56)
+			if p < 0 || p > size-56 {
+				return 0, 0, errNotZip
+			}
+			if _, err := ra.ReadAt(rec, p); err != nil || le.Uint32(rec) != 0x06064b50 {
+				return 0, 0, errNotZip
+			}
+			endOff = p
+			declared, dirSize, dirOffset = le.Uint64(rec[32:]), le.Uint64(rec[40:]), le.Uint64(rec[48:])
+		}
+	}
+	const maxInt64 = 1<<63 - 1
+	if dirSize > maxInt64 || dirOffset > maxInt64 {
+		return 0, 0, errNotZip
+	}
+	base := endOff - int64(dirSize) - int64(dirOffset)
+	if o := base + int64(dirOffset); o < 0 || o >= size {
+		return 0, 0, errNotZip
+	}
+	if base > 0 {
+		if _, ok := nextHeader(bufio.NewReader(io.NewSectionReader(ra, int64(dirOffset), size-int64(dirOffset)))); ok {
+			base = 0
+		}
+	}
+	start := base + int64(dirOffset)
+	br := bufio.NewReaderSize(io.NewSectionReader(ra, start, size-start), 64<<10)
+	for walked <= uint64(max) {
+		if _, ok := nextHeader(br); !ok {
+			break
+		}
+		walked++
+	}
+	return walked, declared, nil
+}
+
+// findEndSignature is archive/zip's search: the last end record signature
+// in b; when that record's comment does not fit, there is none.
+func findEndSignature(b []byte) int {
+	for i := len(b) - 22; i >= 0; i-- {
+		if b[i] == 'P' && b[i+1] == 'K' && b[i+2] == 0x05 && b[i+3] == 0x06 {
+			if n := int(b[i+20]) | int(b[i+21])<<8; n+22+i > len(b) {
+				return -1
+			}
+			return i
+		}
+	}
+	return -1
+}
+
+// zip64Locator returns the offset of the zip64 end record named by the
+// locator right before the end record, as archive/zip validates it.
+func zip64Locator(ra io.ReaderAt, endOff int64) (int64, bool) {
+	le := binary.LittleEndian
+	if endOff < 20 {
 		return 0, false
 	}
-	buf := make([]byte, tail)
-	if _, err := ra.ReadAt(buf, size-tail); err != nil && err != io.EOF {
+	loc := make([]byte, 20)
+	if _, err := ra.ReadAt(loc, endOff-20); err != nil {
+		return 0, false
+	}
+	if le.Uint32(loc) != 0x07064b50 || le.Uint32(loc[4:]) != 0 || le.Uint32(loc[16:]) != 1 {
+		return 0, false
+	}
+	return int64(le.Uint64(loc[8:])), true
+}
+
+// nextHeader reads one central directory header (46 bytes plus name, extra
+// and comment) and reports whether it was complete and signed.
+func nextHeader(br *bufio.Reader) (int, bool) {
+	var h [46]byte
+	if _, err := io.ReadFull(br, h[:]); err != nil || binary.LittleEndian.Uint32(h[:]) != 0x02014b50 {
 		return 0, false
 	}
 	le := binary.LittleEndian
-	for i := len(buf) - eocdLen; i >= 0; i-- {
-		// the record ends the file: its comment runs exactly to the end
-		if le.Uint32(buf[i:]) != 0x06054b50 || i+eocdLen+int(le.Uint16(buf[i+20:])) != len(buf) {
-			continue
-		}
-		total := uint64(le.Uint16(buf[i+10:]))
-		if total != 0xFFFF {
-			return total, true
-		}
-		// zip64: the locator sits right before the record
-		if i < 20 || le.Uint32(buf[i-20:]) != 0x07064b50 {
-			return 0, false
-		}
-		off := int64(le.Uint64(buf[i-20+8:]))
-		rec := make([]byte, 56)
-		if off < 0 || off > size-56 {
-			return 0, false
-		}
-		if _, err := ra.ReadAt(rec, off); err != nil || le.Uint32(rec) != 0x06064b50 {
-			return 0, false
-		}
-		return le.Uint64(rec[32:]), true
+	n := int(le.Uint16(h[28:])) + int(le.Uint16(h[30:])) + int(le.Uint16(h[32:]))
+	if d, err := br.Discard(n); err != nil || d != n {
+		return 0, false
 	}
-	return 0, false
+	return 46 + n, true
 }

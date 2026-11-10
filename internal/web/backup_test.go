@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -17,7 +18,9 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
+	"github.com/allister/allister/internal/backup"
 	"github.com/allister/allister/internal/jobs"
 	"github.com/allister/allister/internal/library"
 	"github.com/allister/allister/internal/plugin"
@@ -395,5 +398,42 @@ func TestBackupRoundTripsRealAnimePlugin(t *testing.T) {
 	_, got, _ := backupJSON(t, b.download(t))
 	if !reflect.DeepEqual(got, want) || len(got) != 1 || len(got[0].Credits) != 1 || got[0].Entry == nil {
 		t.Fatalf("round trip differs:\n%+v\n%+v", got, want)
+	}
+}
+
+// serveRecover runs the request and returns what the handler panicked with.
+func serveRecover(h http.Handler, req *http.Request) (rec *httptest.ResponseRecorder, panicked any) {
+	rec = httptest.NewRecorder()
+	defer func() { panicked = recover() }()
+	h.ServeHTTP(rec, req)
+	return rec, nil
+}
+
+func TestBackupDownloadFailureIsNeverAFinishedZip(t *testing.T) {
+	// a failure before any byte was sent is a plain 500
+	e := backupEnv(t)
+	e.addFixture(t, "book", "book", bookItem("1", "B"), library.Entry{Status: library.Active})
+	e.d.Close()
+	rec, p := serveRecover(e.h, httptest.NewRequest("GET", "/settings/backup/download", nil))
+	if p != nil || rec.Code != http.StatusInternalServerError || rec.Header().Get("Content-Disposition") != "" {
+		t.Fatalf("closed db: panic %v, status %d, headers %v", p, rec.Code, rec.Header())
+	}
+	// a failure after bytes were sent aborts the connection (the browser
+	// marks the download failed instead of saving a truncated zip)
+	e = backupEnv(t)
+	e.srv.backupWrite = func(_ context.Context, w io.Writer, _ *library.Library, _ []backup.PluginVersion, _ string, _ time.Time) error {
+		w.Write([]byte("PK\x03\x04 partial"))
+		return errors.New("database gone in batch 2")
+	}
+	_, p = serveRecover(e.h, httptest.NewRequest("GET", "/settings/backup/download", nil))
+	if p != http.ErrAbortHandler {
+		t.Fatalf("panic = %v, want http.ErrAbortHandler", p)
+	}
+	// a client that went away needs nothing
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	rec, p = serveRecover(e.h, httptest.NewRequest("GET", "/settings/backup/download", nil).WithContext(ctx))
+	if p != nil {
+		t.Fatalf("cancelled request panicked: %v", p)
 	}
 }

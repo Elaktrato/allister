@@ -411,3 +411,142 @@ func TestValidFileName(t *testing.T) {
 		}
 	}
 }
+
+func TestRestoreItemLinksExistingPeopleUnchanged(t *testing.T) {
+	a := newEnv(t)
+	richShow(t, a, "1")
+	bi := collect(t, a.lib, 200)[0]
+
+	b := newEnv(t)
+	// B already knows the character (c1) and the voice actor (p1) from another item
+	other := mustSave(t, b.lib, "tv", "show", tvData("other", nil))
+	if err := b.lib.SaveCredits(bg, other, []plugin.Credit{{Role: "actor",
+		Person: plugin.PersonRef{ID: "c1", Name: "Hero (edited in B)", URL: "https://tv.example/c/b-c1"},
+		With:   &plugin.PersonRef{ID: "p1", Name: "Actor (B)", URL: "https://tv.example/p/b-p1"}}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.db.Exec(`UPDATE people SET image_path = 'b-local.jpg' WHERE source_id = 'c1'`); err != nil {
+		t.Fatal(err)
+	}
+	snapshot := func(sid string) [3]string {
+		var r [3]string
+		if err := b.db.QueryRow(`SELECT name, external_url, image_path FROM people WHERE plugin_id = 'tv' AND source_id = ?`, sid).Scan(&r[0], &r[1], &r[2]); err != nil {
+			t.Fatal(err)
+		}
+		return r
+	}
+	c1, p1 := snapshot("c1"), snapshot("p1")
+	res, err := b.lib.RestoreItem(bg, bi, keepCovers)
+	if err != nil || res.Outcome != RestoreCreated {
+		t.Fatalf("restore = %+v, %v", res, err)
+	}
+	if got := snapshot("c1"); got != c1 {
+		t.Fatalf("existing person changed: %v -> %v", c1, got)
+	}
+	if got := snapshot("p1"); got != p1 {
+		t.Fatalf("existing counterpart changed: %v -> %v", p1, got)
+	}
+	// the missing director is created with the backup's data; credits link to the existing people
+	if got := snapshot("p2"); got != [3]string{"Director", "", ""} {
+		t.Fatalf("new person = %v", got)
+	}
+	cs, err := b.lib.Credits(bg, res.ItemID)
+	if err != nil || len(cs) != 2 || cs[0].Person.Name != "Hero (edited in B)" || cs[0].With == nil || cs[0].With.Name != "Actor (B)" || cs[0].Detail != "MAIN" {
+		t.Fatalf("credits = %+v, %v", cs, err)
+	}
+	// a new counterpart is created from the backup's data
+	c := newEnv(t)
+	res, err = c.lib.RestoreItem(bg, bi, keepCovers)
+	if err != nil || res.Outcome != RestoreCreated {
+		t.Fatal(err)
+	}
+	var name, img string
+	if err := c.db.QueryRow(`SELECT name, image_path FROM people WHERE source_id = 'p1'`).Scan(&name, &img); err != nil || name != "Actor One" || img != "https://img.example/p1.jpg" {
+		t.Fatalf("new counterpart = %q %q %v", name, img, err)
+	}
+}
+
+func TestRestoreItemPersonWithoutNameFailsAtPlanTime(t *testing.T) {
+	e := newEnv(t)
+	bi := BackupItem{PluginID: "tv", Kind: "show", Source: "tvdata", SourceID: "1", Titles: []plugin.Title{{Lang: "en", Text: "T"}}, Cover: "c.png",
+		Credits: []BackupCredit{{Role: "actor", Person: BackupPerson{SourceID: "x", Name: " "}}}}
+	resolved := 0
+	res, err := e.lib.RestoreItem(bg, bi, RestoreOptions{ResolveCover: func(context.Context, string) (string, string, error) {
+		resolved++
+		return "", "", nil
+	}})
+	if err != nil || res.Outcome != RestoreFailed || !strings.Contains(res.Reason, "name") {
+		t.Fatalf("result = %+v, %v", res, err)
+	}
+	if resolved != 0 {
+		t.Fatal("the cover was stored before the names were checked")
+	}
+	bi.Credits[0].Person.Name = "Named"
+	w := "  "
+	bi.Credits[0].With = &BackupPerson{SourceID: "y", Name: w}
+	if res, _ := e.lib.RestoreItem(bg, bi, RestoreOptions{}); res.Outcome != RestoreFailed {
+		t.Fatalf("counterpart without name = %+v", res)
+	}
+}
+
+func TestRestoreItemReleasesCoverWhenTheItemIsNotWritten(t *testing.T) {
+	e := newEnv(t)
+	// a trigger makes the item transaction fail for source id "boom"
+	if _, err := e.db.Exec(`CREATE TRIGGER fail_boom BEFORE INSERT ON item_titles WHEN NEW.text = 'Boom'
+		BEGIN SELECT RAISE(ABORT, 'boom'); END`); err != nil {
+		t.Fatal(err)
+	}
+	var released []string
+	opts := RestoreOptions{
+		ResolveCover: func(_ context.Context, name string) (string, string, error) { return "stored-" + name, "", nil },
+		ReleaseCover: func(_ context.Context, stored string) { released = append(released, stored) },
+	}
+	ok := BackupItem{PluginID: "book", Kind: "book", Source: "books", SourceID: "ok", Cover: "shared.png", Titles: []plugin.Title{{Lang: "en", Text: "Fine"}}}
+	if res, err := e.lib.RestoreItem(bg, ok, opts); err != nil || res.Outcome != RestoreCreated {
+		t.Fatalf("ok = %+v, %v", res, err)
+	}
+	boom := ok
+	boom.SourceID, boom.Titles = "boom", []plugin.Title{{Lang: "en", Text: "Boom"}}
+	// the shared cover is referenced by the first item: kept
+	if _, err := e.lib.RestoreItem(bg, boom, opts); err == nil {
+		t.Fatal("trigger did not fail the transaction")
+	}
+	if len(released) != 0 {
+		t.Fatalf("referenced cover released: %v", released)
+	}
+	// an unreferenced cover of a failed item is released
+	boom.Cover = "own.png"
+	if _, err := e.lib.RestoreItem(bg, boom, opts); err == nil {
+		t.Fatal("trigger did not fail the transaction")
+	}
+	if !reflect.DeepEqual(released, []string{"stored-own.png"}) {
+		t.Fatalf("released = %v", released)
+	}
+}
+
+func TestRestoreItemManualRulesAndRemoteCoverSync(t *testing.T) {
+	e := newEnv(t)
+	// richBook makes author required: a manual item without it fails
+	manual := BackupItem{PluginID: "book", Kind: "book", Source: "manual", SourceID: "m1", Titles: []plugin.Title{{Lang: "en", Text: "T"}}}
+	res, err := e.lib.RestoreItem(bg, manual, RestoreOptions{})
+	if err != nil || res.Outcome != RestoreFailed || !strings.Contains(res.Reason, "required") {
+		t.Fatalf("manual without required = %+v, %v", res, err)
+	}
+	// a sourced item may lack it (as in a normal save)
+	sourced := manual
+	sourced.Source = "books"
+	if res, err := e.lib.RestoreItem(bg, sourced, RestoreOptions{}); err != nil || res.Outcome != RestoreCreated || !res.SyncPending {
+		t.Fatalf("sourced = %+v, %v", res, err)
+	}
+	// a manual item is done, unless it has a remote cover to download
+	manual.Fields = map[string]plugin.FieldValue{"author": {Text: "A"}}
+	res, err = e.lib.RestoreItem(bg, manual, RestoreOptions{})
+	if err != nil || res.Outcome != RestoreCreated || res.SyncPending || mustItem(t, e.lib, res.ItemID).SyncState != "done" {
+		t.Fatalf("manual = %+v, %v", res, err)
+	}
+	manual.SourceID, manual.CoverURL = "m2", "https://img.example/m2.jpg"
+	res, err = e.lib.RestoreItem(bg, manual, RestoreOptions{})
+	if err != nil || res.Outcome != RestoreCreated || !res.SyncPending || mustItem(t, e.lib, res.ItemID).SyncState != "pending" {
+		t.Fatalf("manual with remote cover = %+v, %v", res, err)
+	}
+}

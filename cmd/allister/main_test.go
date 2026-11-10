@@ -116,3 +116,25 @@ func TestRemoveRestoreTempsDeletesOnlyRestoreSpools(t *testing.T) {
 	}
 	removeRestoreTemps(filepath.Join(dir, "missing")) // no tmp dir: no-op
 }
+
+func TestRemoveRestoreTempsWithGlobCharactersInDataDir(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "data[1]*")
+	tmp := filepath.Join(dir, "tmp")
+	if err := os.MkdirAll(filepath.Join(tmp, "restore-dir.zip"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for _, n := range []string{"restore-1.zip", "restore-2.zip.part", "other.zip"} {
+		if err := os.WriteFile(filepath.Join(tmp, n), []byte("x"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	removeRestoreTemps(dir)
+	var left []string
+	ents, _ := os.ReadDir(tmp)
+	for _, e := range ents {
+		left = append(left, e.Name())
+	}
+	if len(left) != 3 || left[0] != "other.zip" || left[1] != "restore-2.zip.part" || left[2] != "restore-dir.zip" {
+		t.Fatalf("left = %v", left)
+	}
+}

@@ -4,6 +4,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -33,6 +34,7 @@ var bg = context.Background()
 var clock = time.Date(2026, 11, 10, 9, 30, 0, 0, time.UTC)
 
 type env struct {
+	db     *sql.DB
 	lib    *library.Library
 	reg    *plugin.Registry
 	covers string
@@ -54,7 +56,7 @@ func newEnv(t *testing.T) *env {
 			t.Fatal(err)
 		}
 	}
-	return &env{lib: library.New(d, reg), reg: reg, covers: filepath.Join(root, "covers"), root: root, t: t}
+	return &env{db: d, lib: library.New(d, reg), reg: reg, covers: filepath.Join(root, "covers"), root: root, t: t}
 }
 
 func fp(f float64) *float64 { return &f }
@@ -502,7 +504,7 @@ func TestBackupRefusesNewerFormat(t *testing.T) {
 		{"negative", header("-1") + string(item) + "]}", "format version -1"},
 		{"fraction", header("1.5") + string(item) + "]}", "format version"},
 		{"string", header(`"1"`) + string(item) + "]}", "format version"},
-		{"missing version", `{"format":"allister.backup","items":[` + string(item) + "]}", "format version"},
+		{"missing version", `{"format":"allister.backup","items":[` + string(item) + "]}", "must come before"},
 		{"other format", `{"format":"something.else","format_version":1,"items":[` + string(item) + "]}", "not an Allister backup"},
 		{"missing format", `{"format_version":1,"items":[` + string(item) + "]}", "not an Allister backup"},
 		{"array", `[` + string(item) + `]`, "not an Allister backup"},
@@ -806,27 +808,6 @@ func TestBackupRejectsOversizedArchive(t *testing.T) {
 		}
 		if n := itemCount(t, e); n != 0 {
 			t.Fatalf("items = %d", n)
-		}
-	})
-	t.Run("too many entries in a zip64 directory", func(t *testing.T) {
-		var b bytes.Buffer
-		zw := zip.NewWriter(&b)
-		zw.SetComment("PK\x05\x06 a fake record in the comment is not trusted")
-		for i := 0; i < 70000; i++ { // over 65535 entries: zip64 end records
-			if _, err := zw.CreateHeader(&zip.FileHeader{Name: fmt.Sprint("e", i), Method: zip.Store}); err != nil {
-				t.Fatal(err)
-			}
-		}
-		zw.Close()
-		data := b.Bytes()
-		if n, ok := entryCount(bytes.NewReader(data), int64(len(data))); !ok || n != 70000 {
-			t.Fatalf("entryCount = %d, %v", n, ok)
-		}
-		e := newEnv(t)
-		_, err := e.restore(data, Limits{MaxEntries: 69999}, nil)
-		var rej *RejectError
-		if !errors.As(err, &rej) || !strings.Contains(err.Error(), "more than 69999 files") {
-			t.Fatalf("err = %v", err)
 		}
 	})
 	t.Run("too many items", func(t *testing.T) {

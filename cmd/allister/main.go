@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -168,9 +169,18 @@ func syncJobs(reg *plugin.Registry) map[string]func(itemID int64) (kind string, 
 // DATA_DIR/tmp when the process died mid-restore (a normal restore removes
 // its own file on every path).
 func removeRestoreTemps(dataDir string) {
-	names, _ := filepath.Glob(filepath.Join(dataDir, "tmp", "restore-*.zip"))
-	for _, n := range names {
-		if err := os.Remove(n); err != nil {
+	// ReadDir, not Glob: DATA_DIR may contain pattern characters
+	dir := filepath.Join(dataDir, "tmp")
+	ents, err := os.ReadDir(dir)
+	if err != nil {
+		return // no tmp dir yet
+	}
+	for _, e := range ents {
+		n := e.Name()
+		if !e.Type().IsRegular() || !strings.HasPrefix(n, "restore-") || !strings.HasSuffix(n, ".zip") {
+			continue
+		}
+		if err := os.Remove(filepath.Join(dir, n)); err != nil {
 			log.Printf("startup: %v", err)
 		}
 	}
