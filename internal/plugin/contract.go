@@ -179,7 +179,43 @@ type TermDef struct {
 	Filterable bool   `json:"filterable,omitempty"`
 }
 
-// KindDef is one media kind of a plugin.
+// Core columns of the list table: values the core keeps for every entry,
+// which a kind may offer as columns by key (ColumnDef.Key). The title column
+// is always shown and is not one of them.
+const (
+	ColumnProgress = "progress"
+	ColumnRating   = "rating"
+	ColumnStatus   = "status"
+	ColumnUpdated  = "updated"
+)
+
+// CoreColumns returns the closed set of core column keys in a stable order
+// (a fresh slice).
+func CoreColumns() []string {
+	return []string{ColumnProgress, ColumnRating, ColumnStatus, ColumnUpdated}
+}
+
+// ColumnDef offers one column of the kind's list table. Key names a field of
+// the kind or a core column (CoreColumns); Label overrides the heading (the
+// field's label, or the core's "Progress", "Score", "Status", "Updated"):
+// a single line of at most 40 characters. Default columns are shown until
+// the user chooses, in declaration order. Hide is the screen width the
+// column needs: "" always shown, "sm", "md" or "lg" from that width on.
+type ColumnDef struct {
+	Key     string `json:"key"`
+	Label   string `json:"label,omitempty"`
+	Default bool   `json:"default,omitempty"`
+	Hide    string `json:"hide,omitempty"`
+}
+
+// KindDef is one media kind of a plugin. TitleLanguages are the language
+// tags of its titles; the user picks one of them per plugin. TitleFallback is
+// the optional order of title languages the core tries when an item has no
+// title in the chosen language (each a member of TitleLanguages, listed
+// once); after it, or without it, the item's first stored title is shown.
+// It is omitted from JSON when empty. Columns, when set, are the columns its
+// list table offers (see ColumnDef); without them the core derives the table
+// from the fields. It is omitted from JSON when empty.
 type KindDef struct {
 	Key            string       `json:"key"`
 	Label          string       `json:"label"`
@@ -191,6 +227,8 @@ type KindDef struct {
 	Progress       ProgressSpec `json:"progress"`
 	Sections       []SectionDef `json:"sections,omitempty"`
 	TitleLanguages []string     `json:"title_languages"`
+	TitleFallback  []string     `json:"title_fallback,omitempty"`
+	Columns        []ColumnDef  `json:"columns,omitempty"`
 }
 
 // SourceInfo describes a data source. URLPatterns look like

@@ -106,9 +106,9 @@ type itemView struct {
 }
 
 func (s *server) itemView(ctx context.Context, li *loadedItem) itemView {
-	lang := s.deps.Settings.TitleLang(ctx)
 	m, k, d := li.man, li.kind, li.data
-	v := itemView{Title: library.ResolveTitle(d.Titles, lang)}
+	lang := s.titleLang(ctx, m)
+	v := itemView{Title: library.ResolveTitle(d.Titles, lang, k.TitleFallback)}
 	if v.Title == "" {
 		v.Title = "(untitled)"
 	}
@@ -313,7 +313,7 @@ func (s *server) section(li *loadedItem, sec plugin.SectionDef, lang string) (se
 	case plugin.SectionTitles:
 		heading("Titles")
 		// the displayed title (ResolveTitle's choice) first, the rest in order
-		first := library.ResolveTitleIndex(d.Titles, lang)
+		first := library.ResolveTitleIndex(d.Titles, lang, k.TitleFallback)
 		if first >= 0 {
 			t := d.Titles[first]
 			sv.Titles = append(sv.Titles, titleRow{Label: langLabel(t.Lang), Text: t.Text})
@@ -327,7 +327,7 @@ func (s *server) section(li *loadedItem, sec plugin.SectionDef, lang string) (se
 	case plugin.SectionRelated:
 		heading("Related")
 		for _, r := range d.Relations {
-			row := relatedRow{Kind: relationLabel(r.Kind), Title: orID(library.ResolveTitle(r.Item.Titles, lang), r.Item.ID),
+			row := relatedRow{Kind: relationLabel(r.Kind), Title: orID(library.ResolveTitle(r.Item.Titles, lang, titleFallback(m, k, r.Item.Kind)), r.Item.ID),
 				Type: r.Item.Fields["type"].Text}
 			switch {
 			case r.Item.ID != "" && hasKind(m, r.Item.Kind) && hasSource(m, r.Item.Source):

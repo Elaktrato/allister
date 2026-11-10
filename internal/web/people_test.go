@@ -181,7 +181,7 @@ func TestPersonPagePreferredTitleLanguage(t *testing.T) {
 	e.withCast(t, a, anilist.CastMember{Character: pperson("c1", "Hero", "", ""), Actor: &va})
 	path := e.personPath(t, "v1")
 	for lang, want := range map[string]string{"en": "English Name", "ja": "Japanese Name"} {
-		if err := e.set.Set(context.Background(), "title_lang", lang); err != nil {
+		if err := e.set.SetTitleLang(context.Background(), "anime", lang); err != nil {
 			t.Fatal(err)
 		}
 		body := e.get(path).Body.String()

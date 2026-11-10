@@ -63,6 +63,23 @@ func manifest() plugin.Manifest {
 				{Type: plugin.SectionLinks},
 			},
 			TitleLanguages: []string{"ja", "ja-latn", "en"},
+			// the list table: type, year, progress, score, status and
+			// updated by default; the other fields can be switched on
+			Columns: []plugin.ColumnDef{
+				{Key: "type", Default: true, Hide: "sm"},
+				{Key: "year", Default: true, Hide: "md"},
+				{Key: plugin.ColumnProgress, Default: true},
+				{Key: plugin.ColumnRating, Label: "Score", Default: true},
+				{Key: plugin.ColumnStatus, Default: true},
+				{Key: plugin.ColumnUpdated, Default: true, Hide: "lg"},
+				{Key: "episodes", Hide: "md"},
+				{Key: "studio", Hide: "lg"},
+				{Key: "source_material", Hide: "lg"},
+				{Key: "started_on", Hide: "lg"},
+				{Key: "ended_on", Hide: "lg"},
+			},
+			// native, romaji, English: the order the core used to hard-code
+			TitleFallback: []string{"ja", "ja-latn", "en"},
 		}},
 		Sources: []plugin.SourceInfo{{
 			ID:                SourceID,

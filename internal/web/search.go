@@ -178,7 +178,7 @@ func (s *server) runSearch(r *http.Request, m plugin.Manifest, si plugin.SourceI
 		v.Message, v.Retry = "Search is unavailable right now, please try again", true
 		return
 	}
-	lang := s.deps.Settings.TitleLang(r.Context())
+	lang := s.titleLang(r.Context(), m)
 	text := textField(k)
 	for _, it := range res {
 		if len(v.Results) == maxSearchResults {
@@ -189,7 +189,7 @@ func (s *server) runSearch(r *http.Request, m plugin.Manifest, si plugin.SourceI
 		}
 		c := searchCard{
 			ID:    it.ID,
-			Title: orID(library.ResolveTitle(it.Titles, lang), it.ID),
+			Title: orID(library.ResolveTitle(it.Titles, lang, titleFallback(m, k, it.Kind)), it.ID),
 			Cover: covers.Src(httpURL(it.CoverURL)),
 			// the source that was asked (matched against the manifest), not
 			// what the result claims

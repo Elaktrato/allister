@@ -17,6 +17,7 @@ const (
 	maxUnitRunes          = 20
 	maxIDLabelRunes       = 40
 	maxUnmatchedNoteRunes = 200
+	maxColumnLabelRunes   = 40
 )
 
 var (
@@ -195,6 +196,17 @@ func validateKind(p *problems, path string, k KindDef) {
 		}
 		seenLang[l] = true
 	}
+	seenFallback := map[string]bool{}
+	for i, l := range k.TitleFallback {
+		at := fmt.Sprintf("%s.title_fallback[%d]", path, i)
+		switch {
+		case !slices.Contains(k.TitleLanguages, l) || l == "":
+			p.add(at, "%q is not one of the title languages", l)
+		case seenFallback[l]:
+			p.add(at, "duplicate %q", l)
+		}
+		seenFallback[l] = true
+	}
 	for _, t := range []struct {
 		name string
 		def  TermDef
@@ -255,6 +267,7 @@ func validateKind(p *problems, path string, k KindDef) {
 	}
 
 	validateProgress(p, path+".progress", k.Progress, fields)
+	validateColumns(p, path, k.Columns, fields)
 
 	for i, s := range k.Sections {
 		sp := fmt.Sprintf("%s.sections[%d]", path, i)
@@ -271,6 +284,43 @@ func validateKind(p *problems, path string, k KindDef) {
 			if _, ok := fields[s.Field]; !ok {
 				p.add(sp+".field", "no field %q", s.Field)
 			}
+		}
+	}
+}
+
+// columnHides are the allowed ColumnDef.Hide values.
+var columnHides = []string{"", "sm", "md", "lg"}
+
+// validateColumns checks a kind's declared table columns: each names a field
+// or a core column (never both, never the always-shown title), once, with a
+// bounded single-line label and a known width hint.
+func validateColumns(p *problems, path string, cols []ColumnDef, fields map[string]FieldType) {
+	seen := map[string]bool{}
+	for i, c := range cols {
+		cp := fmt.Sprintf("%s.columns[%d]", path, i)
+		_, isField := fields[c.Key]
+		isCore := slices.Contains(CoreColumns(), c.Key)
+		switch {
+		case c.Key == "title":
+			p.add(cp+".key", "%q is always shown and cannot be declared", c.Key)
+		case isField && isCore:
+			p.add(cp+".key", "%q names both a field and a core column", c.Key)
+		case !isField && !isCore:
+			p.add(cp+".key", "%q is neither a field of the kind nor a core column (%s)", c.Key, strings.Join(CoreColumns(), ", "))
+		case seen[c.Key]:
+			p.add(cp+".key", "duplicate %q", c.Key)
+		}
+		seen[c.Key] = true
+		switch l := c.Label; {
+		case !utf8.ValidString(l) || strings.IndexFunc(l, isControl) >= 0:
+			p.add(cp+".label", "must be a single line without control characters")
+		case l != "" && strings.TrimSpace(l) == "":
+			p.add(cp+".label", "must not be blank (leave it empty for the default heading)")
+		case utf8.RuneCountInString(strings.TrimSpace(l)) > maxColumnLabelRunes:
+			p.add(cp+".label", "longer than %d characters", maxColumnLabelRunes)
+		}
+		if !slices.Contains(columnHides, c.Hide) {
+			p.add(cp+".hide", `%q is not one of "", "sm", "md", "lg"`, c.Hide)
 		}
 	}
 }

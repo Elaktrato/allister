@@ -44,31 +44,47 @@ func TestGetSetRoundTrip(t *testing.T) {
 	}
 }
 
-func TestTitleLangDefault(t *testing.T) {
+// TestTitleLangPerPlugin: the title language is stored per plugin
+// (plugin.<id>.title_lang); nothing stored is "" (the web layer picks the
+// plugin's default), and plugins never see each other's choice.
+func TestTitleLangPerPlugin(t *testing.T) {
 	s, _ := newStore(t)
 	ctx := context.Background()
-	if got := s.TitleLang(ctx); got != "ja" {
-		t.Fatalf("got %q", got)
+	if got := s.TitleLang(ctx, "anime"); got != "" {
+		t.Fatalf("unset: got %q", got)
 	}
-	if err := s.Set(ctx, KeyTitleLang, "en"); err != nil {
+	if err := s.SetTitleLang(ctx, "anime", "en"); err != nil {
 		t.Fatal(err)
 	}
-	if got := s.TitleLang(ctx); got != "en" {
+	if v, ok, _ := s.Get(ctx, "plugin.anime.title_lang"); !ok || v != "en" {
+		t.Fatalf("stored %q %v", v, ok)
+	}
+	if got := s.TitleLang(ctx, "anime"); got != "en" {
 		t.Fatalf("got %q", got)
+	}
+	if got := s.TitleLang(ctx, "book"); got != "" {
+		t.Fatalf("book sees anime's language: %q", got)
+	}
+	if _, ok, _ := s.Get(ctx, "title_lang"); ok {
+		t.Fatal("the global key must not be written")
 	}
 }
 
-func TestKnownLanguages(t *testing.T) {
+func TestKnownLanguagesOfOnePlugin(t *testing.T) {
 	s, exec := newStore(t)
 	exec(`INSERT INTO items(id, plugin_id, kind, source, source_id) VALUES(1,'anime','anime','x','1')`)
 	exec(`INSERT INTO items(id, plugin_id, kind, source, source_id) VALUES(2,'anime','anime','x','2')`)
-	exec(`INSERT INTO item_titles(item_id, lang, text) VALUES(1,'fr','a'),(1,'en','b'),(2,'fr','c'),(2,'de','d')`)
-	got, err := s.KnownLanguages(context.Background())
+	exec(`INSERT INTO items(id, plugin_id, kind, source, source_id) VALUES(3,'book','book','x','3')`)
+	exec(`INSERT INTO item_titles(item_id, lang, text) VALUES(1,'fr','a'),(1,'en','b'),(2,'fr','c'),(2,'de','d'),(3,'es','e')`)
+	got, err := s.KnownLanguages(context.Background(), "anime")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if want := []string{"de", "en", "fr"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("got %v", got)
+	}
+	if got, _ := s.KnownLanguages(context.Background(), "book"); !reflect.DeepEqual(got, []string{"es"}) {
+		t.Fatalf("book: %v", got)
 	}
 }
 
@@ -124,3 +140,52 @@ func TestEnabledStoreReportsDBErrors(t *testing.T) {
 }
 
 var _ plugin.EnabledStore = (*Store)(nil)
+
+// TestColumnsRoundTrip: the visible columns of a plugin's kind are stored as
+// a JSON list under plugin.<id>.columns.<kind>; nothing stored (or an
+// unreadable value) means the kind's defaults; Reset removes the choice;
+// plugins and kinds never share it.
+func TestColumnsRoundTrip(t *testing.T) {
+	s, exec := newStore(t)
+	ctx := context.Background()
+	if got, ok := s.Columns(ctx, "anime", "anime"); ok || got != nil {
+		t.Fatalf("unset: %v %v", got, ok)
+	}
+	if err := s.SetColumns(ctx, "anime", "anime", []string{"studio", "rating"}); err != nil {
+		t.Fatal(err)
+	}
+	if v, ok, _ := s.Get(ctx, "plugin.anime.columns.anime"); !ok || v != `["studio","rating"]` {
+		t.Fatalf("stored %q %v", v, ok)
+	}
+	if got, ok := s.Columns(ctx, "anime", "anime"); !ok || !reflect.DeepEqual(got, []string{"studio", "rating"}) {
+		t.Fatalf("got %v %v", got, ok)
+	}
+	for _, other := range [][2]string{{"book", "book"}, {"anime", "other"}} {
+		if got, ok := s.Columns(ctx, other[0], other[1]); ok {
+			t.Fatalf("%v sees anime's choice: %v", other, got)
+		}
+	}
+	// an empty choice (title only) is a choice
+	if err := s.SetColumns(ctx, "book", "book", []string{}); err != nil {
+		t.Fatal(err)
+	}
+	if got, ok := s.Columns(ctx, "book", "book"); !ok || got == nil || len(got) != 0 {
+		t.Fatalf("empty: %v %v", got, ok)
+	}
+	if err := s.ResetColumns(ctx, "anime", "anime"); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := s.Columns(ctx, "anime", "anime"); ok {
+		t.Fatal("reset kept the choice")
+	}
+	if _, ok := s.Columns(ctx, "book", "book"); !ok {
+		t.Fatal("reset of anime removed book's choice")
+	}
+	// garbage is ignored (the defaults apply)
+	for _, bad := range []string{`not json`, `{"a":1}`, `[1,2]`, `null`} {
+		exec(`INSERT INTO settings(key, value) VALUES('plugin.tv.columns.show', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`, bad)
+		if got, ok := s.Columns(ctx, "tv", "show"); ok {
+			t.Errorf("%s: %v %v", bad, got, ok)
+		}
+	}
+}

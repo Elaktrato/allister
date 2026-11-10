@@ -42,7 +42,7 @@ func TestOverviewLiveForUnsaved(t *testing.T) {
 
 func TestOverviewUsesPreferredLanguage(t *testing.T) {
 	e := newEnv(t)
-	if err := e.set.Set(context.Background(), settings.KeyTitleLang, "en"); err != nil {
+	if err := e.set.SetTitleLang(context.Background(), "anime", "en"); err != nil {
 		t.Fatal(err)
 	}
 	b := e.get("/anime/anilist/1535").Body.String()

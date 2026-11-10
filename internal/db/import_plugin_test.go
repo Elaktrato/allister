@@ -56,7 +56,7 @@ func TestImportPluginMigrationUpgradesDBAtVersion9(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer d.Close()
-	if v, err := goose.GetDBVersion(d); err != nil || v != latestVersion || latestVersion != 10 {
+	if v, err := goose.GetDBVersion(d); err != nil || v != latestVersion || latestVersion < 10 {
 		t.Fatalf("version = %d, %v", v, err)
 	}
 	ic, rc := columns(t, d, "imports"), columns(t, d, "import_rows")

@@ -345,3 +345,101 @@ func TestValidateIcon(t *testing.T) {
 		}
 	}
 }
+
+// TestValidateTitleFallback: a kind's optional title fallback order lists
+// declared title languages, each once.
+func TestValidateTitleFallback(t *testing.T) {
+	for _, ok := range [][]string{nil, {"en"}, {"original", "en"}} {
+		m := tv()
+		m.Kinds[0].TitleFallback = ok
+		if err := plugin.Validate(m); err != nil {
+			t.Errorf("fallback %q refused: %v", ok, err)
+		}
+	}
+	for _, c := range []struct {
+		fallback []string
+		want     string
+	}{
+		{[]string{"de"}, `kinds[0].title_fallback[0]: "de" is not one of the title languages`},
+		{[]string{"en", "en"}, `kinds[0].title_fallback[1]: duplicate "en"`},
+		{[]string{""}, `kinds[0].title_fallback[0]: "" is not one of the title languages`},
+	} {
+		m := tv()
+		m.Kinds[0].TitleFallback = c.fallback
+		err := plugin.Validate(m)
+		if err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("fallback %q: err = %v, want %s", c.fallback, err, c.want)
+		}
+	}
+}
+
+// TestValidateColumns: a kind's optional table columns name its fields or
+// the closed set of core columns, each once, with a bounded single-line
+// label and a known screen-width hint; the title column is always shown and
+// cannot be declared.
+func TestValidateColumns(t *testing.T) {
+	good := []plugin.ColumnDef{
+		{Key: "type", Default: true, Hide: "sm"},
+		{Key: "year", Label: "Released", Default: true, Hide: "md"},
+		{Key: "episodes", Hide: "lg"},
+		{Key: "progress", Default: true},
+		{Key: "rating", Label: "Score", Default: true},
+		{Key: "status", Default: true},
+		{Key: "updated", Hide: "lg"},
+	}
+	m := tv()
+	m.Kinds[0].Columns = good
+	if err := plugin.Validate(m); err != nil {
+		t.Fatalf("good columns refused: %v", err)
+	}
+	for _, c := range []struct {
+		name string
+		cols []plugin.ColumnDef
+		mod  func(k *plugin.KindDef)
+		want string
+	}{
+		{"unknown key", []plugin.ColumnDef{{Key: "studio"}}, nil, `kinds[0].columns[0].key: "studio" is neither a field of the kind nor a core column`},
+		{"empty key", []plugin.ColumnDef{{Key: ""}}, nil, `kinds[0].columns[0].key: "" is neither a field`},
+		{"duplicate", []plugin.ColumnDef{{Key: "year"}, {Key: "year"}}, nil, `kinds[0].columns[1].key: duplicate "year"`},
+		{"title", []plugin.ColumnDef{{Key: "title"}}, nil, `kinds[0].columns[0].key: "title" is always shown`},
+		{"bad hide", []plugin.ColumnDef{{Key: "year", Hide: "xl"}}, nil, `kinds[0].columns[0].hide: "xl" is not one of "", "sm", "md", "lg"`},
+		{"long label", []plugin.ColumnDef{{Key: "year", Label: strings.Repeat("x", 41)}}, nil, `kinds[0].columns[0].label: longer than 40 characters`},
+		{"control in label", []plugin.ColumnDef{{Key: "year", Label: "a\nb"}}, nil, `kinds[0].columns[0].label: must be a single line without control characters`},
+		{"blank label", []plugin.ColumnDef{{Key: "year", Label: "   "}}, nil, `kinds[0].columns[0].label: must not be blank`},
+		{"no-break blank label", []plugin.ColumnDef{{Key: "year", Label: "\u00a0 \u3000"}}, nil, `kinds[0].columns[0].label: must not be blank`},
+		{"label padded past 40", []plugin.ColumnDef{{Key: "year", Label: " " + strings.Repeat("x", 41) + " "}}, nil, `kinds[0].columns[0].label: longer than 40 characters`},
+		{"field shadowed by a core column", []plugin.ColumnDef{{Key: "status"}}, func(k *plugin.KindDef) {
+			k.Fields = append(k.Fields, plugin.FieldDef{Key: "status", Label: "Status", Type: plugin.FieldText})
+		}, `kinds[0].columns[0].key: "status" names both a field and a core column`},
+	} {
+		m := tv()
+		if c.mod != nil {
+			c.mod(&m.Kinds[0])
+		}
+		m.Kinds[0].Columns = c.cols
+		err := plugin.Validate(m)
+		if err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%s: err = %v, want %s", c.name, err, c.want)
+		}
+	}
+	// a label of exactly 40 characters (runes) is fine, also with padding
+	// (trimmed first); fields need not be Show to be columns
+	m = tv()
+	m.Kinds[0].Columns = []plugin.ColumnDef{{Key: "year", Label: " " + strings.Repeat("ä", 40) + " "}, {Key: "episodes"}}
+	if err := plugin.Validate(m); err != nil {
+		t.Errorf("40-rune label: %v", err)
+	}
+}
+
+// TestCoreColumnsAreAClosedSet: the core columns a kind may offer by key.
+func TestCoreColumnsAreAClosedSet(t *testing.T) {
+	got := plugin.CoreColumns()
+	want := []string{"progress", "rating", "status", "updated"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("core columns = %v", got)
+	}
+	got[0] = "x"
+	if plugin.CoreColumns()[0] != "progress" {
+		t.Fatal("CoreColumns must return a fresh slice")
+	}
+}

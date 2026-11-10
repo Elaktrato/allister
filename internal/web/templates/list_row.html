@@ -11,22 +11,29 @@
       {{if .Unmatched}}<span title="{{.UnmatchedHint}}" class="rounded bg-slate-800 px-2 py-0.5 text-sky-300">unmatched</span>{{end}}
     </div>
   </td>
-  {{if .HasType}}<td class="hidden py-2 pr-3 text-slate-300 sm:table-cell">{{.Type}}</td>{{end}}
-  {{range .Fields}}<td class="hidden py-2 pr-3 text-slate-300 md:table-cell">{{.}}</td>{{end}}
-  <td class="py-2 pr-3 whitespace-nowrap">
+  {{range .Cells}}
+  {{- if eq .Core "progress"}}
+  <td class="{{if .Hide}}hidden {{end}}py-2 pr-3 whitespace-nowrap{{template "cell_hide" .Hide}}">
     <span class="inline-flex flex-wrap items-center gap-2">
-      {{range .Progress}}<span>{{if $.ShowLabels}}<span class="text-slate-400">{{.Label}}</span> {{else}}<span class="sr-only">{{.Label}}</span>{{end}}<span>{{.Value}}</span></span>{{end}}
-      {{if .CanIncrement}}
-      <form method="post" action="{{.IncrementURL}}" hx-post="{{.IncrementURL}}" hx-target="closest tr" hx-swap="outerHTML" class="inline">
-        <input type="hidden" name="return" value="{{.Return}}">
-        <button type="submit" class="rounded bg-slate-800 px-2 py-0.5 text-sm hover:bg-slate-700" aria-label="{{.IncrementLabel}}">+1</button>
+      {{range $.Progress}}<span>{{if $.ShowLabels}}<span class="text-slate-400">{{.Label}}</span> {{else}}<span class="sr-only">{{.Label}}</span>{{end}}<span>{{.Value}}</span></span>{{end}}
+      {{if $.CanIncrement}}
+      <form method="post" action="{{$.IncrementURL}}" hx-post="{{$.IncrementURL}}" hx-target="closest tr" hx-swap="outerHTML" class="inline">
+        <input type="hidden" name="return" value="{{$.Return}}">
+        <button type="submit" class="rounded bg-slate-800 px-2 py-0.5 text-sm hover:bg-slate-700" aria-label="{{$.IncrementLabel}}">+1</button>
       </form>
       {{end}}
     </span>
   </td>
-  <td class="py-2 pr-3" data-score="{{.ScoreAttr}}">{{.Score}}</td>
-  <td class="py-2 pr-3 whitespace-nowrap">{{.Status}}</td>
-  <td class="hidden py-2 pr-3 whitespace-nowrap text-slate-400 lg:table-cell">{{with .Updated}}<time datetime="{{.}}">{{.}}</time>{{end}}</td>
+  {{- else if eq .Core "rating"}}
+  <td class="{{if .Hide}}hidden {{end}}py-2 pr-3{{template "cell_hide" .Hide}}" data-score="{{$.ScoreAttr}}">{{$.Score}}</td>
+  {{- else if eq .Core "status"}}
+  <td class="{{if .Hide}}hidden {{end}}py-2 pr-3 whitespace-nowrap{{template "cell_hide" .Hide}}">{{$.Status}}</td>
+  {{- else if eq .Core "updated"}}
+  <td class="{{if .Hide}}hidden {{end}}py-2 pr-3 whitespace-nowrap text-slate-400{{template "cell_hide" .Hide}}">{{with $.Updated}}<time datetime="{{.}}">{{.}}</time>{{end}}</td>
+  {{- else}}
+  <td class="{{if .Hide}}hidden {{end}}py-2 pr-3 text-slate-300{{template "cell_hide" .Hide}}">{{.Text}}</td>
+  {{- end}}
+  {{- end}}
   <td class="py-2 text-right whitespace-nowrap">
     <a href="{{.EditURL}}" hx-get="{{.EditURL}}" hx-target="#dialog-slot" hx-swap="innerHTML" class="mr-2 text-indigo-300 hover:underline">Edit</a>
     <form method="post" action="{{.RemoveURL}}" hx-post="{{.RemoveURL}}" hx-confirm="{{.RemoveConfirm}}" class="inline">

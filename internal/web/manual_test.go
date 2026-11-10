@@ -17,7 +17,6 @@ import (
 	"github.com/allister/allister/internal/library"
 	"github.com/allister/allister/internal/plugin"
 	"github.com/allister/allister/internal/plugin/plugintest"
-	"github.com/allister/allister/internal/settings"
 )
 
 type upload struct {
@@ -185,7 +184,7 @@ func TestManualFormVaryHeader(t *testing.T) {
 
 func TestManualFormDefaultsToPreferredLanguage(t *testing.T) {
 	e := newEnv(t)
-	if err := e.set.Set(context.Background(), settings.KeyTitleLang, "en"); err != nil {
+	if err := e.set.SetTitleLang(context.Background(), "anime", "en"); err != nil {
 		t.Fatal(err)
 	}
 	b := e.get("/anime/manual/new").Body.String()
@@ -197,7 +196,7 @@ func TestManualFormDefaultsToPreferredLanguage(t *testing.T) {
 		t.Fatalf("titles %+v", it.Titles)
 	}
 	// a preferred language the kind does not offer falls back to the first
-	if err := e.set.Set(context.Background(), settings.KeyTitleLang, "de"); err != nil {
+	if err := e.set.SetTitleLang(context.Background(), "anime", "de"); err != nil {
 		t.Fatal(err)
 	}
 	mustContain(t, e.get("/anime/manual/new").Body.String(), `<option value="ja" selected>`)

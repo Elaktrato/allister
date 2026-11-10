@@ -89,7 +89,7 @@ type server struct {
 
 // pageNames lists every page template (templates/<name>.html). Add a page by
 // dropping its file in templates/ and listing it here.
-var pageNames = []string{"settings", "settings_plugins_page", "search", "item", "list", "person", "manual_form", "details_form", "import", "error", "recommendations", "backup"}
+var pageNames = []string{"settings", "settings_plugins_page", "settings_plugin", "search", "item", "list", "person", "manual_form", "details_form", "import", "error", "recommendations", "backup"}
 
 // pagePartials lists extra template files a page needs (also rendered alone
 // for htmx requests).
@@ -137,13 +137,15 @@ func newServer(deps Deps, now func() time.Time) (*server, http.Handler) {
 	}
 	mux.HandleFunc("GET /{$}", s.index)
 	mux.HandleFunc("GET /settings", s.getSettings)
-	mux.HandleFunc("POST /settings", s.postSettings)
 	mux.HandleFunc("GET /settings/import", s.getImport)
 	mux.HandleFunc("POST /settings/import", s.postImport)
 	mux.HandleFunc("POST /settings/import/cancel", s.postImportCancel)
 	mux.HandleFunc("POST /settings/import/resume", s.postImportResume)
 	mux.HandleFunc("GET /settings/plugins", s.getPlugins)
 	mux.HandleFunc("POST /settings/plugins/{id}", s.postPlugin)
+	mux.HandleFunc("GET /settings/plugins/{id}", s.getPluginSettings)
+	mux.HandleFunc("POST /settings/plugins/{id}/title-language", s.postTitleLanguage)
+	mux.HandleFunc("POST /settings/plugins/{id}/columns", s.postColumns)
 	mux.HandleFunc("GET /settings/backup", s.getBackup)
 	mux.HandleFunc("GET /settings/backup/download", s.getBackupDownload)
 	mux.HandleFunc("POST /settings/backup/restore", s.postBackupRestore)

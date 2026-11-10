@@ -75,7 +75,7 @@ func titleLangs(k plugin.KindDef) []string {
 func (s *server) newManualForm(r *http.Request, m plugin.Manifest, k plugin.KindDef, vals map[string]string, v entryValues) manualForm {
 	langs := titleLangs(k)
 	f := manualForm{itemForm: s.newItemForm(k, vals, nil), entryValues: v, TitleLang: langs[0]}
-	if pref := s.deps.Settings.TitleLang(r.Context()); slices.Contains(langs, pref) {
+	if pref := s.titleLang(r.Context(), m); slices.Contains(langs, pref) {
 		f.TitleLang = pref
 	}
 	f.Heading, f.Submit = "Add "+lowerFirst(k.Label)+" manually", "Add"

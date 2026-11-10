@@ -205,8 +205,9 @@ func TestSettingsSectionTabs(t *testing.T) {
 func TestSettingsPluginsPage(t *testing.T) {
 	e := newEnvWith(t, withPlugins(plugintest.BookPlugin()))
 	general := e.get("/settings").Body.String()
-	mustContain(t, general, `name="title_lang"`)
-	mustNotContain(t, general, `data-plugin=`)
+	// the title language moved to each plugin's page; General links them
+	mustNotContain(t, general, `name="title_lang"`, `data-plugin=`)
+	mustContain(t, general, `href="/settings/plugins/anime"`, `href="/settings/plugins/book"`)
 	rec := e.get("/settings/plugins")
 	if rec.Code != 200 {
 		t.Fatalf("status %d", rec.Code)

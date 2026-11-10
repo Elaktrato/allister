@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/allister/allister/internal/db"
 	"github.com/allister/allister/internal/plugin"
 	"github.com/allister/allister/internal/plugin/plugintest"
 	"modernc.org/sqlite"
@@ -76,23 +77,30 @@ func bookT(t *testing.T, l *Library, id, title string, fields map[string]plugin.
 }
 
 func TestResolveTitle(t *testing.T) {
+	// the order the anime plugin declares (formerly hard-coded in the core)
+	jp := []string{"ja", "ja-latn", "en"}
 	cases := []struct {
 		name      string
 		ts        []plugin.Title
 		preferred string
+		fallback  []string
 		want      string
 	}{
-		{"preferred", []plugin.Title{{Lang: "ja", Text: "進撃の巨人"}, {Lang: "en", Text: "Attack on Titan"}}, "en", "Attack on Titan"},
-		{"romaji before english", []plugin.Title{{Lang: "en", Text: "E"}, {Lang: "ja-latn", Text: "R"}}, "de", "R"},
-		{"native first", []plugin.Title{{Lang: "en", Text: "E"}, {Lang: "ja", Text: "N"}, {Lang: "ja-latn", Text: "R"}}, "de", "N"},
-		{"only english", []plugin.Title{{Lang: "en", Text: "E"}}, "de", "E"},
-		{"only french", []plugin.Title{{Lang: "fr", Text: "F"}}, "de", "F"},
-		{"first of others", []plugin.Title{{Lang: "fr", Text: "F"}, {Lang: "es", Text: "S"}}, "de", "F"},
-		{"empty preferred", []plugin.Title{{Lang: "fr", Text: "F"}, {Lang: "en", Text: "E"}}, "", "E"},
-		{"none", nil, "ja", ""},
+		{"preferred", []plugin.Title{{Lang: "ja", Text: "進撃の巨人"}, {Lang: "en", Text: "Attack on Titan"}}, "en", jp, "Attack on Titan"},
+		{"romaji before english", []plugin.Title{{Lang: "en", Text: "E"}, {Lang: "ja-latn", Text: "R"}}, "de", jp, "R"},
+		{"native first", []plugin.Title{{Lang: "en", Text: "E"}, {Lang: "ja", Text: "N"}, {Lang: "ja-latn", Text: "R"}}, "de", jp, "N"},
+		{"only english", []plugin.Title{{Lang: "en", Text: "E"}}, "de", jp, "E"},
+		{"only french", []plugin.Title{{Lang: "fr", Text: "F"}}, "de", jp, "F"},
+		{"first of others", []plugin.Title{{Lang: "fr", Text: "F"}, {Lang: "es", Text: "S"}}, "de", jp, "F"},
+		{"empty preferred", []plugin.Title{{Lang: "fr", Text: "F"}, {Lang: "en", Text: "E"}}, "", jp, "E"},
+		{"none", nil, "ja", jp, ""},
+		// the order is data: another plugin's order, or none at all
+		{"other order", []plugin.Title{{Lang: "ja", Text: "N"}, {Lang: "en", Text: "E"}}, "de", []string{"en", "ja"}, "E"},
+		{"no fallback: stored primary title", []plugin.Title{{Lang: "en", Text: "E"}, {Lang: "ja", Text: "N"}}, "de", nil, "E"},
+		{"no fallback, preferred present", []plugin.Title{{Lang: "en", Text: "E"}, {Lang: "ja", Text: "N"}}, "ja", nil, "N"},
 	}
 	for _, c := range cases {
-		if got := ResolveTitle(c.ts, c.preferred); got != c.want {
+		if got := ResolveTitle(c.ts, c.preferred, c.fallback); got != c.want {
 			t.Errorf("%s: got %q want %q", c.name, got, c.want)
 		}
 	}
@@ -107,7 +115,9 @@ func TestListRowsCarryItemEntryAndResolvedTitle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for lang, want := range map[string]string{"en": "Dune", "ja": "デューン", "de": "Der Wüstenplanet", "fr": "デューン"} {
+	// fr is missing and the book kind declares no TitleFallback: the first
+	// stored title (formerly the core's fixed ja fallback)
+	for lang, want := range map[string]string{"en": "Dune", "ja": "デューン", "de": "Der Wüstenplanet", "fr": "Dune"} {
 		pg, err := l.List(bg, bookQ, lang)
 		if err != nil {
 			t.Fatal(err)
@@ -903,14 +913,14 @@ func TestResolveTitleIndex(t *testing.T) {
 		pref string
 		want int
 	}{{"de", 2}, {"fr", 1}, {"en", 1}} {
-		if got := ResolveTitleIndex(ts, tc.pref); got != tc.want {
+		if got := ResolveTitleIndex(ts, tc.pref, []string{"en"}); got != tc.want {
 			t.Errorf("%s: got %d, want %d", tc.pref, got, tc.want)
 		}
-		if ResolveTitle(ts, tc.pref) != ts[tc.want].Text {
+		if ResolveTitle(ts, tc.pref, []string{"en"}) != ts[tc.want].Text {
 			t.Errorf("%s: ResolveTitle disagrees", tc.pref)
 		}
 	}
-	if ResolveTitleIndex(nil, "en") != -1 || ResolveTitleIndex([]plugin.Title{{Lang: "x", Text: "X"}}, "en") != 0 {
+	if ResolveTitleIndex(nil, "en", nil) != -1 || ResolveTitleIndex([]plugin.Title{{Lang: "x", Text: "X"}}, "en", []string{"en"}) != 0 {
 		t.Error("empty or no match")
 	}
 }
@@ -985,6 +995,49 @@ func TestCheckFilterAndSortAgreeWithList(t *testing.T) {
 		_, lerr := e.lib.List(bg, q, "en")
 		if (err == nil) != (lerr == nil) {
 			t.Errorf("%+v: CheckSort %v but List %v", c.s, err, lerr)
+		}
+	}
+}
+
+// TestListAndRowUseTheKindsTitleFallback: when the chosen language is
+// missing, List and Row fall back in the order the item's kind declares
+// (TitleFallback), and without one to the item's first stored title. No
+// order is built into the core.
+func TestListAndRowUseTheKindsTitleFallback(t *testing.T) {
+	d, err := db.Open(filepath.Join(t.TempDir(), "t.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { d.Close() })
+	reg := plugin.NewRegistry(plugintest.NewMemEnabled())
+	ordered := plugintest.TVPlugin()
+	ordered.M.Kinds[0].TitleFallback = []string{"original", "en"}
+	plain := plugintest.TVPlugin(plugintest.WithID("tv2")) // no fallback declared
+	for _, p := range []plugin.Plugin{ordered, plain} {
+		if err := reg.Register(p); err != nil {
+			t.Fatal(err)
+		}
+	}
+	l := New(d, reg)
+	for _, pid := range []string{"tv", "tv2"} {
+		data := tvData("1", nil)
+		data.Titles = []plugin.Title{{Lang: "en", Text: "English"}, {Lang: "original", Text: "Original"}}
+		id, err := l.AddToList(bg, pid, "show", data, Entry{Status: Active})
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := map[string]string{"tv": "Original", "tv2": "English"}[pid]
+		pg, err := l.List(bg, Query{PluginID: pid, Kind: "show"}, "de")
+		if err != nil || len(pg.Rows) != 1 || pg.Rows[0].Title != want {
+			t.Errorf("%s list: %+v %v, want %q", pid, pg.Rows, err, want)
+		}
+		r, err := l.Row(bg, id, "de")
+		if err != nil || r == nil || r.Title != want {
+			t.Errorf("%s row: %+v %v, want %q", pid, r, err, want)
+		}
+		// the chosen language wins when the item has it
+		if pg, _ := l.List(bg, Query{PluginID: pid, Kind: "show"}, "en"); len(pg.Rows) != 1 || pg.Rows[0].Title != "English" {
+			t.Errorf("%s list en: %+v", pid, pg.Rows)
 		}
 	}
 }

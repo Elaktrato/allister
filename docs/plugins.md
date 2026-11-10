@@ -68,12 +68,35 @@ type Exporter interface {
 A `KindDef` describes one media kind:
 
 - `Key`, `Label`, `LabelPlural`: id and display names, all three required. The list page heading uses `LabelPlural`.
-- `TitleLanguages`: the language tags the plugin's titles use (at least one, no duplicates or empty values). Every item has titles per language, and the user's display language comes from Settings. **Limitation:** when the chosen language is missing, the core falls back to a fixed order: `ja`, `ja-latn`, `en`, then the first title. This order lives in the core (`library.ResolveTitle`) and is not configurable per plugin yet.
+- `TitleLanguages`: the language tags the plugin's titles use (at least one, no duplicates or empty values). Every item has titles per language. The user picks the display language **per plugin** on the plugin's settings page (`/settings/plugins/{id}`) from these tags (the union over the plugin's kinds, in order) plus tags found in the plugin's stored titles. Before the user chooses, the first declared tag is used.
+- `TitleFallback`: optional, the order of languages the core tries when an item has no title in the chosen language, for example `["ja", "ja-latn", "en"]` (the anime plugin). Every entry must be one of `TitleLanguages`, listed once. After it (or without it) the item's first stored title is shown. JSON `title_fallback`, omitted when empty. There is no fallback order in the core any more.
+- `Columns`: optional, the columns of the kind's list table (see [Table columns](#table-columns)).
 - `Fields`: the item schema (below).
 - `Genres`, `Tags`: `TermDef{Enabled, Label, Editable, Filterable}`. When enabled, items carry genres (names) and tags (a name, an optional rank from 0 to 100 and a spoiler flag) as dedicated, indexed rows. `Label` is required when enabled. `Editable` puts a text area in Edit details and the manual form (one term per line; tags as `Name:80!`, where `:80` is the rank and a trailing `!` marks a spoiler). `Filterable` adds a multi-select with counts from the user's own library and an any/all switch to the list. The core trims terms, removes case-insensitive duplicates and allows at most 60 characters per term, 50 genres and 100 tags per item.
 - `Statuses`: labels for the five fixed core status classes `planned`, `active`, `paused`, `completed` and `dropped` ("Plan to watch", "Watching", ...). All five labels are required. A plugin cannot add a status.
 - `Progress`: see [Progress](#progress).
 - `Sections`: see [Sections](#sections).
+
+### Table columns
+
+```go
+type ColumnDef struct {
+	Key     string // a field key of the kind, or a core column
+	Label   string // optional heading, <= 40 characters, single line
+	Default bool   // shown before the user chooses
+	Hide    string // "", "sm", "md" or "lg"
+}
+```
+
+The list table always has the cover, the title (which sorts) and the actions. Everything else is a column the kind offers in `KindDef.Columns`, in the order given. `Key` names a field of the kind (its value is shown as on the overview, with the unit) or one of the **core columns** `progress`, `rating` (heading "Score"), `status` and `updated` (`plugin.CoreColumns()`; a closed set). `Label` replaces the field's label or the core heading. `Hide` is the screen width the column needs: empty means always, `sm`, `md` and `lg` show it from 640, 768 and 1024 px on. JSON `columns` (each `key`, `label`, `default`, `hide`, the last three omitted when unset), omitted when empty.
+
+`Validate` refuses a column whose key is neither a field nor a core column, a field key that is also a core column name, `title` (always shown), a key listed twice, a label that is blank (only spaces; leave it empty for the default heading), over 40 characters after trimming or with control characters, and any other `Hide`.
+
+The `Default` columns, in declaration order, are the table until the user chooses. The user's choice (Settings > Plugins > Settings, one form per kind) is stored as the setting `plugin.<id>.columns.<kind>`, a JSON list of column keys; posted keys the kind does not offer are refused, and stored keys it no longer offers (after a plugin update removed a column) are dropped when read. A column heading sorts when its key is a sort key: a sortable field (see `Sortable`), `progress` (with a +1 track), `rating` and `updated`; `status` never sorts. The compact Sort by control of the filter panel always offers every sort key, also of columns that are not shown.
+
+Without `Columns` the core derives the table as before: the type column (the first `Show` enum field, else the first `Show` text field; from `sm`), every sortable field (from `md`), Progress, Score, Status and Updated (from `lg`), all shown by default. The anime plugin declares Type, Year, Progress, Score, Status and Updated as defaults (exactly its earlier table) and offers Episodes, Studio, Source, Started and Ended.
+
+**Upgrade note.** `TitleFallback` and `Columns` are optional and omitted from JSON when unset, so the contract version stays 1 and an existing manifest keeps working: without `TitleFallback` a missing language shows the first stored title (the core no longer tries `ja`, `ja-latn`, `en` for every plugin), and without `Columns` the table is derived as above. The old global title language setting (`title_lang`) is moved to `plugin.anime.title_lang` by migration 00011.
 
 ### Fields
 
@@ -92,10 +115,10 @@ type FieldDef struct {
 
 | Flag | Effect in the core |
 |---|---|
-| `Show` | The field appears in the overview's info section, and in search results unless it is a URL field or the text of a text section. The kind's first `Show` enum field (else its first `Show` text field) is the list's type column. |
+| `Show` | The field appears in the overview's info section, and in search results unless it is a URL field or the text of a text section. Without declared `Columns`, the kind's first `Show` enum field (else its first `Show` text field) is the list's type column. |
 | `Editable` | The field is in Edit details and in the manual-entry form. Fields that are not editable keep their stored value on every edit. |
 | `Filterable` | The field gets a filter in the list's filter bar and a URL parameter `f.<key>`. Enum: a select, which matches exactly (several values match any of them). Number and date: a from/to range (`f.<key>.from`, `f.<key>.to`, canonical `f.<key>=a..b`). List: matches any of the given values. Text and URL: case-insensitive "contains" (ASCII case folding). |
-| `Sortable` | The field is offered as a sort (`sort=<key>`) for number, date, text, enum and URL fields. On a list field the flag is accepted but has no effect: no sort is offered. |
+| `Sortable` | The field is offered as a sort (`sort=<key>`) for number, date, text, enum and URL fields, and its column heading sorts while the column is shown. On a list field the flag is accepted but has no effect: no sort is offered. |
 | `Required` | A manual entry must have a value. In Edit details the field is required only when the item already has a value stored, so a source that lacks the field never blocks other edits. A backup restore refuses a manual item that is missing one. Items saved from a source may lack it. |
 | `Unit` | A short label (at most 20 characters, single line, no control characters) shown after a number ("37 eps"). Number fields only. |
 
@@ -233,7 +256,7 @@ An export is the plugin's own interchange format. The **universal backup** (Sett
 
 ## Storage and enabling
 
-Plugin data lives in generic, plugin-namespaced tables (items, typed fields, titles, terms, people, credits, relations, external ids, list entries, progress values), so a plugin never brings migrations. People are namespaced per plugin and never shared across plugins. Disabling a plugin in Settings hides its navigation, routes (404), person pages, import choices and export links, and pauses its background jobs. All its rows stay. Enabling it brings everything back.
+The user's per-plugin choices live in the core's settings table, keyed by plugin id: `plugin.<id>.enabled`, `plugin.<id>.title_lang` and `plugin.<id>.columns.<kind>`. Plugin data lives in generic, plugin-namespaced tables (items, typed fields, titles, terms, people, credits, relations, external ids, list entries, progress values), so a plugin never brings migrations. People are namespaced per plugin and never shared across plugins. Disabling a plugin in Settings hides its navigation, routes (404), person pages, import choices and export links, and pauses its background jobs. All its rows stay. Enabling it brings everything back.
 
 ## Versioning
 

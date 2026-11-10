@@ -1,0 +1,60 @@
+{{define "title"}}{{.Name}} settings - Allister{{end}}
+{{define "content"}}
+<div class="md:flex md:items-start md:gap-8">
+  {{settingsTabsMarker}}
+  <div class="min-w-0 flex-1">
+    <p class="mb-1 text-sm"><a href="/settings/plugins" class="text-slate-400 hover:text-slate-200 hover:underline">Plugins</a></p>
+    <h1 class="mb-6 text-2xl font-semibold">{{.Name}} <span class="text-base font-normal {{if .Enabled}}text-emerald-400{{else}}text-slate-500{{end}}">{{if .Enabled}}enabled{{else}}disabled{{end}}</span></h1>
+    <section aria-labelledby="title-language-heading" class="mb-8 max-w-md rounded-lg border border-slate-800 bg-slate-900/40 p-4">
+      <h2 id="title-language-heading" class="mb-1 font-semibold">Title language</h2>
+      <p class="mb-3 text-sm text-slate-400">Titles of this plugin's entries are shown in this language when an entry has it.</p>
+      <form method="post" action="{{.LangAction}}" class="flex flex-wrap items-center gap-3">
+        <label for="title_lang" class="sr-only">Title language</label>
+        <select id="title_lang" name="title_lang" class="min-w-0 flex-1 rounded-md border border-slate-700 bg-slate-900 px-3 py-2 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500">
+          {{range .LangOptions}}<option value="{{.Value}}"{{if eq .Value $.Lang}} selected{{end}}>{{.Label}}</option>
+          {{end}}
+        </select>
+        <button type="submit" class="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium hover:bg-indigo-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400">Save</button>
+      </form>
+    </section>
+    {{range $f := .Columns}}
+    <section id="{{.Anchor}}" aria-labelledby="{{.Anchor}}-heading" class="mb-8 max-w-md rounded-lg border border-slate-800 bg-slate-900/40 p-4">
+      <h2 id="{{.Anchor}}-heading" class="mb-1 font-semibold">Table columns{{with .Heading}}: {{.}}{{end}}</h2>
+      <p class="mb-3 text-sm text-slate-400">Choose the columns of the list and their order. The cover, the title and the actions are always shown.</p>
+      <form method="post" action="{{.Action}}">
+        {{/* the form's default button: Enter (implicit submission) only saves, never moves or resets */}}
+        <button type="submit" class="sr-only" tabindex="-1" aria-hidden="true">Save columns</button>
+        <input type="hidden" name="kind" value="{{.Kind}}">
+        <fieldset class="mb-4">
+        <legend class="sr-only">Table columns{{with .Heading}}: {{.}}{{end}}</legend>
+        <ul class="divide-y divide-slate-800 rounded-md border border-slate-800">
+          <li class="flex items-center gap-3 px-3 py-2 text-sm text-slate-400">
+            <input type="checkbox" checked disabled aria-label="Title" class="h-4 w-4 accent-indigo-500">
+            <span class="flex-1"><span class="text-slate-200">Title</span> <span class="text-xs text-slate-500">always shown</span></span>
+          </li>
+          {{range .Rows}}
+          <li class="flex items-center gap-3 px-3 py-1.5 text-sm">
+            <input type="hidden" name="order" value="{{.Key}}">
+            <input type="checkbox" id="col-{{$f.Kind}}-{{.Key}}" name="show" value="{{.Key}}"{{if .Shown}} checked{{end}} class="h-4 w-4 accent-indigo-500">
+            <label for="col-{{$f.Kind}}-{{.Key}}" class="flex-1 {{if .Shown}}text-slate-200{{else}}text-slate-400{{end}}"><span>{{.Label}}</span>{{with .Width}} <span class="text-xs text-slate-500">{{.}}</span>{{end}}{{with .Note}} <span class="text-xs text-slate-500">({{.}})</span>{{end}}</label>
+            {{if .Shown}}
+            <span class="flex gap-1">
+              {{if .Up}}<button type="submit" name="move" value="up:{{.Key}}" aria-label="Move {{.Label}} up" class="rounded p-1 text-slate-400 hover:bg-slate-800 hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"><span class="icon text-[1.125rem]" aria-hidden="true">arrow_upward</span></button>{{else}}<span class="w-[1.625rem]" aria-hidden="true"></span>{{end}}
+              {{if .Down}}<button type="submit" name="move" value="down:{{.Key}}" aria-label="Move {{.Label}} down" class="rounded p-1 text-slate-400 hover:bg-slate-800 hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"><span class="icon text-[1.125rem]" aria-hidden="true">arrow_downward</span></button>{{else}}<span class="w-[1.625rem]" aria-hidden="true"></span>{{end}}
+            </span>
+            {{end}}
+          </li>
+          {{end}}
+        </ul>
+        </fieldset>
+        <div class="flex flex-wrap items-center gap-3">
+          <button type="submit" class="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium hover:bg-indigo-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400">Save columns</button>
+          <button type="submit" name="reset" value="1" class="rounded-md bg-slate-700 px-3 py-2 text-sm font-medium hover:bg-slate-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500">Reset to defaults</button>
+          {{if not .Custom}}<span class="text-xs text-slate-500">Showing the defaults</span>{{end}}
+        </div>
+      </form>
+    </section>
+    {{end}}
+  </div>
+</div>
+{{end}}

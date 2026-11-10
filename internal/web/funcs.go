@@ -36,11 +36,6 @@ var templateFuncs = template.FuncMap{
 }
 
 func langLabel(tag string) string {
-	for _, o := range baseLangOptions {
-		if o.Value == tag {
-			return o.Label
-		}
-	}
 	if n, ok := langNames[tag]; ok {
 		return n
 	}

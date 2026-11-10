@@ -118,7 +118,7 @@ func (s *server) newMatchView(r *http.Request, t *matchTarget, si plugin.SourceI
 		Heading:     "Match to " + si.Name,
 		RefLabel:    si.Name + " URL or id",
 		SearchLabel: "Or search " + si.Name,
-		Title:       orID(library.ResolveTitle(t.item.Titles, s.deps.Settings.TitleLang(r.Context())), t.ref.ID),
+		Title:       orID(s.resolveTitle(r.Context(), m, t.kind, t.ref.Kind, t.item.Titles), t.ref.ID),
 		Source:      si.ID,
 	}
 	if len(si.URLPatterns) > 0 {
