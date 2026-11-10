@@ -6,8 +6,10 @@ package guard
 
 import (
 	"bufio"
+	"fmt"
 	"go/parser"
 	"go/token"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -48,7 +50,7 @@ var excludedDirs = []string{
 
 // mediaWords are the words of the first plugin (anime) that the core must not
 // contain, case-insensitively.
-var mediaWords = regexp.MustCompile(`(?i)anime|anilist|episode|yamtrack|mal_id|myanimelist`)
+var mediaWords = regexp.MustCompile(`(?i)anime|anilist|episode|yamtrack|mal_id|myanimelist|manga|\bmal\b`)
 
 // allowed lists, per file, the exact (trimmed) lines that may contain a media
 // word. Keep it minimal: every entry needs a reason.
@@ -104,42 +106,54 @@ func productionFiles(t *testing.T) []string {
 	return out
 }
 
+// scan returns one message per offending line of the file rel read from r
+// (lines in allowed[rel] are skipped and recorded in used), plus one when the
+// file name itself has a media word.
+func scan(rel string, r io.Reader, used map[string]map[string]bool) ([]string, error) {
+	var out []string
+	if mediaWords.MatchString(rel) {
+		out = append(out, fmt.Sprintf("%s: media-specific word %q in a core file name", rel, mediaWords.FindString(rel)))
+	}
+	sc := bufio.NewScanner(r)
+	sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	for n := 1; sc.Scan(); n++ {
+		line := sc.Text()
+		if !mediaWords.MatchString(line) {
+			continue
+		}
+		trimmed := strings.TrimSpace(line)
+		ok := false
+		for _, a := range allowed[rel] {
+			if trimmed == a {
+				ok = true
+				if used[rel] == nil {
+					used[rel] = map[string]bool{}
+				}
+				used[rel][a] = true
+			}
+		}
+		if !ok {
+			out = append(out, fmt.Sprintf("%s:%d: media-specific word %q in the core: %s", rel, n, mediaWords.FindString(line), trimmed))
+		}
+	}
+	return out, sc.Err()
+}
+
 func TestCoreHasNoMediaSpecificWords(t *testing.T) {
 	used := map[string]map[string]bool{}
 	for _, rel := range productionFiles(t) {
-		if mediaWords.MatchString(rel) {
-			t.Errorf("%s: media-specific word %q in a core file name", rel, mediaWords.FindString(rel))
-		}
 		f, err := os.Open(filepath.Join(root, rel))
 		if err != nil {
 			t.Fatal(err)
 		}
-		sc := bufio.NewScanner(f)
-		sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
-		for n := 1; sc.Scan(); n++ {
-			line := sc.Text()
-			if !mediaWords.MatchString(line) {
-				continue
-			}
-			trimmed := strings.TrimSpace(line)
-			ok := false
-			for _, a := range allowed[rel] {
-				if trimmed == a {
-					ok = true
-					if used[rel] == nil {
-						used[rel] = map[string]bool{}
-					}
-					used[rel][a] = true
-				}
-			}
-			if !ok {
-				t.Errorf("%s:%d: media-specific word %q in the core: %s", rel, n, mediaWords.FindString(line), trimmed)
-			}
-		}
-		if err := sc.Err(); err != nil {
+		msgs, err := scan(rel, f, used)
+		f.Close()
+		if err != nil {
 			t.Fatalf("%s: %v", rel, err)
 		}
-		f.Close()
+		for _, m := range msgs {
+			t.Error(m)
+		}
 	}
 	// a stale allow-list entry hides nothing but must go
 	for rel, lines := range allowed {
@@ -207,6 +221,7 @@ func TestNoLegacyPackagesRemain(t *testing.T) {
 		"internal/titles",
 		"internal/importer/yamtrack",
 		"internal/plugins/anime/animedef",
+		"internal/plugins/anime/animemap",
 	} {
 		if _, err := os.Stat(filepath.Join(root, dir)); err == nil {
 			t.Errorf("legacy package %s still exists", dir)
@@ -222,6 +237,9 @@ var migrationName = regexp.MustCompile(`^(\d{5})_[a-z0-9_]+\.sql$`)
 // TestMigrationsAreStrictlyIncreasing: goose applies migrations by number and
 // cannot apply a lower number to a database already at a higher version, so
 // the numbers sorted by file name must strictly increase. Gaps are allowed.
+// With five-digit names, sorting by name already orders by number; the real
+// value of this test is the name pattern (which keeps that true and catches
+// a duplicate number) and the assertion that 00008 stays absent.
 func TestMigrationsAreStrictlyIncreasing(t *testing.T) {
 	ents, err := os.ReadDir(filepath.Join(root, "internal/db/migrations"))
 	if err != nil {
@@ -260,5 +278,67 @@ func TestMigrationsAreStrictlyIncreasing(t *testing.T) {
 	// would never run on a database already at version 9 or later.
 	if _, ok := seen[8]; ok {
 		t.Errorf("migration 00008 must stay unused (see 00009_rewrite_sync_jobs.sql)")
+	}
+}
+
+// TestScannerFlagsPlantedWords keeps the guard honest: the scanner flags
+// planted media words in Go and HTML lines and in file names, leaves clean
+// lines alone, and the walked files cover the core (so nobody can neuter the
+// word list or coreDirs unnoticed).
+func TestScannerFlagsPlantedWords(t *testing.T) {
+	for _, line := range []string{
+		"// Episode counter", "func AnimeID() {}", "<h1>Anime</h1>", `x := "anilist.co"`,
+		"var yamtrackRows int", "SELECT mal_id FROM t", "the MyAnimeList id", "a Manga shelf", "MAL #5", "id (mal)",
+	} {
+		msgs, err := scan("internal/web/x.go", strings.NewReader("package web\n"+line+"\n"), map[string]map[string]bool{})
+		if err != nil || len(msgs) != 1 || !strings.Contains(msgs[0], "internal/web/x.go:2:") {
+			t.Errorf("%q: %v %v", line, msgs, err)
+		}
+	}
+	html := "<p>clean</p>\n<td>{{.Episodes}}</td>\n"
+	if msgs, _ := scan("internal/web/templates/x.html", strings.NewReader(html), map[string]map[string]bool{}); len(msgs) != 1 ||
+		!strings.Contains(msgs[0], "x.html:2:") {
+		t.Errorf("html: %v", msgs)
+	}
+	for _, clean := range []string{"normal malformed animation? no", "// a smallish formal note", "items and units"} {
+		// "animation" contains "anim" but not "anime"; "normal", "malformed" are not the word mal
+		if msgs, _ := scan("internal/web/x.go", strings.NewReader(clean+"\n"), map[string]map[string]bool{}); len(msgs) != 0 {
+			t.Errorf("clean line %q flagged: %v", clean, msgs)
+		}
+	}
+	if msgs, _ := scan("internal/web/anime_page.go", strings.NewReader(""), map[string]map[string]bool{}); len(msgs) != 1 {
+		t.Errorf("file name not flagged: %v", msgs)
+	}
+	// an allow-listed line passes and is recorded
+	used := map[string]map[string]bool{}
+	line := allowed["cmd/allister/main.go"][1]
+	if msgs, _ := scan("cmd/allister/main.go", strings.NewReader("\t"+line+"\n"), used); len(msgs) != 0 || !used["cmd/allister/main.go"][line] {
+		t.Errorf("allowed line: %v %v", msgs, used)
+	}
+	files := map[string]bool{}
+	for _, f := range productionFiles(t) {
+		files[f] = true
+	}
+	for _, want := range []string{"cmd/allister/main.go", "internal/web/server.go", "internal/web/templates/base.html",
+		"internal/library/library.go", "internal/importer/runner.go", "internal/plugin/contract.go", "internal/db/db.go"} {
+		if !files[want] {
+			t.Errorf("%s is not scanned", want)
+		}
+	}
+	for f := range files {
+		if strings.HasPrefix(f, "internal/plugin/plugintest/") || strings.HasPrefix(f, "internal/plugins/") || strings.HasSuffix(f, "_test.go") {
+			t.Errorf("%s must not be scanned", f)
+		}
+	}
+	for _, d := range []string{"internal/backup", "internal/jobs", "internal/covers", "internal/settings", "internal/ids", "internal/config"} {
+		found := false
+		for f := range files {
+			if strings.HasPrefix(f, d+"/") {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("no file of %s is scanned", d)
+		}
 	}
 }

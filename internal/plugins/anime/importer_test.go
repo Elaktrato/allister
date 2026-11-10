@@ -249,3 +249,19 @@ func TestPluginUnknownIDsReturnNil(t *testing.T) {
 		t.Error("declared ids must resolve")
 	}
 }
+
+// AniList reports MyAnimeList ids in canonical decimal form, so the export's
+// id loses its leading zeros: "0123" must match a saved item with mal 123
+// (and is a duplicate of "123").
+func TestImporterCanonicalMALID(t *testing.T) {
+	res := parseCSV(t, "media_id,media_type,status,title\n0123,anime,Completed,\n123,anime,Planning,Dup\n")
+	if len(res.Entries) != 1 {
+		t.Fatalf("entries = %+v", res.Entries)
+	}
+	if e := res.Entries[0]; e.ExternalIDs["mal"] != "123" || e.Title != "MAL #123" {
+		t.Errorf("entry = %+v", e)
+	}
+	if len(res.Skipped) != 1 || !strings.Contains(res.Skipped[0].Reason, "duplicate media_id 123") {
+		t.Errorf("skipped = %+v", res.Skipped)
+	}
+}

@@ -23,7 +23,8 @@ type storedRow struct {
 // with their reasons) as a new import and enqueues the job. Nothing is stored
 // when the plugin or importer is unknown or disabled (ErrUnknownImporter),
 // the importer's ResolveVia source is not provided by the plugin
-// (ErrSourceMissing; only an empty ResolveVia means manual-only), the file is
+// (ErrSourceMissing) or cannot look up (ErrNoLookup; only an empty
+// ResolveVia means manual-only), the file is
 // not in the format (*BadFileError), holds nothing importable (*NoRowsError)
 // or another import is active (*ActiveError).
 func (r *Runner) Submit(ctx context.Context, pluginID, importerID, filename string, in io.Reader) (int64, error) {
@@ -35,8 +36,8 @@ func (r *Runner) Submit(ctx context.Context, pluginID, importerID, filename stri
 	if imp == nil {
 		return 0, ErrUnknownImporter
 	}
-	if ref.sourceMissing() {
-		return 0, ErrSourceMissing
+	if err := ref.usable(); err != nil {
+		return 0, err
 	}
 	res, err := imp.Parse(ctx, in)
 	if err != nil {

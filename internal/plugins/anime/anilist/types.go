@@ -86,12 +86,12 @@ type Provider interface {
 }
 
 var (
-	// ErrNotFound: the provider does not know the requested item.
-	ErrNotFound = errors.New("provider: not found")
-	// ErrRateLimited: the provider throttled the request.
-	ErrRateLimited = errors.New("provider: rate limited")
+	// ErrNotFound: AniList does not know the requested item.
+	ErrNotFound = errors.New("anilist: not found")
+	// ErrRateLimited: AniList throttled the request.
+	ErrRateLimited = errors.New("anilist: rate limited")
 	// ErrUnavailable: server error, network error, timeout or unreadable response.
-	ErrUnavailable = errors.New("provider: unavailable")
+	ErrUnavailable = errors.New("anilist: unavailable")
 	// ErrBadResponse: AniList answered with something the client cannot use
 	// and would answer the same on a retry (malformed data on a 200, a GraphQL
 	// error that is not "not found", an unexpected 4xx status).

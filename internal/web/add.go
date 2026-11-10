@@ -424,25 +424,30 @@ func (s *server) fetchLive(ctx context.Context, t *addTarget) error {
 	return nil
 }
 
-// addFailure handles a resolveAdd or fetchLive error: source outages
-// re-render the dialog (keeping the form) with a readable message, the rest
-// use error pages.
+// addFailure handles a resolveAdd or fetchLive error: source outages (503)
+// and unusable source answers (502) re-render the dialog (keeping the form)
+// with a readable message, the rest use error pages.
 func (s *server) addFailure(w http.ResponseWriter, r *http.Request, m plugin.Manifest, ref itemRef, v entryValues, err error) {
 	retry := itemURL(m, ref.Source, ref.ID, ref.Kind)
-	if !errors.Is(err, plugin.ErrRateLimited) && !errors.Is(err, plugin.ErrUnavailable) {
+	status := http.StatusServiceUnavailable
+	switch {
+	case errors.Is(err, plugin.ErrBadResponse):
+		status = http.StatusBadGateway
+	case errors.Is(err, plugin.ErrRateLimited), errors.Is(err, plugin.ErrUnavailable):
+	default:
+		s.itemFail(w, r, m, ref.Source, err, retry)
+		return
+	}
+	if !isPartialRequest(r) {
 		s.itemFail(w, r, m, ref.Source, err, retry)
 		return
 	}
 	log.Printf("%s %s: %v", r.Method, r.URL.Path, err)
 	msg := sourceMessage(m, ref.Source, err)
-	if !isPartialRequest(r) {
-		s.errorPage(w, r, http.StatusServiceUnavailable, "Temporarily unavailable", msg, retry)
-		return
-	}
 	k := kindFor(m, ref)
 	f := newEntryForm(m, k, ref.Source, ref.ID, progressContext{Keys: k.Progress.Defaults}, v)
 	f.Error = msg
-	s.renderPartialStatus(w, http.StatusServiceUnavailable, "item", "add_dialog", f)
+	s.renderPartialStatus(w, status, "item", "add_dialog", f)
 }
 
 // addDialog writes the dialog (htmx) or the overview with the dialog open

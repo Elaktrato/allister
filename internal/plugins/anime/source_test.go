@@ -335,12 +335,12 @@ func TestSourceErrorMapping(t *testing.T) {
 		want   error // nil: a plain error (none of the plugin sentinels)
 		legacy string
 	}{
-		{"not found", 404, string(fixtureOrEmpty("notfound.json")), plugin.ErrNotFound, "provider: not found"},
-		{"rate limited", 429, `{}`, plugin.ErrRateLimited, "provider: rate limited"},
-		{"server error", 500, `{}`, plugin.ErrUnavailable, "provider: unavailable"},
-		{"malformed", 200, `not json`, nil, "anilist: bad response"},
-		{"graphql error", 200, `{"errors":[{"message":"Invalid query","status":400}]}`, nil, "anilist: bad response"},
-		{"teapot", 418, `{}`, nil, "anilist: bad response"},
+		{"not found", 404, string(fixtureOrEmpty("notfound.json")), plugin.ErrNotFound, "anilist: not found"},
+		{"rate limited", 429, `{}`, plugin.ErrRateLimited, "anilist: rate limited"},
+		{"server error", 500, `{}`, plugin.ErrUnavailable, "anilist: unavailable"},
+		{"malformed", 200, `not json`, plugin.ErrBadResponse, "anilist: bad response"},
+		{"graphql error", 200, `{"errors":[{"message":"Invalid query","status":400}]}`, plugin.ErrBadResponse, "anilist: bad response"},
+		{"teapot", 418, `{}`, plugin.ErrBadResponse, "anilist: bad response"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			s := newSource(t, []byte(c.body), c.status, nil)
@@ -358,6 +358,10 @@ func TestSourceErrorMapping(t *testing.T) {
 				}
 				if c.want != nil && !errors.Is(err, c.want) {
 					t.Errorf("%s: err = %v, want %v", name, err, c.want)
+				}
+				// a bad answer is never retryable
+				if c.want == plugin.ErrBadResponse && (errors.Is(err, plugin.ErrUnavailable) || errors.Is(err, plugin.ErrRateLimited)) {
+					t.Errorf("%s: err = %v must not be retryable", name, err)
 				}
 				// the cause is preserved: the message still carries the legacy sentinel
 				if err != nil && !strings.Contains(err.Error(), c.legacy) {

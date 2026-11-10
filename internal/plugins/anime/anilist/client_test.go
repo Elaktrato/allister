@@ -507,3 +507,11 @@ func TestAniListRequestsMediumForPeopleAndLargeForCovers(t *testing.T) {
 		}
 	}
 }
+
+func TestSentinelsNameAniList(t *testing.T) {
+	for _, err := range []error{ErrNotFound, ErrRateLimited, ErrUnavailable, ErrBadResponse} {
+		if !strings.HasPrefix(err.Error(), "anilist: ") {
+			t.Errorf("%q must start with \"anilist: \"", err)
+		}
+	}
+}

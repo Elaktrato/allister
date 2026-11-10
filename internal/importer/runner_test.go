@@ -664,3 +664,62 @@ func TestManualOnlyImporterSavesManualEntries(t *testing.T) {
 		t.Errorf("looked up %v", got)
 	}
 }
+
+// plugin.ErrBadResponse fails the row at once even when the source also
+// wraps a retryable sentinel: retrying a bad answer does not help.
+func TestRunnerBadResponseFailsRowWithoutRetry(t *testing.T) {
+	e := newGenEnv(t)
+	e.bookSrc.Fn = func(_ context.Context, _, _, v string, _ int) (plugin.ItemData, error) {
+		if v == "2" {
+			return plugin.ItemData{}, fmt.Errorf("books: %w (%w)", plugin.ErrBadResponse, plugin.ErrUnavailable)
+		}
+		return book(v, 300), nil
+	}
+	e.bookImp.Result = plugin.ParseResult{Entries: []plugin.ParsedEntry{
+		bookEntry("1", "One", plugin.Planned, 0), bookEntry("2", "Two", plugin.Planned, 0), bookEntry("3", "Three", plugin.Planned, 0)}}
+	id := e.submit("book", "books-csv")
+	if err := e.run("book", id); err != nil {
+		t.Fatalf("the job must complete: %v", err)
+	}
+	r := e.report()
+	if r.State != "done" || r.Imported != 2 || r.Failed != 1 || r.FailedRows[0].Title != "Two" ||
+		!strings.Contains(r.FailedRows[0].Message, "bad response") {
+		t.Fatalf("report: %+v", r)
+	}
+	n := 0
+	for _, v := range e.bookSrc.Looked() {
+		if v == "2" {
+			n++
+		}
+	}
+	if n != 1 {
+		t.Errorf("row 2 looked up %d times, want once", n)
+	}
+}
+
+// usable double-checks the resolved importer: a declared ResolveVia source
+// must be provided by the plugin and support lookup (Validate already
+// refuses a manifest without lookup; this guards the runner on its own).
+func TestImporterRefUsable(t *testing.T) {
+	src := &plugintest.LookupSource{}
+	for name, c := range map[string]struct {
+		ref  importerRef
+		want error
+	}{
+		"manual-only": {importerRef{info: plugin.ImporterInfo{ID: "i"}}, nil},
+		"resolvable": {importerRef{info: plugin.ImporterInfo{ResolveVia: "s"}, source: src,
+			srcInfo: plugin.SourceInfo{ID: "s", Name: "S", SupportsLookup: true}}, nil},
+		"source missing": {importerRef{info: plugin.ImporterInfo{ResolveVia: "s"},
+			srcInfo: plugin.SourceInfo{ID: "s", SupportsLookup: true}}, ErrSourceMissing},
+		"no lookup": {importerRef{info: plugin.ImporterInfo{ResolveVia: "s"}, source: src,
+			srcInfo: plugin.SourceInfo{ID: "s", Name: "S"}}, ErrNoLookup},
+	} {
+		err := c.ref.usable()
+		if !errors.Is(err, c.want) || (c.want == nil) != (err == nil) {
+			t.Errorf("%s: err = %v, want %v", name, err, c.want)
+		}
+		if err != nil && !errors.Is(err, ErrUnknownImporter) {
+			t.Errorf("%s: %v must match ErrUnknownImporter", name, err)
+		}
+	}
+}

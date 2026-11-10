@@ -13,6 +13,11 @@ var (
 	ErrRateLimited = errors.New("plugin: rate limited")
 	// ErrUnavailable: server error, network error, timeout or unreadable response.
 	ErrUnavailable = errors.New("plugin: unavailable")
+	// ErrBadResponse: the source answered, but with data the core cannot use
+	// (malformed, or an error the source will repeat); retrying will not help.
+	// The web shows it as a bad gateway (502); an import fails that row and
+	// moves on, it never retries it.
+	ErrBadResponse = errors.New("plugin: bad response from the source")
 	// ErrBadInput: an importer was given a file that is not in its format.
 	ErrBadInput = errors.New("plugin: bad input")
 )

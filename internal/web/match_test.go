@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/url"
 	"reflect"
 	"strconv"
@@ -470,6 +471,7 @@ func TestMatchFetchesBeforeAnyChange(t *testing.T) {
 		"not found":    {plugin.ErrNotFound, 422, "Fake TV has no show with that id."},
 		"unavailable":  {plugin.ErrUnavailable, 503, "Nothing was changed"},
 		"rate limited": {plugin.ErrRateLimited, 503, "Nothing was changed"},
+		"bad answer":   {fmt.Errorf("tvdata: %w", plugin.ErrBadResponse), 502, "Fake TV returned an answer we could not use. Please try again later. Nothing was changed."},
 	} {
 		t.Run(name, func(t *testing.T) {
 			e := newFixtureEnv(t)

@@ -54,9 +54,9 @@ func checkKind(kind string) error {
 
 // mapErr maps an AniList client error onto the plugin sentinels while keeping
 // the cause: errors.Is matches both. Context errors pass through unchanged.
-// anilist.ErrBadResponse (an answer that a retry would not change) stays a
-// plain error, so an import records the row as failed and moves on instead
-// of retrying it as unavailable.
+// anilist.ErrBadResponse (an answer that a retry would not change) becomes
+// plugin.ErrBadResponse, never ErrUnavailable: an import records the row as
+// failed and moves on instead of retrying it, the web answers 502.
 func mapErr(err error) error {
 	if err == nil {
 		return nil
@@ -66,7 +66,7 @@ func mapErr(err error) error {
 	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
 		return err
 	case errors.Is(err, anilist.ErrBadResponse):
-		return fmt.Errorf("anime: %w", err)
+		target = plugin.ErrBadResponse
 	case errors.Is(err, anilist.ErrNotFound):
 		target = plugin.ErrNotFound
 	case errors.Is(err, anilist.ErrRateLimited):

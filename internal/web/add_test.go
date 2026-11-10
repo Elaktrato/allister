@@ -3,6 +3,7 @@ package web
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http/httptest"
 	"net/url"
 	"strings"
@@ -746,4 +747,22 @@ func TestAddRepeatedParametersFirstWins(t *testing.T) {
 	if en.Status != library.Completed || *en.Rating != 6 || en.Progress["pages"] != 9 || en.Comment != "one" {
 		t.Fatalf("%+v", en)
 	}
+}
+
+func TestAddBadSourceAnswerIs502AndSavesNothing(t *testing.T) {
+	e := newAddEnv(t)
+	e.book.Err = fmt.Errorf("books: graphql error: %w", plugin.ErrBadResponse)
+	rec := e.do("POST", "/book/books/42/add", url.Values{"status": {"active"}, "comment": {"typed"}}, true)
+	if rec.Code != 502 {
+		t.Fatalf("got %d", rec.Code)
+	}
+	mustContain(t, rec.Body.String(), "<form", "typed", "Fake Books returned an answer we could not use. Please try again later.")
+	e.assertNothingSavedFor(t, "book", "books", "42")
+	// without JavaScript: the error page with the retry link
+	rec = e.do("POST", "/book/books/42/add", url.Values{"status": {"active"}}, false)
+	if rec.Code != 502 {
+		t.Fatalf("full page: %d", rec.Code)
+	}
+	mustContain(t, rec.Body.String(), "Fake Books returned an answer we could not use", `href="/book/books/42"`)
+	e.assertNothingSavedFor(t, "book", "books", "42")
 }

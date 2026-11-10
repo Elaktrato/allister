@@ -2,6 +2,8 @@ package web
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
@@ -713,4 +715,21 @@ func TestFieldUnitRendersAfterNumbers(t *testing.T) {
 	mustContain(t, e.get("/book/books/1").Body.String(), "Pages:</dt> <dd class=\"inline\">320 pages</dd>")
 	e.book.Summaries = []plugin.ItemSummary{d.ItemSummary}
 	mustContain(t, e.get("/book/search?q=u").Body.String(), "Ursula K. Le Guin · 320 pages")
+}
+
+// A source that answered with data the core cannot use is a bad gateway: the
+// readable page with the retry link, not a bare internal error.
+func TestOverviewBadSourceAnswerIs502(t *testing.T) {
+	e := newFixtureEnv(t)
+	e.tv.Errs = map[string]error{plugintest.OpDetails: fmt.Errorf("tvdata: malformed: %w", plugin.ErrBadResponse)}
+	rec := e.get("/tv/tvdata/1")
+	if rec.Code != 502 {
+		t.Fatalf("got %d: %s", rec.Code, rec.Body.String())
+	}
+	mustContain(t, rec.Body.String(), "Fake TV returned an answer we could not use. Please try again later.", `href="/tv/tvdata/1"`, "Try again")
+	// an error of our own code stays an internal error
+	e.tv.Errs = map[string]error{plugintest.OpDetails: errors.New("disk on fire")}
+	if rec := e.get("/tv/tvdata/1"); rec.Code != 500 {
+		t.Fatalf("plain error: %d", rec.Code)
+	}
 }

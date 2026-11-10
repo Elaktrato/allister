@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math"
 	"regexp"
+	"slices"
 	"strings"
 	"unicode/utf8"
 )
@@ -114,8 +115,8 @@ func Validate(m Manifest) error {
 		case utf8.RuneCountInString(n) > maxUnmatchedNoteRunes:
 			p.add(path+".unmatched_note", "longer than %d characters", maxUnmatchedNoteRunes)
 		}
-		if im.ResolveVia != "" && !sources[im.ResolveVia] {
-			p.add(path+".resolve_via", "unknown source %q", im.ResolveVia)
+		if im.ResolveVia != "" {
+			validateResolveVia(&p, path, im, m.Sources)
 		}
 	}
 	exporters := map[string]bool{}
@@ -133,6 +134,32 @@ func Validate(m Manifest) error {
 		}
 	}
 	return errors.Join(p.list...)
+}
+
+// validateResolveVia checks that the importer's ResolveVia source exists,
+// supports lookup and can look up the importer's ExternalIDType; otherwise
+// every row of every import would fail its lookup.
+func validateResolveVia(p *problems, path string, im ImporterInfo, sources []SourceInfo) {
+	var src *SourceInfo
+	for i := range sources {
+		if sources[i].ID == im.ResolveVia {
+			src = &sources[i]
+			break
+		}
+	}
+	if src == nil {
+		p.add(path+".resolve_via", "unknown source %q", im.ResolveVia)
+		return
+	}
+	if !src.SupportsLookup {
+		p.add(path+".resolve_via", "source %q does not support lookup", src.ID)
+	}
+	switch {
+	case im.ExternalIDType == "":
+		p.add(path+".external_id_type", "required when resolve_via is set")
+	case !slices.Contains(src.ExternalIDTypes, im.ExternalIDType):
+		p.add(path+".external_id_type", "source %q cannot look up %q ids", src.ID, im.ExternalIDType)
+	}
 }
 
 func checkID(p *problems, path, id string, seen map[string]bool) {

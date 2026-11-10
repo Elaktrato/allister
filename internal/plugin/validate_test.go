@@ -294,3 +294,33 @@ func TestValidateReservedSourceIDs(t *testing.T) {
 		t.Errorf("importer/exporter ids: %v", err)
 	}
 }
+
+// An importer that resolves through a source must name an id type that
+// source can look up; otherwise every row of every import would fail.
+func TestValidateImporterLookupConfiguration(t *testing.T) {
+	for name, c := range map[string]struct {
+		mod  func(m *plugin.Manifest)
+		want string // "" means valid
+	}{
+		"fixture as is":   {func(*plugin.Manifest) {}, ""},
+		"manual-only":     {func(m *plugin.Manifest) { m.Importers[0].ResolveVia, m.Importers[0].ExternalIDType = "", "" }, ""},
+		"manual-only, id": {func(m *plugin.Manifest) { m.Importers[0].ResolveVia = "" }, ""},
+		"no id type": {func(m *plugin.Manifest) { m.Importers[0].ExternalIDType = "" },
+			`importers[0].external_id_type: required when resolve_via is set`},
+		"id type the source does not know": {func(m *plugin.Manifest) { m.Importers[0].ExternalIDType = "asin" },
+			`importers[0].external_id_type: source "books" cannot look up "asin" ids`},
+		"source without lookup": {func(m *plugin.Manifest) { m.Sources[0].SupportsLookup = false },
+			`importers[0].resolve_via: source "books" does not support lookup`},
+		"source without id types": {func(m *plugin.Manifest) { m.Sources[0].ExternalIDTypes = nil },
+			`importers[0].external_id_type: source "books" cannot look up "isbn" ids`},
+	} {
+		t.Run(name, func(t *testing.T) {
+			m := book()
+			c.mod(&m)
+			err := plugin.Validate(m)
+			if (c.want == "") != (err == nil) || (err != nil && !strings.Contains(err.Error(), c.want)) {
+				t.Fatalf("err = %v, want %q", err, c.want)
+			}
+		})
+	}
+}

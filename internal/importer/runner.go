@@ -83,6 +83,10 @@ var (
 	// ErrSourceMissing matches ErrUnknownImporter too: the importer names a
 	// ResolveVia source that its plugin does not provide.
 	ErrSourceMissing = fmt.Errorf("%w: its source is not provided by the plugin", ErrUnknownImporter)
+	// ErrNoLookup matches ErrUnknownImporter too: the importer's ResolveVia
+	// source does not support lookup (plugin.Validate refuses such a
+	// manifest; the runner checks again on its own).
+	ErrNoLookup = fmt.Errorf("%w: its source cannot look up external ids", ErrUnknownImporter)
 	// ErrActive is wrapped by *ActiveError: another import is pending or running.
 	ErrActive = errors.New("another import is still active")
 	// ErrNothingToResume: the latest import is not failed or cancelled, has no
@@ -249,10 +253,19 @@ func (ref *importerRef) kind(key string) (plugin.KindDef, bool) {
 	return plugin.KindDef{}, false
 }
 
-// sourceMissing reports an importer that resolves through a source its
-// plugin does not provide.
-func (ref *importerRef) sourceMissing() bool {
-	return ref.info.ResolveVia != "" && ref.source == nil
+// usable reports why an importer that resolves through a source cannot run:
+// ErrSourceMissing (the plugin does not provide the source) or ErrNoLookup
+// (the source cannot look up). nil for a usable or manual-only importer.
+func (ref *importerRef) usable() error {
+	switch {
+	case ref.info.ResolveVia == "":
+		return nil
+	case ref.source == nil:
+		return ErrSourceMissing
+	case !ref.srcInfo.SupportsLookup:
+		return ErrNoLookup
+	}
+	return nil
 }
 
 // idLabel names the importer's external id type (its label, else the type).
@@ -428,8 +441,11 @@ func (r *Runner) Handler() jobs.Handler {
 		if !ok {
 			return r.fail(ctx, p.ImportID, "Stopped: the importer is no longer installed")
 		}
-		if ref.sourceMissing() {
+		switch err := ref.usable(); {
+		case errors.Is(err, ErrSourceMissing):
 			return r.fail(ctx, p.ImportID, "Stopped: the importer's source is no longer provided by its plugin")
+		case err != nil:
+			return r.fail(ctx, p.ImportID, "Stopped: the importer's source cannot look up external ids")
 		}
 		if _, err := r.d.DB.ExecContext(ctx, `UPDATE imports SET state=?, note='' WHERE id=? AND state=?`, stateRunning, p.ImportID, statePending); err != nil {
 			return fmt.Errorf("import %d: %w", p.ImportID, err)
@@ -590,6 +606,9 @@ func (r *Runner) process(ctx context.Context, ref *importerRef, importID int64, 
 		}
 		if ctx.Err() != nil {
 			return fmt.Errorf("import %d: %w", importID, ctx.Err())
+		}
+		if errors.Is(err, plugin.ErrBadResponse) { // a retry would get the same answer
+			return r.record(ctx, importID, pr.seq, outcomeFailed, 0, err.Error())
 		}
 		if errors.Is(err, plugin.ErrNotFound) {
 			notFound = true

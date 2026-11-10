@@ -132,10 +132,13 @@ func Parse(r io.Reader) (rows []Row, skipped []SkippedRow, err error) {
 			continue
 		}
 		malID := get("media_id")
-		if n, err := strconv.ParseUint(malID, 10, 31); err != nil || n == 0 {
+		n, err := strconv.ParseUint(malID, 10, 31)
+		if err != nil || n == 0 {
 			skip(fmt.Sprintf("invalid media_id %q", malID), false)
 			continue
 		}
+		// AniList reports MAL ids in canonical decimal form: "0123" is 123
+		malID = strconv.FormatUint(n, 10)
 		status, ok := statusMap[strings.ToLower(get("status"))]
 		if !ok {
 			skip(fmt.Sprintf("unknown status %q", get("status")), false)

@@ -207,7 +207,9 @@ type SourceInfo struct {
 }
 
 // ImporterInfo describes an import format. ResolveVia names the declared
-// source used to look up ExternalIDType; FallbackTitleLang is the title
+// source used to look up ExternalIDType (that source must have
+// SupportsLookup and list ExternalIDType in its ExternalIDTypes; an empty
+// ResolveVia makes the importer manual-only); FallbackTitleLang is the title
 // language of the manual entry kept when nothing matches. ExternalIDLabel is
 // an optional human name of ExternalIDType ("Example DB"): a single line of
 // at most 40 characters; the core shows such an id as "<label> #<value>"

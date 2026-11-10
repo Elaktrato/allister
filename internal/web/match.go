@@ -257,6 +257,10 @@ func (s *server) postMatch(w http.ResponseWriter, r *http.Request, pluginID stri
 	case errors.Is(err, plugin.ErrNotFound):
 		fail(http.StatusUnprocessableEntity, si.Name+" has no "+strings.ToLower(t.kind.Label)+" with that id.")
 		return
+	case errors.Is(err, plugin.ErrBadResponse):
+		log.Printf("match %s/%s: fetch %s/%s: %v", t.man.ID, t.ref.ID, si.ID, id, err)
+		fail(http.StatusBadGateway, sourceMessage(t.man, si.ID, err)+" Nothing was changed.")
+		return
 	case errors.Is(err, plugin.ErrRateLimited), errors.Is(err, plugin.ErrUnavailable):
 		log.Printf("match %s/%s: fetch %s/%s: %v", t.man.ID, t.ref.ID, si.ID, id, err)
 		fail(http.StatusServiceUnavailable, sourceMessage(t.man, si.ID, err)+" Nothing was changed.")

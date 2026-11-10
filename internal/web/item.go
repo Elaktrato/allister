@@ -176,6 +176,9 @@ func (s *server) itemFail(w http.ResponseWriter, r *http.Request, m plugin.Manif
 		s.errorPage(w, r, http.StatusNotFound, "Not found", "Several kinds share this id: add ?kind=…", "")
 	case errors.Is(err, errNoSuchItem), errors.Is(err, plugin.ErrNotFound):
 		s.errorPage(w, r, http.StatusNotFound, "Not found", "There is no such item.", "")
+	case errors.Is(err, plugin.ErrBadResponse):
+		log.Printf("%s %s: %v", r.Method, r.URL.Path, err)
+		s.errorPage(w, r, http.StatusBadGateway, "Unusable answer", sourceMessage(m, source, err), retry)
 	case errors.Is(err, plugin.ErrRateLimited), errors.Is(err, plugin.ErrUnavailable):
 		log.Printf("%s %s: %v", r.Method, r.URL.Path, err)
 		s.errorPage(w, r, http.StatusServiceUnavailable, "Temporarily unavailable", sourceMessage(m, source, err), retry)
@@ -185,11 +188,15 @@ func (s *server) itemFail(w http.ResponseWriter, r *http.Request, m plugin.Manif
 	}
 }
 
-// sourceMessage is the readable outage message naming the source.
+// sourceMessage is the readable message of a source failure naming the
+// source: a bad answer (plugin.ErrBadResponse), rate limiting or an outage.
 func sourceMessage(m plugin.Manifest, source string, err error) string {
 	name := "The source"
 	if si, ok := sourceInfo(m, source); ok && si.Name != "" {
 		name = si.Name
+	}
+	if errors.Is(err, plugin.ErrBadResponse) {
+		return name + " returned an answer we could not use. Please try again later."
 	}
 	if errors.Is(err, plugin.ErrRateLimited) {
 		return name + " is rate limiting requests, please wait a moment and try again."
