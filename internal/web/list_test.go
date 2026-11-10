@@ -440,7 +440,10 @@ func TestSafeReturn(t *testing.T) {
 		"/other":                   "/anime",
 		"anime":                    "/anime",
 		"javascript:alert(1)":      "/anime",
-		"/anime/../../evil":        "/anime/../../evil", // still same-origin path
+		"/anime/../../evil":        "/anime", // a .. segment never passes
+		"/anime/../other":          "/anime",
+		"/anime/a/../b":            "/anime",
+		"/anime/./x":               "/anime/./x", // a single dot stays: same location
 		"/ANIME":                   "/anime",
 		"http://localhost/anime":   "/anime",
 		"/anime#frag":              "/anime",
