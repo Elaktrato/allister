@@ -282,7 +282,7 @@ func TestImportPageHasUploadFormAndSettingsLink(t *testing.T) {
 	mustContain(t, page, `name="importer" value="anime/yamtrack"`, "Import from Yamtrack CSV", `accept=".csv"`,
 		"Export your list from Yamtrack", "Rows are matched on AniList")
 	mustNotContain(t, page, "<select")
-	mustContain(t, e.get("/settings", false).Body.String(), `href="/settings/import"`, "Import from Yamtrack")
+	mustContain(t, settingsTabs(t, e.get("/settings", false).Body.String()), `href="/settings/import"`, "<span>Import</span>")
 }
 
 func TestImportUploadRejectsBadFilesAndStoresNothing(t *testing.T) {
@@ -427,7 +427,7 @@ func TestImportRoutesNeedAnImporter(t *testing.T) {
 	}
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, httptest.NewRequest("GET", "/settings", nil))
-	mustNotContain(t, rec.Body.String(), "Import from Yamtrack")
+	mustNotContain(t, rec.Body.String(), `href="/settings/import"`)
 }
 
 func TestImportStalledShowsNoteAndResumeButton(t *testing.T) {
@@ -501,7 +501,7 @@ func TestImportPageOffersImportersOfEnabledPlugins(t *testing.T) {
 	mustContain(t, page, `<select name="importer"`, `<option value="anime/yamtrack">Yamtrack CSV (Anime)</option>`,
 		`<option value="book/books-csv">Books CSV (Books)</option>`, "CSV export", "Rows are matched on Fake Books")
 	mustContain(t, page, "<h1 class=\"mb-6 text-2xl font-semibold\">Import</h1>")
-	mustContain(t, e.get("/settings", false).Body.String(), `href="/settings/import"`, "Import a file")
+	mustContain(t, settingsTabs(t, e.get("/settings", false).Body.String()), `href="/settings/import"`, "<span>Import</span>")
 
 	// with two importers the field is required
 	rec := e.upload(t, "file", "x.csv", []byte("x"))
@@ -515,7 +515,9 @@ func TestImportPageOffersImportersOfEnabledPlugins(t *testing.T) {
 			t.Errorf("%q: %d", v, rec.Code)
 		}
 		mustContain(t, rec.Body.String(), "This importer is not available.")
-		mustNotContain(t, rec.Body.String(), v+"<")
+		// (the sidebar's icon names, such as menu_book, are not the echo)
+		main := rec.Body.String()[strings.Index(rec.Body.String(), "</header>"):]
+		mustNotContain(t, main, v+"<")
 	}
 	if r, _ := e.im.Latest(context.Background()); r != nil {
 		t.Fatalf("stored: %+v", r)
@@ -570,7 +572,7 @@ func TestImportPageExplainsImportPausedByDisabledPlugin(t *testing.T) {
 	if rec := e.uploadTo(t, url.Values{"importer": {"book/books-csv"}}, "file", "b.csv", []byte("x")); rec.Code != 303 {
 		t.Fatalf("upload: %d", rec.Code)
 	}
-	const paused = "This import is paused because the Books plugin is disabled. Enable it in Settings to continue, or cancel the import."
+	const paused = "This import is paused because the Books plugin is disabled. Enable it on the Plugins page of Settings to continue, or cancel the import."
 	mustNotContain(t, e.get("/settings/import", false).Body.String(), paused)
 	if err := e.reg.SetEnabled(context.Background(), "book", false); err != nil {
 		t.Fatal(err)

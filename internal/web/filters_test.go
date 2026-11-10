@@ -514,15 +514,17 @@ func TestSortOptionsAndDirection(t *testing.T) {
 			t.Errorf("%s: rows %q notice %q", q, rowTitles(b), noticeOf(b))
 		}
 	}
+	// the choices are the table head's sort links (sort_test.go has the
+	// details), and the panel's compact sort control has them all selected
 	b := e.listGet(t, "/tv?sort=year&dir=asc")
-	mustContain(t, b, `name="sort"`, `<option value="updated">Recently updated</option>`, `<option value="title">Title</option>`,
-		`<option value="rating">Score</option>`, `<option value="progress">Progress</option>`, `<option value="year" selected>Year</option>`,
-		`name="dir"`, `<option value="asc" selected>`)
+	mustContain(t, b, `<option value="year" selected>Year</option>`, `<option value="asc" selected>Ascending</option>`,
+		`id="sort-updated"`, `id="sort-title"`, `id="sort-rating"`, `id="sort-progress"`, `id="sort-year"`)
+	mustContain(t, headCell(t, thead(t, b), "Year"), `aria-sort="ascending"`)
 	// the book fixture has no sortable field
 	e.addFixture(t, "book", "book", bookItem("1", "Earthsea"), library.Entry{Status: library.Active})
 	bk := e.listGet(t, "/book")
-	mustContain(t, bk, `<option value="title">Title</option>`, `<option value="progress">Progress</option>`)
-	mustNotContain(t, bk, `<option value="year"`, `<option value="author"`)
+	mustContain(t, bk, `id="sort-title"`, `id="sort-progress"`)
+	mustNotContain(t, bk, `id="sort-year"`, `id="sort-author"`)
 }
 
 func TestFiltersSurvivePaginationLinks(t *testing.T) {
@@ -577,7 +579,7 @@ func TestPartialResponseHasOnlyRows(t *testing.T) {
 	b := rec.Body.String()
 	wantRows(t, "partial", b, "Dark")
 	mustContain(t, b, "Showing 1–1 of 1", `id="list-tabs"`, `hx-swap-oob="true"`, "All (1)", `href="/tv?q=dar&amp;status=completed"`)
-	mustNotContain(t, b, "<html", "<header", `id="list-rows"`, "<form method=\"get\"", `id="dialog-slot"`)
+	mustNotContain(t, b, "<html", "<header", `id="list-rows"`, `method="get"`, `id="dialog-slot"`)
 	// the address bar gets the canonical URL
 	if got := rec.Header().Get("HX-Push-Url"); got != "/tv?q=dar" {
 		t.Errorf("HX-Push-Url %q", got)
@@ -590,7 +592,7 @@ func TestPartialResponseHasOnlyRows(t *testing.T) {
 	} {
 		rec := e.getWith("/tv?q=dar", h)
 		b := rec.Body.String()
-		mustContain(t, b, "<html", `id="list-rows"`, `id="dialog-slot"`, `<form method="get" action="/tv"`)
+		mustContain(t, b, "<html", `id="list-rows"`, `id="dialog-slot"`, `<form id="list-filter" method="get" action="/tv"`)
 		wantRows(t, fmt.Sprint(h), b, "Dark")
 		if !strings.Contains(rec.Header().Get("Vary"), "HX-Request") || rec.Header().Get("HX-Push-Url") != "" {
 			t.Errorf("%v: headers %v", h, rec.Header())
@@ -637,7 +639,7 @@ func TestFilterBarOnlyShowsFilterableFields(t *testing.T) {
 	e.addFixture(t, "tv", "show", tvShow("1", "Dark"), active)
 	e.addFixture(t, "anime", "anime", animeData("1", "Alpha", "TV", 2001, "Madhouse"), active)
 	form := func(b string) string {
-		i := strings.Index(b, `<form method="get"`)
+		i := strings.Index(b, `<form id="list-filter" method="get"`)
 		if i < 0 {
 			t.Fatal("no filter form")
 		}
@@ -663,7 +665,7 @@ func TestFilterBarOnlyShowsFilterableFields(t *testing.T) {
 	mustContain(t, form(e2.listGet(t, "/book?kind=comic&status=active")), `name="kind" value="comic"`, `name="status" value="active"`)
 	// an empty list has no filter bar
 	e3 := newFixtureEnv(t)
-	mustNotContain(t, e3.listGet(t, "/tv"), `<form method="get"`)
+	mustNotContain(t, e3.listGet(t, "/tv"), `id="list-filter"`, `method="get"`)
 }
 
 func TestClearFiltersLink(t *testing.T) {
@@ -746,7 +748,7 @@ func TestPartialSwapsTermCountsAndClearOutOfBand(t *testing.T) {
 	// never a select, fieldset, the any/all switch or the text inputs (focus stays)
 	mustNotContain(t, b, "<select", "<fieldset", `name="genre_mode"`, `name="tag_mode"`, `name="q"`, `name="rmin"`, `name="sort"`,
 		`id="filter-genre"`, `id="filter-tag"`)
-	if n := strings.Count(b, "hx-swap-oob"); n != 4 { // tabs, clear, two option lists
+	if n := strings.Count(b, "hx-swap-oob"); n != 7 { // tabs, clear, the Filters badge, the sort and dir option lists, the genre and tag option lists
 		t.Errorf("%d oob blocks", n)
 	}
 	// without filters the Clear slot is swapped empty

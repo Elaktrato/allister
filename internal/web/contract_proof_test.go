@@ -669,7 +669,7 @@ func TestThreePluginsShareOneQueueAndImportRunner(t *testing.T) {
 	e.drain(t)
 	b = e.page(t, "/settings/import")
 	mustContain(t, b, "again.txt", `data-state="pending"`, "Cancel import",
-		"This import is paused because the Books plugin is disabled. Enable it in Settings to continue, or cancel the import.")
+		"This import is paused because the Books plugin is disabled. Enable it on the Plugins page of Settings to continue, or cancel the import.")
 	rec = e.uploadImport(t, "tv/tv-json", "tv2.txt", "dark;Dark;active\n")
 	if rec.Code != http.StatusConflict {
 		t.Fatalf("import while a paused one is pending: %d", rec.Code)
@@ -716,7 +716,8 @@ func TestNavigationAndSettingsWithThreePlugins(t *testing.T) {
 		last = i
 	}
 	mustContain(t, nav, ">Anime<", ">Books<", ">Shows<")
-	// Settings lists the three plugins with their sources and importers and a toggle each
+	b = e.page(t, "/settings/plugins")
+	// Settings > Plugins lists the three plugins with their sources and importers and a toggle each
 	for _, p := range []struct{ id, name, source, importer string }{
 		{"anime", "Anime", "AniList", "Yamtrack CSV"}, {"book", "Books", "Fake Books", "Books CSV"}, {"tv", "TV", "Fake TV", "TV JSON"}} {
 		i := strings.Index(b, `data-plugin="`+p.id+`"`)
@@ -755,7 +756,7 @@ func TestNavigationAndSettingsWithThreePlugins(t *testing.T) {
 	mustContain(t, e.page(t, "/tv/search"), "Search shows")
 
 	// the home page follows the enabled plugins in registry order
-	for _, step := range []struct{ toggle, want string }{{"", "/anime"}, {"anime", "/book"}, {"book", "/tv"}, {"tv", "/settings"}} {
+	for _, step := range []struct{ toggle, want string }{{"", "/anime"}, {"anime", "/book"}, {"book", "/tv"}, {"tv", "/settings/plugins"}} {
 		if step.toggle != "" {
 			if rec := e.do("POST", "/settings/plugins/"+step.toggle, url.Values{"enabled": {"0"}}, false); rec.Code != http.StatusSeeOther {
 				t.Fatalf("disable %s: %d", step.toggle, rec.Code)
@@ -766,7 +767,7 @@ func TestNavigationAndSettingsWithThreePlugins(t *testing.T) {
 		}
 	}
 	// with all three off the nav has only Settings and every row offers Enable
-	b = e.page(t, "/settings")
+	b = e.page(t, "/settings/plugins")
 	nav = navOf(t, b)
 	mustNotContain(t, nav, `href="/anime"`, `href="/book"`, `href="/tv"`)
 	if n := strings.Count(b, `name="enabled" value="1"`); n != 3 {

@@ -12,6 +12,7 @@
     </div>
   </td>
   {{if .HasType}}<td class="hidden py-2 pr-3 text-slate-300 sm:table-cell">{{.Type}}</td>{{end}}
+  {{range .Fields}}<td class="hidden py-2 pr-3 text-slate-300 md:table-cell">{{.}}</td>{{end}}
   <td class="py-2 pr-3 whitespace-nowrap">
     <span class="inline-flex flex-wrap items-center gap-2">
       {{range .Progress}}<span>{{if $.ShowLabels}}<span class="text-slate-400">{{.Label}}</span> {{else}}<span class="sr-only">{{.Label}}</span>{{end}}<span>{{.Value}}</span></span>{{end}}
@@ -25,6 +26,7 @@
   </td>
   <td class="py-2 pr-3" data-score="{{.ScoreAttr}}">{{.Score}}</td>
   <td class="py-2 pr-3 whitespace-nowrap">{{.Status}}</td>
+  <td class="hidden py-2 pr-3 whitespace-nowrap text-slate-400 lg:table-cell">{{with .Updated}}<time datetime="{{.}}">{{.}}</time>{{end}}</td>
   <td class="py-2 text-right whitespace-nowrap">
     <a href="{{.EditURL}}" hx-get="{{.EditURL}}" hx-target="#dialog-slot" hx-swap="innerHTML" class="mr-2 text-indigo-300 hover:underline">Edit</a>
     <form method="post" action="{{.RemoveURL}}" hx-post="{{.RemoveURL}}" hx-confirm="{{.RemoveConfirm}}" class="inline">

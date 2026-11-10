@@ -15,6 +15,8 @@ import (
 var templateFuncs = template.FuncMap{
 	// navMarker marks where base.html's navigation goes (see executeFor).
 	"navMarker": func() template.HTML { return template.HTML(navMarker) },
+	// settingsTabsMarker marks where a settings page's section tabs go.
+	"settingsTabsMarker": func() template.HTML { return template.HTML(settingsTabsMarker) },
 	// dialogSwap is the condition (on s, the response status) of the dialog
 	// slot's before-swap handler: true for every dialogSwapStatuses member.
 	"dialogSwap": dialogSwap,

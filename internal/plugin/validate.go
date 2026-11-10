@@ -25,6 +25,8 @@ var (
 	idRe = regexp.MustCompile(`^[a-z][a-z0-9-]{0,31}$`)
 	// keyRe: field and progress keys.
 	keyRe = regexp.MustCompile(`^[a-z][a-z0-9_]{0,31}$`)
+	// iconRe: a Manifest.Icon (an icon name, empty allowed separately).
+	iconRe = regexp.MustCompile(`^[a-z0-9_]{1,40}$`)
 )
 
 // reservedIDs are first URL segments owned by the core.
@@ -61,6 +63,9 @@ func Validate(m Manifest) error {
 	}
 	if m.Name == "" {
 		p.add("name", "required")
+	}
+	if m.Icon != "" && !iconRe.MatchString(m.Icon) {
+		p.add("icon", "%q is not an icon name (lower-case letters, digits and _, 1 to 40 characters)", m.Icon)
 	}
 	if len(m.Kinds) == 0 {
 		p.add("kinds", "at least one kind required")

@@ -25,6 +25,7 @@ func manifest() plugin.Manifest {
 		Version:         "1.0.0",
 		ContractVersion: plugin.ContractVersion,
 		DefaultEnabled:  true,
+		Icon:            "live_tv",
 		Kinds: []plugin.KindDef{{
 			Key:         KindAnime,
 			Label:       "Anime",

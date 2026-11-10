@@ -4,7 +4,7 @@ Details behind the short sections of the [README](../README.md).
 
 ## Searching your list
 
-The filter bar above the list searches only your own entries and updates as you type. Everything is in the URL, so a filtered list can be bookmarked. Paging and the status tabs keep the filters, and "Clear filters" removes them. Parameters:
+The search bar above the list (`q`) and the Filters panel next to it (every other parameter except the sort) search only your own entries and update the list as you type. The panel works without JavaScript too (the Apply button submits it); the Filters button shows how many of its filters are set (the score range counts once), and a list opened with such filters starts with the panel open. The column headings of the table set `sort` and `dir`. Below 1024 px wide the Updated column is hidden, and below 768 px the Year column (any plugin's sortable field column) too; the Filters panel then shows a Sort by control with every sort key (the hidden columns included) and the direction, which sets the same `sort` and `dir` (on wider screens it is hidden and the headings sort). Everything is in the URL, so a filtered list can be bookmarked. Paging and the status tabs keep the filters, and "Clear filters" removes them. Parameters:
 
 | Parameter | Meaning |
 |---|---|
@@ -17,7 +17,7 @@ The filter bar above the list searches only your own entries and updates as you 
 | `progress` | `not_started`, `in_progress` or `finished`. |
 | `rmin`, `rmax` | Score range 0 to 10. `unrated=1` and `zero=1` add unrated entries and entries scored 0 (rows matching any checked score choice are shown). |
 | `unmatched=1`, `partial=1` | Only unmatched entries, or only entries whose cast or images are still syncing. |
-| `sort`, `dir` | `updated` (recently updated, the default), `title`, `rating`, `year` or `progress`, and `asc` or `desc` (title defaults to ascending, the others to descending). |
+| `sort`, `dir` | `updated` (recently updated, the default), `title`, `rating`, `year` or `progress`, and `asc` or `desc` (title defaults to ascending, the others to descending). Set by clicking a column heading of the table (Title, Year, Progress, Score, Updated): the first click sorts by that column in its default direction, a second click reverses it. The sorted column shows an arrow. Sorting keeps the filters and goes back to page 1. |
 
 Unknown or invalid parameters are ignored, and a notice names them.
 
@@ -32,7 +32,7 @@ Unknown or invalid parameters are ignored, and a notice names them.
 | `/anime/export/json` | The JSON export |
 | `/list/{id}/edit` | The list entry's Edit dialog (status, rating, progress, dates, comment) |
 | `/people/{id}` | Person page |
-| `/settings`, `/settings/import`, `/settings/backup` | Settings, import, backup and restore |
+| `/settings`, `/settings/plugins`, `/settings/import`, `/settings/backup` | Settings sections: General (title language), Plugins (switch plugins on and off), Import, Backup and restore |
 | `/healthz` | Answers `ok`, for monitoring |
 
 Changes from the first version: a data volume from the first (pre-plugin) preview build starts empty after the upgrade (its anime tables are dropped, not copied); make a cold backup of the volume first if it holds data you want (see the README). List statuses are the core's status classes, so a bookmark like `/anime?status=watching` now opens the All tab with a notice (use `status=active`). The list's search and filter parameters are new. Edit details (`/anime/{source}/{id}/edit`) and the recommendations fragment (`/anime/{source}/{id}/recommendations`, loaded by the overview) are new routes.

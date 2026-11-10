@@ -16,7 +16,7 @@ func TestManifestIsValid(t *testing.T) {
 
 func TestManifestMatchesBaseline(t *testing.T) {
 	m := New(Options{}).Manifest()
-	if m.ID != "anime" || m.Name != "Anime" || m.Version != "1.0.0" || m.ContractVersion != plugin.ContractVersion || !m.DefaultEnabled {
+	if m.ID != "anime" || m.Name != "Anime" || m.Version != "1.0.0" || m.ContractVersion != plugin.ContractVersion || !m.DefaultEnabled || m.Icon != "live_tv" {
 		t.Errorf("header = %+v", m)
 	}
 	if len(m.Kinds) != 1 {

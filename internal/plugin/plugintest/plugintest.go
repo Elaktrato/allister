@@ -68,7 +68,7 @@ func apply(p *Plugin, opts []Option) *Plugin {
 func BookPlugin(opts ...Option) *Plugin {
 	p := &Plugin{
 		M: plugin.Manifest{
-			ID: "book", Name: "Books", Version: "1.0.0", ContractVersion: plugin.ContractVersion, DefaultEnabled: true,
+			ID: "book", Name: "Books", Version: "1.0.0", ContractVersion: plugin.ContractVersion, DefaultEnabled: true, Icon: "menu_book",
 			Kinds: []plugin.KindDef{{
 				Key: "book", Label: "Book", LabelPlural: "Books",
 				Fields: []plugin.FieldDef{

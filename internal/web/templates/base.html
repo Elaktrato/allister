@@ -4,18 +4,20 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{{block "title" .}}Allister{{end}}</title>
+  <link rel="preload" href="/static/material-symbols-outlined-v383.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="/static/app.css">
   <script src="/static/htmx.min.js" defer></script>
 </head>
 <body class="min-h-full bg-slate-950 text-slate-100">
-  <header class="border-b border-slate-800">
-    <nav class="mx-auto flex max-w-6xl items-center gap-4 px-4 py-3">
-      <a href="/" class="text-lg font-semibold">Allister</a>
-      {{navMarker}}
-    </nav>
+  <a href="#main" class="sr-only rounded-md bg-indigo-600 px-3 py-2 font-medium focus:not-sr-only focus:fixed focus:left-3 focus:top-3 focus:z-50">Skip to content</a>
+  {{/* the sidebar: a fixed 14rem column on large screens, a top bar below */}}
+  <header class="border-b border-slate-800 bg-slate-900/70 lg:fixed lg:inset-y-0 lg:left-0 lg:z-30 lg:w-56 lg:overflow-y-auto lg:border-b-0 lg:border-r">
+    {{navMarker}}
   </header>
-  <main class="mx-auto max-w-6xl px-4 py-6">
-    {{block "content" .}}{{end}}
+  <main id="main" class="min-w-0 px-4 py-6 lg:ml-56 lg:px-8 lg:py-8">
+    <div class="mx-auto max-w-6xl">
+      {{block "content" .}}{{end}}
+    </div>
   </main>
 </body>
 </html>

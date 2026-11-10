@@ -358,10 +358,10 @@ func (e *env) browserPost(target string, form url.Values) *httptest.ResponseReco
 }
 
 // togglePlugin presses the Disable/Enable button of a plugin's row in
-// Settings and expects the redirect back to Settings.
+// Settings > Plugins and expects the redirect back to that page.
 func (e *proofEnv) togglePlugin(t *testing.T, id, wantButton string) {
 	t.Helper()
-	page := e.page(t, "/settings")
+	page := e.page(t, "/settings/plugins")
 	i := strings.Index(page, `data-plugin="`+id+`"`)
 	if i < 0 {
 		t.Fatalf("no settings row for %s", id)
@@ -370,7 +370,7 @@ func (e *proofEnv) togglePlugin(t *testing.T, id, wantButton string) {
 	mustContain(t, row, ">"+wantButton+"</button>")
 	form := formWith(t, row, `action="/settings/plugins/`+id+`"`)
 	rec := e.browserPost("/settings/plugins/"+id, submitted(t, form))
-	if rec.Code != http.StatusSeeOther || rec.Header().Get("Location") != "/settings" {
+	if rec.Code != http.StatusSeeOther || rec.Header().Get("Location") != "/settings/plugins" {
 		t.Fatalf("%s %s: %d %q", wantButton, id, rec.Code, rec.Header().Get("Location"))
 	}
 }
@@ -592,7 +592,7 @@ func TestBackupEndToEnd(t *testing.T) {
 	a.drain(t)
 
 	// the per-plugin export is a JSON list of the plugin's entries; it is not a backup
-	settings := a.page(t, "/settings")
+	settings := a.page(t, "/settings/plugins")
 	export := a.get(hrefWith(t, settings, "/anime/export/"))
 	if export.Code != 200 || !strings.Contains(export.Header().Get("Content-Disposition"), "anime-json-") {
 		t.Fatalf("export: %d %q", export.Code, export.Header().Get("Content-Disposition"))
@@ -709,7 +709,7 @@ func TestDisablingAPluginPausesItsRunningImport(t *testing.T) {
 	}
 	b := e.page(t, "/settings/import")
 	mustContain(t, b, `data-state="running"`, `data-count="imported">1<`,
-		"This import is paused because the Books plugin is disabled. Enable it in Settings to continue, or cancel the import.")
+		"This import is paused because the Books plugin is disabled. Enable it on the Plugins page of Settings to continue, or cancel the import.")
 	if n := e.itemCount(t); n != 1 {
 		t.Fatalf("%d items saved while paused", n)
 	}

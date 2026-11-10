@@ -1,18 +1,17 @@
 {{define "title"}}Settings - Allister{{end}}
 {{define "content"}}
-<h1 class="mb-6 text-2xl font-semibold">Settings</h1>
-<form method="post" action="/settings" class="flex max-w-md flex-col gap-4">
-  <label for="title_lang" class="text-sm font-medium text-slate-300">Title language</label>
-  <select id="title_lang" name="title_lang" class="w-full rounded border border-slate-700 bg-slate-900 px-3 py-2">
-    {{range .Options}}<option value="{{.Value}}"{{if eq .Value $.Selected}} selected{{end}}>{{.Label}}</option>
-    {{end}}
-  </select>
-  <button type="submit" class="self-start rounded bg-indigo-600 px-4 py-2 font-medium hover:bg-indigo-500">Save</button>
-</form>
-{{template "plugins" .}}
-<h2 class="mb-2 mt-10 text-lg font-semibold">Data</h2>
-<ul class="flex flex-col gap-1">
-  {{if .Import}}<li><a href="/settings/import" class="text-indigo-400 underline hover:text-indigo-300">{{.Import}}</a></li>{{end}}
-  <li><a href="/settings/backup" class="text-indigo-400 underline hover:text-indigo-300">Backup</a></li>
-</ul>
+<div class="md:flex md:items-start md:gap-8">
+  {{settingsTabsMarker}}
+  <div class="min-w-0 flex-1">
+    <h1 class="mb-6 text-2xl font-semibold">General</h1>
+    <form method="post" action="/settings" class="flex max-w-md flex-col gap-4">
+      <label for="title_lang" class="text-sm font-medium text-slate-300">Title language</label>
+      <select id="title_lang" name="title_lang" class="w-full rounded-md border border-slate-700 bg-slate-900 px-3 py-2 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500">
+        {{range .Options}}<option value="{{.Value}}"{{if eq .Value $.Selected}} selected{{end}}>{{.Label}}</option>
+        {{end}}
+      </select>
+      <button type="submit" class="self-start rounded-md bg-indigo-600 px-4 py-2 font-medium hover:bg-indigo-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400">Save</button>
+    </form>
+  </div>
+</div>
 {{end}}

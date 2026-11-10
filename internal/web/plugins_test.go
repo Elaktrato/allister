@@ -220,7 +220,7 @@ func TestSettingsTogglePersistsAndIsCSRFProtected(t *testing.T) {
 		t.Fatalf("evil origin: %d", rec.Code)
 	}
 	rec := post(map[string]string{"Sec-Fetch-Site": "same-origin"}, url.Values{"enabled": {"0"}})
-	if rec.Code != 303 || rec.Header().Get("Location") != "/settings" || e.reg.IsEnabled("anime") {
+	if rec.Code != 303 || rec.Header().Get("Location") != "/settings/plugins" || e.reg.IsEnabled("anime") {
 		t.Fatalf("same-origin: %d %q enabled=%v", rec.Code, rec.Header().Get("Location"), e.reg.IsEnabled("anime"))
 	}
 	if v, ok, _ := e.set.Get(context.Background(), "plugin.anime.enabled"); !ok || v != "0" {
@@ -256,12 +256,12 @@ func TestToggleUnknownPluginAndBadValue(t *testing.T) {
 
 func TestSettingsListsPlugins(t *testing.T) {
 	e := newEnvWith(t, withPlugins(plugintest.BookPlugin()))
-	body := e.get("/settings").Body.String()
+	body := e.get("/settings/plugins").Body.String()
 	mustContain(t, body, "Plugins", "Anime", "Books", "AniList", "Fake Books", "Books CSV", "JSON",
 		`action="/settings/plugins/anime"`, `action="/settings/plugins/book"`, `name="enabled" value="0"`,
 		`href="/anime"`, "keeps all its data")
 	e.disable(t, "book")
-	body = e.get("/settings").Body.String()
+	body = e.get("/settings/plugins").Body.String()
 	mustContain(t, body, `action="/settings/plugins/book"`, `name="enabled" value="1"`, ">Enable<")
 	// the disabled plugin row shows no list link; fixtures have no routes either way
 	i := strings.Index(body, `data-plugin="book"`)
@@ -271,7 +271,7 @@ func TestSettingsListsPlugins(t *testing.T) {
 
 func TestSettingsListsRefusedPluginsWithReason(t *testing.T) {
 	e := newEnvWith(t, withPlugins(plugintest.BookPlugin(plugintest.WithID("list")), plugintest.TVPlugin(plugintest.WithID("Bad ID"))))
-	body := e.get("/settings").Body.String()
+	body := e.get("/settings/plugins").Body.String()
 	mustContain(t, body, "Refused plugins", "reserved by the core")
 	if !strings.Contains(body, `&#34;list&#34;`) && !strings.Contains(body, "&quot;list&quot;") {
 		t.Errorf("refused id missing: %s", body)
@@ -344,7 +344,7 @@ func TestRootRedirectsToFirstEnabledOrSettings(t *testing.T) {
 		t.Fatalf("got %q", l)
 	}
 	e.disable(t, "book")
-	if l := loc(); l != "/settings" {
+	if l := loc(); l != "/settings/plugins" {
 		t.Fatalf("got %q", l)
 	}
 }

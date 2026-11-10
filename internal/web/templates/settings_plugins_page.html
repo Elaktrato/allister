@@ -1,0 +1,10 @@
+{{define "title"}}Plugins - Allister{{end}}
+{{define "content"}}
+<div class="md:flex md:items-start md:gap-8">
+  {{settingsTabsMarker}}
+  <div class="min-w-0 flex-1">
+    <h1 class="mb-2 text-2xl font-semibold">Plugins</h1>
+    {{template "plugins" .}}
+  </div>
+</div>
+{{end}}

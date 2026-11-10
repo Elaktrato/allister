@@ -41,6 +41,8 @@ type rowView struct {
 	Title, Href, Cover string
 	HasType            bool
 	Type, Status       string
+	Fields             []string // the sortFields columns, in order
+	Updated            string   // the day the entry was last changed (2006-01-02)
 	Progress           []progressCell
 	ShowLabels         bool // more than one track: labels are visible
 	CanIncrement       bool
@@ -55,10 +57,27 @@ type rowView struct {
 	RemoveConfirm      string
 }
 
+// headView is one cell of the table head that can sort: Href ("" when the
+// column does not sort) sorts by the column, toggling the direction of the
+// sorted column; Sort is the aria-sort of the sorted column ("ascending" or
+// "descending", "" for the others).
+type headView struct {
+	Label, ID, Href, Sort string
+	Hide                  string // "md" or "lg": the column shows from that screen width on
+}
+
+// listHead is the table head: the core columns and one per sortField.
+type listHead struct {
+	Title, Progress, Score, Updated headView
+	Fields                          []headView
+}
+
 type listView struct {
 	Heading              string // the kind's plural label
+	AddLabel             string // "Add book": the search link's text
 	Kinds                []tabView
 	TypeHeader           string // "" without a type column
+	Head                 listHead
 	Tabs                 []tabView
 	TabsOOB              bool   // the tabs ride along with a rows partial
 	PushURL              string // the canonical URL of what is shown (filters applied, page clamped)
@@ -162,6 +181,64 @@ func typeField(k plugin.KindDef) (plugin.FieldDef, bool) {
 	return plugin.FieldDef{}, false
 }
 
+// sortFields are the fields shown as sortable columns: the kind's Sortable
+// fields the library can sort by, except the type column's field and a key
+// that a core sort name (title, rating, ...) would shadow.
+func sortFields(k plugin.KindDef) []plugin.FieldDef {
+	tf, hasType := typeField(k)
+	var out []plugin.FieldDef
+	for _, fd := range k.Fields {
+		if !fd.Sortable || (hasType && fd.Key == tf.Key) || coreSort(fd.Key) ||
+			library.CheckSort(k, library.Sort{Kind: library.SortField, Field: fd.Key}) != nil {
+			continue
+		}
+		out = append(out, fd)
+	}
+	return out
+}
+
+// coreSort reports whether key is a core sort name.
+func coreSort(key string) bool {
+	switch library.SortKind(key) {
+	case library.SortUpdated, library.SortTitle, library.SortRating, library.SortProgress:
+		return true
+	}
+	return false
+}
+
+// sortHead builds the head cell of the column sorting by key. The sorted
+// column links to the other direction, every other column to its default
+// direction (titles A to Z, the rest highest first); the links keep the
+// filters, kind and status and start at page 1 (filteredListURL), in the
+// canonical form parseSort reads.
+func sortHead(m plugin.Manifest, kind, status string, f listFilters, key, label string) headView {
+	cur, dir := f.Sort, f.Dir
+	if cur == "" {
+		cur = string(library.SortUpdated)
+	}
+	if dir == "" {
+		dir = defaultDir(cur)
+	}
+	h := headView{Label: label, ID: "sort-" + key}
+	next := defaultDir(key)
+	if cur == key {
+		h.Sort, next = "descending", "asc"
+		if dir == "asc" {
+			h.Sort, next = "ascending", "desc"
+		}
+	}
+	g := f
+	g.Sort, g.Dir = key, next
+	if next == defaultDir(key) {
+		g.Dir = ""
+	}
+	if key == string(library.SortUpdated) && g.Dir == "" { // the default order
+		g.Sort = ""
+	}
+	h.Href = filteredListURL(m, kind, status, 1, g)
+	return h
+}
+
 // primaryTrack is the kind's +1 track when it is a count or pages track
 // active for the item.
 func primaryTrack(k plugin.KindDef, keys []string) (plugin.ProgressDef, bool) {
@@ -194,6 +271,13 @@ func (s *server) rowView(m plugin.Manifest, row library.Row, ret string) rowView
 	}
 	if fd, ok := typeField(k); ok {
 		v.HasType, v.Type = true, it.Fields[fd.Key].Text
+	}
+	for _, fd := range sortFields(k) {
+		text, _ := fieldText(fd, it.Fields[fd.Key])
+		v.Fields = append(v.Fields, text)
+	}
+	if !e.UpdatedAt.IsZero() {
+		v.Updated = e.UpdatedAt.Format("2006-01-02")
 	}
 	for _, def := range k.Progress.Eligible {
 		if slices.Contains(it.ProgressKeys, def.Key) {
@@ -283,6 +367,19 @@ func (s *server) buildList(r *http.Request, m plugin.Manifest, lq listQuery) (li
 	}
 	if fd, ok := typeField(k); ok {
 		v.TypeHeader = fd.Label
+	}
+	v.AddLabel = "Add " + lowerFirst(k.Label)
+	head := func(key, label string) headView { return sortHead(m, k.Key, lq.Status, f, key, label) }
+	v.Head = listHead{Title: head("title", "Title"), Score: head("rating", "Score"), Updated: head("updated", "Updated"),
+		Progress: headView{Label: "Progress"}}
+	v.Head.Updated.Hide = "lg"
+	if k.Progress.PrimaryKey != "" {
+		v.Head.Progress = head("progress", "Progress")
+	}
+	for _, fd := range sortFields(k) {
+		h := head(fd.Key, fd.Label)
+		h.Hide = "md"
+		v.Head.Fields = append(v.Head.Fields, h)
 	}
 	for _, row := range pg.Rows {
 		v.Rows = append(v.Rows, s.rowView(m, row, ret))

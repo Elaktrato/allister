@@ -59,6 +59,7 @@ func (s *server) getPerson(w http.ResponseWriter, r *http.Request) {
 		s.personNotFound(w, r)
 		return
 	}
+	r = withNavPlugin(r, p.PluginID) // the sidebar highlights the person's plugin
 	apps, err := s.deps.Library.Appearances(ctx, id)
 	if err != nil {
 		log.Printf("person %d appearances: %v", id, err)

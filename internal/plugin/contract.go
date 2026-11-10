@@ -240,13 +240,18 @@ type ExporterInfo struct {
 	MIME      string `json:"mime"`
 }
 
-// Manifest is the complete declarative description of a plugin.
+// Manifest is the complete declarative description of a plugin. Icon is the
+// optional NAME of a Material Symbols icon ("live_tv", "menu_book"): plain
+// data, lower-case letters, digits and "_", 1 to 40 characters. The core
+// shows it next to the plugin's navigation entry; empty means the core's
+// default icon. It is omitted from JSON when empty.
 type Manifest struct {
 	ID              string         `json:"id"`
 	Name            string         `json:"name"`
 	Version         string         `json:"version"`
 	ContractVersion int            `json:"contract_version"`
 	DefaultEnabled  bool           `json:"default_enabled"`
+	Icon            string         `json:"icon,omitempty"`
 	Kinds           []KindDef      `json:"kinds"`
 	Sources         []SourceInfo   `json:"sources,omitempty"`
 	Importers       []ImporterInfo `json:"importers,omitempty"`
