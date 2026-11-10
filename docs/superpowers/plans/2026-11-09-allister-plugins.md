@@ -1,6 +1,7 @@
 # Allister Generic Core and Plugins Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> Historical: written before the plugin era; the global `title_lang` setting it describes became per-plugin (`plugin.<id>.title_lang`, migration 00011).
 
 **Goal:** Turn the working anime app into a generic, data-only-plugin core with anime as the first, switchable plugin, plus the approved follow-ups (edit details, late-loading recommendations, smaller images, list search and filters, pinned and checksummed builds, universal backup).
 

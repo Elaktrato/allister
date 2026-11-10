@@ -20,7 +20,6 @@ State of the project when the work moved from Claude Code to another agent. `mai
 
 ## Known follow-ups (none blocking)
 
-- Docs under `docs/superpowers/specs` and `plans` are historical; they still describe the global title-language setting in places.
 - Not built: other media types (books, manga, TV, movies, games) as plugins, MyAnimeList source (deliberately skipped), dashboards, accounts.
 
 ## Running and previews

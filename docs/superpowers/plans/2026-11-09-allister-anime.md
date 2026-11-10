@@ -1,6 +1,7 @@
 # Allister Anime Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> Historical: written before the plugin era; the global `title_lang` setting it describes became per-plugin (`plugin.<id>.title_lang`, migration 00011).
 
 **Goal:** A Dockerised, single-user Go + htmx + Tailwind app that searches, saves and tracks anime (AniList as the only metadata source, manual entries, Yamtrack import).
 
