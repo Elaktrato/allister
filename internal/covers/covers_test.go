@@ -3,6 +3,7 @@ package covers
 import (
 	"bytes"
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -99,13 +100,29 @@ func TestDownloadRejectsNon2xx(t *testing.T) {
 	}
 }
 
-func TestDownloadRejectsOversize(t *testing.T) {
-	srv := imageServer(t, "image/png", 200, bytes.Repeat([]byte("a"), maxBytes+1))
+// TestDownloadRejectsOver2MiB: a downloaded image may be at most
+// MaxImageBytes (2 MiB); one byte more is refused and leaves no file.
+func TestDownloadRejectsOver2MiB(t *testing.T) {
+	if MaxImageBytes != 2<<20 {
+		t.Fatalf("MaxImageBytes = %d, want 2 MiB", MaxImageBytes)
+	}
 	dir := t.TempDir()
-	if _, err := Download(context.Background(), nil, dir, srv.URL); err == nil {
-		t.Fatal("expected error")
+	over := imageServer(t, "image/png", 200, bytes.Repeat([]byte("a"), MaxImageBytes+1))
+	if _, err := Download(context.Background(), nil, dir, over.URL); !errors.Is(err, ErrTooLarge) {
+		t.Fatalf("err = %v, want ErrTooLarge", err)
 	}
 	if f := files(t, dir); len(f) != 0 {
+		t.Fatalf("files = %v", f)
+	}
+	exact := imageServer(t, "image/png", 200, bytes.Repeat([]byte("b"), MaxImageBytes))
+	name, err := Download(context.Background(), nil, dir, exact.URL)
+	if err != nil {
+		t.Fatalf("exactly 2 MiB: %v", err)
+	}
+	if fi, err := os.Stat(filepath.Join(dir, name)); err != nil || fi.Size() != MaxImageBytes {
+		t.Fatalf("stored %v %v", fi, err)
+	}
+	if f := files(t, dir); len(f) != 1 {
 		t.Fatalf("files = %v", f)
 	}
 }
@@ -188,7 +205,11 @@ func TestSaveRejectsOtherContent(t *testing.T) {
 
 func TestSaveRejectsOversize(t *testing.T) {
 	dir := t.TempDir()
-	body := pngBytes(strings.Repeat("a", maxBytes))
+	// user uploads keep their own larger cap (MaxUploadBytes, 10 MiB)
+	if MaxUploadBytes != 10<<20 {
+		t.Fatalf("MaxUploadBytes = %d", MaxUploadBytes)
+	}
+	body := pngBytes(strings.Repeat("a", MaxUploadBytes))
 	if _, err := Save(dir, bytes.NewReader(body)); err == nil {
 		t.Fatal("expected error")
 	}
@@ -196,7 +217,7 @@ func TestSaveRejectsOversize(t *testing.T) {
 		t.Fatalf("files = %v", f)
 	}
 	// exactly the limit is fine
-	ok := pngBytes(strings.Repeat("a", maxBytes-len(pngBytes(""))))
+	ok := pngBytes(strings.Repeat("a", MaxUploadBytes-len(pngBytes(""))))
 	if _, err := Save(dir, bytes.NewReader(ok)); err != nil {
 		t.Fatalf("at limit: %v", err)
 	}

@@ -67,8 +67,8 @@ const castQuery = `query ($id: Int, $perPage: Int) {
     characters(perPage: $perPage, sort: ROLE) {
       edges {
         role
-        node { id name { full } image { large } siteUrl }
-        voiceActors(language: JAPANESE) { id name { full } image { large } siteUrl }
+        node { id name { full } image { medium } siteUrl }
+        voiceActors(language: JAPANESE) { id name { full } image { medium } siteUrl }
       }
     }
   }
@@ -430,8 +430,11 @@ type apiPerson struct {
 	Name struct {
 		Full string `json:"full"`
 	} `json:"name"`
+	// Image is the person photo at AniList's "medium" size (about 21 KB
+	// against 87 KB at "large"): it is shown small, and every credited
+	// person's photo is downloaded. Covers stay at "large".
 	Image struct {
-		Large string `json:"large"`
+		Medium string `json:"medium"`
 	} `json:"image"`
 	SiteURL string `json:"siteUrl"`
 }
@@ -441,7 +444,7 @@ func (p apiPerson) person() provider.Person {
 		Source:   provider.AniList,
 		ID:       strconv.Itoa(p.ID),
 		Name:     p.Name.Full,
-		ImageURL: p.Image.Large,
+		ImageURL: p.Image.Medium,
 		URL:      p.SiteURL,
 	}
 }

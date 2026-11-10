@@ -443,3 +443,38 @@ func TestAnimeGenresAndTagsAreCleaned(t *testing.T) {
 		}
 	}
 }
+
+// TestAniListRequestsMediumForPeopleAndLargeForCovers: person photos (the
+// characters and voice actors of the cast) are requested at the smaller
+// "medium" size, covers at "large".
+func TestAniListRequestsMediumForPeopleAndLargeForCovers(t *testing.T) {
+	var castBody string
+	cast, err := serve(t, 200, fixture(t, "cast.json"), &castBody).Cast(context.Background(), "154587")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Count(castBody, "image { medium }") != 2 || strings.Contains(castBody, "large") {
+		t.Errorf("cast query must request image { medium } for characters and voice actors only: %s", castBody)
+	}
+	if len(cast) == 0 || !strings.Contains(cast[0].Character.ImageURL, "/medium/") ||
+		cast[0].Actor == nil || !strings.Contains(cast[0].Actor.ImageURL, "/medium/") {
+		t.Errorf("cast images not mapped from medium: %+v", cast)
+	}
+	for name, call := range map[string]func(c *Client) error{
+		"anime": func(c *Client) error { _, err := c.Anime(context.Background(), "154587"); return err },
+		"mal":   func(c *Client) error { _, err := c.AnimeByMALID(context.Background(), "52991"); return err },
+		"search": func(c *Client) error {
+			_, err := c.Search(context.Background(), "frieren")
+			return err
+		},
+	} {
+		var body string
+		fx := map[string]string{"anime": "anime.json", "mal": "anime_mal.json", "search": "search.json"}[name]
+		if err := call(serve(t, 200, fixture(t, fx), &body)); err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if !strings.Contains(body, "coverImage { large }") || strings.Contains(body, "medium") {
+			t.Errorf("%s query must request coverImage { large }: %s", name, body)
+		}
+	}
+}

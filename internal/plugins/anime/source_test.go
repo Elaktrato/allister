@@ -242,8 +242,8 @@ func TestSourcePersonWithoutActor(t *testing.T) {
 }
 
 func TestSourcePersonImageComesFromClient(t *testing.T) {
-	body := `{"data":{"Media":{"characters":{"edges":[{"role":"MAIN","node":{"id":1,"name":{"full":"X"},"image":{"large":"https://img.example/c.png"}},
-	  "voiceActors":[{"id":2,"name":{"full":"Y"},"image":{"large":"https://img.example/a.png"}}]}]}}}}`
+	body := `{"data":{"Media":{"characters":{"edges":[{"role":"MAIN","node":{"id":1,"name":{"full":"X"},"image":{"medium":"https://img.example/c.png"}},
+	  "voiceActors":[{"id":2,"name":{"full":"Y"},"image":{"medium":"https://img.example/a.png"}}]}]}}}}`
 	cr, err := newSource(t, []byte(body), 0, nil).People(ctx(), "anime", "1")
 	if err != nil || len(cr) != 1 {
 		t.Fatalf("cr=%+v err=%v", cr, err)
@@ -396,8 +396,8 @@ const hostile = `{"data":{"Media":{"id":7,"idMal":8,
  "recommendations":{"nodes":[{"mediaRecommendation":{"id":10,"title":{"romaji":"Rec\tTitle"},"coverImage":{"large":"//cdn.example/r.jpg"}}}]}}}}`
 
 const hostileCast = `{"data":{"Media":{"characters":{"edges":[
- {"role":"MAIN","node":{"id":1,"name":{"full":"Na\nme"},"image":{"large":"//cdn.example/c.png"},"siteUrl":"ftp://x/y"},
-  "voiceActors":[{"id":2,"name":{"full":"Ac\u0000tor"},"image":{"large":"data:x"},"siteUrl":"//anilist.co/staff/2"}]},
+ {"role":"MAIN","node":{"id":1,"name":{"full":"Na\nme"},"image":{"medium":"//cdn.example/c.png"},"siteUrl":"ftp://x/y"},
+  "voiceActors":[{"id":2,"name":{"full":"Ac\u0000tor"},"image":{"medium":"data:x"},"siteUrl":"//anilist.co/staff/2"}]},
  {"role":"MAIN","node":{"id":3,"name":{"full":" \n "}},"voiceActors":[]}]}}}}`
 
 func TestSourceSanitisesHostileData(t *testing.T) {
