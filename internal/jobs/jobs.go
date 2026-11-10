@@ -153,9 +153,19 @@ func (q *Queue) Run(ctx context.Context) {
 // Recover resets jobs left in state running by a crash to pending. Run does
 // this itself; call it earlier (before SweepSync) when startup work needs the
 // reset to have happened. It is idempotent.
+// donePruneDays is how long a done job row is kept before Recover prunes
+// it (failed rows keep their last_error for debugging and stay).
+const donePruneDays = 30
+
+// Recover resets jobs left in state running by a crash to pending and
+// prunes done jobs older than donePruneDays.
 func (q *Queue) Recover(ctx context.Context) error {
 	if _, err := q.db.ExecContext(ctx, `UPDATE jobs SET state='pending' WHERE state='running'`); err != nil {
 		return fmt.Errorf("reset running jobs: %w", err)
+	}
+	if _, err := q.db.ExecContext(ctx, `DELETE FROM jobs WHERE state='done' AND finished_at < ?`,
+		q.stamp(q.now().Add(-donePruneDays*24*time.Hour))); err != nil {
+		return fmt.Errorf("prune done jobs: %w", err)
 	}
 	return nil
 }
@@ -276,11 +286,12 @@ func (q *Queue) finish(id int64, kind string, attempts, partials int, herr error
 	ctx := context.Background()
 	now := q.now()
 	var err error
+	fin := q.stamp(now)
 	switch {
 	case herr == nil:
-		_, err = q.db.ExecContext(ctx, `UPDATE jobs SET state='done', last_error='' WHERE id=?`, id)
+		_, err = q.db.ExecContext(ctx, `UPDATE jobs SET state='done', last_error='', finished_at=? WHERE id=?`, fin, id)
 	case errors.Is(herr, errUnknownKind), errors.Is(herr, ErrPermanent):
-		_, err = q.db.ExecContext(ctx, `UPDATE jobs SET state='failed', last_error=? WHERE id=?`, herr.Error(), id)
+		_, err = q.db.ExecContext(ctx, `UPDATE jobs SET state='failed', last_error=?, finished_at=? WHERE id=?`, herr.Error(), fin, id)
 	case interrupted:
 		// interrupted by shutdown: run again after restart, no attempt used
 		_, err = q.db.ExecContext(ctx, `UPDATE jobs SET state='pending', last_error=? WHERE id=?`, herr.Error(), id)
@@ -291,8 +302,8 @@ func (q *Queue) finish(id int64, kind string, attempts, partials int, herr error
 	case errors.Is(herr, ErrRetryLater):
 		partials++
 		if partials >= maxPartials {
-			_, err = q.db.ExecContext(ctx, `UPDATE jobs SET state='failed', partials=?, last_error=? WHERE id=?`,
-				partials, fmt.Sprintf("gave up after %d partial runs: %v", partials, herr), id)
+			_, err = q.db.ExecContext(ctx, `UPDATE jobs SET state='failed', partials=?, last_error=?, finished_at=? WHERE id=?`,
+				partials, fmt.Sprintf("gave up after %d partial runs: %v", partials, herr), fin, id)
 		} else {
 			_, err = q.db.ExecContext(ctx, `UPDATE jobs SET state='pending', partials=?, run_after=?, last_error=? WHERE id=?`,
 				partials, q.stamp(now.Add(q.backoff(partials))), herr.Error(), id)
@@ -300,8 +311,8 @@ func (q *Queue) finish(id int64, kind string, attempts, partials int, herr error
 	default:
 		attempts++
 		if attempts >= maxAttempts {
-			_, err = q.db.ExecContext(ctx, `UPDATE jobs SET state='failed', attempts=?, last_error=? WHERE id=?`,
-				attempts, herr.Error(), id)
+			_, err = q.db.ExecContext(ctx, `UPDATE jobs SET state='failed', attempts=?, last_error=?, finished_at=? WHERE id=?`,
+				attempts, herr.Error(), fin, id)
 		} else {
 			_, err = q.db.ExecContext(ctx, `UPDATE jobs SET state='pending', attempts=?, run_after=?, last_error=? WHERE id=?`,
 				attempts, q.stamp(now.Add(q.backoff(attempts))), herr.Error(), id)
