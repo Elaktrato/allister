@@ -1,0 +1,126 @@
+{{define "title"}}Appearance - Allister{{end}}
+{{define "content"}}
+<div class="md:flex md:items-start md:gap-8">
+  {{settingsTabsMarker}}
+  <div class="min-w-0 flex-1">
+    <h1 class="mb-2 text-2xl font-semibold">Appearance</h1>
+    <p class="mb-6 max-w-xl text-sm text-slate-400">Colours, font and text size of the whole app. Changes apply on the next page you open.</p>
+    {{if .Error}}
+    <div class="mb-6 max-w-2xl rounded border border-amber-700 bg-amber-950 p-3 text-amber-200" role="alert">
+      <p>{{.Error}}</p>
+    </div>
+    {{end}}
+
+    <section aria-labelledby="colours-heading" class="mb-8 max-w-2xl rounded-lg border border-slate-800 bg-slate-900/40 p-4">
+      <h2 id="colours-heading" class="mb-1 font-semibold">Colours</h2>
+      <p class="mb-3 text-sm text-slate-400">{{if .Custom}}Custom colours, based on {{.PresetName}}. Applying a preset replaces them.{{else}}Pick a preset. System follows your device's light or dark setting.{{end}}</p>
+      <form method="post" action="/settings/appearance/preset" class="flex flex-wrap items-center gap-3">
+        <label for="preset" class="sr-only">Colour preset</label>
+        <select id="preset" name="preset" class="min-w-0 flex-1 rounded-md border border-slate-700 bg-slate-900 px-3 py-2 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500">
+          {{range .Presets}}<option value="{{.ID}}"{{if eq .ID $.Preset}} selected{{end}}>{{.Name}}</option>
+          {{end}}
+        </select>
+        <button type="submit" class="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium hover:bg-indigo-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400">Apply</button>
+      </form>
+
+      <details class="group mt-4"{{if .OpenAdvanced}} open{{end}}>
+        <summary class="cursor-pointer rounded-md py-1 text-sm font-medium text-slate-300 hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500">Advanced: edit every colour</summary>
+        <p class="mt-2 text-sm text-slate-400">Starts from the colours in use{{if .System}} (System edits the dark preset; saving makes the colours fixed){{end}}. Pick a colour or type it as #rrggbb. Pairs that are hard to read are marked; you can still save them.</p>
+        <form method="post" action="/settings/appearance/palette" class="mt-3">
+          {{range .Groups}}
+          <fieldset class="mb-4">
+            <legend class="mb-2 text-sm font-semibold text-slate-200">{{.Name}}</legend>
+            <ul class="divide-y divide-slate-800 rounded-md border border-slate-800">
+              {{range .Rows}}
+              <li class="px-3 py-2 text-sm">
+                <div class="flex flex-wrap items-center gap-3">
+                  <input type="color" id="color-{{.Token}}" name="color.{{.Token}}" value="{{.Value}}" class="h-8 w-10 shrink-0 cursor-pointer rounded border border-slate-700 bg-slate-950" data-token="{{.Token}}">
+                  <label for="color-{{.Token}}" class="min-w-0 flex-1 text-slate-200">{{.Label}}</label>
+                  <label for="hex-{{.Token}}" class="sr-only">{{.Label}} as #rrggbb</label>
+                  <input type="text" id="hex-{{.Token}}" name="hex.{{.Token}}" value="{{.Hex}}" maxlength="7" spellcheck="false" autocomplete="off" data-token="{{.Token}}" class="w-24 rounded-md border border-slate-700 bg-slate-950 px-2 py-1 font-mono text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"{{if .Warnings}} aria-describedby="warn-{{.Token}}"{{end}}>
+                  <input type="hidden" name="was.{{.Token}}" value="{{.Value}}">
+                </div>
+                {{if .Warnings}}<ul id="warn-{{.Token}}" class="mt-1 flex flex-col gap-0.5 text-xs text-amber-300">{{range .Warnings}}<li class="flex items-center gap-1"><span class="icon text-[1rem]" aria-hidden="true">warning</span><span>{{.}}</span></li>{{end}}</ul>{{end}}
+              </li>
+              {{end}}
+            </ul>
+          </fieldset>
+          {{end}}
+          <button type="submit" class="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium hover:bg-indigo-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400">Save colours</button>
+        </form>
+        <form method="post" action="/settings/appearance/palette/reset" class="mt-3">
+          <button type="submit" class="inline-flex items-center gap-1.5 rounded-md bg-slate-700 px-3 py-2 text-sm font-medium hover:bg-slate-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"><span class="icon text-[1.125rem]" aria-hidden="true">restart_alt</span><span>Reset to preset</span></button>
+        </form>
+      </details>
+    </section>
+
+    <section aria-labelledby="font-heading" class="mb-8 max-w-2xl rounded-lg border border-slate-800 bg-slate-900/40 p-4">
+      <h2 id="font-heading" class="mb-1 font-semibold">Font and text size</h2>
+      <p class="mb-3 text-sm text-slate-400">System fonts come from your device; bundled and uploaded fonts are served by Allister.</p>
+      <form method="post" action="/settings/appearance/font">
+        <fieldset class="mb-4">
+          <legend class="mb-2 text-sm font-semibold text-slate-200">Font</legend>
+          <ul class="divide-y divide-slate-800 rounded-md border border-slate-800">
+            {{range .Fonts}}
+            <li class="flex items-start gap-3 px-3 py-2">
+              <input type="radio" id="font-{{.ID}}" name="font" value="{{.ID}}"{{if .Checked}} checked{{end}} class="mt-1 h-4 w-4 accent-indigo-500">
+              <label for="font-{{.ID}}" class="min-w-0 flex-1">
+                <span class="block text-sm text-slate-200">{{.Name}} <span class="text-xs text-slate-400">{{.Kind}}</span></span>
+                <span class="al-font-{{.ID}} block truncate text-base text-slate-300">The quick brown fox jumps over the lazy dog 0123456789</span>
+              </label>
+            </li>
+            {{end}}
+          </ul>
+        </fieldset>
+        <fieldset class="mb-4">
+          <legend class="mb-2 text-sm font-semibold text-slate-200">Text size</legend>
+          <div class="flex flex-wrap gap-4">
+            {{range .Scales}}
+            <span class="flex items-center gap-2 text-sm">
+              <input type="radio" id="scale-{{.ID}}" name="scale" value="{{.ID}}"{{if .Checked}} checked{{end}} class="h-4 w-4 accent-indigo-500">
+              <label for="scale-{{.ID}}" class="text-slate-200">{{.Label}}</label>
+            </span>
+            {{end}}
+          </div>
+        </fieldset>
+        <button type="submit" class="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium hover:bg-indigo-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400">Save font</button>
+      </form>
+    </section>
+    {{if .Uploads}}
+    <section aria-labelledby="upload-heading" class="mb-8 max-w-2xl rounded-lg border border-slate-800 bg-slate-900/40 p-4">
+      <h2 id="upload-heading" class="mb-1 font-semibold">Your fonts</h2>
+      <p class="mb-3 text-sm text-slate-400">Upload a font file (woff2, woff, ttf or otf, up to 2 MiB) to choose it above. Use fonts you may use; {{len .Uploaded}} of {{.UploadMax}} fonts uploaded.</p>
+      {{if .Uploaded}}
+      <ul class="mb-4 divide-y divide-slate-800 rounded-md border border-slate-800">
+        {{range .Uploaded}}
+        <li class="flex flex-wrap items-center gap-3 px-3 py-2 text-sm">
+          <span class="min-w-0 flex-1 break-words text-slate-200">{{.Name}} <span class="text-xs text-slate-400">{{.Format}}, {{.Size}}{{if .Active}}, in use{{end}}</span></span>
+          <form method="post" action="/settings/appearance/fonts/{{.ID}}/delete">
+            <button type="submit" aria-label="Delete {{.Name}}" class="inline-flex items-center gap-1 rounded-md px-2 py-1 text-slate-300 hover:bg-slate-800 hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"><span class="icon text-[1.125rem]" aria-hidden="true">delete</span><span>Delete</span></button>
+          </form>
+        </li>
+        {{end}}
+      </ul>
+      {{end}}
+      {{if .UploadFull}}
+      <p class="text-sm text-amber-300">Delete a font to upload another.</p>
+      {{else}}
+      <form method="post" action="/settings/appearance/fonts" enctype="multipart/form-data" class="flex flex-col gap-3">
+        <div class="flex flex-col gap-1">
+          <label for="font-name" class="text-sm text-slate-200">Name</label>
+          <input type="text" id="font-name" name="name" required maxlength="{{.NameMax}}" autocomplete="off" class="rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500">
+        </div>
+        <div class="flex flex-col gap-1">
+          <label for="font-file" class="text-sm text-slate-200">Font file</label>
+          <input type="file" id="font-file" name="file" required accept=".woff2,.woff,.ttf,.otf,font/woff2,font/woff,font/ttf,font/otf" class="text-sm text-slate-300">
+        </div>
+        <div>
+          <button type="submit" class="inline-flex items-center gap-1.5 rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium hover:bg-indigo-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400"><span class="icon text-[1.125rem]" aria-hidden="true">upload</span><span>Upload font</span></button>
+        </div>
+      </form>
+      {{end}}
+    </section>
+    {{end}}
+  </div>
+</div>
+{{end}}

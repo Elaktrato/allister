@@ -7,8 +7,17 @@
 //	backup.json  {"format": "allister.backup", "format_version": 1,
 //	              "created_at": "<RFC 3339 UTC>",
 //	              "plugins": [{"id": ..., "version": ...}],   (informational)
+//	              "appearance": {...},                        (optional)
 //	              "items": [library.BackupItem, ...]}
 //	covers/<name>  the file of every item whose cover is a local file
+//	fonts/<name>   the file of every uploaded font
+//
+// The appearance member (see appearance.go) holds the appearance settings
+// and the list of uploaded fonts; it and the fonts/ entries are ignored by
+// a restore of an older Allister (an unknown member, unread entries), so
+// the format version stays 1. The member may come before the header: it is
+// held (within Limits.MaxMemberBytes) and applied only after "format" and
+// "format_version" were accepted, so a refused archive stores nothing.
 //
 // A remote cover URL is not retained once a cover has been downloaded, so
 // every local item cover is included (not only uploaded ones). Person photos
@@ -52,6 +61,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/allister/allister/internal/appearance"
 	"github.com/allister/allister/internal/covers"
 	"github.com/allister/allister/internal/library"
 )
@@ -67,6 +77,7 @@ const (
 
 	jsonName   = "backup.json"
 	coversDirZ = "covers/"
+	fontsDirZ  = "fonts/"
 	batchSize  = 200
 )
 
@@ -126,11 +137,13 @@ func (l Limits) withDefaults() Limits {
 // Write streams the backup of every item in lib as a zip to w: backup.json
 // (deflated, written item by item in batches, never held in memory) followed
 // by covers/<name> (stored: images are already compressed) for every local
-// cover file found in coversDir. A local cover whose name is not acceptable
-// or whose file is missing is written as "cover": "" with
-// "cover_missing": true. A write error stops the stream and is returned (the
-// caller has usually sent headers already and can only log it).
-func Write(ctx context.Context, w io.Writer, lib *library.Library, plugins []PluginVersion, coversDir string, now time.Time) error {
+// cover file found in coversDir, then fonts/<name> for every uploaded font
+// of app (nil: no appearance member and no fonts). A local cover whose
+// name is not acceptable or whose file is missing is written as
+// "cover": "" with "cover_missing": true. A write error stops the stream
+// and is returned (the caller has usually sent headers already and can
+// only log it).
+func Write(ctx context.Context, w io.Writer, lib *library.Library, plugins []PluginVersion, coversDir string, app *appearance.Service, now time.Time) error {
 	zw := zip.NewWriter(w)
 	jw, err := zw.CreateHeader(&zip.FileHeader{Name: jsonName, Method: zip.Deflate, Modified: now.UTC()})
 	if err != nil {
@@ -140,12 +153,14 @@ func Write(ctx context.Context, w io.Writer, lib *library.Library, plugins []Plu
 	if plugins == nil {
 		plugins = []PluginVersion{}
 	}
+	look, fonts := appearanceOf(ctx, app)
 	head, err := json.Marshal(struct {
-		Format        string          `json:"format"`
-		FormatVersion int             `json:"format_version"`
-		CreatedAt     string          `json:"created_at"`
-		Plugins       []PluginVersion `json:"plugins"`
-	}{Format, FormatVersion, now.UTC().Format(time.RFC3339), plugins})
+		Format        string            `json:"format"`
+		FormatVersion int               `json:"format_version"`
+		CreatedAt     string            `json:"created_at"`
+		Plugins       []PluginVersion   `json:"plugins"`
+		Appearance    *appearanceMember `json:"appearance,omitempty"`
+	}{Format, FormatVersion, now.UTC().Format(time.RFC3339), plugins, look})
 	if err != nil {
 		return fmt.Errorf("backup: %w", err)
 	}
@@ -192,6 +207,9 @@ func Write(ctx context.Context, w io.Writer, lib *library.Library, plugins []Plu
 		if err := writeCover(zw, coversDir, name, now); err != nil {
 			return err
 		}
+	}
+	if err := writeFonts(ctx, zw, app, fonts, now); err != nil {
+		return err
 	}
 	if err := zw.Close(); err != nil {
 		return fmt.Errorf("backup: %w", err)
@@ -248,6 +266,9 @@ type Options struct {
 	// Enqueue is called for every created item whose sync state is
 	// pending, so the caller can queue its sync job.
 	Enqueue func(ctx context.Context, itemID int64, pluginID string)
+	// Appearance restores the appearance member and the uploaded fonts;
+	// when nil they are skipped (noted).
+	Appearance *appearance.Service
 }
 
 // Row identifies one backup item in a report. Index is its 1-based position
@@ -274,6 +295,9 @@ type Report struct {
 	MoreNotes                               int
 	Ignored                                 int
 	Aborted                                 string
+	// Appearance notes what the appearance member restored or skipped
+	// (cleaned like the rows).
+	Appearance []string
 }
 
 func addRow(list *[]Row, more *int, r Row) {
@@ -330,6 +354,8 @@ type restorer struct {
 	opts    Options
 	lim     Limits
 	covers  map[string]*zip.File
+	fonts   map[string]*zip.File
+	looked  bool // the appearance member was handled
 	done    map[string]coverResult
 	budget  *budget
 	rep     *Report
@@ -409,20 +435,25 @@ func Restore(ctx context.Context, ra io.ReaderAt, size int64, opts Options) (*Re
 	return rs.rep, nil
 }
 
-// index maps the readable entries: the first regular backup.json and the
-// first regular covers/<valid name> of each name. Everything else
-// (directories, symlinks, nested or unsafe names, duplicates) is ignored.
+// index maps the readable entries: the first regular backup.json, the
+// first regular covers/<valid name> and fonts/<stored font name> of each
+// name. Everything else (directories, symlinks, nested or unsafe names,
+// duplicates) is ignored.
 func (rs *restorer) index(zr *zip.Reader) *zip.File {
 	var jsonFile *zip.File
 	rs.covers = map[string]*zip.File{}
+	rs.fonts = map[string]*zip.File{}
 	for _, f := range zr.File {
 		regular := f.Mode().IsRegular() && !strings.HasSuffix(f.Name, "/")
 		name, isCover := strings.CutPrefix(f.Name, coversDirZ)
+		font, isFont := strings.CutPrefix(f.Name, fontsDirZ)
 		switch {
 		case regular && f.Name == jsonName && jsonFile == nil:
 			jsonFile = f
 		case regular && isCover && library.ValidFileName(name) && rs.covers[name] == nil:
 			rs.covers[name] = f
+		case regular && isFont && appearance.IsStoredFontName(font) && rs.fonts[font] == nil:
+			rs.fonts[font] = f
 		default:
 			rs.rep.Ignored++
 		}
@@ -458,6 +489,17 @@ func (rs *restorer) decode(ctx context.Context, dec *json.Decoder) error {
 		return nil
 	}
 	seen := map[string]bool{}
+	// pending holds appearance members read before the header was checked
+	var pending []json.RawMessage
+	flush := func() error {
+		for _, raw := range pending {
+			if err := rs.restoreAppearance(ctx, raw); err != nil {
+				return err
+			}
+		}
+		pending = nil
+		return nil
+	}
 	for dec.More() {
 		tok, err := dec.Token()
 		if err != nil {
@@ -501,8 +543,25 @@ func (rs *restorer) decode(ctx context.Context, dec *json.Decoder) error {
 			if err := header(); err != nil {
 				return err
 			}
+			if err := flush(); err != nil {
+				return err
+			}
 			if err := rs.items(ctx, dec); err != nil {
 				return err
+			}
+		case "appearance":
+			var raw json.RawMessage
+			if err := rs.member(dec, &raw, seen["items"]); err != nil {
+				return err
+			}
+			// applied only once the header is known to be acceptable
+			// (before "items", or at the end of an archive without them),
+			// so a refused archive stores nothing
+			pending = append(pending, raw)
+			if seen["items"] {
+				if err := flush(); err != nil {
+					return err
+				}
 			}
 		default:
 			var skip json.RawMessage
@@ -515,6 +574,9 @@ func (rs *restorer) decode(ctx context.Context, dec *json.Decoder) error {
 		return rs.syntax(err)
 	}
 	if err := header(); err != nil {
+		return err
+	}
+	if err := flush(); err != nil {
 		return err
 	}
 	if _, err := dec.Token(); err != io.EOF {

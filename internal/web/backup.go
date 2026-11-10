@@ -103,7 +103,7 @@ func (s *server) getBackupDownload(w http.ResponseWriter, r *http.Request) {
 	h.Set("X-Content-Type-Options", "nosniff")
 	h.Set("Cache-Control", "no-store")
 	cw := &countingWriter{w: w}
-	err := s.backupWrite(r.Context(), cw, s.deps.Library, plugins, s.deps.CoversDir, now)
+	err := s.backupWrite(r.Context(), cw, s.deps.Library, plugins, s.deps.CoversDir, s.appearance, now)
 	if err == nil {
 		return
 	}
@@ -184,7 +184,7 @@ func (s *server) postBackupRestore(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	rep, err := backup.Restore(r.Context(), f, fi.Size(), backup.Options{
-		Library: s.deps.Library, CoversDir: s.deps.CoversDir,
+		Library: s.deps.Library, CoversDir: s.deps.CoversDir, Appearance: s.appearance,
 		// disabled plugins' jobs wait at the queue's gate
 		Enqueue: func(ctx context.Context, itemID int64, pluginID string) { s.enqueueSync(ctx, pluginID, itemID) },
 	})
@@ -265,6 +265,9 @@ func logRestore(rep *backup.Report, err error) {
 		rep.Created, rep.Skipped, rep.Failed, rep.UnknownPlugin, rep.Ignored)
 	for _, row := range rep.FailedRows {
 		log.Printf("backup restore: item %d failed (%q %q %q %q): %s", row.Index, row.PluginID, row.Kind, row.Source, row.SourceID, row.Reason)
+	}
+	for _, n := range rep.Appearance {
+		log.Printf("backup restore: appearance: %s", n)
 	}
 	if rep.Aborted != "" {
 		log.Printf("backup restore: %s", rep.Aborted)

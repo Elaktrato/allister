@@ -1,12 +1,15 @@
 package web
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"os"
 	"regexp"
 	"strings"
 	"testing"
+
+	"github.com/allister/allister/internal/appearance"
 )
 
 // TestHtmxChecksumMatches verifies the vendored (and embedded, so served)
@@ -119,4 +122,76 @@ func TestIconFontDeclaredWithoutFlash(t *testing.T) {
 	b := get(t, "/settings").Body.String()
 	mustContain(t, b, `<link rel="preload" href="/static/`+iconFont+`" as="font" type="font/woff2" crossorigin>`)
 	mustNotContain(t, b, "googleapis", "gstatic")
+}
+
+// bundledFontFiles are the vendored app fonts (see PINS.md): Inter, Source
+// Serif 4 and JetBrains Mono from the Fontsource variable packages, each as
+// its Latin and Latin Extended subset.
+var bundledFontFiles = []string{
+	"inter-latin-wght-v5.3.0.woff2", "inter-latin-ext-wght-v5.3.0.woff2",
+	"source-serif-4-latin-wght-v5.3.1.woff2", "source-serif-4-latin-ext-wght-v5.3.1.woff2",
+	"jetbrains-mono-latin-wght-v5.3.0.woff2", "jetbrains-mono-latin-ext-wght-v5.3.0.woff2",
+}
+
+// TestBundledFontsPinned: every bundled font file is woff2, matches its
+// .sha256, is recorded in PINS.md and has its licence in LICENSES/; the
+// stylesheet declares exactly these files (font-display: swap, a
+// unicode-range per subset) and they are served with the font headers.
+func TestBundledFontsPinned(t *testing.T) {
+	pins, err := os.ReadFile("../../PINS.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	css, _ := appearance.NewService(nil, nil).Stylesheet(context.Background())
+	for _, name := range bundledFontFiles {
+		font, err := staticFS.ReadFile("static/fonts/" + name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.HasPrefix(string(font), "wOF2") {
+			t.Errorf("%s is not woff2", name)
+		}
+		sumFile, err := staticFS.ReadFile("static/fonts/" + name + ".sha256")
+		if err != nil {
+			t.Fatal(err)
+		}
+		fields := strings.Fields(string(sumFile))
+		if len(fields) != 2 || fields[1] != name || !regexp.MustCompile(`^[0-9a-f]{64}$`).MatchString(fields[0]) {
+			t.Fatalf("%s.sha256 is not `<sha256>  %s`: %q", name, name, sumFile)
+		}
+		sum := sha256.Sum256(font)
+		if got := hex.EncodeToString(sum[:]); got != fields[0] {
+			t.Errorf("%s sha256 = %s, recorded %s", name, got, fields[0])
+		}
+		mustContain(t, string(pins), "`internal/web/static/fonts/"+name+"`", fields[0])
+		mustContain(t, string(css), `src: url("/static/fonts/`+name+`") format("woff2");`)
+
+		rec := get(t, "/static/fonts/"+name)
+		if rec.Code != 200 || rec.Header().Get("Content-Type") != "font/woff2" ||
+			rec.Header().Get("Cache-Control") != "public, max-age=31536000, immutable" || rec.Header().Get("X-Content-Type-Options") != "nosniff" {
+			t.Errorf("%s served %d %v", name, rec.Code, rec.Header())
+		}
+	}
+	if n := strings.Count(string(css), "@font-face"); n != len(bundledFontFiles) {
+		t.Errorf("%d @font-face rules, want %d", n, len(bundledFontFiles))
+	}
+	if n := strings.Count(string(css), "font-display: swap;"); n != len(bundledFontFiles) {
+		t.Errorf("%d font-display: swap, want %d", n, len(bundledFontFiles))
+	}
+	if n := strings.Count(string(css), "unicode-range: U+"); n != len(bundledFontFiles) {
+		t.Errorf("%d unicode ranges, want %d", n, len(bundledFontFiles))
+	}
+	for _, lic := range []string{"inter-OFL-1.1.txt", "source-serif-4-OFL-1.1.txt", "jetbrains-mono-OFL-1.1.txt"} {
+		b, err := os.ReadFile("../../LICENSES/" + lic)
+		if err != nil {
+			t.Fatal(err)
+		}
+		mustContain(t, string(b), "SIL OPEN FONT LICENSE Version 1.1")
+		mustContain(t, string(pins), "`LICENSES/"+lic+"`")
+	}
+	if got := len(appearance.BundledFonts); got != 3 {
+		t.Errorf("%d bundled fonts, want 3", got)
+	}
+	// every static .sha256 (fonts included) is listed for the pins checks
+	mustContain(t, string(pins), "OFL-1.1")
 }
