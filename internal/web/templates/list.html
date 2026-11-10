@@ -3,9 +3,9 @@
 <div class="mb-5 flex flex-wrap items-center gap-x-4 gap-y-3">
   <h1 class="text-3xl font-semibold">{{.Heading}}</h1>
   <div class="ml-auto flex flex-wrap items-center gap-2">
-    {{range .Exports}}<a href="{{.URL}}" class="inline-flex items-center gap-1.5 rounded-md px-2.5 py-2 text-sm text-slate-300 hover:bg-slate-800 hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500" download><span class="icon text-lg" aria-hidden="true">download</span><span>Export {{.Name}}</span></a>{{end}}
-    {{with .ManualURL}}<a href="{{.}}" class="inline-flex items-center gap-1.5 rounded-md px-2.5 py-2 text-sm text-slate-300 hover:bg-slate-800 hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"><span class="icon text-lg" aria-hidden="true">edit_note</span><span>Add manually</span></a>{{end}}
-    <a href="{{.SearchURL}}" class="inline-flex items-center gap-1.5 rounded-md bg-indigo-600 py-2 pl-2.5 pr-3.5 text-sm font-medium text-white hover:bg-indigo-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400"><span class="icon text-lg" aria-hidden="true">add</span><span>{{.AddLabel}}</span></a>
+    {{range .Exports}}<a href="{{.URL}}" class="inline-flex items-center gap-1.5 rounded-md px-2.5 py-2 text-sm text-slate-300 hover:bg-slate-800 hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500" download><span class="icon text-[1.125rem]" aria-hidden="true">download</span><span>Export {{.Name}}</span></a>{{end}}
+    {{with .ManualURL}}<a href="{{.}}" class="inline-flex items-center gap-1.5 rounded-md px-2.5 py-2 text-sm text-slate-300 hover:bg-slate-800 hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"><span class="icon text-[1.125rem]" aria-hidden="true">edit_note</span><span>Add manually</span></a>{{end}}
+    <a href="{{.SearchURL}}" class="inline-flex items-center gap-1.5 rounded-md bg-indigo-600 py-2 pl-2.5 pr-3.5 text-sm font-medium text-white hover:bg-indigo-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400"><span class="icon text-[1.125rem]" aria-hidden="true">add</span><span>{{.AddLabel}}</span></a>
   </div>
 </div>
 {{if .Kinds}}
@@ -76,6 +76,6 @@
 {{/* a table head cell: a sort link (plain GET; with htmx it refreshes the rows region like the filter bar) or plain text */}}
 {{define "sort_th"}}<th scope="col"{{with .Sort}} aria-sort="{{.}}"{{end}} class="py-2 pr-3 font-medium{{if eq .Hide "md"}} hidden md:table-cell{{else if eq .Hide "lg"}} hidden lg:table-cell{{end}}">
 {{- if .Href}}<a id="{{.ID}}" href="{{.Href}}" hx-get="{{.Href}}" hx-target="#list-rows" hx-push-url="true" hx-sync="#list-filter:replace" class="group -mx-1 inline-flex items-center gap-1 whitespace-nowrap rounded px-1 hover:text-slate-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500{{if .Sort}} text-slate-100{{end}}"><span>{{.Label}}</span>
-{{- if .Sort}}<span class="icon text-base text-indigo-400" aria-hidden="true">{{if eq .Sort "ascending"}}arrow_upward{{else}}arrow_downward{{end}}</span>
-{{- else}}<span class="icon text-base opacity-0 group-hover:opacity-60 group-focus-visible:opacity-60" aria-hidden="true">unfold_more</span>{{end}}</a>
+{{- if .Sort}}<span class="icon text-[1rem] text-indigo-400" aria-hidden="true">{{if eq .Sort "ascending"}}arrow_upward{{else}}arrow_downward{{end}}</span>
+{{- else}}<span class="icon text-[1rem] opacity-0 group-hover:opacity-60 group-focus-visible:opacity-60" aria-hidden="true">unfold_more</span>{{end}}</a>
 {{- else}}{{.Label}}{{end}}</th>{{end}}

@@ -17,7 +17,9 @@
 @layer components {
   /* An icon is decorative: always aria-hidden="true" next to a text label.
      The box is one em square and clips, so a name the font lacks never
-     spills out as text. */
+     spills out as text. Size an icon with a font-size-only class such as
+     text-[1rem]: text-lg and friends also set a line-height, which moves
+     the glyph out of its box. */
   .icon {
     font-family: "Material Symbols Outlined";
     font-weight: normal;
