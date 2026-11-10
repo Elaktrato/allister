@@ -33,5 +33,5 @@
     {{range .Sections}}{{template "section" .}}{{end}}
   </div>
 </div>
-<div id="dialog-slot" hx-on::before-swap="var s=event.detail.xhr.status;if({{dialogSwap}}){event.detail.shouldSwap=true;event.detail.isError=false}">{{with .Dialog}}{{template "add_dialog" .}}{{end}}{{with .Match}}{{template "match_dialog" .}}{{end}}</div>
+<div id="dialog-slot" data-swap-statuses="{{dialogStatuses}}">{{with .Dialog}}{{template "add_dialog" .}}{{end}}{{with .Match}}{{template "match_dialog" .}}{{end}}</div>
 {{end}}

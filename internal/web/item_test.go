@@ -353,7 +353,7 @@ func TestOverviewStatusLabelAndRating(t *testing.T) {
 	// not in the list: the add button instead of the summary
 	e.saveFixture(t, "tv", "show", tvShow("3", "Only Saved"))
 	b = e.get("/tv/tvdata/3").Body.String()
-	mustContain(t, b, "Add to list", `hx-get="/tv/tvdata/3/add"`, `id="dialog-slot"`, `hx-on::before-swap=`)
+	mustContain(t, b, "Add to list", `hx-get="/tv/tvdata/3/add"`, `id="dialog-slot"`, `data-swap-statuses=`)
 	mustNotContain(t, b, "Rating:")
 }
 

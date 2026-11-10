@@ -275,7 +275,12 @@ func TestMatchSwappableStatuses(t *testing.T) {
 	e := newMatchEnv(t)
 	e.unmatched(t)
 	b := e.do("GET", "/anime/manual/man1", nil, false).Body.String()
-	mustContain(t, b, "s===422", "s===503")
+	swaps := slotStatuses(t, b)
+	for _, code := range []int{422, 503} {
+		if !swaps[code] {
+			t.Errorf("match page's dialog slot does not swap %d", code)
+		}
+	}
 }
 
 func TestMatchEnqueuesSync(t *testing.T) {

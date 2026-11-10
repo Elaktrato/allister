@@ -17,9 +17,9 @@ var templateFuncs = template.FuncMap{
 	"navMarker": func() template.HTML { return template.HTML(navMarker) },
 	// settingsTabsMarker marks where a settings page's section tabs go.
 	"settingsTabsMarker": func() template.HTML { return template.HTML(settingsTabsMarker) },
-	// dialogSwap is the condition (on s, the response status) of the dialog
-	// slot's before-swap handler: true for every dialogSwapStatuses member.
-	"dialogSwap": dialogSwap,
+	// dialogStatuses is the dialog slot's data-swap-statuses value: the
+	// statuses app.js allows the slot to swap (dialogSwapStatuses).
+	"dialogStatuses": dialogStatuses,
 	// coverSrc maps a stored image value to a URL (see covers.Src).
 	"coverSrc": covers.Src,
 	// langLabel is the human label of a language tag.
@@ -70,14 +70,15 @@ func fmtDay(t *time.Time) string {
 // dialogSwapStatuses are the error statuses with which the dialog handlers
 // (add, match, list entry edit) answer an htmx request with a re-rendered
 // dialog. htmx 2 swaps no 4xx or 5xx answer by itself, so every dialog slot
-// allows exactly these (see dialogSwap).
+// allows exactly these (see dialogStatuses).
 var dialogSwapStatuses = []int{http.StatusConflict, http.StatusUnprocessableEntity, http.StatusBadGateway, http.StatusServiceUnavailable}
 
-// dialogSwap returns "s===409||s===422||..." for dialogSwapStatuses.
-func dialogSwap() string {
+// dialogStatuses returns "409 422 ..." for dialogSwapStatuses: the value
+// of the dialog slot's data-swap-statuses, which app.js consults.
+func dialogStatuses() string {
 	parts := make([]string, len(dialogSwapStatuses))
 	for i, c := range dialogSwapStatuses {
-		parts[i] = "s===" + strconv.Itoa(c)
+		parts[i] = strconv.Itoa(c)
 	}
-	return strings.Join(parts, "||")
+	return strings.Join(parts, " ")
 }

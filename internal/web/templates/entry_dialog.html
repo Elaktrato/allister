@@ -39,7 +39,7 @@
       <textarea name="comment" rows="3" maxlength="2000" class="mt-1 w-full rounded border border-slate-700 bg-slate-950 px-3 py-2">{{.Comment}}</textarea>
     </label>
     <div class="flex justify-end gap-3">
-      <a href="{{.CancelURL}}" hx-on:click="event.preventDefault();this.closest('[data-dialog]').remove()" class="rounded px-4 py-2 hover:bg-slate-800">Cancel</a>
+      <a href="{{.CancelURL}}" data-dialog-close class="rounded px-4 py-2 hover:bg-slate-800">Cancel</a>
       <button type="submit" class="rounded bg-indigo-600 px-4 py-2 font-medium hover:bg-indigo-500">{{.Submit}}</button>
     </div>
   </form>

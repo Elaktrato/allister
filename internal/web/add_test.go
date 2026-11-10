@@ -500,7 +500,7 @@ func TestAddValidationErrorFullPageKeepsInput(t *testing.T) {
 	if rec.Code != 422 {
 		t.Fatalf("got %d", rec.Code)
 	}
-	mustContain(t, rec.Body.String(), "<html", "Earthsea", `action="/book/books/42/add"`, "typed", `value="11"`, `hx-on::before-swap=`)
+	mustContain(t, rec.Body.String(), "<html", "Earthsea", `action="/book/books/42/add"`, "typed", `value="11"`, `data-swap-statuses=`)
 	e.assertNothingSavedFor(t, "book", "books", "42")
 }
 
