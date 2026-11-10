@@ -68,6 +68,7 @@ func run() error {
 		Registry:  registry,
 		CoversDir: coversDir,
 	}))
+	queue.Register(jobs.KindSchedule, jobs.Schedule(jobs.ScheduleDeps{Library: lib, Registry: registry}))
 	syncJobsByPlugin := syncJobs(registry)
 	imports := importer.New(importer.Deps{
 		DB: database, Library: lib, Registry: registry, Queue: queue, SyncJobs: syncJobsByPlugin,
@@ -93,14 +94,16 @@ func run() error {
 	srv := &http.Server{
 		Addr: ":" + cfg.Port,
 		Handler: web.NewServer(web.Deps{
-			Settings:  settingsStore,
-			Registry:  registry,
-			Jobs:      queue,
-			SyncJobs:  syncJobsByPlugin,
-			CoversDir: coversDir,
-			DataDir:   cfg.DataDir,
-			Imports:   imports,
-			Library:   lib,
+			Settings: settingsStore,
+			Registry: registry,
+			Jobs:     queue,
+			SyncJobs: syncJobsByPlugin,
+			// the calendar feed enqueues schedule refreshes through these
+			ScheduleJobs: scheduleJobs(registry),
+			CoversDir:    coversDir,
+			DataDir:      cfg.DataDir,
+			Imports:      imports,
+			Library:      lib,
 			// uploaded fonts live in DATA_DIR/fonts next to the covers
 			Appearance: appearance.NewService(settingsStore, appearance.NewFontStore(database, filepath.Join(cfg.DataDir, "fonts"))),
 		}),
@@ -153,6 +156,16 @@ func syncJobs(reg *plugin.Registry) map[string]func(itemID int64) (kind string, 
 	out := map[string]func(int64) (string, any){}
 	for _, m := range reg.Manifests() {
 		out[m.ID] = jobs.SyncJobFor(m.ID)
+	}
+	return out
+}
+
+// scheduleJobs wires the schedule refresh job of every installed plugin for
+// the calendar feed.
+func scheduleJobs(reg *plugin.Registry) map[string]func(itemID int64) (kind string, payload any) {
+	out := map[string]func(int64) (string, any){}
+	for _, m := range reg.Manifests() {
+		out[m.ID] = jobs.ScheduleJobFor(m.ID)
 	}
 	return out
 }

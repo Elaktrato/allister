@@ -122,7 +122,7 @@ func TestManifestMatchesBaseline(t *testing.T) {
 		t.Errorf("sections = %+v", k.Sections)
 	}
 	wantSource := plugin.SourceInfo{ID: "anilist", Name: "AniList", RequestsPerMinute: 30, ExternalIDTypes: []string{"mal"},
-		SupportsLookup: true, LinkLabel: "View on AniList", URLPatterns: []string{"anilist.co/anime/{id}"}}
+		SupportsLookup: true, SupportsSchedule: true, LinkLabel: "View on AniList", URLPatterns: []string{"anilist.co/anime/{id}"}}
 	if len(m.Sources) != 1 || !reflect.DeepEqual(m.Sources[0], wantSource) {
 		t.Errorf("sources = %+v", m.Sources)
 	}

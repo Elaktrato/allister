@@ -4,7 +4,23 @@ import (
 	"context"
 	"errors"
 	"io"
+	"time"
 )
+
+// Airing is one scheduled release of a source item: its number and when it
+// airs (UTC).
+type Airing struct {
+	Number int       `json:"number"`
+	AirsAt time.Time `json:"airs_at"`
+}
+
+// ScheduleSource is the optional capability of a source that knows the air
+// dates of a kind's numbered releases. A source declares it with
+// SourceInfo.SupportsSchedule; the schedule job calls it only for such
+// sources, and the calendar feed lists what it stored.
+type ScheduleSource interface {
+	Schedule(ctx context.Context, kind, id string) ([]Airing, error)
+}
 
 var (
 	// ErrNotFound: the source does not know the requested item.

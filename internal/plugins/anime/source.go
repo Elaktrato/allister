@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/allister/allister/internal/plugin"
 	"github.com/allister/allister/internal/plugins/anime/anilist"
@@ -26,6 +27,12 @@ type source struct {
 // malLookup is the optional MAL id lookup of a provider (anilist.Client).
 type malLookup interface {
 	AnimeByMALID(ctx context.Context, malID string) (anilist.Anime, error)
+}
+
+// scheduleReader is the optional airing-schedule lookup of a provider
+// (anilist.Client); the manifest declares SupportsSchedule when it exists.
+type scheduleReader interface {
+	AiringSchedule(ctx context.Context, id string) ([]anilist.Airing, error)
 }
 
 // maxIDDigits is the longest AniList id accepted.
@@ -135,6 +142,32 @@ func (s *source) People(ctx context.Context, kind, id string) ([]plugin.Credit, 
 		return nil, mapErr(err)
 	}
 	return Credits(cast), nil
+}
+
+// Schedule returns the known episode air dates of an anime.
+func (s *source) Schedule(ctx context.Context, kind, id string) ([]plugin.Airing, error) {
+	if err := checkKind(kind); err != nil {
+		return nil, err
+	}
+	if err := checkID(id); err != nil {
+		return nil, err
+	}
+	r, ok := s.c.(scheduleReader)
+	if !ok {
+		return nil, nil // nothing known for this provider
+	}
+	nodes, err := r.AiringSchedule(ctx, id)
+	if err != nil {
+		return nil, mapErr(err)
+	}
+	out := make([]plugin.Airing, 0, len(nodes))
+	for _, n := range nodes {
+		if n.Episode <= 0 || n.AirsAt <= 0 {
+			continue // not a release (specials without a number, unknown dates)
+		}
+		out = append(out, plugin.Airing{Number: n.Episode, AirsAt: time.Unix(n.AirsAt, 0).UTC()})
+	}
+	return out, nil
 }
 
 // Lookup finds an anime by external id; only the MyAnimeList id ("mal") is

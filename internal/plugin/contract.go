@@ -240,8 +240,11 @@ type SourceInfo struct {
 	RequestsPerMinute int      `json:"requests_per_minute"`
 	ExternalIDTypes   []string `json:"external_id_types,omitempty"`
 	SupportsLookup    bool     `json:"supports_lookup,omitempty"`
-	LinkLabel         string   `json:"link_label,omitempty"`
-	URLPatterns       []string `json:"url_patterns,omitempty"`
+	// SupportsSchedule: the source implements ScheduleSource (the core then
+	// keeps its airing schedule for the calendar feed).
+	SupportsSchedule bool     `json:"supports_schedule,omitempty"`
+	LinkLabel        string   `json:"link_label,omitempty"`
+	URLPatterns      []string `json:"url_patterns,omitempty"`
 }
 
 // ImporterInfo describes an import format. ResolveVia names the declared
