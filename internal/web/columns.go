@@ -9,6 +9,7 @@ package web
 import (
 	"context"
 	"slices"
+	"strings"
 
 	"github.com/allister/allister/internal/library"
 	"github.com/allister/allister/internal/plugin"
@@ -39,7 +40,7 @@ func kindColumns(k plugin.KindDef) []listColumn {
 	}
 	out := make([]listColumn, 0, len(k.Columns))
 	for _, c := range k.Columns {
-		col := listColumn{Key: c.Key, Label: c.Label, Hide: c.Hide, Default: c.Default}
+		col := listColumn{Key: c.Key, Label: strings.TrimSpace(c.Label), Hide: c.Hide, Default: c.Default}
 		if fd, ok := fieldDef(k, c.Key); ok {
 			col.Field = fd
 			col.Label = orDefault(col.Label, fd.Label)

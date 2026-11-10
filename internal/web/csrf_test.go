@@ -26,7 +26,7 @@ func TestCrossOriginProtection(t *testing.T) {
 		{"matching origin", "POST", titleLangURL, map[string]string{"Origin": "http://allister.test"}, 0},
 		{"matching origin other scheme", "POST", titleLangURL, map[string]string{"Origin": "https://allister.test"}, 0},
 		{"origin same host other port", "POST", titleLangURL, map[string]string{"Origin": "http://allister.test:9"}, 403},
-		{"no headers", "POST", "/settings", nil, 0},
+		{"no headers", "POST", titleLangURL, nil, 0},
 		{"fetch metadata wins over matching origin", "POST", titleLangURL, map[string]string{"Sec-Fetch-Site": "cross-site", "Origin": "http://allister.test"}, 403},
 		{"get cross-site still ok", "GET", "/healthz", map[string]string{"Sec-Fetch-Site": "cross-site"}, 200},
 		{"head cross-site still ok", "HEAD", "/healthz", map[string]string{"Sec-Fetch-Site": "cross-site"}, 200},

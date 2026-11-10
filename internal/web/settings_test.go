@@ -169,3 +169,22 @@ func TestPluginSettingsAreIsolated(t *testing.T) {
 	}
 	mustContain(t, e.get("/settings/plugins/anime").Body.String(), `value="ja" selected`)
 }
+
+// TestStoredTitleLanguageIsShownSelected: a stored language the plugin no
+// longer offers (an old value, a removed title) is still what titles use, so
+// the select shows it, selected, instead of silently showing another.
+func TestStoredTitleLanguageIsShownSelected(t *testing.T) {
+	h, st, _ := newTestServer(t)
+	st.SetTitleLang(context.Background(), "anime", "pt-br")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/settings/plugins/anime", nil))
+	b := rec.Body.String()
+	mustContain(t, b, `<option value="pt-br" selected>pt-br</option>`, `value="ja"`)
+	if n := strings.Count(b, " selected>"); n != 1 {
+		t.Fatalf("%d selected options", n)
+	}
+	// saving the page unchanged keeps it
+	if rec := postForm(h, "/settings/plugins/anime/title-language", url.Values{"title_lang": {"pt-br"}}); rec.Code != http.StatusSeeOther {
+		t.Fatalf("resave: %d", rec.Code)
+	}
+}

@@ -314,7 +314,9 @@ func validateColumns(p *problems, path string, cols []ColumnDef, fields map[stri
 		switch l := c.Label; {
 		case !utf8.ValidString(l) || strings.IndexFunc(l, isControl) >= 0:
 			p.add(cp+".label", "must be a single line without control characters")
-		case utf8.RuneCountInString(l) > maxColumnLabelRunes:
+		case l != "" && strings.TrimSpace(l) == "":
+			p.add(cp+".label", "must not be blank (leave it empty for the default heading)")
+		case utf8.RuneCountInString(strings.TrimSpace(l)) > maxColumnLabelRunes:
 			p.add(cp+".label", "longer than %d characters", maxColumnLabelRunes)
 		}
 		if !slices.Contains(columnHides, c.Hide) {

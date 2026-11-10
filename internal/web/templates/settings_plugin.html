@@ -25,16 +25,18 @@
         {{/* the form's default button: Enter (implicit submission) only saves, never moves or resets */}}
         <button type="submit" class="sr-only" tabindex="-1" aria-hidden="true">Save columns</button>
         <input type="hidden" name="kind" value="{{.Kind}}">
-        <ul class="mb-4 divide-y divide-slate-800 rounded-md border border-slate-800">
+        <fieldset class="mb-4">
+        <legend class="sr-only">Table columns{{with .Heading}}: {{.}}{{end}}</legend>
+        <ul class="divide-y divide-slate-800 rounded-md border border-slate-800">
           <li class="flex items-center gap-3 px-3 py-2 text-sm text-slate-400">
-            <input type="checkbox" checked disabled class="h-4 w-4 accent-indigo-500">
+            <input type="checkbox" checked disabled aria-label="Title" class="h-4 w-4 accent-indigo-500">
             <span class="flex-1"><span class="text-slate-200">Title</span> <span class="text-xs text-slate-500">always shown</span></span>
           </li>
           {{range .Rows}}
           <li class="flex items-center gap-3 px-3 py-1.5 text-sm">
             <input type="hidden" name="order" value="{{.Key}}">
             <input type="checkbox" id="col-{{$f.Kind}}-{{.Key}}" name="show" value="{{.Key}}"{{if .Shown}} checked{{end}} class="h-4 w-4 accent-indigo-500">
-            <label for="col-{{$f.Kind}}-{{.Key}}" class="flex-1 {{if .Shown}}text-slate-200{{else}}text-slate-400{{end}}"><span>{{.Label}}</span>{{with .Width}} <span class="text-xs text-slate-500">{{.}}</span>{{end}}</label>
+            <label for="col-{{$f.Kind}}-{{.Key}}" class="flex-1 {{if .Shown}}text-slate-200{{else}}text-slate-400{{end}}"><span>{{.Label}}</span>{{with .Width}} <span class="text-xs text-slate-500">{{.}}</span>{{end}}{{with .Note}} <span class="text-xs text-slate-500">({{.}})</span>{{end}}</label>
             {{if .Shown}}
             <span class="flex gap-1">
               {{if .Up}}<button type="submit" name="move" value="up:{{.Key}}" aria-label="Move {{.Label}} up" class="rounded p-1 text-slate-400 hover:bg-slate-800 hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"><span class="icon text-[1.125rem]" aria-hidden="true">arrow_upward</span></button>{{else}}<span class="w-[1.625rem]" aria-hidden="true"></span>{{end}}
@@ -44,6 +46,7 @@
           </li>
           {{end}}
         </ul>
+        </fieldset>
         <div class="flex flex-wrap items-center gap-3">
           <button type="submit" class="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium hover:bg-indigo-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400">Save columns</button>
           <button type="submit" name="reset" value="1" class="rounded-md bg-slate-700 px-3 py-2 text-sm font-medium hover:bg-slate-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500">Reset to defaults</button>

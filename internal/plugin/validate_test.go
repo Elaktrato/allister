@@ -405,6 +405,9 @@ func TestValidateColumns(t *testing.T) {
 		{"bad hide", []plugin.ColumnDef{{Key: "year", Hide: "xl"}}, nil, `kinds[0].columns[0].hide: "xl" is not one of "", "sm", "md", "lg"`},
 		{"long label", []plugin.ColumnDef{{Key: "year", Label: strings.Repeat("x", 41)}}, nil, `kinds[0].columns[0].label: longer than 40 characters`},
 		{"control in label", []plugin.ColumnDef{{Key: "year", Label: "a\nb"}}, nil, `kinds[0].columns[0].label: must be a single line without control characters`},
+		{"blank label", []plugin.ColumnDef{{Key: "year", Label: "   "}}, nil, `kinds[0].columns[0].label: must not be blank`},
+		{"no-break blank label", []plugin.ColumnDef{{Key: "year", Label: "\u00a0 \u3000"}}, nil, `kinds[0].columns[0].label: must not be blank`},
+		{"label padded past 40", []plugin.ColumnDef{{Key: "year", Label: " " + strings.Repeat("x", 41) + " "}}, nil, `kinds[0].columns[0].label: longer than 40 characters`},
 		{"field shadowed by a core column", []plugin.ColumnDef{{Key: "status"}}, func(k *plugin.KindDef) {
 			k.Fields = append(k.Fields, plugin.FieldDef{Key: "status", Label: "Status", Type: plugin.FieldText})
 		}, `kinds[0].columns[0].key: "status" names both a field and a core column`},
@@ -419,9 +422,10 @@ func TestValidateColumns(t *testing.T) {
 			t.Errorf("%s: err = %v, want %s", c.name, err, c.want)
 		}
 	}
-	// a label of exactly 40 characters (runes) is fine
+	// a label of exactly 40 characters (runes) is fine, also with padding
+	// (trimmed first); fields need not be Show to be columns
 	m = tv()
-	m.Kinds[0].Columns = []plugin.ColumnDef{{Key: "year", Label: strings.Repeat("ä", 40)}}
+	m.Kinds[0].Columns = []plugin.ColumnDef{{Key: "year", Label: " " + strings.Repeat("ä", 40) + " "}, {Key: "episodes"}}
 	if err := plugin.Validate(m); err != nil {
 		t.Errorf("40-rune label: %v", err)
 	}

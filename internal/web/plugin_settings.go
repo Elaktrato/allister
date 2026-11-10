@@ -88,6 +88,13 @@ func (s *server) titleLangOptions(ctx context.Context, m plugin.Manifest) ([]lan
 			langs = append(langs, l)
 		}
 	}
+	// a stored choice that is no longer offered still applies to the titles,
+	// so it is offered (and shown selected) rather than hidden
+	if s.deps.Settings != nil {
+		if cur := s.deps.Settings.TitleLang(ctx, m.ID); cur != "" && !slices.Contains(langs, cur) {
+			langs = append(langs, cur)
+		}
+	}
 	opts := make([]langOption, 0, len(langs))
 	for _, l := range langs {
 		opts = append(opts, langOption{Value: l, Label: langLabel(l)})
@@ -171,9 +178,12 @@ type columnsForm struct {
 // columnRow is one offered column of a columnsForm: the shown ones first,
 // in their order, then the others in the kind's order.
 type columnRow struct {
-	Key, Label, Width string
-	Shown, Up, Down   bool
+	Key, Label, Width, Note string
+	Shown, Up, Down         bool
 }
+
+// columnNotes are core notes on core columns, shown on the settings page.
+var columnNotes = map[string]string{plugin.ColumnProgress: "includes the +1 button"}
 
 // columnWidths describe the screen width a column needs.
 var columnWidths = map[string]string{"sm": "from 640 px wide", "md": "from 768 px wide", "lg": "from 1024 px wide"}
@@ -190,7 +200,7 @@ func (s *server) columnsForms(ctx context.Context, m plugin.Manifest) []columnsF
 			f.Heading = k.LabelPlural
 		}
 		row := func(c listColumn, on bool) columnRow {
-			return columnRow{Key: c.Key, Label: c.Label, Width: columnWidths[c.Hide], Shown: on}
+			return columnRow{Key: c.Key, Label: c.Label, Width: columnWidths[c.Hide], Note: columnNotes[c.Core], Shown: on}
 		}
 		for i, c := range shown {
 			r := row(c, true)
