@@ -5,8 +5,10 @@
 # TAILWIND_VERSION. It also checks the vendored htmx file and icon font against
 # their .sha256 files.
 #
-# Usage: scripts/update-pins.sh          print the changes as a diff (no writes)
-#        scripts/update-pins.sh --write  apply them
+# Usage: scripts/update-pins.sh          print the changes as a diff (no
+#                                        writes; exits 1 when a pin is stale)
+#        scripts/update-pins.sh --write  apply them (each file is written
+#                                        through a rename, never half-written)
 #
 # Tags are kept: to move to another version, edit the tag by hand first (and
 # for Go also go.mod's toolchain line), then run this script to resolve the
@@ -37,7 +39,7 @@ fi
 
 cd "$(dirname "$0")/.."
 
-for tool in docker curl sha256sum awk diff grep sed mktemp; do
+for tool in docker curl sha256sum awk diff grep sed stat mktemp; do
 	command -v "$tool" >/dev/null || {
 		echo "update-pins: $tool is required" >&2
 		exit 1
@@ -161,9 +163,16 @@ if [ "$changed" -eq 0 ]; then
 fi
 if [ "$write" -eq 1 ]; then
 	for f in "${files[@]}"; do
-		cp "$tmp/new/$f" "$f"
+		# write through a rename (never a half-written file) and keep the
+		# original file's mode (go.sh stays executable)
+		if ! cp "$tmp/new/$f" "$f.tmp" || ! chmod "$(stat -c '%a' "$f")" "$f.tmp" || ! mv "$f.tmp" "$f"; then
+			rm -f "$f.tmp"
+			echo "update-pins: could not write $f" >&2
+			exit 1
+		fi
 	done
 	echo "update-pins: written. Run scripts/go.sh test ./internal/guard/ ./internal/web/ and docker compose build." >&2
 else
-	echo "update-pins: dry run, nothing written (pass --write to apply)" >&2
+	echo "update-pins: dry run, nothing written; pins are stale (pass --write to apply)" >&2
+	exit 1
 fi
