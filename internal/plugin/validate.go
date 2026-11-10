@@ -37,7 +37,7 @@ var (
 // reservedIDs are first URL segments owned by the core.
 var reservedIDs = map[string]bool{
 	"list": true, "people": true, "settings": true, "covers": true,
-	"static": true, "healthz": true, "api": true,
+	"static": true, "healthz": true, "api": true, "version": true,
 }
 
 // reservedSourceIDs are the core's segments right after a plugin's prefix

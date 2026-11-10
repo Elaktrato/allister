@@ -352,7 +352,7 @@ func TestRootRedirectsToFirstEnabledOrSettings(t *testing.T) {
 }
 
 func TestReservedIDsNeverReachServeMux(t *testing.T) {
-	for _, id := range []string{"list", "people", "settings", "covers", "static", "healthz", "api"} {
+	for _, id := range []string{"list", "people", "settings", "covers", "static", "healthz", "api", "version"} {
 		reg := plugin.NewRegistry(plugintest.NewMemEnabled())
 		if err := reg.Register(plugintest.BookPlugin(plugintest.WithID(id))); err == nil {
 			t.Fatalf("%s accepted", id)
