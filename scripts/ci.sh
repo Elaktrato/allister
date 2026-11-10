@@ -13,16 +13,19 @@
 #   test                 go test with coverage; writes .ci/coverage.out and
 #                        .ci/coverage.txt (per-function summary)
 #   vuln                 govulncheck on the source and on the built binary
-#   mutation [pkg...]    gremlins on the given packages (default: the core
-#                        list in MUTATION_PACKAGES); writes .ci/mutation/
+#   mutation [pkg[=N]...] gremlins on the given packages (default: the list
+#                        in MUTATION_PACKAGES with its thresholds); writes
+#                        .ci/mutation/
 #   hadolint             lint the Dockerfile
 #   actionlint           lint .github/workflows (with shellcheck)
+#   shell                shellcheck scripts/*.sh
 #   gitleaks             scan the git history for secrets
 #   trivy <image>        scan a local image; fails on fixable HIGH/CRITICAL
 #   trivy-sarif <image>  the same findings as SARIF on stdout (never fails)
 #   sbom <image> <file>  write an SPDX JSON SBOM of a local image
 #   smoke <image>        run the image, check /healthz and /version, remove it
-#   all                  fmt tidy vet lint test vuln hadolint actionlint gitleaks
+#   all                  fmt tidy vet lint test vuln hadolint actionlint
+#                        shell gitleaks
 set -euo pipefail
 
 # --- pinned tool images (tag for humans, digest for docker)
@@ -32,11 +35,22 @@ ACTIONLINT_IMAGE=rhysd/actionlint:1.7.12@sha256:b1934ee5f1c509618f2508e6eb47ee0d
 GITLEAKS_IMAGE=ghcr.io/gitleaks/gitleaks:v8.30.1@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f
 TRIVY_IMAGE=aquasec/trivy:0.76.1@sha256:790fd66d1697395d8693d1acaa1ea702406a20f109b6fc7bac8db623eca6c06c
 
-# Packages under mutation test, most valuable first. Each needs its own
-# tests; the efficacy threshold applies to each package separately.
-MUTATION_PACKAGES=(internal/plugin internal/settings internal/covers internal/jobs internal/importer internal/backup internal/library)
-# The measured starting point (docs/ci.md); raise it as tests improve.
-MUTATION_THRESHOLD=${MUTATION_THRESHOLD:-80}
+# Packages under mutation test, most valuable first, each with its minimum
+# test efficacy (killed / (killed + lived), in percent). The thresholds sit a
+# few points under the values measured when they were set (docs/ci.md): a
+# ratchet, raise them as tests improve. internal/web is left out (a run of its
+# tests takes about 20 s, too slow for every mutant).
+MUTATION_PACKAGES=(
+	internal/plugin=87
+	internal/settings=95
+	internal/covers=82
+	internal/jobs=83
+	internal/importer=79
+	internal/backup=76
+	internal/library=91
+)
+# for packages given on the command line (or MUTATION_THRESHOLD=N to override all)
+MUTATION_DEFAULT_THRESHOLD=75
 
 cd "$(dirname "$0")/.."
 root=$PWD
@@ -84,6 +98,7 @@ lint)
 		-v "$root":/src -w /src "$GOLANGCI_IMAGE" golangci-lint run ./...
 	;;
 fmt)
+	# shellcheck disable=SC2016 # expanded inside the container
 	in_go 'files=$(find . -name "*.go" -not -path "./.ci/*" -exec gofmt -l {} +); if [ -n "$files" ]; then echo "gofmt needed:"; echo "$files"; exit 1; fi; echo "gofmt: ok"'
 	;;
 tidy)
@@ -113,43 +128,80 @@ vuln)
 	in_go "$build_tools && .ci/bin/govulncheck ./... && go build -trimpath -o .ci/allister ./cmd/allister && .ci/bin/govulncheck -mode=binary .ci/allister"
 	;;
 mutation)
-	pkgs=("$@")
-	[ "${#pkgs[@]}" -eq 0 ] && pkgs=("${MUTATION_PACKAGES[@]}")
+	entries=("$@")
+	[ "${#entries[@]}" -eq 0 ] && entries=("${MUTATION_PACKAGES[@]}")
+	pkgs=()
+	declare -A threshold=()
+	for e in "${entries[@]}"; do
+		p=${e%%=*}
+		t=$MUTATION_DEFAULT_THRESHOLD
+		[[ $e == *=* ]] && t=${e#*=}
+		for d in "${MUTATION_PACKAGES[@]}"; do
+			[ "${d%%=*}" = "$p" ] && [[ $e != *=* ]] && t=${d#*=}
+		done
+		t=${MUTATION_THRESHOLD:-$t}
+		# package directories only: the names end up in a shell script
+		if ! [[ $p =~ ^[a-z][a-z0-9_/-]*$ ]] || [[ $p == *..* ]] || [ ! -d "$p" ] || ! [[ $t =~ ^[0-9]+$ ]]; then
+			echo "mutation: '$e' is not a package directory with an optional =threshold (e.g. internal/plugin=85)" >&2
+			exit 2
+		fi
+		pkgs+=("$p")
+		threshold[$p]=$t
+	done
 	workers=${MUTATION_WORKERS:-2}
 	rm -rf "$out/mutation"
 	mkdir -p "$out/mutation"
 	script="$build_tools; status=0"
 	for p in "${pkgs[@]}"; do
 		name=${p//\//-}
-		script="$script; start=\$(date +%s); .ci/bin/gremlins unleash --workers $workers --timeout-coefficient 3 --threshold-efficacy $MUTATION_THRESHOLD -o .ci/mutation/$name.json ./$p > .ci/mutation/$name.log 2>&1 || status=1; echo \"$p \$(( \$(date +%s) - start ))\" >> .ci/mutation/times.txt; tail -n 6 .ci/mutation/$name.log"
+		script="$script; start=\$(date +%s); GOFLAGS=-count=1 .ci/bin/gremlins unleash --workers $workers --timeout-coefficient 5 -o .ci/mutation/$name.json ./$p > .ci/mutation/$name.log 2>&1 || status=1; echo \"$p \$(( \$(date +%s) - start ))\" >> .ci/mutation/times.txt; tail -n 6 .ci/mutation/$name.log"
 	done
 	set +e
 	in_go "$script; exit \$status"
 	rc=$?
 	set -e
 	{
-		echo "### Mutation testing (gremlins, efficacy threshold ${MUTATION_THRESHOLD}%)"
+		echo "### Mutation testing (gremlins)"
 		echo
-		echo "| Package | Killed | Lived | Not covered | Timed out | Efficacy | Mutant coverage | Seconds |"
-		echo "|---|---|---|---|---|---|---|---|"
+		echo "Efficacy = killed / (killed + lived); a package below its threshold fails the job."
+		echo
+		echo "| Package | Killed | Lived | Not covered | Timed out | Efficacy | Threshold | Mutant coverage | Seconds |"
+		echo "|---|---|---|---|---|---|---|---|---|"
 		for p in "${pkgs[@]}"; do
 			name=${p//\//-}
 			secs=$(awk -v p="$p" '$1 == p { print $2 }' "$out/mutation/times.txt")
 			if [ -f "$out/mutation/$name.json" ]; then
-				# the report is JSON; pick the totals without needing jq
-				tr -d ' \n' <"$out/mutation/$name.json" | grep -oE '"(test_efficacy|mutations_coverage|mutants_killed|mutants_lived|mutants_not_covered|mutants_timed_out)":[0-9.]+' |
-					awk -F: -v p="$p" -v s="$secs" '{ gsub(/"/, "", $1); v[$1] = $2 }
-						END { printf "| %s | %d | %d | %d | %d | %.2f%% | %.2f%% | %s |\n", p, v["mutants_killed"], v["mutants_lived"], v["mutants_not_covered"], v["mutants_timed_out"], v["test_efficacy"], v["mutations_coverage"], s }'
+				# the report is JSON; pick the totals without needing jq (the
+				# timed-out count is only in the log)
+				timedout=$(sed -n 's/^Timed out: \([0-9]*\).*/\1/p' "$out/mutation/$name.log")
+				eff=$(tr -d ' \n' <"$out/mutation/$name.json" | grep -oE '"test_efficacy":[0-9.]+' | cut -d: -f2)
+				# gremlins' own --threshold-efficacy flag does not fail in
+				# v0.6.0 (the value is never read back as a number), so the
+				# threshold is checked here
+				if ! awk -v e="${eff:-0}" -v t="${threshold[$p]}" 'BEGIN { exit !(e + 0 >= t + 0) }'; then
+					echo "mutation: $p efficacy ${eff:-?}% is below its threshold ${threshold[$p]}%" >&2
+					rc=1
+				fi
+				tr -d ' \n' <"$out/mutation/$name.json" | grep -oE '"(test_efficacy|mutations_coverage|mutants_killed|mutants_lived|mutants_not_covered)":[0-9.]+' |
+					awk -F: -v p="$p" -v s="$secs" -v to="${timedout:-0}" -v th="${threshold[$p]}" '{ gsub(/"/, "", $1); v[$1] = $2 }
+						END { printf "| %s | %d | %d | %d | %d | %.2f%% | %s%% | %.2f%% | %s |\n", p, v["mutants_killed"], v["mutants_lived"], v["mutants_not_covered"], to, v["test_efficacy"], th, v["mutations_coverage"], s }'
 			else
-				echo "| $p | no report (see $name.log) | | | | | | $secs |"
+				rc=1
+				echo "| $p | no report (see $name.log) | | | | | ${threshold[$p]}% | | $secs |"
 			fi
 		done
-	} | summary
+	} >"$out/mutation/summary.md"
+	summary <"$out/mutation/summary.md"
 	exit "$rc"
 	;;
 hadolint)
 	docker run --rm -i -v "$root/.hadolint.yaml":/hadolint.yaml:ro "$HADOLINT_IMAGE" hadolint --config /hadolint.yaml - <Dockerfile
 	echo "hadolint: ok"
+	;;
+shell)
+	# the shellcheck that ships in the actionlint image
+	docker run --rm -v "$root":/repo -w /repo --entrypoint shellcheck "$ACTIONLINT_IMAGE" scripts/*.sh
+	echo "shellcheck: ok"
 	;;
 actionlint)
 	docker run --rm -v "$root":/repo -w /repo "$ACTIONLINT_IMAGE" -color
@@ -213,13 +265,13 @@ smoke)
 	esac
 	;;
 all)
-	for c in fmt tidy vet lint test vuln hadolint actionlint gitleaks; do
+	for c in fmt tidy vet lint test vuln hadolint actionlint shell gitleaks; do
 		echo "== $c"
 		"$0" "$c"
 	done
 	;;
 *)
-	sed -n '2,25s/^# \{0,1\}//p' "$0" >&2
+	sed -n '2,28s/^# \{0,1\}//p' "$0" >&2
 	exit 2
 	;;
 esac
