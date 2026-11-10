@@ -39,6 +39,7 @@ func run() error {
 	if err := os.MkdirAll(coversDir, 0o755); err != nil {
 		return err
 	}
+	removeRestoreTemps(cfg.DataDir)
 	database, err := db.Open(filepath.Join(cfg.DataDir, "allister.db"))
 	if err != nil {
 		return err
@@ -106,6 +107,7 @@ func run() error {
 			Jobs:      queue,
 			SyncJobs:  syncJobsByPlugin,
 			CoversDir: coversDir,
+			DataDir:   cfg.DataDir,
 			Imports:   imports,
 			Library:   lib,
 		}),
@@ -160,4 +162,16 @@ func syncJobs(reg *plugin.Registry) map[string]func(itemID int64) (kind string, 
 		out[m.ID] = jobs.SyncJobFor(m.ID)
 	}
 	return out
+}
+
+// removeRestoreTemps deletes upload spools a backup restore left in
+// DATA_DIR/tmp when the process died mid-restore (a normal restore removes
+// its own file on every path).
+func removeRestoreTemps(dataDir string) {
+	names, _ := filepath.Glob(filepath.Join(dataDir, "tmp", "restore-*.zip"))
+	for _, n := range names {
+		if err := os.Remove(n); err != nil {
+			log.Printf("startup: %v", err)
+		}
+	}
 }

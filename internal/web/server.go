@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/allister/allister/internal/importer"
@@ -43,6 +44,9 @@ type Deps struct {
 	SyncJobs map[string]func(itemID int64) (kind string, payload any)
 	// CoversDir is DATA_DIR/covers; when empty /covers/ is not served.
 	CoversDir string
+	// DataDir is DATA_DIR: a backup restore spools its upload to
+	// DATA_DIR/tmp. When empty the restore form is not offered.
+	DataDir string
 	// Imports runs the imports of every plugin's importers (/settings/import);
 	// when nil the import pages answer 404.
 	Imports *importer.Runner
@@ -75,11 +79,16 @@ type server struct {
 	coreGuarded  []string
 	// now is the server's clock (export file names, caches).
 	now func() time.Time
+	// restoreMu allows one backup restore at a time; maxBackupBody caps its
+	// upload; spoolHook (tests) sees the spooled temp file.
+	restoreMu     sync.Mutex
+	maxBackupBody int64
+	spoolHook     func(path string)
 }
 
 // pageNames lists every page template (templates/<name>.html). Add a page by
 // dropping its file in templates/ and listing it here.
-var pageNames = []string{"settings", "search", "item", "list", "person", "manual_form", "details_form", "import", "error", "recommendations"}
+var pageNames = []string{"settings", "search", "item", "list", "person", "manual_form", "details_form", "import", "error", "recommendations", "backup"}
 
 // pagePartials lists extra template files a page needs (also rendered alone
 // for htmx requests).
@@ -119,7 +128,7 @@ func newServer(deps Deps, now func() time.Time) (*server, http.Handler) {
 		deps.Library = library.New(deps.Store.DB(), deps.Registry)
 	}
 	s := &server{deps: deps, pages: parsePages(), cache: newAnimeCache(now, cacheMaxEntries, cacheTTL),
-		recs: newRecCache(now, recCacheMaxEntries, cacheTTL), recTimeout: recTimeout, now: now}
+		recs: newRecCache(now, recCacheMaxEntries, cacheTTL), recTimeout: recTimeout, now: now, maxBackupBody: maxBackupBody}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("ok"))
@@ -136,6 +145,9 @@ func newServer(deps Deps, now func() time.Time) (*server, http.Handler) {
 	mux.HandleFunc("POST /settings/import/cancel", s.postImportCancel)
 	mux.HandleFunc("POST /settings/import/resume", s.postImportResume)
 	mux.HandleFunc("POST /settings/plugins/{id}", s.postPlugin)
+	mux.HandleFunc("GET /settings/backup", s.getBackup)
+	mux.HandleFunc("GET /settings/backup/download", s.getBackupDownload)
+	mux.HandleFunc("POST /settings/backup/restore", s.postBackupRestore)
 	s.mountPlugins(mux)
 	return s, refuseCrossOrigin(mux)
 }

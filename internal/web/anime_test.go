@@ -102,7 +102,7 @@ func newEnvWith(t *testing.T, mk func(es plugin.EnabledStore) *plugin.Registry) 
 		e.reg = mk(e.set)
 	}
 	e.srv, e.h = newServer(Deps{
-		Settings: e.set, Store: e.st, Jobs: e.jobs, SyncJobs: testSyncJobs(), CoversDir: e.covers, Registry: e.reg,
+		Settings: e.set, Store: e.st, Jobs: e.jobs, SyncJobs: testSyncJobs(), CoversDir: e.covers, DataDir: filepath.Dir(e.covers), Registry: e.reg,
 		Providers: map[provider.Source]provider.Provider{provider.AniList: e.fp},
 	}, func() time.Time { return *e.now })
 	e.reg = e.srv.deps.Registry

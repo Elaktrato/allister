@@ -5,6 +5,8 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -94,4 +96,23 @@ func TestSyncJobsWiresAllInstalledPlugins(t *testing.T) {
 			t.Fatalf("%s: got %q %+v", id, kind, payload)
 		}
 	}
+}
+
+func TestRemoveRestoreTempsDeletesOnlyRestoreSpools(t *testing.T) {
+	dir := t.TempDir()
+	tmp := filepath.Join(dir, "tmp")
+	if err := os.MkdirAll(tmp, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for _, n := range []string{"restore-123.zip", "restore-x.zip", "keep.txt"} {
+		if err := os.WriteFile(filepath.Join(tmp, n), []byte("x"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	removeRestoreTemps(dir)
+	left, _ := os.ReadDir(tmp)
+	if len(left) != 1 || left[0].Name() != "keep.txt" {
+		t.Fatalf("left = %v", left)
+	}
+	removeRestoreTemps(filepath.Join(dir, "missing")) // no tmp dir: no-op
 }
