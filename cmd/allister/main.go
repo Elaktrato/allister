@@ -40,7 +40,7 @@ func main() {
 func run() error {
 	cfg := config.Load()
 	coversDir := filepath.Join(cfg.DataDir, "covers")
-	if err := os.MkdirAll(coversDir, 0o755); err != nil {
+	if err := os.MkdirAll(coversDir, 0o755); err != nil { //nolint:gosec // G301: the data volume belongs to the container; 0755 matches the image's other directories
 		return err
 	}
 	removeRestoreTemps(cfg.DataDir)

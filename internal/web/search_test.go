@@ -3,7 +3,6 @@ package web
 import (
 	"context"
 	"errors"
-	"github.com/allister/allister/internal/library"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -14,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/allister/allister/internal/db"
+	"github.com/allister/allister/internal/library"
 	"github.com/allister/allister/internal/plugin"
 	"github.com/allister/allister/internal/plugin/plugintest"
 	"github.com/allister/allister/internal/plugins/anilist"

@@ -2,12 +2,12 @@ package library
 
 import (
 	"fmt"
-	"github.com/allister/allister/internal/plugin/plugintest"
 	"reflect"
 	"sync/atomic"
 	"testing"
 
 	"github.com/allister/allister/internal/plugin"
+	"github.com/allister/allister/internal/plugin/plugintest"
 )
 
 var badChars = map[string]string{

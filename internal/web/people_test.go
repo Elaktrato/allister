@@ -2,11 +2,11 @@ package web
 
 import (
 	"context"
-	"github.com/allister/allister/internal/library"
 	"net/http"
 	"strings"
 	"testing"
 
+	"github.com/allister/allister/internal/library"
 	"github.com/allister/allister/internal/plugin"
 	"github.com/allister/allister/internal/plugins/anilist"
 )

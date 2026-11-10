@@ -1,6 +1,6 @@
 # Pins
 
-Everything Allister's build pulls from the network is pinned to an exact version and verified by a digest or checksum. The tests in `internal/guard/pins_test.go` and `internal/web/static_test.go` fail when an image is unpinned, a checksum (Tailwind, htmx, the icon font, the bundled app fonts) is missing or wrong, or this file does not record a pin that is in use (or records one that is not).
+Everything Allister's build and CI pull from the network is pinned to an exact version and verified by a digest or checksum. The tests in `internal/guard/pins_test.go` and `internal/web/static_test.go` fail when an image is unpinned, a checksum (Tailwind, htmx, the icon font, the bundled app fonts) is missing or wrong, or this file does not record a pin that is in use (or records one that is not).
 
 Pinned on 2026-11-10.
 
@@ -81,9 +81,34 @@ The image carries every licence: the Dockerfile's final stage copies `LICENSES/`
 - Each sum is recorded next to its file (`<file>.sha256`, sha256sum format). The version is in the file name, so cached copies are never reused for a new file. Served from the embedded static files as `font/woff2` with the same immutable cache as the icon font, declared by the generated `/appearance.css` with `font-display: swap`. Nothing is fetched from a CDN at run time.
 - Refreshing: download the new package version's two files per font (twice; the sums must match; compare with the npm tarball), save them under the new version's names, regenerate the `.sha256` files (`cd internal/web/static/fonts && sha256sum <file> > <file>.sha256`), check the upstream licence file (copy it unchanged when it changed, update the table above), and update the version in `internal/appearance/bundled.go`, `internal/web/static_test.go` and this section. `scripts/update-pins.sh` never rewrites the fonts; it only checks them.
 
+## CI tools
+
+The checks in `scripts/ci.sh` (run by the GitHub workflows and locally, see `docs/ci.md`) use these images, pinned the same way as above (multi-architecture index digest, resolved with `docker buildx imagetools inspect` and cross-checked against the registry's `Docker-Content-Digest` header). `TestCIScriptImagesPinned` fails when one is unpinned or a `docker run` in the script uses a literal image. Versions released less than a week before pinning were skipped for the previous release (a short cooldown against a compromised fresh release).
+
+| Tool | Image |
+|---|---|
+| golangci-lint (Go 1.27) | `golangci/golangci-lint:v2.15.0@sha256:fbfcfd12a6f8d7f1b97b3362ca80fc2a244d46863148c73cb88e7793af96c481` |
+| hadolint | `hadolint/hadolint:v2.15.1@sha256:32dac94127fd60b7b7e3fbfc65e1383b9b5e25c9bfd7b8536de7a539fe68a12d` |
+| actionlint (with shellcheck) | `rhysd/actionlint:1.7.12@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667` |
+| gitleaks | `ghcr.io/gitleaks/gitleaks:v8.30.1@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f` |
+| Trivy (image scan and SBOM) | `aquasec/trivy:0.76.1@sha256:790fd66d1697395d8693d1acaa1ea702406a20f109b6fc7bac8db623eca6c06c` |
+
+Go itself is the build image above (`scripts/ci.sh` reads it from `scripts/go.sh`).
+
+## Go tools
+
+Built from the separate module `tools/` (`tools/go.mod` with `tool` directives; `tools/go.sum` holds the hashes, verified against the Go checksum database when downloaded). It is a module of its own so the tools' dependencies never enter the application's `go.mod`. `TestPinsDocumentListsTools` checks this table against `tools/go.mod` and `tools/go.sum`.
+
+| Module | Version | Tool |
+|---|---|---|
+| `golang.org/x/vuln` | `v1.9.0` | `govulncheck` (security advisories) |
+| `github.com/go-gremlins/gremlins` | `v0.6.0` | `gremlins` (mutation testing) |
+
+Update with `scripts/go.sh -C tools get -tool <module>/cmd/<tool>@<version>` and `scripts/go.sh -C tools mod tidy`, then edit this table (Dependabot proposes updates of `tools/` too).
+
 ## Refreshing
 
-- **Security updates of the same tags** (new digests, new Tailwind sums of the same release): run `scripts/update-pins.sh`. It resolves every pinned tag again, hashes the Tailwind release, checks htmx, the icon font and its name list and the bundled app fonts, and prints the changes as a diff. `scripts/update-pins.sh --write` applies them to the Dockerfile, `scripts/go.sh`, `README.md` and this file. Then run `scripts/go.sh test ./...` and `docker compose build`.
+- **Security updates of the same tags** (new digests, new Tailwind sums of the same release, also the CI tool images in `scripts/ci.sh`): run `scripts/update-pins.sh`. It resolves every pinned tag again, hashes the Tailwind release, checks htmx, the icon font and its name list and the bundled app fonts, and prints the changes as a diff. `scripts/update-pins.sh --write` applies them to the Dockerfile, `scripts/go.sh`, `scripts/ci.sh`, `README.md` and this file. Then run `scripts/go.sh test ./...` and `docker compose build`.
 - **A new version** (image tag, Go patch, Tailwind release): edit the tag (or `TAILWIND_VERSION`) everywhere it appears, including this file, and for Go also the `toolchain` line of `go.mod`; then run `scripts/update-pins.sh --write` to resolve the new digests and checksums, and test as above.
 - **htmx**: replace `htmx.min.js` with the upstream file, regenerate the sum (`cd internal/web/static && sha256sum htmx.min.js > htmx.min.js.sha256`), compare it with upstream, and update the version and sum above. The script never rewrites htmx.
 - **Material Symbols**: fetch the stylesheet URL above again, download the woff2 it names (twice; the sums must match), save it as `material-symbols-outlined-v<version>.woff2` (the new version in the name, so cached copies are never reused), regenerate the `.sha256` file, and update the file name in `input.css`, `base.html`, `internal/web/static_test.go`, `internal/guard/pins_test.go`, `scripts/update-pins.sh` and this section. The script never rewrites the font; it only checks it.

@@ -4,6 +4,7 @@
 
 # debian:bookworm-slim
 FROM debian:bookworm-slim@sha256:734a72b3d6142a71993b4bc580ca01d8ca687f77a2c422d96a961d3376b179bc AS css
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 ARG TARGETARCH
 ARG TAILWIND_VERSION=v3.4.17
 # sha256 of tailwindcss-linux-x64 and tailwindcss-linux-arm64 of TAILWIND_VERSION

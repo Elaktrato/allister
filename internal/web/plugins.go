@@ -132,7 +132,7 @@ func (s *server) entryNotFound(w http.ResponseWriter, r *http.Request) {
 
 // internalError logs err and answers 500.
 func (s *server) internalError(w http.ResponseWriter, r *http.Request, err error) {
-	log.Printf("%s %s: %v", r.Method, r.URL.Path, err)
+	log.Printf("%s %q: %v", r.Method, r.URL.Path, err)
 	http.Error(w, "internal error", http.StatusInternalServerError)
 }
 

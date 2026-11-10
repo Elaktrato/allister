@@ -262,13 +262,13 @@ func (s *server) itemFail(w http.ResponseWriter, r *http.Request, m plugin.Manif
 		log.Printf("%s %s: %v", r.Method, r.URL.Path, err)
 		s.errorPage(w, r, http.StatusServiceUnavailable, "Not configured", sourceMessage(m, source, err), retry)
 	case errors.Is(err, plugin.ErrBadResponse):
-		log.Printf("%s %s: %v", r.Method, r.URL.Path, err)
+		log.Printf("%s %q: %v", r.Method, r.URL.Path, err)
 		s.errorPage(w, r, http.StatusBadGateway, "Unusable answer", sourceMessage(m, source, err), retry)
 	case errors.Is(err, plugin.ErrRateLimited), errors.Is(err, plugin.ErrUnavailable):
-		log.Printf("%s %s: %v", r.Method, r.URL.Path, err)
+		log.Printf("%s %q: %v", r.Method, r.URL.Path, err)
 		s.errorPage(w, r, http.StatusServiceUnavailable, "Temporarily unavailable", sourceMessage(m, source, err), retry)
 	default:
-		log.Printf("%s %s: %v", r.Method, r.URL.Path, err)
+		log.Printf("%s %q: %v", r.Method, r.URL.Path, err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
 	}
 }

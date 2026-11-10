@@ -165,8 +165,9 @@ func Write(ctx context.Context, w io.Writer, lib *library.Library, plugins []Plu
 		return fmt.Errorf("backup: %w", err)
 	}
 	// the surrounding object is written by hand so items can stream
-	bw.Write(head[:len(head)-1])
-	bw.WriteString(`,"items":[`)
+	// bufio errors are sticky: the Flush below reports a failed write
+	_, _ = bw.Write(head[:len(head)-1])
+	_, _ = bw.WriteString(`,"items":[`)
 	enc := json.NewEncoder(bw)
 	var names []string
 	seen := map[string]bool{}
@@ -196,7 +197,7 @@ func Write(ctx context.Context, w io.Writer, lib *library.Library, plugins []Plu
 	if err != nil {
 		return fmt.Errorf("backup: %w", err)
 	}
-	bw.WriteString("]}\n")
+	_, _ = bw.WriteString("]}\n") // sticky, reported by Flush
 	if err := bw.Flush(); err != nil {
 		return fmt.Errorf("backup: %w", err)
 	}
@@ -230,7 +231,7 @@ func coverFile(coversDir, name string) bool {
 // writeCover adds covers/<name>. A file that vanished since it was checked
 // is skipped with a log line (the restore then notes the missing cover).
 func writeCover(zw *zip.Writer, coversDir, name string, now time.Time) error {
-	f, err := os.Open(filepath.Join(coversDir, name))
+	f, err := os.Open(filepath.Join(coversDir, name)) //nolint:gosec // G304: name passed coverFile, a plain file name inside coversDir
 	if err != nil {
 		log.Printf("backup: cover %s skipped: %v", name, err)
 		return nil
@@ -407,7 +408,7 @@ func Restore(ctx context.Context, ra io.ReaderAt, size int64, opts Options) (*Re
 		return rs.rep, reject("This file is not an Allister backup archive (unexpected data before the zip directory). Only archives written by Allister are accepted.")
 	case err != nil:
 		return rs.rep, err
-	case walked > uint64(rs.lim.MaxEntries):
+	case walked > uint64(rs.lim.MaxEntries): //nolint:gosec // G115: MaxEntries is a positive limit
 		return rs.rep, reject("The archive holds more than %d files: it is not an Allister backup.", rs.lim.MaxEntries)
 	case walked != declared:
 		return rs.rep, reject("The archive's file directory does not match its end record (%d entries, %d declared): it is not an Allister backup.", walked, declared)
@@ -664,7 +665,7 @@ func (rs *restorer) item(ctx context.Context, index int, raw json.RawMessage) er
 			Source   string `json:"source"`
 			SourceID string `json:"source_id"`
 		}
-		json.Unmarshal(raw, &id)
+		_ = json.Unmarshal(raw, &id) // best effort: the ids only label the failed row
 		rs.rep.Failed++
 		addRow(&rs.rep.FailedRows, &rs.rep.MoreFailed, Row{Index: index, PluginID: clip(id.PluginID, 60), Kind: clip(id.Kind, 60),
 			Source: clip(id.Source, 60), SourceID: clip(id.SourceID, 100), Reason: clip("the item cannot be read: "+err.Error(), 300)})
@@ -861,7 +862,6 @@ var errPrefix = errors.New("data before the zip directory")
 // and a mismatch before zip.NewReader allocates anything.
 func scanDirectory(ra io.ReaderAt, size int64, max int) (walked, declared uint64, err error) {
 	le := binary.LittleEndian
-	const endLen = 22
 	var buf []byte
 	var endOff int64
 	for i, bLen := range []int64{1024, 65 * 1024} {
@@ -919,7 +919,7 @@ func scanDirectory(ra io.ReaderAt, size int64, max int) (walked, declared uint64
 	}
 	start := int64(dirOffset)
 	br := bufio.NewReaderSize(io.NewSectionReader(ra, start, size-start), 64<<10)
-	for walked <= uint64(max) {
+	for walked <= uint64(max) { //nolint:gosec // G115: max is the positive entry limit
 		if _, ok := nextHeader(br); !ok {
 			break
 		}
@@ -956,7 +956,7 @@ func zip64Locator(ra io.ReaderAt, endOff int64) (int64, bool) {
 	if le.Uint32(loc) != 0x07064b50 || le.Uint32(loc[4:]) != 0 || le.Uint32(loc[16:]) != 1 {
 		return 0, false
 	}
-	return int64(le.Uint64(loc[8:])), true
+	return int64(le.Uint64(loc[8:])), true //nolint:gosec // G115: the caller refuses p < 0
 }
 
 // nextHeader reads one central directory header (46 bytes plus name, extra
