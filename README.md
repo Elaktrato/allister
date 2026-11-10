@@ -6,7 +6,7 @@ It is a single Go binary with a SQLite database, server-rendered pages, htmx and
 
 ## Features
 
-- Search AniList and open an overview: titles in several languages, related entries, cast and recommendations.
+- Search AniList and open an overview: titles in several languages, related entries, cast and recommendations (loaded after the page, so a slow AniList never delays it).
 - Add to your list with status, rating, progress, start and finish dates and a comment.
 - Paginated list with status tabs and a +1 episode button.
 - Character and voice-actor pages that link to the anime in your own list.
@@ -88,7 +88,7 @@ This saves the database and the covers separately. The database file is named wi
 
 ## Disk use
 
-Covers and person images are stored locally in `covers/` inside the data volume. Expect roughly a few hundred MB for an import of around 800 entries. Files of removed or re-matched entries are not deleted automatically, and the app does not prune them; if you ever need the space, you can clean up `covers/` by hand.
+Covers and person images are stored locally in `covers/` inside the data volume. Measured on AniList: a cover is about 40 KB (the larger size), a person photo about 21 KB (the `medium` size Allister requests; `large` would be about 87 KB), and an anime credits about 52 people (characters and voice actors). That is roughly 1 MB of person photos plus the cover per anime; voice actors and characters shared between anime are downloaded once. A single downloaded image is limited to 2 MiB. Files of removed or re-matched entries are not deleted automatically, and the app does not prune them; if you ever need the space, you can clean up `covers/` by hand.
 
 ## Security
 
