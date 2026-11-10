@@ -143,7 +143,11 @@ echo "htmx $(grep -o 'version:"[0-9.]*"' internal/web/static/htmx.min.js | head 
 	echo "update-pins: internal/web/static/material-symbols-outlined-v383.woff2 does not match its .sha256" >&2
 	exit 1
 }
-echo "material symbols v383: checksum ok" >&2
+(cd internal/web/testdata && sha256sum -c --quiet material-symbols-outlined.codepoints.sha256) || {
+	echo "update-pins: internal/web/testdata/material-symbols-outlined.codepoints does not match its .sha256" >&2
+	exit 1
+}
+echo "material symbols v383: checksum ok (font and name list)" >&2
 
 changed=0
 for f in "${files[@]}"; do
