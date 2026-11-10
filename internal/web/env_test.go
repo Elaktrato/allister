@@ -105,7 +105,7 @@ func newEnvWith(t *testing.T, mk func(es plugin.EnabledStore) *plugin.Registry) 
 	e.lib = library.New(d, e.reg)
 	fonts := appearance.NewFontStore(d, filepath.Join(filepath.Dir(e.covers), "fonts"))
 	e.srv, e.h = newServer(Deps{
-		Settings: e.set, Jobs: e.jobs, SyncJobs: testSyncJobs(), CoversDir: e.covers, DataDir: filepath.Dir(e.covers),
+		Settings: e.set, Jobs: e.jobs, SyncJobs: testSyncJobs(), ScheduleJobs: testScheduleJobs(), CoversDir: e.covers, DataDir: filepath.Dir(e.covers),
 		Registry: e.reg, Library: e.lib, Appearance: appearance.NewService(e.set, fonts),
 	}, func() time.Time { return *e.now })
 	return e
@@ -117,6 +117,10 @@ func newEnvWith(t *testing.T, mk func(es plugin.EnabledStore) *plugin.Registry) 
 // enqueued.
 func testSyncJobs() map[string]func(int64) (string, any) {
 	return map[string]func(int64) (string, any){"anime": jobs.SyncJobFor("anime")}
+}
+
+func testScheduleJobs() map[string]func(int64) (string, any) {
+	return map[string]func(int64) (string, any){"tv": jobs.ScheduleJobFor("tv")}
 }
 
 func sampleAnimeProvider() *animeProvider {

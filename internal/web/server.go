@@ -41,6 +41,9 @@ type Deps struct {
 	// sync job. cmd/allister wires the generic sync job (jobs.SyncJobFor)
 	// for every installed plugin.
 	SyncJobs map[string]func(itemID int64) (kind string, payload any)
+	// ScheduleJobs maps a plugin id to its schedule refresh job, like
+	// SyncJobs: the calendar feed enqueues refreshes without knowing the kind.
+	ScheduleJobs map[string]func(itemID int64) (kind string, payload any)
 	// CoversDir is DATA_DIR/covers; when empty /covers/ is not served.
 	CoversDir string
 	// DataDir is DATA_DIR: a backup restore spools its upload to
@@ -145,6 +148,7 @@ func newServer(deps Deps, now func() time.Time) (*server, http.Handler) {
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("ok"))
 	})
+	mux.HandleFunc("GET /calendar.ics", s.getCalendar)
 	mux.Handle("GET /static/", staticHandler())
 	if deps.CoversDir != "" {
 		mux.Handle("GET /covers/", coversHandler(deps.CoversDir))
