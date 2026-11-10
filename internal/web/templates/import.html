@@ -81,7 +81,7 @@
       <button type="submit" class="rounded bg-indigo-600 px-4 py-2 font-medium hover:bg-indigo-500">Upload and import</button>
     </form>
     {{else}}
-    <p class="mb-4 max-w-2xl text-sm text-slate-400" data-no-importers>No enabled plugin offers an importer. Enable a plugin in Settings to import a file.</p>
+    <p class="mb-4 max-w-2xl text-sm text-slate-400" data-no-importers>No enabled plugin offers an importer. Enable a plugin in <a href="/settings/plugins" class="text-indigo-400 underline hover:text-indigo-300">Settings &gt; Plugins</a> to import a file.</p>
     {{end}}
     {{template "import_progress" .}}
   </div>

@@ -572,7 +572,7 @@ func TestImportPageExplainsImportPausedByDisabledPlugin(t *testing.T) {
 	if rec := e.uploadTo(t, url.Values{"importer": {"book/books-csv"}}, "file", "b.csv", []byte("x")); rec.Code != 303 {
 		t.Fatalf("upload: %d", rec.Code)
 	}
-	const paused = "This import is paused because the Books plugin is disabled. Enable it in Settings to continue, or cancel the import."
+	const paused = "This import is paused because the Books plugin is disabled. Enable it on the Plugins page of Settings to continue, or cancel the import."
 	mustNotContain(t, e.get("/settings/import", false).Body.String(), paused)
 	if err := e.reg.SetEnabled(context.Background(), "book", false); err != nil {
 		t.Fatal(err)

@@ -154,7 +154,7 @@ func (s *server) loadImport(r *http.Request, p importPage) (importPage, error) {
 				if m.Name != "" {
 					name = m.Name
 				}
-				p.Paused = "This import is paused because the " + name + " plugin is disabled. Enable it in Settings to continue, or cancel the import."
+				p.Paused = "This import is paused because the " + name + " plugin is disabled. Enable it on the Plugins page of Settings to continue, or cancel the import."
 			}
 		}
 	}

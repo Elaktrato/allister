@@ -669,7 +669,7 @@ func TestThreePluginsShareOneQueueAndImportRunner(t *testing.T) {
 	e.drain(t)
 	b = e.page(t, "/settings/import")
 	mustContain(t, b, "again.txt", `data-state="pending"`, "Cancel import",
-		"This import is paused because the Books plugin is disabled. Enable it in Settings to continue, or cancel the import.")
+		"This import is paused because the Books plugin is disabled. Enable it on the Plugins page of Settings to continue, or cancel the import.")
 	rec = e.uploadImport(t, "tv/tv-json", "tv2.txt", "dark;Dark;active\n")
 	if rec.Code != http.StatusConflict {
 		t.Fatalf("import while a paused one is pending: %d", rec.Code)
@@ -756,7 +756,7 @@ func TestNavigationAndSettingsWithThreePlugins(t *testing.T) {
 	mustContain(t, e.page(t, "/tv/search"), "Search shows")
 
 	// the home page follows the enabled plugins in registry order
-	for _, step := range []struct{ toggle, want string }{{"", "/anime"}, {"anime", "/book"}, {"book", "/tv"}, {"tv", "/settings"}} {
+	for _, step := range []struct{ toggle, want string }{{"", "/anime"}, {"anime", "/book"}, {"book", "/tv"}, {"tv", "/settings/plugins"}} {
 		if step.toggle != "" {
 			if rec := e.do("POST", "/settings/plugins/"+step.toggle, url.Values{"enabled": {"0"}}, false); rec.Code != http.StatusSeeOther {
 				t.Fatalf("disable %s: %d", step.toggle, rec.Code)

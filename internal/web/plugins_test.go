@@ -344,7 +344,7 @@ func TestRootRedirectsToFirstEnabledOrSettings(t *testing.T) {
 		t.Fatalf("got %q", l)
 	}
 	e.disable(t, "book")
-	if l := loc(); l != "/settings" {
+	if l := loc(); l != "/settings/plugins" {
 		t.Fatalf("got %q", l)
 	}
 }

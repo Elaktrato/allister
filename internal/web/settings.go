@@ -101,15 +101,32 @@ func (s *server) importAvailable() bool {
 
 // settingsTabsView is the data of the settings section tabs.
 type settingsTabsView struct {
-	Current string // the path of the page shown
+	Current string // the section of the page shown (settingsSection)
 	Import  bool   // the Import tab is offered
 }
 
+// settingsSections are the paths of the settings section pages.
+var settingsSections = []string{"/settings", "/settings/plugins", "/settings/import", "/settings/backup"}
+
+// settingsSection is the section a settings path belongs to: the longest
+// section path it is or lies under, so a page answering a POST below its
+// section (/settings/backup/restore, /settings/import/resume) marks its tab.
+func settingsSection(path string) string {
+	best := ""
+	for _, p := range settingsSections {
+		if underPrefix(path, p) && len(p) > len(best) {
+			best = p
+		}
+	}
+	return best
+}
+
 // settingsTabs prepares the section tabs for r. The Import tab follows
-// importAvailable, and stays while its own page is shown (a running import
-// of a plugin switched off meanwhile is still reported there).
+// importAvailable, and stays while an import page is shown (a running
+// import of a plugin switched off meanwhile is still reported there).
 func (s *server) settingsTabs(r *http.Request) settingsTabsView {
-	return settingsTabsView{Current: r.URL.Path, Import: s.importAvailable() || (s.deps.Imports != nil && r.URL.Path == "/settings/import")}
+	cur := settingsSection(r.URL.Path)
+	return settingsTabsView{Current: cur, Import: s.importAvailable() || (s.deps.Imports != nil && cur == "/settings/import")}
 }
 
 // settingsTab is one rendered section tab.

@@ -239,7 +239,7 @@ func (s *server) fillMarkers(r *http.Request, out []byte) ([]byte, error) {
 }
 
 // index redirects the home page to the first enabled plugin's list, or to
-// Settings when no plugin is enabled.
+// Settings > Plugins (where one is switched on) when no plugin is enabled.
 func (s *server) index(w http.ResponseWriter, r *http.Request) {
 	for _, m := range s.deps.Registry.Manifests() {
 		if s.deps.Registry.IsEnabled(m.ID) {
@@ -247,7 +247,7 @@ func (s *server) index(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	http.Redirect(w, r, "/settings", http.StatusSeeOther)
+	http.Redirect(w, r, "/settings/plugins", http.StatusSeeOther)
 }
 
 // staticHandler serves the embedded static files. A font gets its MIME type

@@ -1,8 +1,10 @@
 package web
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"regexp"
 	"strings"
 	"testing"
@@ -240,4 +242,60 @@ func TestIconsSizedWithoutLineHeight(t *testing.T) {
 			t.Errorf("%s: %s", e.Name(), m)
 		}
 	}
+}
+
+// TestSettingsTabsOnResultPages: a settings section rendered as the answer
+// of a POST below its path (a refused restore, a refused resume) still
+// marks its tab and the sidebar's Settings row, exactly once each.
+func TestSettingsTabsOnResultPages(t *testing.T) {
+	check := func(what string, rec *httptest.ResponseRecorder, tab string) {
+		t.Helper()
+		b := rec.Body.String()
+		if !strings.Contains(b, "<html") {
+			t.Fatalf("%s: not a page (%d): %s", what, rec.Code, b)
+		}
+		if n := strings.Count(b, `aria-current="page"`); n != 1 {
+			t.Errorf("%s: %d aria-current=page", what, n)
+		}
+		if row := navRow(t, mainNav(t, b), "/settings"); !strings.Contains(row, `aria-current="page"`) {
+			t.Errorf("%s: Settings not current", what)
+		}
+		tabs := settingsTabs(t, b)
+		if strings.Count(tabs, `aria-current="true"`) != 1 || !strings.Contains(navRow(t, tabs, tab), `aria-current="true"`) {
+			t.Errorf("%s: tab %s not current: %s", what, tab, tabs)
+		}
+	}
+	e := newEnv(t)
+	rec := e.do("POST", "/settings/backup/restore", url.Values{}, false)
+	if rec.Code < 400 {
+		t.Fatalf("restore without a file: %d", rec.Code)
+	}
+	check("restore", rec, "/settings/backup")
+	ie := newImpEnv(t, notFoundExcept())
+	rec = ie.postPath("/settings/import/resume")
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("resume: %d", rec.Code)
+	}
+	check("resume", rec, "/settings/import")
+	for p, want := range map[string]string{"/settings": "/settings", "/settings/plugins": "/settings/plugins", "/settings/backup/restore": "/settings/backup",
+		"/settings/import/resume": "/settings/import", "/settings/importx": "/settings", "/settings/plugins/anime": "/settings/plugins"} {
+		if got := settingsSection(p); got != want {
+			t.Errorf("settingsSection(%q) = %q, want %q", p, got, want)
+		}
+	}
+}
+
+// TestPluginHintsLeadToSettingsPlugins: with no plugin enabled the home page
+// and the import page's hints lead to Settings > Plugins, where a plugin is
+// switched on.
+func TestPluginHintsLeadToSettingsPlugins(t *testing.T) {
+	e := newImpEnv(t, notFoundExcept())
+	if err := e.reg.SetEnabled(context.Background(), "anime", false); err != nil {
+		t.Fatal(err)
+	}
+	rec := e.get("/", false)
+	if rec.Code != http.StatusSeeOther || rec.Header().Get("Location") != "/settings/plugins" {
+		t.Fatalf("home: %d %q", rec.Code, rec.Header().Get("Location"))
+	}
+	mustContain(t, e.get("/settings/import", false).Body.String(), `Enable a plugin in <a href="/settings/plugins"`)
 }

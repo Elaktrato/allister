@@ -709,7 +709,7 @@ func TestDisablingAPluginPausesItsRunningImport(t *testing.T) {
 	}
 	b := e.page(t, "/settings/import")
 	mustContain(t, b, `data-state="running"`, `data-count="imported">1<`,
-		"This import is paused because the Books plugin is disabled. Enable it in Settings to continue, or cancel the import.")
+		"This import is paused because the Books plugin is disabled. Enable it on the Plugins page of Settings to continue, or cancel the import.")
 	if n := e.itemCount(t); n != 1 {
 		t.Fatalf("%d items saved while paused", n)
 	}
