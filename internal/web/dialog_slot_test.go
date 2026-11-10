@@ -70,7 +70,7 @@ func TestDialogSlotSwapsEveryDialogStatus(t *testing.T) {
 	for _, c := range []struct {
 		page    string
 		answers []answer
-	}{{newEnv(t).get("/anime/anilist/1535").Body.String(), overview}, {le.get("/anime").Body.String(), list}} {
+	}{{newEnv(t).get("/anime/anilist/1535").Body.String(), overview}, {le.get("/anime?view=table").Body.String(), list}} {
 		swaps := slotStatuses(t, c.page)
 		for _, code := range dialogSwapStatuses {
 			if !swaps[code] {

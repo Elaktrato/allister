@@ -151,13 +151,13 @@ func TestFilterByTypeYearRangeStudio(t *testing.T) {
 		"f.type=TV&f.year=1990..1995":      {},
 		"f.year.from=2000&f.year.to=2010&": {"Alpha", "Beta"},
 	} {
-		b := e.listGet(t, "/anime?"+q)
+		b := e.listGet(t, "/anime?view=table&"+q)
 		wantRows(t, q, b, want...)
 		if n := noticeOf(b); n != "" {
 			t.Errorf("%s: unexpected notice %q", q, n)
 		}
 	}
-	b := e.listGet(t, "/anime?f.type=TV&f.year=2000..2010&f.studio=Madhouse")
+	b := e.listGet(t, "/anime?f.type=TV&f.year=2000..2010&f.studio=Madhouse&view=table")
 	mustContain(t, b, "Showing 1–1 of 1")
 	// malformed values are ignored with a notice naming exactly that parameter
 	for q, key := range map[string]string{
@@ -169,7 +169,7 @@ func TestFilterByTypeYearRangeStudio(t *testing.T) {
 		"f.year=..&f.year.from=":       "f.year",
 		"f.studio=Madhouse&f.type=Bad": "f.type",
 	} {
-		b := e.listGet(t, "/anime?"+q)
+		b := e.listGet(t, "/anime?view=table&"+q)
 		want := []string{"Alpha", "Beta", "Gamma", "Delta"}
 		if strings.Contains(q, "studio") {
 			want = []string{"Alpha", "Gamma"}
@@ -180,13 +180,13 @@ func TestFilterByTypeYearRangeStudio(t *testing.T) {
 		}
 	}
 	// the canonical value wins over the form aliases, which are named
-	b = e.listGet(t, "/anime?f.year=2010..&f.year.from=1990&f.year.to=2000")
+	b = e.listGet(t, "/anime?f.year=2010..&f.year.from=1990&f.year.to=2000&view=table")
 	wantRows(t, "alias dropped", b, "Gamma")
 	if got := noticeKeysOf(b); !slices.Equal(got, []string{"f.year.from", "f.year.to"}) {
 		t.Errorf("alias notice keys %q", got)
 	}
 	// the form shows the applied values again
-	b = e.listGet(t, "/anime?f.type=TV&f.year=2000..2010&f.studio=Madhouse")
+	b = e.listGet(t, "/anime?f.type=TV&f.year=2000..2010&f.studio=Madhouse&view=table")
 	mustContain(t, b, `<option value="TV" selected>`, `name="f.year.from" value="2000"`, `name="f.year.to" value="2010"`,
 		`name="f.studio" value="Madhouse"`)
 }
@@ -208,17 +208,17 @@ func TestFilterByGenresAnyAndAll(t *testing.T) {
 		"genre=&genre_mode=any":                      {"Both", "Only Drama", "Comedy"},
 		"genre=Drama&genre=Crime&genre_mode=all&q=b": {"Both"},
 	} {
-		b := e.listGet(t, "/tv?"+q)
+		b := e.listGet(t, "/tv?view=table&"+q)
 		wantRows(t, q, b, want...)
 		if n := noticeOf(b); n != "" {
 			t.Errorf("%s: unexpected notice %q", q, n)
 		}
 	}
-	b := e.listGet(t, "/tv?genre=Drama&genre=Crime&genre_mode=bogus")
+	b := e.listGet(t, "/tv?genre=Drama&genre=Crime&genre_mode=bogus&view=table")
 	wantRows(t, "bad mode", b, "Both", "Only Drama")
 	mustContain(t, noticeOf(b), "genre_mode")
 	// the bar lists the genres with counts and the mode switch
-	b = e.listGet(t, "/tv?genre=Crime&genre_mode=all")
+	b = e.listGet(t, "/tv?genre=Crime&genre_mode=all&view=table")
 	mustContain(t, b, `name="genre"`, `<option value="Drama">Drama (2)</option>`, `<option value="Crime" selected>Crime (1)</option>`,
 		`<option value="Comedy">Comedy (1)</option>`, `name="genre_mode"`, `<option value="all" selected>`)
 }
@@ -229,19 +229,19 @@ func TestFilterByTagsWithCounts(t *testing.T) {
 	e.addFixture(t, "tv", "show", showWith("1", "Loop One", nil, plugin.Tag{Name: "Time Travel"}, plugin.Tag{Name: "Twist", Spoiler: true}), active)
 	e.addFixture(t, "tv", "show", showWith("2", "Loop Two", nil, plugin.Tag{Name: "Time Travel"}), active)
 	e.addFixture(t, "tv", "show", showWith("3", "Calm", nil, plugin.Tag{Name: "Slow"}), library.Entry{Status: library.Completed})
-	b := e.listGet(t, "/tv")
+	b := e.listGet(t, "/tv?view=table&view=table")
 	mustContain(t, b, `name="tag"`, `<option value="Time Travel">Time Travel (2)</option>`, `<option value="Twist">Twist (1)</option>`,
 		`<option value="Slow">Slow (1)</option>`, `name="tag_mode"`)
-	wantRows(t, "tag", e.listGet(t, "/tv?tag=time+travel"), "Loop One", "Loop Two")
-	wantRows(t, "spoiler tag", e.listGet(t, "/tv?tag=Twist"), "Loop One")
-	wantRows(t, "all", e.listGet(t, "/tv?tag=Twist&tag=Time+Travel&tag_mode=all"), "Loop One")
-	wantRows(t, "any", e.listGet(t, "/tv?tag=Twist&tag=Slow"), "Loop One", "Calm")
+	wantRows(t, "tag", e.listGet(t, "/tv?tag=time+travel&view=table"), "Loop One", "Loop Two")
+	wantRows(t, "spoiler tag", e.listGet(t, "/tv?tag=Twist&view=table"), "Loop One")
+	wantRows(t, "all", e.listGet(t, "/tv?tag=Twist&tag=Time+Travel&tag_mode=all&view=table"), "Loop One")
+	wantRows(t, "any", e.listGet(t, "/tv?tag=Twist&tag=Slow&view=table"), "Loop One", "Calm")
 	// counts follow the other filters (text, status), not the tag filter itself
-	b = e.listGet(t, "/tv?q=two&tag=Slow")
+	b = e.listGet(t, "/tv?q=two&tag=Slow&view=table")
 	wantRows(t, "q+tag", b)
 	mustContain(t, b, `<option value="Time Travel">Time Travel (1)</option>`, `<option value="Slow" selected>Slow (0)</option>`)
 	mustNotContain(t, b, `Twist (`)
-	b = e.listGet(t, "/tv?status=completed")
+	b = e.listGet(t, "/tv?status=completed&view=table")
 	mustContain(t, b, `Slow (1)`)
 	mustNotContain(t, b, `Time Travel (`)
 }
@@ -263,22 +263,22 @@ func TestGenreTagFilterHostileValuesIgnoredOrBound(t *testing.T) {
 		}
 	}
 	// hostile values come back escaped as selected options
-	b := e.listGet(t, "/tv?"+url.Values{"genre": {`<script>alert(1)</script>`}}.Encode())
+	b := e.listGet(t, "/tv?view=table&"+url.Values{"genre": {`<script>alert(1)</script>`}}.Encode())
 	mustContain(t, b, "&lt;script&gt;alert(1)&lt;/script&gt;")
 	mustNotContain(t, b, "<script>alert(1)")
 	// nothing was harmed
-	wantRows(t, "after", e.listGet(t, "/tv"), "Drama Show", "Other Show")
+	wantRows(t, "after", e.listGet(t, "/tv?view=table&view=table"), "Drama Show", "Other Show")
 	// at most 50 values per term type: the rest is ignored with a notice
 	vals := url.Values{}
 	for i := 0; i < 60; i++ {
 		vals.Add("genre", fmt.Sprintf("g%d", i))
 	}
 	vals.Add("genre", "Drama")
-	b = e.listGet(t, "/tv?"+vals.Encode())
+	b = e.listGet(t, "/tv?view=table&"+vals.Encode())
 	mustContain(t, noticeOf(b), "genre")
 	// a kind without a tag filter ignores tags with a notice
 	e.addFixture(t, "book", "book", bookItem("1", "Earthsea"), active)
-	b = e.listGet(t, "/book?tag=Dragons")
+	b = e.listGet(t, "/book?tag=Dragons&view=table")
 	wantRows(t, "book tag", b, "Earthsea")
 	mustContain(t, noticeOf(b), "tag")
 }
@@ -288,16 +288,16 @@ func TestFilterByStatusTabAndText(t *testing.T) {
 	e.addFixture(t, "tv", "show", tvShow("1", "Dark"), library.Entry{Status: library.Active})
 	e.addFixture(t, "tv", "show", tvShow("2", "Darker"), library.Entry{Status: library.Completed})
 	e.addFixture(t, "tv", "show", tvShow("3", "Light"), library.Entry{Status: library.Active})
-	b := e.listGet(t, "/tv?status=active&q=dark")
+	b := e.listGet(t, "/tv?status=active&q=dark&view=table")
 	wantRows(t, "active+dark", b, "Dark")
 	main := b[strings.Index(b, "</header>"):]
 	// tabs count with the text filter and keep it
-	mustContain(t, main, "All (2)", "Watching (1)", "Watched (1)", `href="/tv?q=dark&amp;status=all&amp;view=cards"`, `href="/tv?q=dark&amp;status=completed&amp;view=cards"`,
+	mustContain(t, main, "All (2)", "Watching (1)", "Watched (1)", `href="/tv?q=dark&amp;status=all&amp;view=table"`, `href="/tv?q=dark&amp;status=completed&amp;view=table"`,
 		`name="status" value="active"`, `name="q" value="dark"`)
-	wantRows(t, "all dark", e.listGet(t, "/tv?q=DARK"), "Dark", "Darker")
-	wantRows(t, "completed dark", e.listGet(t, "/tv?status=completed&q=dar"), "Darker")
+	wantRows(t, "all dark", e.listGet(t, "/tv?q=DARK&view=table"), "Dark", "Darker")
+	wantRows(t, "completed dark", e.listGet(t, "/tv?status=completed&q=dar&view=table"), "Darker")
 	// a filter that matches nothing says so (not "your list is empty")
-	b = e.listGet(t, "/tv?q=zzz")
+	b = e.listGet(t, "/tv?q=zzz&view=table")
 	wantRows(t, "none", b)
 	mustContain(t, b, "No shows match these filters")
 	mustNotContain(t, b, "Your list is empty")
@@ -321,7 +321,7 @@ func TestSearchMatchesAnyLanguageTitle(t *testing.T) {
 		"d":      {"Dark", "Deep Sea"},
 		"nope":   {},
 	} {
-		wantRows(t, q, e.listGet(t, "/tv?"+url.Values{"q": {q}}.Encode()), want...)
+		wantRows(t, q, e.listGet(t, "/tv?view=table&"+url.Values{"q": {q}}.Encode()), want...)
 	}
 }
 
@@ -347,14 +347,14 @@ func TestSearchEscapesWildcardsAndHostileInput(t *testing.T) {
 		strings.Repeat("a", 10000): {},
 		"   ":                      all,
 	} {
-		rec := e.get("/tv?" + url.Values{"q": {q}}.Encode())
+		rec := e.get("/tv?view=table&" + url.Values{"q": {q}}.Encode())
 		if rec.Code != 200 {
 			t.Fatalf("%.20q: %d", q, rec.Code)
 		}
 		wantRows(t, fmt.Sprintf("q=%.20q", q), rec.Body.String(), want...)
 	}
 	// q is capped at 200 runes (also in the form and links)
-	b := e.listGet(t, "/tv?"+url.Values{"q": {strings.Repeat("é", 300)}}.Encode())
+	b := e.listGet(t, "/tv?view=table&"+url.Values{"q": {strings.Repeat("é", 300)}}.Encode())
 	mustContain(t, b, `value="`+strings.Repeat("é", 200)+`"`)
 	mustNotContain(t, b, strings.Repeat("é", 201))
 	// SQL fragments in keys and sort names are rejected, never used
@@ -366,13 +366,13 @@ func TestSearchEscapesWildcardsAndHostileInput(t *testing.T) {
 		"sort=year)--&dir=asc",
 		"f.year%27%20OR%201=1=2000",
 	} {
-		b := e.listGet(t, "/tv?"+q)
+		b := e.listGet(t, "/tv?view=table&"+q)
 		wantRows(t, q, b, all...)
 		if noticeOf(b) == "" {
 			t.Errorf("%s: no notice", q)
 		}
 	}
-	wantRows(t, "intact", e.listGet(t, "/tv"), all...)
+	wantRows(t, "intact", e.listGet(t, "/tv?view=table&view=table"), all...)
 }
 
 func TestRatingFiltersUnratedAndZeroSeparately(t *testing.T) {
@@ -398,20 +398,20 @@ func TestRatingFiltersUnratedAndZeroSeparately(t *testing.T) {
 		"rmin=10":             {},
 		"rmin=9&rmax=9&zero=": {"Rated 9"},
 	} {
-		b := e.listGet(t, "/tv?"+q)
+		b := e.listGet(t, "/tv?view=table&"+q)
 		wantRows(t, q, b, want...)
 		if n := noticeOf(b); n != "" {
 			t.Errorf("%s: unexpected notice %q", q, n)
 		}
 	}
 	for _, q := range []string{"rmin=11", "rmax=-1", "rmin=abc", "rmin=2.5", "rmin=7&rmax=3", "unrated=yes", "zero=2"} {
-		b := e.listGet(t, "/tv?"+q)
+		b := e.listGet(t, "/tv?view=table&"+q)
 		wantRows(t, q, b, all...)
 		if noticeOf(b) == "" {
 			t.Errorf("%s: no notice", q)
 		}
 	}
-	b := e.listGet(t, "/tv?unrated=1&rmin=3")
+	b := e.listGet(t, "/tv?unrated=1&rmin=3&view=table")
 	mustContain(t, b, `name="unrated" value="1" checked`, `name="rmin" value="3"`)
 	mustNotContain(t, b, `name="zero" value="1" checked`)
 }
@@ -428,15 +428,15 @@ func TestFlagsUnmatchedAndPartial(t *testing.T) {
 	e.addFixture(t, "book", "book", plain, active, library.WithSyncState("done"))
 	e.addFixture(t, "book", "book", bookItem("1", "Pending Sync"), active)
 	e.addFixture(t, "book", "book", bookItem("2", "Synced"), active, library.WithSyncState("done"))
-	b := e.listGet(t, "/book")
+	b := e.listGet(t, "/book?view=table&view=table")
 	mustContain(t, b, `name="unmatched" value="1"`, `name="partial" value="1"`)
-	wantRows(t, "unmatched", e.listGet(t, "/book?unmatched=1"), "Manual With ISBN")
-	wantRows(t, "partial", e.listGet(t, "/book?partial=1"), "Pending Sync")
-	wantRows(t, "both", e.listGet(t, "/book?partial=1&unmatched=1"))
-	b = e.listGet(t, "/book?unmatched=1")
+	wantRows(t, "unmatched", e.listGet(t, "/book?unmatched=1&view=table"), "Manual With ISBN")
+	wantRows(t, "partial", e.listGet(t, "/book?partial=1&view=table"), "Pending Sync")
+	wantRows(t, "both", e.listGet(t, "/book?partial=1&unmatched=1&view=table"))
+	b = e.listGet(t, "/book?unmatched=1&view=table")
 	mustContain(t, b, `name="unmatched" value="1" checked`)
 	for _, q := range []string{"unmatched=true", "partial=0"} {
-		b := e.listGet(t, "/book?"+q)
+		b := e.listGet(t, "/book?view=table&"+q)
 		wantRows(t, q, b, "Manual With ISBN", "Manual Plain", "Pending Sync", "Synced")
 		if noticeOf(b) == "" {
 			t.Errorf("%s: no notice", q)
@@ -458,18 +458,18 @@ func TestFilterByProgressState(t *testing.T) {
 	e.addFixture(t, "book", "book", book("3", "Done", 100), library.Entry{Status: library.Completed, Progress: map[string]float64{"pages": 100}})
 	e.addFixture(t, "book", "book", book("4", "Percent Done", 100), library.Entry{Status: library.Completed, Progress: map[string]float64{"percent": 100}},
 		library.WithProgressKeys([]string{"percent"}))
-	b := e.listGet(t, "/book")
+	b := e.listGet(t, "/book?view=table&view=table")
 	mustContain(t, b, `<select name="progress"`, `<option value="" selected>Any</option>`, `<option value="not_started">Not started</option>`,
 		`<option value="in_progress">In progress</option>`, `<option value="finished">Finished</option>`)
-	wantRows(t, "not started", e.listGet(t, "/book?progress=not_started"), "Unread")
-	wantRows(t, "in progress", e.listGet(t, "/book?progress=in_progress"), "Halfway")
-	b = e.listGet(t, "/book?progress=finished")
+	wantRows(t, "not started", e.listGet(t, "/book?progress=not_started&view=table"), "Unread")
+	wantRows(t, "in progress", e.listGet(t, "/book?progress=in_progress&view=table"), "Halfway")
+	b = e.listGet(t, "/book?progress=finished&view=table")
 	wantRows(t, "finished", b, "Done", "Percent Done")
 	mustContain(t, b, `<option value="finished" selected>Finished</option>`, "Clear filters")
 	// the state combines with the other filters
-	wantRows(t, "finished, text", e.listGet(t, "/book?progress=finished&q=percent"), "Percent Done")
+	wantRows(t, "finished, text", e.listGet(t, "/book?progress=finished&q=percent&view=table"), "Percent Done")
 	for _, q := range []string{"progress=any", "progress=FINISHED", "progress=finished&progress=not_started"} {
-		b := e.listGet(t, "/book?"+q)
+		b := e.listGet(t, "/book?view=table&"+q)
 		wantRows(t, q, b, "Unread", "Halfway", "Done", "Percent Done")
 		if !strings.Contains(noticeOf(b), "progress") {
 			t.Errorf("%s: notice %q", q, noticeOf(b))
@@ -502,27 +502,27 @@ func TestSortOptionsAndDirection(t *testing.T) {
 		"sort=title&dir=desc&q=a":   {"Charlie", "Bravo", "alpha"},
 		"sort=year&genre=&dir=desc": {"alpha", "Bravo", "Charlie"},
 	} {
-		b := e.listGet(t, "/tv?"+q)
+		b := e.listGet(t, "/tv?view=table&"+q)
 		wantOrder(t, q, b, want...)
 		if n := noticeOf(b); n != "" {
 			t.Errorf("%s: unexpected notice %q", q, n)
 		}
 	}
 	for _, q := range []string{"sort=bogus", "sort=type", "sort=episodes", "sort=title&dir=sideways"} {
-		b := e.listGet(t, "/tv?"+q)
+		b := e.listGet(t, "/tv?view=table&"+q)
 		if len(rowTitles(b)) != 3 || noticeOf(b) == "" {
 			t.Errorf("%s: rows %q notice %q", q, rowTitles(b), noticeOf(b))
 		}
 	}
 	// the choices are the table head's sort links (sort_test.go has the
 	// details), and the panel's compact sort control has them all selected
-	b := e.listGet(t, "/tv?sort=year&dir=asc")
+	b := e.listGet(t, "/tv?sort=year&dir=asc&view=table")
 	mustContain(t, b, `<option value="year" selected>Year</option>`, `<option value="asc" selected>Ascending</option>`,
 		`id="sort-updated"`, `id="sort-title"`, `id="sort-rating"`, `id="sort-progress"`, `id="sort-year"`)
 	mustContain(t, headCell(t, thead(t, b), "Year"), `aria-sort="ascending"`)
 	// the book fixture has no sortable field
 	e.addFixture(t, "book", "book", bookItem("1", "Earthsea"), library.Entry{Status: library.Active})
-	bk := e.listGet(t, "/book")
+	bk := e.listGet(t, "/book?view=table&view=table")
 	mustContain(t, bk, `id="sort-title"`, `id="sort-progress"`)
 	mustNotContain(t, bk, `id="sort-year"`, `id="sort-author"`)
 }
@@ -534,24 +534,24 @@ func TestFiltersSurvivePaginationLinks(t *testing.T) {
 	}
 	e.addFixture(t, "tv", "show", showWith("200", "Show Extra", []string{"Comedy"}), library.Entry{Status: library.Active})
 	e.addFixture(t, "tv", "show", showWith("201", "Elsewhere", []string{"Drama"}), library.Entry{Status: library.Active})
-	const filters = "genre=drama&q=Show&sort=title&status=active&view=cards"
-	b := e.listGet(t, "/tv?q=Show&genre=drama&sort=title&status=active")
+	const filters = "genre=drama&q=Show&sort=title&status=active&view=table"
+	b := e.listGet(t, "/tv?q=Show&genre=drama&sort=title&status=active&view=table")
 	if n := len(rowTitles(b)); n != 100 {
 		t.Fatalf("page 1 rows %d", n)
 	}
-	mustContain(t, b, "Showing 1–100 of 101", `href="/tv?genre=drama&amp;page=2&amp;q=Show&amp;sort=title&amp;status=active&amp;view=cards"`)
+	mustContain(t, b, "Showing 1–100 of 101", `href="/tv?genre=drama&amp;page=2&amp;q=Show&amp;sort=title&amp;status=active&amp;view=table"`)
 	// the tabs keep the filters (and start at page 1)
-	mustContain(t, b, `href="/tv?genre=drama&amp;q=Show&amp;sort=title&amp;status=all&amp;view=cards"`, `href="/tv?genre=drama&amp;q=Show&amp;sort=title&amp;status=completed&amp;view=cards"`)
+	mustContain(t, b, `href="/tv?genre=drama&amp;q=Show&amp;sort=title&amp;status=all&amp;view=table"`, `href="/tv?genre=drama&amp;q=Show&amp;sort=title&amp;status=completed&amp;view=table"`)
 	// the row forms return to the filtered page
 	ret := "/tv?" + filters
 	mustContain(t, b, `name="return" value="`+html.EscapeString(ret)+`"`, "return="+url.QueryEscape(ret))
-	p2 := e.listGet(t, "/tv?genre=drama&page=2&q=Show&sort=title&status=active")
+	p2 := e.listGet(t, "/tv?genre=drama&page=2&q=Show&sort=title&status=active&view=table")
 	wantOrder(t, "page 2", p2, "Show 101")
 	mustContain(t, p2, "Showing 101–101 of 101", `href="/tv?`+strings.ReplaceAll(filters, "&", "&amp;")+`"`, "Previous")
 	mustNotContain(t, p2, ">Next<")
 	// range filters keep their canonical form; the form aliases are folded into it
-	p := e.listGet(t, "/tv?f.year.from=2000&f.year.to=2030&q=Show")
-	mustContain(t, p, `href="/tv?f.year=2000..2030&amp;page=2&amp;q=Show&amp;view=cards"`)
+	p := e.listGet(t, "/tv?f.year.from=2000&f.year.to=2030&q=Show&view=table")
+	mustContain(t, p, `href="/tv?f.year=2000..2030&amp;page=2&amp;q=Show&amp;view=table"`)
 }
 
 func TestFilteredReturnSurvivesEdit(t *testing.T) {
@@ -572,16 +572,16 @@ func TestPartialResponseHasOnlyRows(t *testing.T) {
 	e.addFixture(t, "tv", "show", showWith("1", "Dark", []string{"Drama"}), library.Entry{Status: library.Active})
 	e.addFixture(t, "tv", "show", showWith("2", "Light", []string{"Comedy"}), library.Entry{Status: library.Completed})
 	hx := map[string]string{"HX-Request": "true", "HX-Target": "list-rows"}
-	rec := e.getWith("/tv?q=dar&f.year.from=&f.year.to=&genre_mode=any&sort=updated&dir=", hx)
+	rec := e.getWith("/tv?q=dar&f.year.from=&f.year.to=&genre_mode=any&sort=updated&dir=&view=table", hx)
 	if rec.Code != 200 || !strings.Contains(rec.Header().Get("Vary"), "HX-Request") {
 		t.Fatalf("%d %q", rec.Code, rec.Header().Get("Vary"))
 	}
 	b := rec.Body.String()
 	wantRows(t, "partial", b, "Dark")
-	mustContain(t, b, "Showing 1–1 of 1", `id="list-tabs"`, `hx-swap-oob="true"`, "All (1)", `href="/tv?q=dar&amp;status=completed&amp;view=cards"`)
+	mustContain(t, b, "Showing 1–1 of 1", `id="list-tabs"`, `hx-swap-oob="true"`, "All (1)", `href="/tv?q=dar&amp;status=completed&amp;view=table"`)
 	mustNotContain(t, b, "<html", "<header", `id="list-rows"`, `method="get"`, `id="dialog-slot"`)
 	// the address bar gets the canonical URL
-	if got := rec.Header().Get("HX-Push-Url"); got != "/tv?q=dar&view=cards" {
+	if got := rec.Header().Get("HX-Push-Url"); got != "/tv?q=dar&view=table" {
 		t.Errorf("HX-Push-Url %q", got)
 	}
 	// a history restore (cache miss) and other htmx requests get the full page
@@ -590,7 +590,7 @@ func TestPartialResponseHasOnlyRows(t *testing.T) {
 		{"HX-Request": "true"},
 		{},
 	} {
-		rec := e.getWith("/tv?q=dar", h)
+		rec := e.getWith("/tv?q=dar&view=table", h)
 		b := rec.Body.String()
 		mustContain(t, b, "<html", `id="list-rows"`, `id="dialog-slot"`, `<form id="list-filter" method="get" action="/tv"`)
 		wantRows(t, fmt.Sprint(h), b, "Dark")
@@ -606,13 +606,13 @@ func TestPartialResponseHasOnlyRows(t *testing.T) {
 func TestUnknownFilterKeyIgnoredWithNotice(t *testing.T) {
 	e := newFixtureEnv(t)
 	e.addFixture(t, "tv", "show", tvShow("1", "Dark"), library.Entry{Status: library.Active})
-	b := e.listGet(t, "/tv?bogus=1&f.nope=2&q=dark")
+	b := e.listGet(t, "/tv?bogus=1&f.nope=2&q=dark&view=table")
 	wantRows(t, "unknown", b, "Dark")
 	n := noticeOf(b)
 	mustContain(t, n, "bogus", "f.nope")
 	mustNotContain(t, n, ">q<", "dark")
 	// hostile keys are escaped
-	b = e.listGet(t, "/tv?"+url.Values{"<script>x</script>": {"1"}}.Encode())
+	b = e.listGet(t, "/tv?view=table&"+url.Values{"<script>x</script>": {"1"}}.Encode())
 	mustContain(t, noticeOf(b), "&lt;script&gt;")
 	mustNotContain(t, b, "<script>x")
 	// many unknown keys: a bounded notice
@@ -620,14 +620,14 @@ func TestUnknownFilterKeyIgnoredWithNotice(t *testing.T) {
 	for i := 0; i < 100; i++ {
 		vals.Set(fmt.Sprintf("k%03d", i), "1")
 	}
-	b = e.listGet(t, "/tv?"+vals.Encode())
+	b = e.listGet(t, "/tv?view=table&"+vals.Encode())
 	n = noticeOf(b)
 	mustContain(t, n, "k000", "more")
 	mustNotContain(t, n, "k099")
 	// the canonical links never carry rejected keys
-	mustNotContain(t, e.listGet(t, "/tv?bogus=1&status=active"), "bogus=")
+	mustNotContain(t, e.listGet(t, "/tv?bogus=1&status=active&view=table"), "bogus=")
 	// no notice without rejected keys
-	if n := noticeOf(e.listGet(t, "/tv?q=&status=active&page=1")); n != "" {
+	if n := noticeOf(e.listGet(t, "/tv?q=&status=active&page=1&view=table")); n != "" {
 		t.Errorf("notice %q", n)
 	}
 }
@@ -645,15 +645,15 @@ func TestFilterBarOnlyShowsFilterableFields(t *testing.T) {
 		}
 		return b[i : i+strings.Index(b[i:], "</form>")]
 	}
-	bk := form(e.listGet(t, "/book"))
+	bk := form(e.listGet(t, "/book?view=table&view=table"))
 	mustContain(t, bk, `action="/book"`, `name="q"`, `name="f.author"`, ">Author<", `name="genre"`, `name="genre_mode"`,
 		`hx-trigger="keyup changed delay:300ms, change"`, `hx-push-url="true"`, `hx-target="#list-rows"`, `hx-get="/book"`,
 		`type="submit"`, `name="rmin"`, `name="rmax"`, `name="unrated"`, `name="zero"`, `name="sort"`, `name="dir"`)
 	mustNotContain(t, bk, `name="f.pages`, `name="f.isbn`, `name="tag"`, `name="f.year`, "anime", "episode")
-	tv := form(e.listGet(t, "/tv"))
+	tv := form(e.listGet(t, "/tv?view=table&view=table"))
 	mustContain(t, tv, `name="f.year.from"`, `name="f.year.to"`, `type="number"`, ">Year<", `name="genre"`, `name="tag"`, `name="tag_mode"`)
 	mustNotContain(t, tv, `name="f.type"`, `name="f.episodes`, `name="f.author"`)
-	a := form(e.listGet(t, "/anime"))
+	a := form(e.listGet(t, "/anime?view=table&view=table"))
 	mustContain(t, a, `name="f.type"`, `<option value="TV_SHORT">TV_SHORT</option>`, `name="f.year.from"`, `name="f.studio"`, `name="genre"`, `name="tag"`)
 	mustNotContain(t, a, `name="f.episodes`, `name="f.synopsis`, `name="f.started_on`, `name="f.author"`)
 	// a multi-kind plugin keeps the kind in the form; a single-kind one does not
@@ -662,10 +662,10 @@ func TestFilterBarOnlyShowsFilterableFields(t *testing.T) {
 	cd := bookItem("2", "The Comic")
 	cd.Kind = "comic"
 	e2.addFixture(t, "book", "comic", cd, active)
-	mustContain(t, form(e2.listGet(t, "/book?kind=comic&status=active")), `name="kind" value="comic"`, `name="status" value="active"`)
+	mustContain(t, form(e2.listGet(t, "/book?kind=comic&status=active&view=table")), `name="kind" value="comic"`, `name="status" value="active"`)
 	// an empty list has no filter bar
 	e3 := newFixtureEnv(t)
-	mustNotContain(t, e3.listGet(t, "/tv"), `id="list-filter"`, `method="get"`)
+	mustNotContain(t, e3.listGet(t, "/tv?view=table"), `id="list-filter"`, `method="get"`)
 }
 
 func TestClearFiltersLink(t *testing.T) {
@@ -674,11 +674,11 @@ func TestClearFiltersLink(t *testing.T) {
 	cd.Kind = "comic"
 	e.addFixture(t, "book", "comic", cd, library.Entry{Status: library.Active})
 	e.addFixture(t, "tv", "show", showWith("1", "Dark", []string{"Drama"}), library.Entry{Status: library.Active})
-	b := e.listGet(t, "/tv?q=x&status=active&genre=drama&sort=title")
-	mustContain(t, b, `href="/tv?status=active&amp;view=cards">Clear filters</a>`)
-	mustNotContain(t, e.listGet(t, "/tv"), "Clear filters")
-	mustNotContain(t, e.listGet(t, "/tv?status=active"), "Clear filters")
-	mustContain(t, e.listGet(t, "/book?kind=comic&q=zzz"), `href="/book?kind=comic&amp;view=cards">Clear filters</a>`)
+	b := e.listGet(t, "/tv?q=x&status=active&genre=drama&sort=title&view=table")
+	mustContain(t, b, `href="/tv?status=active&amp;view=table">Clear filters</a>`)
+	mustNotContain(t, e.listGet(t, "/tv?view=table&view=table"), "Clear filters")
+	mustNotContain(t, e.listGet(t, "/tv?status=active&view=table"), "Clear filters")
+	mustContain(t, e.listGet(t, "/book?kind=comic&q=zzz&view=table"), `href="/book?kind=comic&amp;view=table">Clear filters</a>`)
 }
 
 // TestLibraryRefusalFallsBackWithNotice: should the library still refuse a
@@ -696,7 +696,7 @@ func TestLibraryRefusalFallsBackWithNotice(t *testing.T) {
 	for i := 0; i < 21; i++ {
 		vals.Set(fmt.Sprintf("f.n%02d", i), "1..")
 	}
-	b := e.listGet(t, "/tv?"+vals.Encode())
+	b := e.listGet(t, "/tv?view=table&"+vals.Encode())
 	wantRows(t, "fallback", b, "Dark")
 	mustContain(t, noticeOf(b), "filters")
 	mustNotContain(t, b, "Clear filters", `value="zzz"`)
@@ -714,7 +714,7 @@ func TestListHistoryRestoreFetchesFullPage(t *testing.T) {
 	}
 	// the empty list too (no live filtering, but the attribute costs nothing)
 	mustContain(t, newFixtureEnv(t).listGet(t, "/tv"), `hx-history="false"`)
-	rec := e.getWith("/tv?q=dar", map[string]string{"HX-Request": "true", "HX-Target": "list-rows", "HX-History-Restore-Request": "true"})
+	rec := e.getWith("/tv?q=dar&view=table", map[string]string{"HX-Request": "true", "HX-Target": "list-rows", "HX-History-Restore-Request": "true"})
 	b := rec.Body.String()
 	mustContain(t, b, "<html", `name="q" value="dar"`, `hx-history="false"`)
 	wantRows(t, "restore", b, "Dark")
@@ -724,7 +724,7 @@ func TestListVaryCoversAllRequestHeaders(t *testing.T) {
 	e := newFixtureEnv(t)
 	e.addFixture(t, "tv", "show", tvShow("1", "Dark"), library.Entry{Status: library.Active})
 	for _, h := range []map[string]string{{}, {"HX-Request": "true", "HX-Target": "list-rows"}} {
-		got := e.getWith("/tv", h).Header().Values("Vary")
+		got := e.getWith("/tv?view=table", h).Header().Values("Vary")
 		if !slices.Equal(got, []string{"HX-Request, HX-Target, HX-History-Restore-Request"}) {
 			t.Errorf("%v: Vary %q", h, got)
 		}
@@ -737,14 +737,14 @@ func TestPartialSwapsTermCountsAndClearOutOfBand(t *testing.T) {
 	e.addFixture(t, "tv", "show", showWith("1", "Dark", []string{"Drama"}, plugin.Tag{Name: "Loop"}), active)
 	e.addFixture(t, "tv", "show", showWith("2", "Light", []string{"Comedy"}), active)
 	hx := map[string]string{"HX-Request": "true", "HX-Target": "list-rows"}
-	b := e.getWith("/tv?q=dar&genre=Comedy", hx).Body.String()
+	b := e.getWith("/tv?q=dar&genre=Comedy&view=table", hx).Body.String()
 	// only the option lists go out of band, into the existing selects
 	genre := oobBlock(t, b, "innerHTML:#filter-genre-select")
 	mustContain(t, genre, `<option value="Drama">Drama (1)</option>`, `<option value="Comedy" selected>Comedy (0)</option>`)
 	tag := oobBlock(t, b, "innerHTML:#filter-tag-select")
 	// tag counts follow the genre and text filters: nothing matches both
 	mustNotContain(t, tag, `Loop (`, "<option")
-	mustContain(t, b, `id="filter-clear" hx-swap-oob="true"`, `href="/tv?view=cards">Clear filters</a>`)
+	mustContain(t, b, `id="filter-clear" hx-swap-oob="true"`, `href="/tv?view=table">Clear filters</a>`)
 	// never a select, fieldset, the any/all switch or the text inputs (focus stays)
 	mustNotContain(t, b, "<select", "<fieldset", `name="genre_mode"`, `name="tag_mode"`, `name="q"`, `name="rmin"`, `name="sort"`,
 		`id="filter-genre"`, `id="filter-tag"`)
@@ -752,11 +752,11 @@ func TestPartialSwapsTermCountsAndClearOutOfBand(t *testing.T) {
 		t.Errorf("%d oob blocks", n)
 	}
 	// without filters the Clear slot is swapped empty
-	b = e.getWith("/tv", hx).Body.String()
+	b = e.getWith("/tv?view=table", hx).Body.String()
 	mustContain(t, b, `id="filter-clear" hx-swap-oob="true"></span>`, `<option value="Loop">Loop (1)</option>`)
 	mustNotContain(t, b, "Clear filters")
 	// the full page: the selects carry the stable target ids (unique), no oob
-	full := e.listGet(t, "/tv?q=dar&genre=Comedy")
+	full := e.listGet(t, "/tv?q=dar&genre=Comedy&view=table")
 	for _, id := range []string{`id="filter-genre-select"`, `id="filter-tag-select"`, `id="filter-clear"`} {
 		if n := strings.Count(full, id); n != 1 {
 			t.Errorf("%s appears %d times", id, n)
@@ -788,10 +788,10 @@ func TestPushURLIsTheAppliedQuery(t *testing.T) {
 		e.addFixture(t, "tv", "show", tvShow(fmt.Sprint(i+1), fmt.Sprintf("Show %03d", i+1)), library.Entry{Status: library.Active})
 	}
 	for target, want := range map[string]string{
-		"/tv?page=99":                    "/tv?page=2&view=cards",
-		"/tv?q=Show&page=99999999999999": "/tv?page=2&q=Show&view=cards",
-		"/tv?q=Show+001&page=5":          "/tv?q=Show+001&view=cards",
-		"/tv?q=Show&bogus=1&sort=nope":   "/tv?q=Show&view=cards",
+		"/tv?page=99&view=table":                    "/tv?page=2&view=table",
+		"/tv?q=Show&page=99999999999999&view=table": "/tv?page=2&q=Show&view=table",
+		"/tv?q=Show+001&page=5&view=table":          "/tv?q=Show+001&view=table",
+		"/tv?q=Show&bogus=1&sort=nope&view=table":   "/tv?q=Show&view=table",
 	} {
 		if got := e.getWith(target, hx).Header().Get("HX-Push-Url"); got != want {
 			t.Errorf("%s: HX-Push-Url %q, want %q", target, got, want)
@@ -809,7 +809,7 @@ func TestPushURLIsTheAppliedQuery(t *testing.T) {
 	for i := 0; i < 21; i++ {
 		vals.Set(fmt.Sprintf("f.n%02d", i), "1..")
 	}
-	if got := r.getWith("/tv?"+vals.Encode(), hx).Header().Get("HX-Push-Url"); got != "/tv?view=cards" {
+	if got := r.getWith("/tv?view=table&"+vals.Encode(), hx).Header().Get("HX-Push-Url"); got != "/tv?view=table" {
 		t.Errorf("refused: HX-Push-Url %q", got)
 	}
 }
@@ -817,13 +817,13 @@ func TestPushURLIsTheAppliedQuery(t *testing.T) {
 func TestUnreadableParameterNotice(t *testing.T) {
 	e := newFixtureEnv(t)
 	e.addFixture(t, "tv", "show", tvShow("1", "Dark"), library.Entry{Status: library.Active})
-	b := e.listGet(t, "/tv?q=dark&a;b=1")
+	b := e.listGet(t, "/tv?q=dark&a;b=1&view=table")
 	wantRows(t, "readable pairs kept", b, "Dark")
 	if got := noticeKeysOf(b); !slices.Equal(got, []string{"(unreadable parameter)"}) {
 		t.Errorf("notice keys %q", got)
 	}
 	mustContain(t, b, `name="q" value="dark"`)
-	if got := noticeKeysOf(e.listGet(t, "/tv?q=%zz")); !slices.Equal(got, []string{"(unreadable parameter)"}) {
+	if got := noticeKeysOf(e.listGet(t, "/tv?q=%zz&view=table")); !slices.Equal(got, []string{"(unreadable parameter)"}) {
 		t.Errorf("bad escape: notice keys %q", got)
 	}
 }

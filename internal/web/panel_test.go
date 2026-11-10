@@ -113,20 +113,20 @@ func TestFilterPanelOpensWithFiltersAndCountsThem(t *testing.T) {
 func TestFilterPanelNotInPartial(t *testing.T) {
 	e := panelEnv(t)
 	hx := map[string]string{"HX-Request": "true", "HX-Target": "list-rows"}
-	b := e.getWith("/tv?genre=Drama&unrated=1", hx).Body.String()
+	b := e.getWith("/tv?genre=Drama&unrated=1&view=table", hx).Body.String()
 	mustNotContain(t, b, "<details", "filter-panel", "<summary", `name="q"`)
 	mustContain(t, b, `<span id="filter-count" hx-swap-oob="true">`)
 	if c := filterCount(t, b); !strings.Contains(c, `>2<span class="sr-only"> active</span>`) {
 		t.Errorf("badge %q", c)
 	}
-	mustContain(t, e.getWith("/tv?q=d", hx).Body.String(), `<span id="filter-count" hx-swap-oob="true"></span>`)
+	mustContain(t, e.getWith("/tv?q=d&view=table", hx).Body.String(), `<span id="filter-count" hx-swap-oob="true"></span>`)
 }
 
 // TestListAddEntryPoint: the list header links the source search (with an
 // add icon and a text label) and, when the plugin has it, the manual form.
 func TestListAddEntryPoint(t *testing.T) {
 	e := panelEnv(t)
-	b := e.listGet(t, "/tv")
+	b := e.listGet(t, "/tv?view=table&view=table")
 	i := strings.Index(b, `href="/tv/search"`)
 	if i < 0 {
 		t.Fatal("no add link")
@@ -137,5 +137,5 @@ func TestListAddEntryPoint(t *testing.T) {
 	mustContain(t, a, "<span>Add show</span>")
 	an := newEnv(t)
 	an.addEntry(t, "anilist", "1", nil, library.Active, 0)
-	mustContain(t, an.get("/anime").Body.String(), `href="/anime/search"`, "<span>Add anime</span>", `href="/anime/manual/new"`)
+	mustContain(t, an.get("/anime?view=table").Body.String(), `href="/anime/search"`, "<span>Add anime</span>", `href="/anime/manual/new"`)
 }

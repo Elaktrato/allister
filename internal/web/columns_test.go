@@ -46,7 +46,7 @@ func rowCells(row string) int { return strings.Count(row, "<td") }
 func TestDefaultColumnsReproduceTheAnimeTable(t *testing.T) {
 	e := newEnv(t)
 	e.addEntry(t, anilist.AniList, "1", ip(12), library.Active, 3)
-	b := e.get("/anime").Body.String()
+	b := e.get("/anime?view=table").Body.String()
 	if got, want := strings.Join(headLabels(t, b), "|"), "Title|Type|Year|Progress|Score|Status|Updated"; got != want {
 		t.Fatalf("head = %s, want %s", got, want)
 	}
@@ -88,7 +88,7 @@ func TestDeclaredColumnsDriveTheTable(t *testing.T) {
 	e.addFixture(t, "book", "book", d, library.Entry{Status: library.Active, Rating: ip(8)})
 	e.addEntry(t, anilist.AniList, "1", ip(12), library.Active, 3)
 
-	b := e.listGet(t, "/book")
+	b := e.listGet(t, "/book?view=table&view=table")
 	if got, want := strings.Join(headLabels(t, b), "|"), "Title|Author|Length|Status"; got != want {
 		t.Fatalf("book head = %s, want %s", got, want)
 	}
@@ -110,20 +110,20 @@ func TestDeclaredColumnsDriveTheTable(t *testing.T) {
 	mustContain(t, ctl, `<option value="updated" selected>Recently updated</option>`, `<option value="title">Title</option>`,
 		`<option value="rating">Score</option>`, `<option value="progress">Progress</option>`)
 	// sorting by a hidden column still works (and marks no head cell)
-	sorted := e.listGet(t, "/book?sort=rating")
+	sorted := e.listGet(t, "/book?sort=rating&view=table")
 	mustNotContain(t, thead(t, sorted), "aria-sort")
 	if n := noticeOf(sorted); n != "" {
 		t.Errorf("notice %q", n)
 	}
 	// the rows partial brings the same head and cells
-	p := e.getWith("/book?q=earth", map[string]string{"HX-Request": "true", "HX-Target": "list-rows"}).Body.String()
+	p := e.getWith("/book?q=earth&view=table", map[string]string{"HX-Request": "true", "HX-Target": "list-rows"}).Body.String()
 	if got := strings.Join(headLabels(t, p), "|"); got != "Title|Author|Length|Status" {
 		t.Fatalf("partial head = %s", got)
 	}
 	mustContain(t, rowOf(t, p, "Earthsea"), ">183</td>")
 
 	// the anime table next to it is unchanged
-	if got := strings.Join(headLabels(t, e.listGet(t, "/anime")), "|"); got != "Title|Type|Year|Progress|Score|Status|Updated" {
+	if got := strings.Join(headLabels(t, e.listGet(t, "/anime?view=table&view=table")), "|"); got != "Title|Type|Year|Progress|Score|Status|Updated" {
 		t.Fatalf("anime head = %s", got)
 	}
 }
@@ -135,10 +135,10 @@ func TestUndeclaredColumnsKeepTheDerivedTable(t *testing.T) {
 	e := newFixtureEnv(t)
 	e.addFixture(t, "tv", "show", tvShow("1", "Dark"), library.Entry{Status: library.Active})
 	e.addFixture(t, "book", "book", bookItem("1", "Earthsea"), library.Entry{Status: library.Active})
-	if got := strings.Join(headLabels(t, e.listGet(t, "/tv")), "|"); got != "Title|Type|Year|Progress|Score|Status|Updated" {
+	if got := strings.Join(headLabels(t, e.listGet(t, "/tv?view=table&view=table")), "|"); got != "Title|Type|Year|Progress|Score|Status|Updated" {
 		t.Fatalf("tv head = %s", got)
 	}
-	if got := strings.Join(headLabels(t, e.listGet(t, "/book")), "|"); got != "Title|Author|Progress|Score|Status|Updated" {
+	if got := strings.Join(headLabels(t, e.listGet(t, "/book?view=table&view=table")), "|"); got != "Title|Author|Progress|Score|Status|Updated" {
 		t.Fatalf("book head = %s", got)
 	}
 }
@@ -234,7 +234,7 @@ func TestPostColumnsChangesTheList(t *testing.T) {
 	if got, ok := e.set.Columns(context.Background(), "anime", "anime"); !ok || strings.Join(got, ",") != "studio,rating,type" {
 		t.Fatalf("stored %v %v", got, ok)
 	}
-	b := e.listGet(t, "/anime")
+	b := e.listGet(t, "/anime?view=table&view=table")
 	if got := strings.Join(headLabels(t, b), "|"); got != "Title|Studio|Score|Type" {
 		t.Fatalf("head = %s", got)
 	}
@@ -249,7 +249,7 @@ func TestPostColumnsChangesTheList(t *testing.T) {
 	}
 	ctl := filterForm(t, b)
 	mustContain(t, ctl, `<option value="year">Year</option>`, `<option value="progress">Progress</option>`, `<option value="updated" selected>Recently updated</option>`)
-	p := e.getWith("/anime?sort=year", map[string]string{"HX-Request": "true", "HX-Target": "list-rows"}).Body.String()
+	p := e.getWith("/anime?sort=year&view=table", map[string]string{"HX-Request": "true", "HX-Target": "list-rows"}).Body.String()
 	if got := strings.Join(headLabels(t, p), "|"); got != "Title|Studio|Score|Type" {
 		t.Fatalf("partial head = %s", got)
 	}
@@ -268,7 +268,7 @@ func TestPostColumnsChangesTheList(t *testing.T) {
 	if rec := e.postColumns("anime", url.Values{"kind": {"anime"}, "order": animeOrder}, nil); rec.Code != 303 {
 		t.Fatalf("empty: %d", rec.Code)
 	}
-	if got := strings.Join(headLabels(t, e.listGet(t, "/anime")), "|"); got != "Title" {
+	if got := strings.Join(headLabels(t, e.listGet(t, "/anime?view=table&view=table")), "|"); got != "Title" {
 		t.Fatalf("title only: %s", got)
 	}
 }
@@ -308,7 +308,7 @@ func TestPostColumnsMoveAndReset(t *testing.T) {
 	if _, ok := e.set.Columns(context.Background(), "anime", "anime"); ok {
 		t.Fatal("reset kept the choice")
 	}
-	if got := strings.Join(headLabels(t, e.listGet(t, "/anime")), "|"); got != "Title|Type|Year|Progress|Score|Status|Updated" {
+	if got := strings.Join(headLabels(t, e.listGet(t, "/anime?view=table&view=table")), "|"); got != "Title|Type|Year|Progress|Score|Status|Updated" {
 		t.Fatalf("after reset: %s", got)
 	}
 }
@@ -361,12 +361,12 @@ func TestStoredColumnsAreCheckedOnRead(t *testing.T) {
 	if err := e.set.Set(context.Background(), "plugin.anime.columns.anime", `["bogus","year","title","year","type"]`); err != nil {
 		t.Fatal(err)
 	}
-	if got := strings.Join(headLabels(t, e.listGet(t, "/anime")), "|"); got != "Title|Year|Type" {
+	if got := strings.Join(headLabels(t, e.listGet(t, "/anime?view=table&view=table")), "|"); got != "Title|Year|Type" {
 		t.Fatalf("head = %s", got)
 	}
 	// unreadable JSON: the defaults
 	e.set.Set(context.Background(), "plugin.anime.columns.anime", `{`)
-	if got := strings.Join(headLabels(t, e.listGet(t, "/anime")), "|"); got != "Title|Type|Year|Progress|Score|Status|Updated" {
+	if got := strings.Join(headLabels(t, e.listGet(t, "/anime?view=table&view=table")), "|"); got != "Title|Type|Year|Progress|Score|Status|Updated" {
 		t.Fatalf("garbage: %s", got)
 	}
 }
@@ -380,7 +380,7 @@ func TestColumnChoiceIsPerPlugin(t *testing.T) {
 	if rec := e.postColumns("anime", url.Values{"kind": {"anime"}, "order": animeOrder, "show": {"studio"}}, nil); rec.Code != 303 {
 		t.Fatalf("anime: %d", rec.Code)
 	}
-	if got := strings.Join(headLabels(t, e.listGet(t, "/book")), "|"); got != "Title|Author|Length|Status" {
+	if got := strings.Join(headLabels(t, e.listGet(t, "/book?view=table&view=table")), "|"); got != "Title|Author|Length|Status" {
 		t.Fatalf("book head = %s", got)
 	}
 	if _, ok := e.set.Columns(context.Background(), "book", "book"); ok {
@@ -396,10 +396,10 @@ func TestColumnChoiceIsPerPlugin(t *testing.T) {
 	if rec := e.postColumns("book", url.Values{"kind": {"book"}, "order": {"studio"}, "show": {"studio"}}, nil); rec.Code != 400 {
 		t.Fatalf("anime column for book: %d", rec.Code)
 	}
-	if got := strings.Join(headLabels(t, e.listGet(t, "/book")), "|"); got != "Title|Score|Author" {
+	if got := strings.Join(headLabels(t, e.listGet(t, "/book?view=table&view=table")), "|"); got != "Title|Score|Author" {
 		t.Fatalf("book head = %s", got)
 	}
-	if got := strings.Join(headLabels(t, e.listGet(t, "/anime")), "|"); got != "Title|Studio" {
+	if got := strings.Join(headLabels(t, e.listGet(t, "/anime?view=table&view=table")), "|"); got != "Title|Studio" {
 		t.Fatalf("anime head = %s", got)
 	}
 }

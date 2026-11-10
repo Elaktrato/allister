@@ -16,6 +16,10 @@ GET form without JavaScript; with htmx it refreshes the rows region live. */}}
         class="h-10 w-full rounded-md border border-slate-700 bg-slate-900 pl-10 pr-3 text-base placeholder:text-slate-500 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 sm:text-sm">
     </label>
   </div>
+  {{/* in the card view the table head is gone: the sort control sits open
+       next to the search bar (in the table view it stays in the panel,
+       hidden on large screens where the head sorts) */}}
+  {{if eq .View "cards"}}{{template "sort_control" .}}{{end}}
   {{/* a native disclosure: works without JavaScript, its fields are submitted
        open or closed, and a rows partial never swaps it (it keeps its state);
        a full page opens it when a filter of the panel is set */}}
@@ -64,12 +68,9 @@ GET form without JavaScript; with htmx it refreshes the rows region live. */}}
         </fieldset>
         {{/* the form's only sort and dir fields: the table head's links set
              the sort on large screens (CSS hides this there; a rows partial
-             keeps its options in sync), the columns of Year and Updated are
-             hidden on small screens, so this control sorts there */}}
-        <fieldset id="filter-sort-control" class="flex flex-col gap-1 lg:hidden"><legend class="mb-1 text-slate-400">Sort by</legend>
-          <select id="filter-sort-select" name="sort" aria-label="Sort by" class="rounded-md border border-slate-700 bg-slate-950 px-2 py-1.5 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500">{{template "filter_options" .Sorts}}</select>
-          <select id="filter-dir-select" name="dir" aria-label="Order" class="rounded-md border border-slate-700 bg-slate-950 px-2 py-1.5 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500">{{template "filter_options" .Dirs}}</select>
-        </fieldset>
+             keeps its options in sync); in the card view there is no head,
+             so the control rendered above sorts */}}
+        {{if ne .View "cards"}}{{template "sort_control" .}}{{end}}
         <fieldset class="flex flex-col gap-1"><legend class="mb-1 text-slate-400">Show only</legend>
           {{if .ShowUnmatched}}<label class="flex items-center gap-2"><input type="checkbox" name="unmatched" value="1"{{if .Unmatched}} checked{{end}}> Unmatched</label>{{end}}
           <label class="flex items-center gap-2"><input type="checkbox" name="partial" value="1"{{if .Partial}} checked{{end}}> Partially synced</label>
@@ -88,6 +89,12 @@ GET form without JavaScript; with htmx it refreshes the rows region live. */}}
 {{define "filter_count"}}<span id="filter-count"{{if .OOB}} hx-swap-oob="true"{{end}}>{{with .Active}}<span class="ml-0.5 rounded-full bg-indigo-600 px-1.5 py-0.5 text-xs font-semibold leading-none text-white">{{.}}<span class="sr-only"> active</span></span>{{end}}</span>{{end}}
 
 {{define "filter_options"}}{{range .}}<option value="{{.Value}}"{{if .Selected}} selected{{end}}>{{.Label}}</option>{{end}}{{end}}
+
+{{/* the form's only sort and dir fields (its ids are the out-of-band swap targets) */}}
+{{define "sort_control"}}<fieldset id="filter-sort-control" class="flex flex-col gap-1{{if eq .View "table"}} lg:hidden{{end}}"><legend class="mb-1 text-slate-400">Sort by</legend>
+  <select id="filter-sort-select" name="sort" aria-label="Sort by" class="rounded-md border border-slate-700 bg-slate-950 px-2 py-1.5 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500">{{template "filter_options" .Sorts}}</select>
+  <select id="filter-dir-select" name="dir" aria-label="Order" class="rounded-md border border-slate-700 bg-slate-950 px-2 py-1.5 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500">{{template "filter_options" .Dirs}}</select>
+</fieldset>{{end}}
 
 {{/* the sort control's option lists as out-of-band swaps into the existing selects (which keep focus) */}}
 {{define "filter_sort_oob"}}<div hx-swap-oob="innerHTML:#filter-sort-select">{{template "filter_options" .Sorts}}</div><div hx-swap-oob="innerHTML:#filter-dir-select">{{template "filter_options" .Dirs}}</div>{{end}}

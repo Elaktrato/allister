@@ -41,6 +41,7 @@ type progressCell struct{ Label, Value string }
 type rowView struct {
 	Title, Href, Cover string
 	Status             string
+	StatusKey          string    // the core status class, the card corner's color
 	Cells              []rowCell // the visible columns, in order
 	Updated            string    // the day the entry was last changed (2006-01-02)
 	Progress           []progressCell
@@ -89,6 +90,8 @@ type listView struct {
 	AnyEntries           bool
 	Total, From, To      int
 	PrevURL, NextURL     string
+	ViewCardsURL         string // the view switch: the same list in cards
+	ViewTableURL         string // … and in the table
 	SearchURL, ManualURL string
 	EmptyNoun            string
 	Dialog               *entryDialog
@@ -276,7 +279,7 @@ func (s *server) rowView(m plugin.Manifest, row library.Row, ret string, cols []
 	id := strconv.FormatInt(it.ID, 10)
 	v := rowView{
 		Title: row.Title, Href: itemURL(m, it.Source, it.SourceID, it.Kind), Cover: covers.Src(it.CoverPath),
-		Status: statusLabel(k, e.Status), Score: "–", ScoreAttr: "none",
+		Status: statusLabel(k, e.Status), StatusKey: string(e.Status), Score: "–", ScoreAttr: "none",
 		PartialSync: row.Flags.PartialSync, Unmatched: row.Flags.Unmatched, UnmatchedHint: unmatchedRowHint(m),
 		Return: ret, IncrementURL: "/list/" + id + "/increment", RemoveURL: "/list/" + id + "/remove",
 		EditURL:       "/list/" + id + "/edit?" + url.Values{"return": {ret}}.Encode(),
@@ -406,6 +409,9 @@ func (s *server) buildList(r *http.Request, m plugin.Manifest, lq listQuery) (li
 	if pg.PageNo < pg.Pages {
 		v.NextURL = filteredListURL(m, k.Key, lq.Status, lq.View, pg.PageNo+1, f)
 	}
+	// the view switch keeps the filters, the status and the page
+	v.ViewCardsURL = filteredListURL(m, k.Key, lq.Status, "cards", pg.PageNo, f)
+	v.ViewTableURL = filteredListURL(m, k.Key, lq.Status, "table", pg.PageNo, f)
 	v.Tabs = append(v.Tabs, tabView{Label: "All", Count: all,
 		Href: filteredListURL(m, k.Key, "all", lq.View, 1, f), Current: lq.Status == "" || lq.Status == "all"})
 	for _, st := range listTabOrder {

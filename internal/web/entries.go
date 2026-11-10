@@ -108,7 +108,13 @@ func (s *server) postIncrement(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	s.renderPartial(w, "list", "list_row", s.rowView(t.man, *t.row, ret, s.visibleColumns(r.Context(), t.man, t.kind)))
+	rv := s.rowView(t.man, *t.row, ret, s.visibleColumns(r.Context(), t.man, t.kind))
+	// a +1 from a card answers the card, one from the table the row
+	partial := "list_row"
+	if r.PostFormValue("view") == "cards" {
+		partial = "list_card"
+	}
+	s.renderPartial(w, "list", partial, rv)
 }
 
 // comboValue encodes a progress combination for the form.

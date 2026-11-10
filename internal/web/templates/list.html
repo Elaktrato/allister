@@ -3,6 +3,7 @@
 <div class="mb-5 flex flex-wrap items-center gap-x-4 gap-y-3">
   <h1 class="text-3xl font-semibold">{{.Heading}}</h1>
   <div class="ml-auto flex flex-wrap items-center gap-2">
+    {{template "view_toggle" .}}
     {{range .Exports}}<a href="{{.URL}}" class="inline-flex items-center gap-1.5 rounded-md px-2.5 py-2 text-sm text-slate-300 hover:bg-slate-800 hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500" download><span class="icon text-[1.125rem]" aria-hidden="true">download</span><span>Export {{.Name}}</span></a>{{end}}
     {{with .ManualURL}}<a href="{{.}}" class="inline-flex items-center gap-1.5 rounded-md px-2.5 py-2 text-sm text-slate-300 hover:bg-slate-800 hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"><span class="icon text-[1.125rem]" aria-hidden="true">edit_note</span><span>Add manually</span></a>{{end}}
     <a href="{{.SearchURL}}" class="inline-flex items-center gap-1.5 rounded-md bg-indigo-600 py-2 pl-2.5 pr-3.5 text-sm font-medium text-white hover:bg-indigo-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400"><span class="icon text-[1.125rem]" aria-hidden="true">add</span><span>{{.AddLabel}}</span></a>
@@ -21,6 +22,12 @@
 <div id="list-rows" hx-history="false">{{template "list_rows" .}}</div>
 <div id="dialog-slot" data-swap-statuses="{{dialogStatuses}}">{{with .Dialog}}{{template "entry_dialog" .}}{{end}}</div>
 {{end}}
+
+{{/* the view switch: plain links (a view switch is rare), the current one marked */}}
+{{define "view_toggle"}}<span class="flex overflow-hidden rounded-md border border-slate-700" role="group" aria-label="View">
+  <a href="{{.ViewCardsURL}}"{{if eq .View "cards"}} aria-current="true"{{end}} title="Card view" class="px-2.5 py-2 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-indigo-500{{if eq .View "cards"}} bg-slate-700 text-white{{else}} text-slate-400 hover:bg-slate-800 hover:text-slate-200{{end}}"><span class="icon text-[1.125rem]" aria-hidden="true">grid_view</span><span class="sr-only">Card view</span></a>
+  <a href="{{.ViewTableURL}}"{{if eq .View "table"}} aria-current="true"{{end}} title="Table view" class="px-2.5 py-2 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-indigo-500{{if eq .View "table"}} bg-slate-700 text-white{{else}} text-slate-400 hover:bg-slate-800 hover:text-slate-200{{end}}"><span class="icon text-[1.125rem]" aria-hidden="true">table_view</span><span class="sr-only">Table view</span></a>
+</span>{{end}}
 
 {{define "list_tabs"}}
 <nav id="list-tabs" aria-label="List status" class="mb-4 flex flex-wrap gap-2"{{if .TabsOOB}} hx-swap-oob="true"{{end}}>
@@ -41,6 +48,7 @@
 {{if .Filtered}}<p class="rounded border border-slate-800 bg-slate-900 p-4 text-slate-300">No {{.EmptyNoun}} match these filters.{{with .Filters.ClearURL}} <a class="text-indigo-300 underline" href="{{.}}">Clear filters</a>{{end}}</p>
 {{else}}<p class="rounded border border-slate-800 bg-slate-900 p-4 text-slate-300">Nothing here yet.</p>{{end}}
 {{else}}
+{{if eq .View "cards"}}{{template "list_cards" .}}{{else}}{{/* the table view */}}
 <div class="overflow-x-auto">
   <table class="w-full text-left text-sm">
     {{/* part of the rows region, so a rows partial brings the sort state
@@ -58,6 +66,7 @@
     </tbody>
   </table>
 </div>
+{{end}}
 <div class="mt-4 flex items-center justify-between text-sm text-slate-400">
   <p>Showing {{.From}}–{{.To}} of {{.Total}}</p>
   <p class="flex gap-4">

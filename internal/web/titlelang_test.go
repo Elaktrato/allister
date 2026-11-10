@@ -41,11 +41,11 @@ func TestTitleLanguageIsPerPluginEverywhere(t *testing.T) {
 	two.Titles = titles("original", "Original Zwei", "en", "English Zwei")
 	e.addFixture(t, "tv", "show", two, active)
 
-	list := e.listGet(t, "/tv")
+	list := e.listGet(t, "/tv?view=table&view=table")
 	mustContain(t, list, "Original Eins", "English Zwei")
 	mustNotContain(t, list, "Deutsch Eins", "Original Zwei")
 	// text search matches any language, the row shows the chosen one
-	found := e.listGet(t, "/tv?q=deutsch")
+	found := e.listGet(t, "/tv?q=deutsch&view=table")
 	mustContain(t, found, "Original Eins")
 	mustNotContain(t, found, "English Zwei")
 	// the +1 row
@@ -89,13 +89,13 @@ func TestTitleLanguageIsPerPluginEverywhere(t *testing.T) {
 	if rec := e.do("POST", "/settings/plugins/tv/title-language", url.Values{"title_lang": {"original"}}, false); rec.Code != 303 {
 		t.Fatalf("set tv original: %d", rec.Code)
 	}
-	mustContain(t, e.listGet(t, "/tv"), "Original Zwei")
+	mustContain(t, e.listGet(t, "/tv?view=table&view=table"), "Original Zwei")
 
 	// the book plugin declares no fallback: the first stored title
 	book := bookItem("1", "")
 	book.Titles = titles("de", "Buch Deutsch", "fr", "Livre")
 	e.addFixture(t, "book", "book", book, library.Entry{Status: library.Active})
-	bl := e.listGet(t, "/book")
+	bl := e.listGet(t, "/book?view=table&view=table")
 	mustContain(t, bl, "Buch Deutsch")
 	mustNotContain(t, bl, "Livre")
 	if got := e.set.TitleLang(context.Background(), "book"); got != "" {

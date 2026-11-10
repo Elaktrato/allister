@@ -1,0 +1,34 @@
+{{/* The list as a grid of cover cards (view=cards): the cover, the title in
+      a semi-opaque overlay, the progress values and a +1 bound to the card,
+      and the status as a colored corner. Everything else the table shows is
+      omitted here. */}}
+{{define "list_cards"}}
+<div data-cards class="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
+  {{range .Rows}}{{template "list_card" .}}{{end}}
+</div>
+{{end}}
+
+{{define "list_card"}}
+<div data-card class="relative aspect-[2/3] overflow-hidden rounded-lg bg-slate-800">
+  {{if .Cover}}<img src="{{.Cover}}" alt="" loading="lazy" class="absolute inset-0 h-full w-full object-cover">
+  {{else}}<span class="absolute inset-0 flex items-center justify-center bg-slate-800" aria-hidden="true"><span class="icon text-[2rem] text-slate-600" aria-hidden="true">image</span></span>{{end}}
+  {{/* the status corner: a colored triangle, the label as its accessible name */}}
+  <span class="absolute right-0 top-0 h-0 w-0 border-l-[1.5rem] border-t-[1.5rem] border-l-transparent{{template "status_corner" .StatusKey}}" title="{{.Status}}"><span class="sr-only">{{.Status}}</span></span>
+  <div class="absolute inset-x-0 bottom-0 bg-gradient-to-t from-slate-950/95 via-slate-950/70 to-transparent p-2.5 pt-10">
+    <a href="{{.Href}}" class="line-clamp-2 text-sm font-medium leading-snug text-white hover:underline">{{.Title}}</a>
+    <div class="mt-1 flex items-center justify-between gap-2 text-xs text-slate-300">
+      <span class="min-w-0">{{range .Progress}}<span>{{if $.ShowLabels}}<span class="text-slate-400">{{.Label}}</span> {{else}}<span class="sr-only">{{.Label}}</span> {{end}}{{.Value}}</span> {{end}}</span>
+      {{if .CanIncrement}}
+      <form method="post" action="{{.IncrementURL}}" hx-post="{{.IncrementURL}}" hx-target="closest [data-card]" hx-swap="outerHTML" class="inline shrink-0">
+        <input type="hidden" name="return" value="{{.Return}}">
+        <input type="hidden" name="view" value="cards">
+        <button type="submit" class="rounded bg-slate-800/80 px-2 py-0.5 text-sm hover:bg-slate-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500" aria-label="{{.IncrementLabel}}">+1</button>
+      </form>
+      {{end}}
+    </div>
+  </div>
+</div>
+{{end}}
+
+{{/* the corner triangle's status color, per core status class */}}
+{{define "status_corner"}}{{if eq . "active"}} border-t-indigo-500{{else if eq . "completed"}} border-t-emerald-500{{else if eq . "paused"}} border-t-amber-500{{else if eq . "dropped"}} border-t-rose-500{{else}} border-t-slate-400{{end}}{{end}}

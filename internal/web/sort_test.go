@@ -91,7 +91,7 @@ func TestSortHeaderLinks(t *testing.T) {
 			q[k] = v
 		}
 		q.Set("page", "3") // clamped to page 1; the links never carry a page
-		b := e.listGet(t, "/tv?"+q.Encode())
+		b := e.listGet(t, "/tv?view=table&"+q.Encode())
 		head := thead(t, b)
 		if n := strings.Count(head, "aria-sort="); n != 1 {
 			t.Errorf("%q: %d aria-sort in %s", c.query, n, head)
@@ -106,7 +106,7 @@ func TestSortHeaderLinks(t *testing.T) {
 			for k, v := range sv {
 				want[k] = v
 			}
-			want.Set("view", "cards") // the links keep the resolved view
+			want.Set("view", "table") // the links keep the resolved view
 			href := listHref("/tv", want)
 			cell := headCell(t, head, l[0])
 			mustContain(t, cell, `href="`+href+`"`, `hx-get="`+href+`"`, `hx-target="#list-rows"`, `hx-push-url="true"`,
@@ -119,7 +119,7 @@ func TestSortHeaderLinks(t *testing.T) {
 		}
 	}
 	// stable ids keep keyboard focus on the clicked header across the swap
-	head := thead(t, e.listGet(t, "/tv"))
+	head := thead(t, e.listGet(t, "/tv?view=table&view=table"))
 	mustContain(t, head, `id="sort-title"`, `id="sort-year"`, `id="sort-progress"`, `id="sort-rating"`, `id="sort-updated"`)
 }
 
@@ -127,7 +127,7 @@ func TestSortHeaderLinks(t *testing.T) {
 // list sorted by that column.
 func TestSortHeaderWorksWithoutJavaScript(t *testing.T) {
 	e := sortEnv(t)
-	b := e.listGet(t, "/tv?q=d")
+	b := e.listGet(t, "/tv?q=d&view=table")
 	link := regexp.MustCompile(`<a id="sort-title" href="([^"]+)"`).FindStringSubmatch(b)
 	if link == nil {
 		t.Fatalf("no title link in %s", thead(t, b))
@@ -155,7 +155,7 @@ func TestSortHeaderWorksWithoutJavaScript(t *testing.T) {
 // selects keep focus), and a plain GET submit sorts.
 func TestCompactSortControlIsTheOnlySortField(t *testing.T) {
 	e := sortEnv(t)
-	b := e.listGet(t, "/tv?sort=year&dir=asc&q=d")
+	b := e.listGet(t, "/tv?sort=year&dir=asc&q=d&view=table")
 	form := filterForm(t, b)
 	for _, name := range []string{`name="sort"`, `name="dir"`} {
 		if n := strings.Count(b, name); n != 1 {
@@ -176,28 +176,28 @@ func TestCompactSortControlIsTheOnlySortField(t *testing.T) {
 		`<option value="rating">Score</option>`, `<option value="progress">Progress</option>`,
 		`<option value="year" selected>Year</option>`, `<option value="asc" selected>Ascending</option>`)
 	// the default sort selects "Recently updated" and the default order
-	plain := filterForm(t, e.listGet(t, "/tv"))
+	plain := filterForm(t, e.listGet(t, "/tv?view=table&view=table"))
 	mustContain(t, plain, `<option value="updated" selected>Recently updated</option>`, `<option value="" selected>Default order</option>`)
 
 	// a no-JS submit of the form (every field as a browser sends it) sorts
 	vals := submitted(t, form)
 	vals.Set("sort", "title")
 	vals.Set("dir", "desc")
-	sorted := e.listGet(t, "/tv?"+vals.Encode())
+	sorted := e.listGet(t, "/tv?view=table&"+vals.Encode())
 	wantOrder(t, "submitted", sorted, "Dune Days", "Deep", "Dark")
 	if n := noticeOf(sorted); n != "" {
 		t.Errorf("notice %q", n)
 	}
 	vals.Set("sort", "updated")
 	vals.Set("dir", "")
-	if n := noticeOf(e.listGet(t, "/tv?"+vals.Encode())); n != "" {
+	if n := noticeOf(e.listGet(t, "/tv?view=table&"+vals.Encode())); n != "" {
 		t.Errorf("default submit notice %q", n)
 	}
 
 	// a head link's partial keeps the control in sync, out of band (options
 	// only: never a select element, which would lose focus)
 	hx := map[string]string{"HX-Request": "true", "HX-Target": "list-rows"}
-	p := e.getWith("/tv?sort=title&q=d", hx).Body.String()
+	p := e.getWith("/tv?sort=title&q=d&view=table", hx).Body.String()
 	mustNotContain(t, p, `<form method="get"`, "<html", `name="q"`, "<select", `name="sort"`)
 	mustContain(t, headCell(t, thead(t, p), "Title"), `aria-sort="ascending"`)
 	mustContain(t, oobBlock(t, p, "innerHTML:#filter-sort-select"), `<option value="title" selected>Title</option>`, `<option value="year">Year</option>`)
@@ -211,13 +211,13 @@ func TestCompactSortControlIsTheOnlySortField(t *testing.T) {
 func TestSortHeaderColumnsFollowTheSchema(t *testing.T) {
 	e := newFixtureEnv(t)
 	e.addFixture(t, "book", "book", bookItem("1", "Earthsea"), library.Entry{Status: library.Active})
-	head := thead(t, e.listGet(t, "/book"))
+	head := thead(t, e.listGet(t, "/book?view=table&view=table"))
 	mustContain(t, head, `id="sort-title"`, `id="sort-progress"`, `id="sort-rating"`, `id="sort-updated"`)
 	mustNotContain(t, head, `id="sort-year"`, `id="sort-author"`, ">Year<")
 	mustNotContain(t, headCell(t, head, "Author"), "<a ")
 	// a plugin without a +1 track: Progress is plain text
 	e2 := newFixtureEnv(t, func(book, _ *plugintest.Plugin) { book.M.Kinds[0].Progress.PrimaryKey = "" })
 	e2.addFixture(t, "book", "book", bookItem("1", "Earthsea"), library.Entry{Status: library.Active})
-	head = thead(t, e2.listGet(t, "/book"))
+	head = thead(t, e2.listGet(t, "/book?view=table"))
 	mustNotContain(t, headCell(t, head, "Progress"), "<a ", "aria-sort")
 }
