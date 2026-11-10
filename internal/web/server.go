@@ -97,7 +97,7 @@ var pagePartials = map[string][]string{
 	"search":       {"templates/search_results.html"},
 	"settings":     {"templates/settings_plugins.html"},
 	"item":         {"templates/sections.html", "templates/add_dialog.html", "templates/progress_inputs.html", "templates/match_dialog.html"},
-	"list":         {"templates/list_row.html", "templates/entry_dialog.html", "templates/progress_inputs.html"},
+	"list":         {"templates/list_row.html", "templates/filter_bar.html", "templates/entry_dialog.html", "templates/progress_inputs.html"},
 	"manual_form":  {"templates/item_inputs.html", "templates/progress_inputs.html"},
 	"details_form": {"templates/item_inputs.html"},
 }

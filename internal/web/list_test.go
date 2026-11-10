@@ -116,7 +116,7 @@ func TestListRowContent(t *testing.T) {
 	b := e.get("/anime").Body.String()
 	mustContain(t, b, "3 / 12", `hx-post="/list/`+idStr(id)+`/increment"`, `hx-target="closest tr"`, `hx-swap="outerHTML"`,
 		`href="/list/`+idStr(id)+`/edit`, `/list/`+idStr(id)+`/remove`, `hx-confirm`, "Watching", "partially synced", "TV", "–")
-	mustNotContain(t, b, "unmatched")
+	mustNotContain(t, b, ">unmatched</span>")
 	e2 := newEnv(t)
 	e2.addEntry(t, anilist.AniList, "1", nil, library.Active, 3)
 	mustContain(t, e2.get("/anime").Body.String(), "3 / ?")
@@ -169,14 +169,14 @@ func TestListShowsUnmatchedBadge(t *testing.T) {
 	}
 	mk(anilist.Manual, "m1", "555")
 	b := e.get("/anime").Body.String()
-	mustContain(t, b, "unmatched")
+	mustContain(t, b, ">unmatched</span>")
 
 	e2 := newEnv(t)
 	ctx = context.Background()
 	e = e2
 	mk(anilist.Manual, "m2", "")
 	mk(anilist.AniList, "5", "123")
-	mustNotContain(t, e2.get("/anime").Body.String(), "unmatched")
+	mustNotContain(t, e2.get("/anime").Body.String(), ">unmatched</span>")
 }
 
 func TestEmptyListShowsHint(t *testing.T) {
@@ -447,6 +447,16 @@ func TestSafeReturn(t *testing.T) {
 		"/anime/%2f":               "/anime",
 		"/anime?x=%00":             "/anime",
 		"/anime?status=watching#x": "/anime",
+		// a filtered list URL carries escapes in its query (never in its path)
+		"/anime?q=%C3%BC&status=active": "/anime?q=%C3%BC&status=active",
+		"/anime?q=%2F%2Fevil.com":       "/anime?q=%2F%2Fevil.com",
+		"/anime?q=100%25":               "/anime?q=100%25",
+		"/anime?x=%1f":                  "/anime",
+		"/anime?x=%7F":                  "/anime",
+		"/anime?x=%zz":                  "/anime",
+		"/anime?x=%2":                   "/anime",
+		"/anime?x=%":                    "/anime",
+		"/anime%3Fx=1":                  "/anime",
 	} {
 		if got := safeReturn(in, "anime"); got != want {
 			t.Errorf("safeReturn(%q) = %q, want %q", in, got, want)

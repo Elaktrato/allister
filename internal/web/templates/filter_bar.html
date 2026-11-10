@@ -1,0 +1,76 @@
+{{/* The list's search and filters, generated from the kind's schema. A plain
+GET form without JavaScript; with htmx it refreshes the rows region live. */}}
+{{define "filter_bar"}}
+<form method="get" action="{{.Action}}" role="search" aria-label="Search and filter the list"
+  hx-get="{{.Action}}" hx-trigger="keyup changed delay:300ms, change" hx-target="#list-rows" hx-push-url="true"
+  class="mb-4 rounded border border-slate-800 bg-slate-900 p-3 text-sm">
+  {{if .Kind}}<input type="hidden" name="kind" value="{{.Kind}}">{{end}}
+  {{if .Status}}<input type="hidden" name="status" value="{{.Status}}">{{end}}
+  <div class="flex flex-wrap items-end gap-3">
+    <label class="flex min-w-48 flex-1 flex-col gap-1"><span class="text-slate-400">Title</span>
+      <input type="search" name="q" value="{{.Q}}" maxlength="200" autocomplete="off" placeholder="Search titles in any language"
+        class="rounded border border-slate-700 bg-slate-950 px-2 py-1"></label>
+    {{range .Fields}}
+    {{if eq .Type "enum"}}
+    <label class="flex flex-col gap-1"><span class="text-slate-400">{{.Label}}</span>
+      <select name="{{.Name}}" class="rounded border border-slate-700 bg-slate-950 px-2 py-1">
+        <option value="">Any</option>
+        {{range .Options}}<option value="{{.Value}}"{{if .Selected}} selected{{end}}>{{.Label}}</option>{{end}}
+      </select></label>
+    {{else if or (eq .Type "number") (eq .Type "date")}}
+    <fieldset class="flex flex-col gap-1"><legend class="mb-1 text-slate-400">{{.Label}}</legend>
+      <span class="flex items-center gap-1">
+        <input type="{{.Type}}" name="{{.FromName}}" value="{{.From}}" aria-label="{{.Label}} from"{{if eq .Type "number"}} step="any"{{end}} class="w-28 rounded border border-slate-700 bg-slate-950 px-2 py-1">
+        <span aria-hidden="true">–</span>
+        <input type="{{.Type}}" name="{{.ToName}}" value="{{.To}}" aria-label="{{.Label}} to"{{if eq .Type "number"}} step="any"{{end}} class="w-28 rounded border border-slate-700 bg-slate-950 px-2 py-1">
+      </span></fieldset>
+    {{else}}
+    <label class="flex flex-col gap-1"><span class="text-slate-400">{{.Label}}</span>
+      <input type="text" name="{{.Name}}" value="{{.Value}}" maxlength="200" autocomplete="off" placeholder="contains…" class="rounded border border-slate-700 bg-slate-950 px-2 py-1"></label>
+    {{end}}
+    {{end}}
+  </div>
+  <div class="mt-3 flex flex-wrap items-start gap-3">
+    {{with .Genres}}{{template "filter_terms" .}}{{end}}
+    {{with .Tags}}{{template "filter_terms" .}}{{end}}
+    <fieldset class="flex flex-col gap-1"><legend class="mb-1 text-slate-400">Score</legend>
+      <span class="flex items-center gap-1">
+        <input type="number" name="rmin" value="{{.RatingMin}}" min="0" max="10" step="1" aria-label="Score from" class="w-20 rounded border border-slate-700 bg-slate-950 px-2 py-1">
+        <span aria-hidden="true">–</span>
+        <input type="number" name="rmax" value="{{.RatingMax}}" min="0" max="10" step="1" aria-label="Score to" class="w-20 rounded border border-slate-700 bg-slate-950 px-2 py-1">
+      </span>
+      <label class="flex items-center gap-2"><input type="checkbox" name="unrated" value="1"{{if .Unrated}} checked{{end}}> Unrated</label>
+      <label class="flex items-center gap-2"><input type="checkbox" name="zero" value="1"{{if .Zero}} checked{{end}}> Scored 0</label>
+      <span class="text-xs text-slate-500">Rows matching any checked score choice are shown.</span>
+    </fieldset>
+    <fieldset class="flex flex-col gap-1"><legend class="mb-1 text-slate-400">Show only</legend>
+      {{if .ShowUnmatched}}<label class="flex items-center gap-2"><input type="checkbox" name="unmatched" value="1"{{if .Unmatched}} checked{{end}}> Unmatched</label>{{end}}
+      <label class="flex items-center gap-2"><input type="checkbox" name="partial" value="1"{{if .Partial}} checked{{end}}> Partially synced</label>
+    </fieldset>
+    <label class="flex flex-col gap-1"><span class="text-slate-400">Sort by</span>
+      <select name="sort" class="rounded border border-slate-700 bg-slate-950 px-2 py-1">
+        {{range .Sorts}}<option value="{{.Value}}"{{if .Selected}} selected{{end}}>{{.Label}}</option>{{end}}
+      </select></label>
+    <label class="flex flex-col gap-1"><span class="text-slate-400">Order</span>
+      <select name="dir" class="rounded border border-slate-700 bg-slate-950 px-2 py-1">
+        {{range .Dirs}}<option value="{{.Value}}"{{if .Selected}} selected{{end}}>{{.Label}}</option>{{end}}
+      </select></label>
+  </div>
+  <div class="mt-3 flex items-center gap-4">
+    <button type="submit" class="rounded bg-indigo-600 px-3 py-1 font-medium hover:bg-indigo-500">Apply</button>
+    {{with .ClearURL}}<a class="text-indigo-300 hover:underline" href="{{.}}">Clear filters</a>{{end}}
+  </div>
+</form>
+{{end}}
+
+{{define "filter_terms"}}
+<fieldset class="flex flex-col gap-1"><legend class="mb-1 text-slate-400">{{.Label}}</legend>
+  <select name="{{.Name}}" multiple size="6" aria-label="{{.Label}}" class="min-w-40 rounded border border-slate-700 bg-slate-950 px-2 py-1">
+    {{range .Options}}<option value="{{.Value}}"{{if .Selected}} selected{{end}}>{{.Label}}</option>{{end}}
+  </select>
+  <select name="{{.ModeName}}" aria-label="{{.Label}}: match" class="rounded border border-slate-700 bg-slate-950 px-2 py-1">
+    <option value="any"{{if not .All}} selected{{end}}>Any of these</option>
+    <option value="all"{{if .All}} selected{{end}}>All of these</option>
+  </select>
+</fieldset>
+{{end}}

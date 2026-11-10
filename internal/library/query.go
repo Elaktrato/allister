@@ -539,6 +539,21 @@ func compileFilter(def plugin.KindDef, f Filter) (clause, error) {
 	return clause{"filter", `EXISTS (SELECT 1 FROM item_fields f WHERE f.item_id = items.id AND f.key = ? AND ` + cond + `)`, args}, nil
 }
 
+// CheckFilter reports whether f is a valid filter of the kind def with the
+// rules List applies (a *FilterError when not). It does not touch the
+// database, so callers can drop an offending filter before querying.
+func CheckFilter(def plugin.KindDef, f Filter) error {
+	_, err := compileFilter(def, f)
+	return err
+}
+
+// CheckSort reports whether s is a valid sort of the kind def with the rules
+// List applies (a *FilterError when not). It does not touch the database.
+func CheckSort(def plugin.KindDef, s Sort) error {
+	_, _, err := (&compiled{def: def, kind: def.Key}).orderBy(s, "")
+	return err
+}
+
 func appendStrings(args []any, vals []string) []any {
 	for _, v := range vals {
 		args = append(args, v)

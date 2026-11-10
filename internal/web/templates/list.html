@@ -11,15 +11,30 @@
   {{end}}
 </nav>
 {{end}}
-<nav aria-label="List status" class="mb-4 flex flex-wrap gap-2">
+{{template "list_tabs" .}}
+{{if .AnyEntries}}{{template "filter_bar" .Filters}}{{end}}
+<div id="list-rows">{{template "list_rows" .}}</div>
+<div id="dialog-slot" hx-on::before-swap="var s=event.detail.xhr.status;if(s===422||s===409||s===503){event.detail.shouldSwap=true;event.detail.isError=false}">{{with .Dialog}}{{template "entry_dialog" .}}{{end}}</div>
+{{end}}
+
+{{define "list_tabs"}}
+<nav id="list-tabs" aria-label="List status" class="mb-4 flex flex-wrap gap-2"{{if .TabsOOB}} hx-swap-oob="true"{{end}}>
   {{range .Tabs}}
   <a href="{{.Href}}"{{if .Current}} aria-current="page"{{end}} class="rounded px-3 py-1 text-sm {{if .Current}}bg-indigo-600 font-medium{{else}}bg-slate-800 hover:bg-slate-700{{end}}">{{.Label}} ({{.Count}})</a>
   {{end}}
 </nav>
+{{end}}
+
+{{/* list_partial answers the filter bar: the rows region plus the tabs (out of band) */}}
+{{define "list_partial"}}{{template "list_rows" .}}{{template "list_tabs" .}}{{end}}
+
+{{define "list_rows"}}
+{{if .Notice}}<p data-filter-notice role="status" class="mb-4 rounded border border-amber-800 bg-slate-900 p-3 text-sm text-amber-200">Ignored unknown or invalid parameters: {{range $i, $k := .Notice}}{{if $i}}, {{end}}<code>{{$k}}</code>{{end}}{{if .NoticeMore}} and {{.NoticeMore}} more{{end}}.</p>{{end}}
 {{if not .AnyEntries}}
 <p class="rounded border border-slate-800 bg-slate-900 p-4 text-slate-300"><strong class="font-medium text-slate-100">No {{.EmptyNoun}} in your list yet.</strong> Your list is empty: <a href="{{.SearchURL}}" class="text-indigo-300 underline">search for {{.EmptyNoun}} to add</a>{{if .ManualURL}} or <a href="{{.ManualURL}}" class="text-indigo-300 underline">add one manually</a>{{end}}.</p>
 {{else if not .Rows}}
-<p class="rounded border border-slate-800 bg-slate-900 p-4 text-slate-300">Nothing here yet.</p>
+{{if .Filtered}}<p class="rounded border border-slate-800 bg-slate-900 p-4 text-slate-300">No {{.EmptyNoun}} match these filters.{{with .Filters.ClearURL}} <a class="text-indigo-300 underline" href="{{.}}">Clear filters</a>{{end}}</p>
+{{else}}<p class="rounded border border-slate-800 bg-slate-900 p-4 text-slate-300">Nothing here yet.</p>{{end}}
 {{else}}
 <div class="overflow-x-auto">
   <table class="w-full text-left text-sm">
@@ -47,5 +62,4 @@
   </p>
 </div>
 {{end}}
-<div id="dialog-slot" hx-on::before-swap="var s=event.detail.xhr.status;if(s===422||s===409||s===503){event.detail.shouldSwap=true;event.detail.isError=false}">{{with .Dialog}}{{template "entry_dialog" .}}{{end}}</div>
 {{end}}

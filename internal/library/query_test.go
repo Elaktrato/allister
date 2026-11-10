@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/allister/allister/internal/plugin"
+	"github.com/allister/allister/internal/plugin/plugintest"
 	"modernc.org/sqlite"
 )
 
@@ -911,5 +912,79 @@ func TestResolveTitleIndex(t *testing.T) {
 	}
 	if ResolveTitleIndex(nil, "en") != -1 || ResolveTitleIndex([]plugin.Title{{Lang: "x", Text: "X"}}, "en") != 0 {
 		t.Error("empty or no match")
+	}
+}
+
+// TestCheckFilterAndSortAgreeWithList: the pure checks give exactly the
+// verdict List gives for the same filter or sort, without a database.
+func TestCheckFilterAndSortAgreeWithList(t *testing.T) {
+	e := newEnv(t)
+	def := richBook().M.Kinds[0]
+	nopDef := richBook(plugintest.WithID("nop")).M.Kinds[0]
+	nopDef.Progress.PrimaryKey = ""
+	f := func(key string, op FilterOp, vals ...string) Filter { return Filter{Key: key, Op: op, Values: vals} }
+	filters := []struct {
+		f  Filter
+		ok bool
+	}{
+		{f("author", OpContains, "frank"), true},
+		{f("author", OpContains, "%_'\\"), true},
+		{f("score", OpRange, "1..5"), true},
+		{f("score", OpRange, "5.."), true},
+		{f("score", OpEq, "3"), true},
+		{f("released", OpRange, "2000-01-01..2001-01-01"), true},
+		{f("format", OpIn, "hardcover", "paperback"), true},
+		{f("translators", OpIn, "A"), true},
+		{f("nope", OpEq, "a"), false},
+		{f("isbn", OpContains, "a"), false},
+		{f("author') OR 1=1 --", OpContains, "a"), false},
+		{f("author", OpEq, "a"), false},
+		{f("format", OpEq, "leather"), false},
+		{f("score", OpRange, "9..1"), false},
+		{f("score", OpRange, "x..y"), false},
+		{f("released", OpEq, "2001-13-01"), false},
+		{f("author", OpContains, strings.Repeat("x", 201)), false},
+		{f("author", OpContains), false},
+	}
+	for _, c := range filters {
+		err := CheckFilter(def, c.f)
+		var fe *FilterError
+		if c.ok != (err == nil) || (err != nil && !errors.As(err, &fe)) {
+			t.Errorf("CheckFilter(%+v) = %v, want ok=%v (typed)", c.f, err, c.ok)
+		}
+		_, lerr := e.lib.List(bg, Query{PluginID: "book", Kind: "book", Filters: []Filter{c.f}}, "en")
+		if (err == nil) != (lerr == nil) {
+			t.Errorf("%+v: CheckFilter %v but List %v", c.f, err, lerr)
+		}
+	}
+	sorts := []struct {
+		s     Sort
+		def   plugin.KindDef
+		query Query
+		ok    bool
+	}{
+		{Sort{Kind: SortTitle}, def, bookQ, true},
+		{Sort{Kind: SortUpdated, Desc: true}, def, bookQ, true},
+		{Sort{Kind: SortRating}, def, bookQ, true},
+		{Sort{Kind: SortProgress}, def, bookQ, true},
+		{Sort{Kind: SortField, Field: "score"}, def, bookQ, true},
+		{Sort{Kind: SortField, Field: "released"}, def, bookQ, true},
+		{Sort{Kind: SortField, Field: "author"}, def, bookQ, false},
+		{Sort{Kind: SortField, Field: "nope') --"}, def, bookQ, false},
+		{Sort{Kind: "bogus"}, def, bookQ, false},
+		{Sort{Kind: SortProgress}, nopDef, Query{PluginID: "nop", Kind: "book"}, false},
+	}
+	for _, c := range sorts {
+		err := CheckSort(c.def, c.s)
+		var fe *FilterError
+		if c.ok != (err == nil) || (err != nil && !errors.As(err, &fe)) {
+			t.Errorf("CheckSort(%+v) = %v, want ok=%v (typed)", c.s, err, c.ok)
+		}
+		q := c.query
+		q.Sort = c.s
+		_, lerr := e.lib.List(bg, q, "en")
+		if (err == nil) != (lerr == nil) {
+			t.Errorf("%+v: CheckSort %v but List %v", c.s, err, lerr)
+		}
 	}
 }

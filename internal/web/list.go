@@ -3,11 +3,14 @@ package web
 // The generic list page GET /{plugin}?status=&page=&kind=: one kind of one
 // plugin at a time (the first kind unless ?kind= names another kind of a
 // plugin with several), tabs per core status class with the kind's status
-// labels and counts, 100 rows per page. Rows are built by rowView and
-// rendered by the list_row template, shared with the +1 response.
+// labels and counts, 100 rows per page, and the schema-generated search and
+// filters of filters.go (kept by the tab, pagination and row links). Rows
+// are built by rowView and rendered by the list_row template, shared with
+// the +1 response.
 
 import (
 	"errors"
+	"log"
 	"math"
 	"net/http"
 	"net/url"
@@ -57,6 +60,11 @@ type listView struct {
 	Kinds                []tabView
 	TypeHeader           string // "" without a type column
 	Tabs                 []tabView
+	TabsOOB              bool // the tabs ride along with a rows partial
+	Filters              filterBar
+	Filtered             bool     // a filter narrows the rows
+	Notice               []string // rejected parameter keys (shown escaped)
+	NoticeMore           int      // rejected keys beyond Notice
 	Rows                 []rowView
 	AnyEntries           bool
 	Total, From, To      int
@@ -69,16 +77,24 @@ type listView struct {
 }
 
 // listQuery is a parsed list request: Kind is the kind key shown, Status ""
-// for All.
+// for All, Filters the valid search, filter and sort state and Rejected the
+// parameter keys that were ignored.
 type listQuery struct {
 	Kind, Status string
 	Page         int
+	Filters      listFilters
+	Rejected     []string
 }
 
 // listURL builds the list URL of a plugin for a kind (only for plugins with
 // several kinds), a status filter and a page (page 1 omitted).
 func listURL(m plugin.Manifest, kind, status string, page int) string {
-	q := url.Values{}
+	return filteredListURL(m, kind, status, page, listFilters{})
+}
+
+// filteredListURL is listURL keeping the filters f (canonical form).
+func filteredListURL(m plugin.Manifest, kind, status string, page int, f listFilters) string {
+	q := f.values()
 	if len(m.Kinds) > 1 && kind != "" {
 		q.Set("kind", kind)
 	}
@@ -97,16 +113,29 @@ func listURL(m plugin.Manifest, kind, status string, page int) string {
 
 // parseListQuery reads the kind (unknown values and single-kind plugins mean
 // the first kind), the status filter (anything but a core status class
-// means All) and the requested page (invalid values mean 1, an overflowing
-// number the last page) from a query.
+// means All), the requested page (invalid values mean 1, an overflowing
+// number the last page) and the filters (parseFilters) from a query. An
+// unknown kind or status is named in Rejected like any other ignored key.
 func parseListQuery(m plugin.Manifest, q url.Values) listQuery {
 	lq := listQuery{Kind: m.Kinds[0].Key, Status: q.Get("status")}
-	if k := q.Get("kind"); len(m.Kinds) > 1 && hasKind(m, k) {
+	k := q.Get("kind")
+	switch {
+	case len(m.Kinds) > 1 && hasKind(m, k):
 		lq.Kind = k
+	case k != "" && k != lq.Kind:
+		lq.Rejected = append(lq.Rejected, "kind")
 	}
 	if !slices.Contains(library.Statuses(), library.Status(lq.Status)) {
+		if lq.Status != "" {
+			lq.Rejected = append(lq.Rejected, "status")
+		}
 		lq.Status = ""
 	}
+	kd, _ := kindDef(m, lq.Kind)
+	var rejected []string
+	lq.Filters, rejected = parseFilters(kd, q)
+	lq.Rejected = append(lq.Rejected, rejected...)
+	slices.Sort(lq.Rejected)
 	raw := q.Get("page")
 	page, err := strconv.Atoi(raw)
 	switch {
@@ -195,7 +224,21 @@ func unmatchedRowHint(m plugin.Manifest) string {
 func (s *server) buildList(r *http.Request, m plugin.Manifest, lq listQuery) (listView, error) {
 	ctx := r.Context()
 	k, _ := kindDef(m, lq.Kind)
-	counts, err := s.deps.Library.Counts(ctx, library.Query{PluginID: m.ID, Kind: k.Key})
+	f := lq.Filters
+	q := library.Query{PluginID: m.ID, Kind: k.Key, Page: lq.Page, PageSize: listPageSize}
+	f.apply(k, &q)
+	if lq.Status != "" {
+		st := library.Status(lq.Status)
+		q.Status = &st
+	}
+	counts, err := s.deps.Library.Counts(ctx, q)
+	if errors.Is(err, library.ErrInvalid) && f.active() {
+		// parseFilters checks every part against the schema, so this is a
+		// safety net: show the list without filters and say so
+		log.Printf("list %s: filters refused: %v", m.ID, err)
+		lq.Filters, lq.Rejected = listFilters{}, append(lq.Rejected, "filters")
+		return s.buildList(r, m, lq)
+	}
 	if err != nil {
 		return listView{}, err
 	}
@@ -203,18 +246,36 @@ func (s *server) buildList(r *http.Request, m plugin.Manifest, lq listQuery) (li
 	for _, n := range counts {
 		all += n
 	}
-	q := library.Query{PluginID: m.ID, Kind: k.Key, Page: lq.Page, PageSize: listPageSize}
-	if lq.Status != "" {
-		st := library.Status(lq.Status)
-		q.Status = &st
+	anyEntries := all > 0
+	if !anyEntries && f.narrows() {
+		plain, err := s.deps.Library.Counts(ctx, library.Query{PluginID: m.ID, Kind: k.Key})
+		if err != nil {
+			return listView{}, err
+		}
+		for _, n := range plain {
+			anyEntries = anyEntries || n > 0
+		}
 	}
 	pg, err := s.deps.Library.List(ctx, q, s.deps.Settings.TitleLang(ctx))
 	if err != nil {
 		return listView{}, err
 	}
-	ret := listURL(m, k.Key, lq.Status, pg.PageNo)
-	v := listView{Heading: k.LabelPlural, AnyEntries: all > 0, Total: pg.Total,
+	var genres, tags []library.TermCount
+	if anyEntries && k.Genres.Enabled && k.Genres.Filterable {
+		if genres, err = s.deps.Library.Terms(ctx, q, "genre"); err != nil {
+			return listView{}, err
+		}
+	}
+	if anyEntries && k.Tags.Enabled && k.Tags.Filterable {
+		if tags, err = s.deps.Library.Terms(ctx, q, "tag"); err != nil {
+			return listView{}, err
+		}
+	}
+	ret := filteredListURL(m, k.Key, lq.Status, pg.PageNo, f)
+	v := listView{Heading: k.LabelPlural, AnyEntries: anyEntries, Total: pg.Total, Filtered: f.narrows(),
+		Filters:   buildFilterBar(m, k, lq, genres, tags),
 		SearchURL: "/" + url.PathEscape(m.ID) + "/search", EmptyNoun: lowerFirst(k.LabelPlural), Exports: s.exportLinks(m)}
+	v.Notice, v.NoticeMore = noticeKeys(lq.Rejected)
 	// the manual-add link only while the plugin has the manual route
 	if manual := "/" + m.ID + "/manual/new"; slices.Contains(s.pluginRoutes[m.ID], "GET "+manual) {
 		v.ManualURL = manual
@@ -229,16 +290,17 @@ func (s *server) buildList(r *http.Request, m plugin.Manifest, lq listQuery) (li
 		v.From, v.To = (pg.PageNo-1)*listPageSize+1, (pg.PageNo-1)*listPageSize+len(pg.Rows)
 	}
 	if pg.PageNo > 1 {
-		v.PrevURL = listURL(m, k.Key, lq.Status, pg.PageNo-1)
+		v.PrevURL = filteredListURL(m, k.Key, lq.Status, pg.PageNo-1, f)
 	}
 	if pg.PageNo < pg.Pages {
-		v.NextURL = listURL(m, k.Key, lq.Status, pg.PageNo+1)
+		v.NextURL = filteredListURL(m, k.Key, lq.Status, pg.PageNo+1, f)
 	}
-	v.Tabs = append(v.Tabs, tabView{Label: "All", Count: all, Href: listURL(m, k.Key, "", 1), Current: lq.Status == ""})
+	v.Tabs = append(v.Tabs, tabView{Label: "All", Count: all, Href: filteredListURL(m, k.Key, "", 1, f), Current: lq.Status == ""})
 	for _, st := range listTabOrder {
-		v.Tabs = append(v.Tabs, tabView{Label: statusLabel(k, st), Count: counts[st], Href: listURL(m, k.Key, string(st), 1),
+		v.Tabs = append(v.Tabs, tabView{Label: statusLabel(k, st), Count: counts[st], Href: filteredListURL(m, k.Key, string(st), 1, f),
 			Current: string(st) == lq.Status})
 	}
+	// another kind has another schema: its link starts without filters
 	if len(m.Kinds) > 1 {
 		for _, mk := range m.Kinds {
 			v.Kinds = append(v.Kinds, tabView{Label: mk.LabelPlural, Href: listURL(m, mk.Key, "", 1), Current: mk.Key == k.Key})
@@ -247,16 +309,37 @@ func (s *server) buildList(r *http.Request, m plugin.Manifest, lq listQuery) (li
 	return v, nil
 }
 
-// getList renders the list page. It is always the full page: nothing
-// requests it as a fragment (the responses still carry Vary: HX-Request).
+// getList renders the list page. The filter bar's htmx requests (HX-Target
+// list-rows) get only the rows region, with the tabs as an out-of-band swap
+// and the canonical URL for the address bar; every other request, a history
+// restore included, gets the full page (both carry Vary: HX-Request).
 func (s *server) getList(w http.ResponseWriter, r *http.Request, pluginID string) {
 	m, ok := s.deps.Registry.Manifest(pluginID)
 	if !ok || len(m.Kinds) == 0 {
 		s.errorPage(w, r, http.StatusNotFound, "Not found", "There is no such list.", "")
 		return
 	}
-	s.showList(w, r, m, parseListQuery(m, r.URL.Query()), nil, http.StatusOK)
+	vals, err := url.ParseQuery(r.URL.RawQuery) // keeps the readable pairs
+	lq := parseListQuery(m, vals)
+	if err != nil {
+		lq.Rejected = append(lq.Rejected, "(unreadable parameter)")
+	}
+	if isPartialRequest(r) && r.Header.Get("HX-Target") == listRowsID {
+		v, err := s.buildList(r, m, lq)
+		if err != nil {
+			s.internalError(w, r, err)
+			return
+		}
+		v.TabsOOB = true
+		w.Header().Set("HX-Push-Url", filteredListURL(m, lq.Kind, lq.Status, lq.Page, lq.Filters))
+		s.renderPartial(w, "list", "list_partial", v)
+		return
+	}
+	s.showList(w, r, m, lq, nil, http.StatusOK)
 }
+
+// listRowsID is the id of the rows region the filter bar targets.
+const listRowsID = "list-rows"
 
 // showList renders the full list page, with the edit dialog open when dialog is set.
 func (s *server) showList(w http.ResponseWriter, r *http.Request, m plugin.Manifest, lq listQuery, dialog *entryDialog, code int) {

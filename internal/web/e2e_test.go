@@ -177,7 +177,7 @@ func TestImportFlow(t *testing.T) {
 	mustContain(t, e.get("/settings/import", false).Body.String(), "Done", `data-count="imported">1<`, `data-count="unmatched">1<`)
 
 	list := e.get("/anime", false).Body.String()
-	mustContain(t, list, "T1", "Lost Show", "unmatched")
+	mustContain(t, list, "T1", "Lost Show", ">unmatched</span>")
 	if n := strings.Count(list, "unmatched</span>"); n != 1 {
 		t.Fatalf("want one unmatched badge, got %d", n)
 	}
@@ -213,7 +213,7 @@ func TestMatchFlowEndToEnd(t *testing.T) {
 	id := e.unmatched(t) // status completed, rating 0, progress 3, start date, comment "c"
 
 	list := e.get("/anime").Body.String()
-	mustContain(t, list, "Lost Show", "unmatched")
+	mustContain(t, list, "Lost Show", ">unmatched</span>")
 	_, enBefore := e.snapshot(t, id)
 
 	// the overview offers matching
@@ -235,7 +235,7 @@ func TestMatchFlowEndToEnd(t *testing.T) {
 	// the list: no badge, same data, same anime id
 	list = e.get("/anime").Body.String()
 	mustContain(t, list, "デスノート")
-	mustNotContain(t, list, "unmatched", "Lost Show")
+	mustNotContain(t, list, ">unmatched</span>", "Lost Show")
 	if got := listID(t, list); got != itoa(id) {
 		t.Fatalf("anime id changed: %s != %d", got, id)
 	}
@@ -285,5 +285,5 @@ func TestMatchRefusesAlreadySavedAnime(t *testing.T) {
 	if sv, _ := e.lib.Item(context.Background(), existing); sv == nil || sv.Source != string(anilist.AniList) {
 		t.Fatal("existing entry touched")
 	}
-	mustContain(t, e.get("/anime").Body.String(), "unmatched")
+	mustContain(t, e.get("/anime").Body.String(), ">unmatched</span>")
 }
