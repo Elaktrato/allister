@@ -4,7 +4,7 @@ Details behind the short sections of the [README](../README.md).
 
 ## Searching your list
 
-The search bar above the list (`q`) and the Filters panel next to it (every other parameter except the sort) search only your own entries and update the list as you type. The panel works without JavaScript too (the Apply button submits it); the Filters button shows how many of its filters are set (the score range counts once), and a list opened with such filters starts with the panel open. The column headings of the table set `sort` and `dir`. Below 1024 px wide the Updated column is hidden, and below 768 px the Year column (any plugin's sortable field column) too; the Filters panel then shows a Sort by control with every sort key (the hidden columns included) and the direction, which sets the same `sort` and `dir` (on wider screens it is hidden and the headings sort). Everything is in the URL, so a filtered list can be bookmarked. Paging and the status tabs keep the filters, and "Clear filters" removes them. Parameters:
+The search bar above the list (`q`) and the Filters panel next to it (every other parameter except the sort) search only your own entries and update the list as you type. The panel works without JavaScript too (the Apply button submits it); the Filters button shows how many of its filters are set (the score range counts once), and a list opened with such filters starts with the panel open. The column headings of the table set `sort` and `dir`; only the columns you show (see [Plugin settings](#plugin-settings)) have a heading. Below 1024 px wide the Updated column is hidden, and below 768 px the Year column (any plugin's sortable field column) too; the Filters panel then shows a Sort by control with every sort key (the hidden columns and the columns you switched off included) and the direction, which sets the same `sort` and `dir` (on wider screens it is hidden and the headings sort). Everything is in the URL, so a filtered list can be bookmarked. Paging and the status tabs keep the filters, and "Clear filters" removes them. Parameters:
 
 | Parameter | Meaning |
 |---|---|
@@ -21,6 +21,15 @@ The search bar above the list (`q`) and the Filters panel next to it (every othe
 
 Unknown or invalid parameters are ignored, and a notice names them.
 
+## Plugin settings
+
+Every installed plugin (enabled or not) has a settings page at `/settings/plugins/{id}`, linked from Settings > Plugins and Settings > General. Both forms are plain forms (no JavaScript needed) and, like every change, refuse requests from other sites.
+
+- **Title language** (stored as the setting `plugin.<id>.title_lang`). The choices are the languages the plugin declares, followed by other language tags found in that plugin's saved titles; nothing else is accepted. Before you choose, the plugin's first language is used (anime: Japanese). When an entry has no title in the chosen language, the plugin's declared fallback order is tried (anime: Japanese, romaji, English), then the entry's first stored title. It applies to the list, the +1 row, overviews (and their titles block and related entries), source search, recommendations, person pages and the match dialog. List search matches every language, and exports and backups keep every title.
+- **Table columns**, one form per kind (stored as `plugin.<id>.columns.<kind>`, a JSON list of column keys in order). The form lists every column the kind offers: the ones shown first, in their order, then the others. Tick or untick, use the arrows to move a shown column (the arrows save the ticks too), "Save columns", or "Reset to defaults" to remove the choice. Cover, title and actions are always there, so an empty choice shows the title only. Columns keep their screen-width hint (for anime, Type from 640 px, Year and Episodes from 768 px, Updated, Studio, Source, Started and Ended from 1024 px). The table head, its sort links (only for shown columns that sort), the rows and the htmx updates follow the choice; the compact Sort by control keeps every sort key. Columns the plugin no longer offers are dropped from a stored choice. The +1 button sits in the Progress column, so without that column the list has no +1 (the Edit dialog still sets progress).
+
+Upgrading: the earlier global title language (Settings > General) is moved to the anime plugin's setting by a database migration, so nothing changes on screen.
+
 ## URLs
 
 | URL | Page |
@@ -32,7 +41,8 @@ Unknown or invalid parameters are ignored, and a notice names them.
 | `/anime/export/json` | The JSON export |
 | `/list/{id}/edit` | The list entry's Edit dialog (status, rating, progress, dates, comment) |
 | `/people/{id}` | Person page |
-| `/settings`, `/settings/plugins`, `/settings/import`, `/settings/backup` | Settings sections: General (title language), Plugins (switch plugins on and off), Import, Backup and restore |
+| `/settings`, `/settings/plugins`, `/settings/import`, `/settings/backup` | Settings sections: General (links to each plugin's settings), Plugins (switch plugins on and off), Import, Backup and restore |
+| `/settings/plugins/{id}` | A plugin's settings: title language and table columns (see [Plugin settings](#plugin-settings)) |
 | `/healthz` | Answers `ok`, for monitoring |
 
 Changes from the first version: a data volume from the first (pre-plugin) preview build starts empty after the upgrade (its anime tables are dropped, not copied); make a cold backup of the volume first if it holds data you want (see the README). List statuses are the core's status classes, so a bookmark like `/anime?status=watching` now opens the All tab with a notice (use `status=active`). The list's search and filter parameters are new. Edit details (`/anime/{source}/{id}/edit`) and the recommendations fragment (`/anime/{source}/{id}/recommendations`, loaded by the overview) are new routes.
@@ -41,7 +51,7 @@ Changes from the first version: a data volume from the first (pre-plugin) previe
 
 - The Go toolchain is pinned to Go 1.23.12, which is no longer supported upstream (no more security fixes). Moving to a supported Go version is planned as a separate follow-up.
 - Only the anime plugin exists. Plugins are compiled in, and there is no marketplace or runtime installation.
-- When the chosen title language is missing, the fallback order (Japanese, romaji, English, then any title) is fixed for every plugin.
+- The title language is one per plugin, not per kind; the column choice is per kind.
 - "Match to AniList" accepts AniList URLs and numeric ids only.
 - A live overview of an anime that is not saved makes two AniList requests (details, then recommendations). Both are cached for 10 minutes.
 - The JSON export builds the whole list in memory (fine for a few thousand entries).
