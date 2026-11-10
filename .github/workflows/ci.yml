@@ -1,0 +1,158 @@
+# Lint, security advisories, tests and the image smoke test. Every check runs
+# through scripts/ci.sh with pinned tools, so `scripts/ci.sh <check>` runs the
+# same thing locally (docs/ci.md). Third-party actions are pinned by commit
+# SHA (PINS.md; internal/guard checks it).
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main, dev]
+  workflow_call:
+
+permissions:
+  contents: read
+
+concurrency:
+  # a new push to a pull request cancels its running checks; pushes to main
+  # and dev always run to completion
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    env:
+      GO_CACHE_DIR: ${{ github.workspace }}/../go-cache
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Go cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ env.GO_CACHE_DIR }}
+          key: go-lint-${{ hashFiles('go.sum', 'tools/go.sum', 'scripts/go.sh') }}
+          restore-keys: go-lint-
+      - name: gofmt
+        run: scripts/ci.sh fmt
+      - name: go mod tidy drift
+        run: scripts/ci.sh tidy
+      - name: go vet
+        run: scripts/ci.sh vet
+      - name: golangci-lint
+        run: scripts/ci.sh lint
+
+  vuln:
+    name: Security advisories
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    env:
+      GO_CACHE_DIR: ${{ github.workspace }}/../go-cache
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Go cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ env.GO_CACHE_DIR }}
+          key: go-vuln-${{ hashFiles('go.sum', 'tools/go.sum', 'scripts/go.sh') }}
+          restore-keys: go-vuln-
+      - name: govulncheck (source and built binary)
+        run: scripts/ci.sh vuln
+
+  test:
+    name: Test
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    env:
+      GO_CACHE_DIR: ${{ github.workspace }}/../go-cache
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Go cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ env.GO_CACHE_DIR }}
+          key: go-test-${{ hashFiles('go.sum', 'tools/go.sum', 'scripts/go.sh') }}
+          restore-keys: go-test-
+      # The whole suite, including internal/guard (core stays generic, every
+      # pin recorded and verified) and the static/pin checks in internal/web.
+      - name: go test with coverage
+        run: scripts/ci.sh test
+      - name: Upload coverage
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: coverage
+          path: |
+            .ci/coverage.out
+            .ci/coverage.txt
+          if-no-files-found: ignore
+          retention-days: 14
+
+  dockerfile:
+    name: Dockerfile and workflows
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: hadolint
+        run: scripts/ci.sh hadolint
+      - name: actionlint
+        run: scripts/ci.sh actionlint
+
+  image:
+    name: Image build, smoke test and scan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      security-events: write # upload the Trivy SARIF to code scanning
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - name: Build
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          load: true
+          push: false
+          tags: allister-ci-check:${{ github.sha }}
+          build-args: |
+            VERSION=ci
+            COMMIT=${{ github.sha }}
+          cache-from: type=gha,scope=image
+          cache-to: type=gha,scope=image,mode=max
+      - name: Smoke test (/healthz, /version)
+        run: scripts/ci.sh smoke "allister-ci-check:${{ github.sha }}"
+      # The SARIF is produced first (it never fails) so code scanning gets
+      # the findings even when the gate below fails. Pull requests from forks
+      # cannot write security events, so they only run the gate.
+      - name: Trivy SARIF
+        if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+        run: scripts/ci.sh trivy-sarif "allister-ci-check:${{ github.sha }}" > .ci/trivy.sarif
+      - name: Upload Trivy SARIF to code scanning
+        if: hashFiles('.ci/trivy.sarif') != ''
+        uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+        with:
+          sarif_file: .ci/trivy.sarif
+          category: trivy-image
+      - name: Trivy (fixable HIGH/CRITICAL fail)
+        run: scripts/ci.sh trivy "allister-ci-check:${{ github.sha }}"
