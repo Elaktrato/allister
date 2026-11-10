@@ -15,7 +15,7 @@
 {{if .AnyEntries}}{{template "filter_bar" .Filters}}{{end}}
 {{/* hx-history="false": htmx never snapshots this page (a snapshot keeps attributes, not typed values), so Back refetches it in full */}}
 <div id="list-rows" hx-history="false">{{template "list_rows" .}}</div>
-<div id="dialog-slot" hx-on::before-swap="var s=event.detail.xhr.status;if(s===422||s===409||s===503){event.detail.shouldSwap=true;event.detail.isError=false}">{{with .Dialog}}{{template "entry_dialog" .}}{{end}}</div>
+<div id="dialog-slot" hx-on::before-swap="var s=event.detail.xhr.status;if({{dialogSwap}}){event.detail.shouldSwap=true;event.detail.isError=false}">{{with .Dialog}}{{template "entry_dialog" .}}{{end}}</div>
 {{end}}
 
 {{define "list_tabs"}}
