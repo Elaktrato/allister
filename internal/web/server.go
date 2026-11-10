@@ -189,7 +189,9 @@ func (s *server) execute(w http.ResponseWriter, status int, page, name string, d
 // executeFor is execute for a request: a full page (base.html) gets the
 // navigation prepared for r. A nil r renders without navigation.
 func (s *server) executeFor(w http.ResponseWriter, r *http.Request, status int, page, name string, data any) {
-	w.Header().Add("Vary", "HX-Request")
+	if w.Header().Get("Vary") == "" { // a handler may have set a wider one
+		w.Header().Set("Vary", "HX-Request")
+	}
 	t, ok := s.pages[page]
 	if !ok {
 		log.Printf("render: unknown page %q", page)

@@ -85,6 +85,25 @@ func noticeOf(body string) string {
 	return body[i : i+end]
 }
 
+// noticeKeysOf returns the keys the notice of body names, in order.
+func noticeKeysOf(body string) []string {
+	var out []string
+	n := noticeOf(body)
+	for {
+		i := strings.Index(n, "<code>")
+		if i < 0 {
+			return out
+		}
+		n = n[i+len("<code>"):]
+		j := strings.Index(n, "</code>")
+		if j < 0 {
+			return out
+		}
+		out = append(out, html.UnescapeString(n[:j]))
+		n = n[j:]
+	}
+}
+
 // animeData is valid data of the real anime plugin.
 func animeData(id, title, typ string, year float64, studio string) plugin.ItemData {
 	f := map[string]plugin.FieldValue{"type": {Text: typ}}
@@ -140,13 +159,31 @@ func TestFilterByTypeYearRangeStudio(t *testing.T) {
 	}
 	b := e.listGet(t, "/anime?f.type=TV&f.year=2000..2010&f.studio=Madhouse")
 	mustContain(t, b, "Showing 1–1 of 1")
-	// malformed values are ignored with a notice naming the parameter
-	for _, q := range []string{"f.type=Bogus", "f.year=abc", "f.year=2010..2000", "f.year=..", "f.year.from=x"} {
+	// malformed values are ignored with a notice naming exactly that parameter
+	for q, key := range map[string]string{
+		"f.type=Bogus":                 "f.type",
+		"f.year=abc":                   "f.year",
+		"f.year=2010..2000":            "f.year",
+		"f.year=..":                    "f.year",
+		"f.year.from=x":                "f.year",
+		"f.year=..&f.year.from=":       "f.year",
+		"f.studio=Madhouse&f.type=Bad": "f.type",
+	} {
 		b := e.listGet(t, "/anime?"+q)
-		wantRows(t, q, b, "Alpha", "Beta", "Gamma", "Delta")
-		if n := noticeOf(b); !strings.Contains(n, "f.year") && !strings.Contains(n, "f.type") {
-			t.Errorf("%s: notice %q", q, n)
+		want := []string{"Alpha", "Beta", "Gamma", "Delta"}
+		if strings.Contains(q, "studio") {
+			want = []string{"Alpha", "Gamma"}
 		}
+		wantRows(t, q, b, want...)
+		if got := noticeKeysOf(b); !slices.Equal(got, []string{key}) {
+			t.Errorf("%s: notice keys %q, want [%s]", q, got, key)
+		}
+	}
+	// the canonical value wins over the form aliases, which are named
+	b = e.listGet(t, "/anime?f.year=2010..&f.year.from=1990&f.year.to=2000")
+	wantRows(t, "alias dropped", b, "Gamma")
+	if got := noticeKeysOf(b); !slices.Equal(got, []string{"f.year.from", "f.year.to"}) {
+		t.Errorf("alias notice keys %q", got)
 	}
 	// the form shows the applied values again
 	b = e.listGet(t, "/anime?f.type=TV&f.year=2000..2010&f.studio=Madhouse")
@@ -628,4 +665,103 @@ func TestLibraryRefusalFallsBackWithNotice(t *testing.T) {
 	wantRows(t, "fallback", b, "Dark")
 	mustContain(t, noticeOf(b), "filters")
 	mustNotContain(t, b, "Clear filters", `value="zzz"`)
+}
+
+// TestListHistoryRestoreFetchesFullPage: htmx must never restore a list from
+// its snapshot (it keeps attributes, not typed values, so the bar would not
+// match the rows): hx-history="false" makes it skip saving the snapshot and
+// fetch the page with HX-History-Restore-Request, which gets the full page.
+func TestListHistoryRestoreFetchesFullPage(t *testing.T) {
+	e := newFixtureEnv(t)
+	e.addFixture(t, "tv", "show", tvShow("1", "Dark"), library.Entry{Status: library.Active})
+	for _, target := range []string{"/tv", "/tv?q=dar", "/tv?q=zzz"} {
+		mustContain(t, e.listGet(t, target), `id="list-rows" hx-history="false"`)
+	}
+	// the empty list too (no live filtering, but the attribute costs nothing)
+	mustContain(t, newFixtureEnv(t).listGet(t, "/tv"), `hx-history="false"`)
+	rec := e.getWith("/tv?q=dar", map[string]string{"HX-Request": "true", "HX-Target": "list-rows", "HX-History-Restore-Request": "true"})
+	b := rec.Body.String()
+	mustContain(t, b, "<html", `name="q" value="dar"`, `hx-history="false"`)
+	wantRows(t, "restore", b, "Dark")
+}
+
+func TestListVaryCoversAllRequestHeaders(t *testing.T) {
+	e := newFixtureEnv(t)
+	e.addFixture(t, "tv", "show", tvShow("1", "Dark"), library.Entry{Status: library.Active})
+	for _, h := range []map[string]string{{}, {"HX-Request": "true", "HX-Target": "list-rows"}} {
+		got := e.getWith("/tv", h).Header().Values("Vary")
+		if !slices.Equal(got, []string{"HX-Request, HX-Target, HX-History-Restore-Request"}) {
+			t.Errorf("%v: Vary %q", h, got)
+		}
+	}
+}
+
+func TestPartialSwapsTermCountsAndClearOutOfBand(t *testing.T) {
+	e := newFixtureEnv(t)
+	active := library.Entry{Status: library.Active}
+	e.addFixture(t, "tv", "show", showWith("1", "Dark", []string{"Drama"}, plugin.Tag{Name: "Loop"}), active)
+	e.addFixture(t, "tv", "show", showWith("2", "Light", []string{"Comedy"}), active)
+	hx := map[string]string{"HX-Request": "true", "HX-Target": "list-rows"}
+	b := e.getWith("/tv?q=dar&genre=Comedy", hx).Body.String()
+	mustContain(t, b, `id="filter-genre" hx-swap-oob="true"`, `id="filter-tag" hx-swap-oob="true"`, `id="filter-clear" hx-swap-oob="true"`,
+		`<option value="Drama">Drama (1)</option>`, `<option value="Comedy" selected>Comedy (0)</option>`, `href="/tv">Clear filters</a>`)
+	// tag counts follow the genre and text filters: nothing matches both
+	mustNotContain(t, b, `Loop (`)
+	// never the text inputs (typing focus stays)
+	mustNotContain(t, b, `name="q"`, `name="rmin"`, `name="sort"`)
+	// without filters the Clear slot is swapped empty
+	b = e.getWith("/tv", hx).Body.String()
+	mustContain(t, b, `id="filter-clear" hx-swap-oob="true"></span>`)
+	mustNotContain(t, b, "Clear filters")
+	// the full page has the same ids, without oob
+	full := e.listGet(t, "/tv?q=dar")
+	mustContain(t, full, `id="filter-genre"`, `id="filter-tag"`, `id="filter-clear"`)
+	mustNotContain(t, full, "hx-swap-oob")
+}
+
+func TestPushURLIsTheAppliedQuery(t *testing.T) {
+	hx := map[string]string{"HX-Request": "true", "HX-Target": "list-rows"}
+	e := newFixtureEnv(t)
+	for i := 0; i < 101; i++ {
+		e.addFixture(t, "tv", "show", tvShow(fmt.Sprint(i+1), fmt.Sprintf("Show %03d", i+1)), library.Entry{Status: library.Active})
+	}
+	for target, want := range map[string]string{
+		"/tv?page=99":                    "/tv?page=2",
+		"/tv?q=Show&page=99999999999999": "/tv?page=2&q=Show",
+		"/tv?q=Show+001&page=5":          "/tv?q=Show+001",
+		"/tv?q=Show&bogus=1&sort=nope":   "/tv?q=Show",
+	} {
+		if got := e.getWith(target, hx).Header().Get("HX-Push-Url"); got != want {
+			t.Errorf("%s: HX-Push-Url %q, want %q", target, got, want)
+		}
+	}
+	// filters the library refused are not pushed
+	r := newFixtureEnv(t, func(_, tv *plugintest.Plugin) {
+		k := &tv.M.Kinds[0]
+		for i := 0; i < 21; i++ {
+			k.Fields = append(k.Fields, plugin.FieldDef{Key: fmt.Sprintf("n%02d", i), Label: fmt.Sprintf("N%02d", i), Type: plugin.FieldNumber, Editable: true, Filterable: true})
+		}
+	})
+	r.addFixture(t, "tv", "show", tvShow("1", "Dark"), library.Entry{Status: library.Active})
+	vals := url.Values{"q": {"zzz"}}
+	for i := 0; i < 21; i++ {
+		vals.Set(fmt.Sprintf("f.n%02d", i), "1..")
+	}
+	if got := r.getWith("/tv?"+vals.Encode(), hx).Header().Get("HX-Push-Url"); got != "/tv" {
+		t.Errorf("refused: HX-Push-Url %q", got)
+	}
+}
+
+func TestUnreadableParameterNotice(t *testing.T) {
+	e := newFixtureEnv(t)
+	e.addFixture(t, "tv", "show", tvShow("1", "Dark"), library.Entry{Status: library.Active})
+	b := e.listGet(t, "/tv?q=dark&a;b=1")
+	wantRows(t, "readable pairs kept", b, "Dark")
+	if got := noticeKeysOf(b); !slices.Equal(got, []string{"(unreadable parameter)"}) {
+		t.Errorf("notice keys %q", got)
+	}
+	mustContain(t, b, `name="q" value="dark"`)
+	if got := noticeKeysOf(e.listGet(t, "/tv?q=%zz")); !slices.Equal(got, []string{"(unreadable parameter)"}) {
+		t.Errorf("bad escape: notice keys %q", got)
+	}
 }

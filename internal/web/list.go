@@ -60,7 +60,8 @@ type listView struct {
 	Kinds                []tabView
 	TypeHeader           string // "" without a type column
 	Tabs                 []tabView
-	TabsOOB              bool // the tabs ride along with a rows partial
+	TabsOOB              bool   // the tabs ride along with a rows partial
+	PushURL              string // the canonical URL of what is shown (filters applied, page clamped)
 	Filters              filterBar
 	Filtered             bool     // a filter narrows the rows
 	Notice               []string // rejected parameter keys (shown escaped)
@@ -272,7 +273,7 @@ func (s *server) buildList(r *http.Request, m plugin.Manifest, lq listQuery) (li
 		}
 	}
 	ret := filteredListURL(m, k.Key, lq.Status, pg.PageNo, f)
-	v := listView{Heading: k.LabelPlural, AnyEntries: anyEntries, Total: pg.Total, Filtered: f.narrows(),
+	v := listView{Heading: k.LabelPlural, AnyEntries: anyEntries, Total: pg.Total, Filtered: f.narrows(), PushURL: ret,
 		Filters:   buildFilterBar(m, k, lq, genres, tags),
 		SearchURL: "/" + url.PathEscape(m.ID) + "/search", EmptyNoun: lowerFirst(k.LabelPlural), Exports: s.exportLinks(m)}
 	v.Notice, v.NoticeMore = noticeKeys(lq.Rejected)
@@ -321,6 +322,8 @@ func (s *server) getList(w http.ResponseWriter, r *http.Request, pluginID string
 	}
 	vals, err := url.ParseQuery(r.URL.RawQuery) // keeps the readable pairs
 	lq := parseListQuery(m, vals)
+	// the answer depends on all three (rows partial, full page, restore)
+	w.Header().Set("Vary", "HX-Request, HX-Target, HX-History-Restore-Request")
 	if err != nil {
 		lq.Rejected = append(lq.Rejected, "(unreadable parameter)")
 	}
@@ -331,7 +334,8 @@ func (s *server) getList(w http.ResponseWriter, r *http.Request, pluginID string
 			return
 		}
 		v.TabsOOB = true
-		w.Header().Set("HX-Push-Url", filteredListURL(m, lq.Kind, lq.Status, lq.Page, lq.Filters))
+		v.Filters.outOfBand()
+		w.Header().Set("HX-Push-Url", v.PushURL)
 		s.renderPartial(w, "list", "list_partial", v)
 		return
 	}

@@ -220,7 +220,14 @@ func parseFilters(k plugin.KindDef, q url.Values) (listFilters, []string) {
 		ranged := fd.Type == plugin.FieldNumber || fd.Type == plugin.FieldDate
 		if ranged {
 			from, to := take(key+".from"), take(key+".to")
-			if len(vals) == 0 && (len(from) > 0 || len(to) > 0) {
+			if len(vals) > 0 { // the canonical value wins; the aliases are named
+				if len(from) > 0 {
+					reject(key + ".from")
+				}
+				if len(to) > 0 {
+					reject(key + ".to")
+				}
+			} else if len(from) > 0 || len(to) > 0 {
 				if len(from) > 1 || len(to) > 1 {
 					reject(key)
 					continue
@@ -401,6 +408,7 @@ type termInput struct {
 	Label, Name, ModeName string
 	All                   bool
 	Options               []option
+	OOB                   bool // rendered as an out-of-band swap
 }
 
 type filterBar struct {
@@ -417,6 +425,18 @@ type filterBar struct {
 	ShowUnmatched bool
 	Sorts, Dirs   []option
 	ClearURL      string // "" when nothing is set
+	OOB           bool   // the Clear slot is rendered as an out-of-band swap
+}
+
+// outOfBand marks the parts a rows partial swaps out of band: the Clear
+// slot and the genre/tag lists (their counts follow the filters).
+func (b *filterBar) outOfBand() {
+	b.OOB = true
+	for _, t := range []*termInput{b.Genres, b.Tags} {
+		if t != nil {
+			t.OOB = true
+		}
+	}
 }
 
 // buildFilterBar draws the bar of kind k from the schema: only Filterable

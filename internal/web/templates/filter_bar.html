@@ -58,13 +58,15 @@ GET form without JavaScript; with htmx it refreshes the rows region live. */}}
   </div>
   <div class="mt-3 flex items-center gap-4">
     <button type="submit" class="rounded bg-indigo-600 px-3 py-1 font-medium hover:bg-indigo-500">Apply</button>
-    {{with .ClearURL}}<a class="text-indigo-300 hover:underline" href="{{.}}">Clear filters</a>{{end}}
+    {{template "filter_clear" .}}
   </div>
 </form>
 {{end}}
 
+{{define "filter_clear"}}<span id="filter-clear"{{if .OOB}} hx-swap-oob="true"{{end}}>{{with .ClearURL}}<a class="text-indigo-300 hover:underline" href="{{.}}">Clear filters</a>{{end}}</span>{{end}}
+
 {{define "filter_terms"}}
-<fieldset class="flex flex-col gap-1"><legend class="mb-1 text-slate-400">{{.Label}}</legend>
+<fieldset id="filter-{{.Name}}"{{if .OOB}} hx-swap-oob="true"{{end}} class="flex flex-col gap-1"><legend class="mb-1 text-slate-400">{{.Label}}</legend>
   <select name="{{.Name}}" multiple size="6" aria-label="{{.Label}}" class="min-w-40 rounded border border-slate-700 bg-slate-950 px-2 py-1">
     {{range .Options}}<option value="{{.Value}}"{{if .Selected}} selected{{end}}>{{.Label}}</option>{{end}}
   </select>

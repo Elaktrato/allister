@@ -13,7 +13,8 @@
 {{end}}
 {{template "list_tabs" .}}
 {{if .AnyEntries}}{{template "filter_bar" .Filters}}{{end}}
-<div id="list-rows">{{template "list_rows" .}}</div>
+{{/* hx-history="false": htmx never snapshots this page (a snapshot keeps attributes, not typed values), so Back refetches it in full */}}
+<div id="list-rows" hx-history="false">{{template "list_rows" .}}</div>
 <div id="dialog-slot" hx-on::before-swap="var s=event.detail.xhr.status;if(s===422||s===409||s===503){event.detail.shouldSwap=true;event.detail.isError=false}">{{with .Dialog}}{{template "entry_dialog" .}}{{end}}</div>
 {{end}}
 
@@ -25,8 +26,8 @@
 </nav>
 {{end}}
 
-{{/* list_partial answers the filter bar: the rows region plus the tabs (out of band) */}}
-{{define "list_partial"}}{{template "list_rows" .}}{{template "list_tabs" .}}{{end}}
+{{/* list_partial answers the filter bar: the rows region plus, out of band, the tabs, the Clear link and the genre/tag counts (never the text inputs, which keep focus) */}}
+{{define "list_partial"}}{{template "list_rows" .}}{{template "list_tabs" .}}{{with .Filters}}{{template "filter_clear" .}}{{with .Genres}}{{template "filter_terms" .}}{{end}}{{with .Tags}}{{template "filter_terms" .}}{{end}}{{end}}{{end}}
 
 {{define "list_rows"}}
 {{if .Notice}}<p data-filter-notice role="status" class="mb-4 rounded border border-amber-800 bg-slate-900 p-3 text-sm text-amber-200">Ignored unknown or invalid parameters: {{range $i, $k := .Notice}}{{if $i}}, {{end}}<code>{{$k}}</code>{{end}}{{if .NoticeMore}} and {{.NoticeMore}} more{{end}}.</p>{{end}}
