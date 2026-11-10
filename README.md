@@ -59,6 +59,8 @@ Open an unmatched entry (or any manual entry) and press "Match to AniList". Past
 
 After `git pull`, run `docker compose up -d --build`. `docker compose down` stops and removes the container but keeps the data volume. **`docker compose down -v` deletes the volume and all your data.**
 
+Every image (the build and runtime base images and the helper images in the commands below) is pinned by digest, and the Tailwind CLI and htmx are checked against recorded sha256 sums (see `PINS.md`). A rebuild therefore never picks up a base-image security update by itself: base-image security updates now need running `scripts/update-pins.sh` (it shows the new pins as a diff; `scripts/update-pins.sh --write` applies them), then `docker compose up -d --build`.
+
 ## Data and backups
 
 Backup from the app: Settings > Backup downloads `allister-backup-YYYY-MM-DD.zip` with every item of every plugin (also disabled ones), your list entries with progress, and every local item cover (a cover's remote URL is not kept once it is downloaded, so the file itself is saved). Settings, plugin choices, jobs, import history and person photos are not included; photos are fetched again by the background sync. To restore, upload the zip on the same page: items you do not have yet are added, items you already have are skipped, nothing is overwritten or deleted, and a backup from a newer Allister is refused. For a full copy of the data volume, use the commands below.
@@ -69,7 +71,7 @@ Cold backup (recommended):
 
 ```
 docker compose stop
-docker run --rm -v <volume>:/data -v "$PWD":/backup alpine tar czf /backup/allister-backup.tgz -C /data .
+docker run --rm -v <volume>:/data -v "$PWD":/backup alpine:3.24.4@sha256:f59abe656b692d901e184be3445e084786602108599d2a51d229c0f5a48c71bf tar czf /backup/allister-backup.tgz -C /data .
 tar tzf allister-backup.tgz
 docker compose start
 ```
@@ -80,16 +82,16 @@ Restore: extracting overwrites `allister.db` and `covers/` in the volume. Stop t
 
 ```
 docker compose stop
-docker run --rm -v <volume>:/data alpine rm -f /data/allister.db /data/allister.db-wal /data/allister.db-shm
-docker run --rm -v <volume>:/data -v "$PWD":/backup alpine tar xzf /backup/allister-backup.tgz -C /data
+docker run --rm -v <volume>:/data alpine:3.24.4@sha256:f59abe656b692d901e184be3445e084786602108599d2a51d229c0f5a48c71bf rm -f /data/allister.db /data/allister.db-wal /data/allister.db-shm
+docker run --rm -v <volume>:/data -v "$PWD":/backup alpine:3.24.4@sha256:f59abe656b692d901e184be3445e084786602108599d2a51d229c0f5a48c71bf tar xzf /backup/allister-backup.tgz -C /data
 docker compose start
 ```
 
 Live backup (optional). Copying the database files of a running instance is not safe, so use SQLite's `.backup` from a helper container (the Allister image has no `sqlite3`). `--user root` is needed because the data files belong to root (the app runs as root in its image) while the sqlite image runs as another user; the backup file in `$PWD` is therefore owned by root. Do not mount the volume read-only for the sqlite helper (SQLite needs the `-shm` file). The covers command below only reads, so `:ro` is fine there.
 
 ```
-docker run --rm --user root -v <volume>:/data -v "$PWD":/backup keinos/sqlite3:3.54.1 sqlite3 /data/allister.db ".backup '/backup/allister-$(date +%F).db'"
-docker run --rm -v <volume>:/data:ro -v "$PWD":/backup alpine tar czf /backup/allister-covers.tgz -C /data covers
+docker run --rm --user root -v <volume>:/data -v "$PWD":/backup keinos/sqlite3:3.54.1@sha256:b577e65892c6468d94b390097eda4488e05253470c161bdea68a05abb961fa17 sqlite3 /data/allister.db ".backup '/backup/allister-$(date +%F).db'"
+docker run --rm -v <volume>:/data:ro -v "$PWD":/backup alpine:3.24.4@sha256:f59abe656b692d901e184be3445e084786602108599d2a51d229c0f5a48c71bf tar czf /backup/allister-covers.tgz -C /data covers
 ```
 
 This saves the database and the covers separately. The database file is named with today's date; if a file of the same name already exists, it is overwritten.
@@ -116,6 +118,8 @@ scripts/go.sh vet ./...
 ```
 
 The Tailwind CSS is built inside the Docker image (`docker compose up --build`); `app.css` is not committed.
+
+`scripts/go.sh` runs the same pinned golang image as the Dockerfile; the exact Go version is also the `toolchain` line of `go.mod`. `PINS.md` lists every pin and how to change it; tests in `internal/guard` and `internal/web` fail when an image is not pinned by digest or a recorded checksum does not match.
 
 Layout:
 
