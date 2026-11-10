@@ -13,9 +13,6 @@ import (
 	"github.com/allister/allister/internal/plugin"
 )
 
-// animePluginID is the id of the built-in anime plugin.
-const animePluginID = "anime"
-
 // routeRegistrar is what a routeSet registers its handlers with. Patterns are
 // "METHOD /path" with the path relative to the plugin's prefix: "/" is the
 // prefix itself ("/book"), "/search" is "/book/search".

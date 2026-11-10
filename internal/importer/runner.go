@@ -18,16 +18,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"log"
-	"math"
-	"path/filepath"
-	"slices"
-	"sort"
 	"strings"
 	"sync"
 	"time"
-	"unicode/utf8"
 
 	"github.com/allister/allister/internal/ids"
 	"github.com/allister/allister/internal/jobs"
@@ -86,6 +80,9 @@ var (
 	// ErrUnknownImporter: the plugin is not installed or not enabled, or it
 	// does not declare the importer.
 	ErrUnknownImporter = errors.New("unknown or disabled importer")
+	// ErrSourceMissing matches ErrUnknownImporter too: the importer names a
+	// ResolveVia source that its plugin does not provide.
+	ErrSourceMissing = fmt.Errorf("%w: its source is not provided by the plugin", ErrUnknownImporter)
 	// ErrActive is wrapped by *ActiveError: another import is pending or running.
 	ErrActive = errors.New("another import is still active")
 	// ErrNothingToResume: the latest import is not failed or cancelled, has no
@@ -252,6 +249,12 @@ func (ref *importerRef) kind(key string) (plugin.KindDef, bool) {
 	return plugin.KindDef{}, false
 }
 
+// sourceMissing reports an importer that resolves through a source its
+// plugin does not provide.
+func (ref *importerRef) sourceMissing() bool {
+	return ref.info.ResolveVia != "" && ref.source == nil
+}
+
 // idLabel names the importer's external id type (its label, else the type).
 func (ref *importerRef) idLabel() string {
 	if ref.info.ExternalIDLabel != "" {
@@ -266,123 +269,6 @@ func (ref *importerRef) noRowsWhat() string {
 		return strings.ToLower(ref.manifest.Kinds[0].LabelPlural)
 	}
 	return strings.ToLower(ref.manifest.Name)
-}
-
-// storedRow is one row as written by Submit.
-type storedRow struct {
-	idType, id, title, outcome, message, data string
-}
-
-// Submit parses the file through the plugin's importer, stores its rows (the
-// parsed entries as pending, the importer's skipped rows and entries of an
-// unknown kind as skipped with their reasons) as a new import and enqueues
-// the job. Nothing is stored when the plugin or importer is unknown or
-// disabled (ErrUnknownImporter), the file is not in the format
-// (*BadFileError), holds nothing importable (*NoRowsError) or another import
-// is active (*ActiveError).
-func (r *Runner) Submit(ctx context.Context, pluginID, importerID, filename string, in io.Reader) (int64, error) {
-	ref, ok := r.resolve(pluginID, importerID)
-	if !ok || !r.d.Registry.IsEnabled(pluginID) {
-		return 0, ErrUnknownImporter
-	}
-	imp := ref.plugin.Importer(importerID)
-	if imp == nil {
-		return 0, ErrUnknownImporter
-	}
-	res, err := imp.Parse(ctx, in)
-	if err != nil {
-		if errors.Is(err, plugin.ErrBadInput) {
-			reason := strings.TrimPrefix(err.Error(), plugin.ErrBadInput.Error()+": ")
-			return 0, &BadFileError{Reason: plugin.SingleLine(reason, maxTitleRunes), Err: err}
-		}
-		return 0, fmt.Errorf("import: %w", err)
-	}
-	rows, entries, err := r.storedRows(ref, res)
-	if err != nil {
-		return 0, err
-	}
-	if entries == 0 {
-		return 0, &NoRowsError{What: ref.noRowsWhat()}
-	}
-	filename = truncate(filepath.Base(strings.ReplaceAll(filename, `\`, "/")), maxFilenameRunes)
-	filename = plugin.SingleLine(filename, maxFilenameRunes)
-
-	r.opMu.Lock()
-	defer r.opMu.Unlock()
-	tx, err := r.d.DB.BeginTx(ctx, nil)
-	if err != nil {
-		return 0, fmt.Errorf("import: %w", err)
-	}
-	defer tx.Rollback()
-	if err := r.activeCheck(ctx, tx); err != nil {
-		return 0, err
-	}
-	ins, err := tx.ExecContext(ctx, `INSERT INTO imports(filename, state, total, ignored, plugin_id, importer_id) VALUES (?,?,?,?,?,?)`,
-		filename, statePending, len(rows), max(res.Ignored, 0), pluginID, importerID)
-	if err != nil {
-		return 0, fmt.Errorf("import: %w", err)
-	}
-	id, err := ins.LastInsertId()
-	if err != nil {
-		return 0, fmt.Errorf("import: %w", err)
-	}
-	stmt, err := tx.PrepareContext(ctx, `INSERT INTO import_rows(import_id, seq, external_id_type, external_id, title, outcome, message, data) VALUES (?,?,?,?,?,?,?,?)`)
-	if err != nil {
-		return 0, fmt.Errorf("import: %w", err)
-	}
-	defer stmt.Close()
-	for i, row := range rows {
-		if _, err := stmt.ExecContext(ctx, id, i+1, row.idType, row.id, row.title, row.outcome, row.message, row.data); err != nil {
-			return 0, fmt.Errorf("import: %w", err)
-		}
-	}
-	if err := tx.Commit(); err != nil {
-		return 0, fmt.Errorf("import: %w", err)
-	}
-	if err := r.d.Queue.Enqueue(ctx, KindRun, Payload{ImportID: id, PluginID: pluginID}); err != nil {
-		if _, uerr := r.d.DB.ExecContext(context.WithoutCancel(ctx),
-			`UPDATE imports SET state=?, finished_at=`+nowSQL+` WHERE id=?`, stateFailed, id); uerr != nil {
-			r.logf("import %d: mark failed: %v", id, uerr)
-		}
-		return 0, fmt.Errorf("import: enqueue: %w", err)
-	}
-	return id, nil
-}
-
-// storedRows turns a parse result into the rows to store, entries first (in
-// file order), then the importer's skipped rows. entries counts the rows that
-// will be processed.
-func (r *Runner) storedRows(ref *importerRef, res plugin.ParseResult) (rows []storedRow, entries int, err error) {
-	idType := ref.info.ExternalIDType
-	for _, e := range res.Entries {
-		value := ""
-		if idType != "" {
-			value = plugin.SingleLine(e.ExternalIDs[idType], maxTitleRunes)
-		}
-		e.Title = plugin.SingleLine(e.Title, maxTitleRunes)
-		if e.Title == "" && value != "" {
-			e.Title = ref.idLabel() + " #" + value
-			e.Notes = append(e.Notes, "no title in the file, using "+e.Title)
-		}
-		row := storedRow{idType: idType, id: value, title: e.Title}
-		if _, ok := ref.kind(e.Kind); !ok {
-			row.outcome, row.message = outcomeSkipped, fmt.Sprintf("unknown kind %q", plugin.SingleLine(e.Kind, 40))
-			rows = append(rows, row)
-			continue
-		}
-		b, err := json.Marshal(e)
-		if err != nil {
-			return nil, 0, fmt.Errorf("import: %w", err)
-		}
-		row.outcome, row.data = outcomePending, string(b)
-		rows = append(rows, row)
-		entries++
-	}
-	for _, s := range res.Skipped {
-		rows = append(rows, storedRow{title: plugin.SingleLine(s.Title, maxTitleRunes), outcome: outcomeSkipped,
-			message: plugin.SingleLine(s.Reason, maxNoteRunes)})
-	}
-	return rows, entries, nil
 }
 
 type queryer interface {
@@ -542,6 +428,9 @@ func (r *Runner) Handler() jobs.Handler {
 		if !ok {
 			return r.fail(ctx, p.ImportID, "Stopped: the importer is no longer installed")
 		}
+		if ref.sourceMissing() {
+			return r.fail(ctx, p.ImportID, "Stopped: the importer's source is no longer provided by its plugin")
+		}
 		if _, err := r.d.DB.ExecContext(ctx, `UPDATE imports SET state=?, note='' WHERE id=? AND state=?`, stateRunning, p.ImportID, statePending); err != nil {
 			return fmt.Errorf("import %d: %w", p.ImportID, err)
 		}
@@ -668,9 +557,8 @@ func (r *Runner) process(ctx context.Context, ref *importerRef, importID int64, 
 	if rc.idType != "" {
 		rc.value = plugin.SingleLine(rc.entry.ExternalIDs[rc.idType], maxTitleRunes)
 	}
-	if rc.value == "" {
-		return r.record(ctx, importID, pr.seq, outcomeSkipped, 0,
-			joinNotes("no "+ref.idLabel()+" id in the row, it cannot be matched"))
+	if rc.value == "" { // rows stored by an older version; Submit skips these now
+		return r.record(ctx, importID, pr.seq, outcomeSkipped, 0, noIDMessage(ref))
 	}
 	if saved, err := r.d.Library.ItemByExternalID(ctx, rc.pluginID(), kind.Key, rc.idType, rc.value); err != nil {
 		return fmt.Errorf("import %d: %w", importID, err)
@@ -757,6 +645,14 @@ func (r *Runner) process(ctx context.Context, ref *importerRef, importID int64, 
 		return r.record(dctx, importID, pr.seq, outcomeFailed, 0, err.Error())
 	}
 	return r.finishSaved(dctx, rc, id, outcomeImported, joinNotes(notes...))
+}
+
+// noIDMessage is the reason of a row without the importer's external id.
+func noIDMessage(ref *importerRef) string {
+	if label := ref.idLabel(); label != "" {
+		return "no " + label + " id in the row, it cannot be matched"
+	}
+	return "no external id in the row, it cannot be matched"
 }
 
 // syncJob enqueues the sync job of a saved item; it returns a note when that
@@ -855,117 +751,4 @@ func (r *Runner) saveUnmatched(ctx context.Context, rc *rowCtx, reason string) e
 // records the row.
 func (r *Runner) finishSaved(ctx context.Context, rc *rowCtx, itemID int64, outcome, msg string) error {
 	return r.record(ctx, rc.importID, rc.seq, outcome, itemID, joinNotes(msg, r.syncJob(ctx, rc.pluginID(), itemID)))
-}
-
-// buildEntry maps a parsed row to a list entry that passes library
-// validation for item (its active progress keys and, through the kind's total
-// fields, its totals), noting every adjustment: progress of keys that are not
-// active is dropped, invalid values are dropped, fractions are rounded down,
-// values above a known total (or above 100 percent) are clamped, an
-// out-of-range rating is dropped, a finish date before the start date drops
-// both dates, and an over-long comment is cut. Status and comment text are
-// left to the library to judge (a rejection fails the row).
-func buildEntry(kind plugin.KindDef, item *library.Item, e plugin.ParsedEntry) (library.Entry, []string) {
-	var notes []string
-	for _, n := range e.Notes {
-		if n = plugin.SingleLine(n, maxNoteRunes); n != "" {
-			notes = append(notes, n)
-		}
-	}
-	en := library.Entry{Status: library.Status(e.Status), Comment: e.Comment, Progress: map[string]float64{}}
-	if utf8.RuneCountInString(en.Comment) > library.MaxCommentRunes {
-		en.Comment = string([]rune(en.Comment)[:library.MaxCommentRunes])
-		notes = append(notes, fmt.Sprintf("comment cut to %d characters", library.MaxCommentRunes))
-	}
-	if e.Rating != nil {
-		if *e.Rating < 0 || *e.Rating > 10 {
-			notes = append(notes, fmt.Sprintf("rating %d is not between 0 and 10, left unrated", *e.Rating))
-		} else {
-			v := *e.Rating
-			en.Rating = &v
-		}
-	}
-	keys := make([]string, 0, len(e.Progress))
-	for k := range e.Progress {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	for _, k := range keys {
-		v := e.Progress[k]
-		def, eligible := progressDef(kind, k)
-		if !eligible || !slices.Contains(item.ProgressKeys, k) {
-			notes = append(notes, fmt.Sprintf("progress %q dropped (not an active progress)", plugin.SingleLine(k, 40)))
-			continue
-		}
-		if math.IsNaN(v) || math.IsInf(v, 0) || v < 0 || v > 1e12 {
-			notes = append(notes, fmt.Sprintf("invalid progress %q, using 0", k))
-			continue
-		}
-		if v != math.Trunc(v) {
-			v = math.Floor(v)
-			notes = append(notes, fmt.Sprintf("progress %q rounded down to %d", k, int64(v)))
-		}
-		if total, bounded := progressBound(def, item); bounded && v > total {
-			v = total
-			prefix := "progress"
-			if len(item.ProgressKeys) > 1 {
-				prefix = k + " progress"
-			}
-			notes = append(notes, fmt.Sprintf("%s clamped to %d", prefix, int64(total)))
-		}
-		en.Progress[k] = v
-	}
-	if e.StartedOn != nil {
-		en.StartedOn = validDay(*e.StartedOn, "start", &notes)
-	}
-	if e.FinishedOn != nil {
-		en.FinishedOn = validDay(*e.FinishedOn, "finish", &notes)
-	}
-	if en.StartedOn != nil && en.FinishedOn != nil && en.FinishedOn.Before(*en.StartedOn) {
-		en.StartedOn, en.FinishedOn = nil, nil
-		notes = append(notes, "dates dropped (finish date was before start date)")
-	}
-	return en, notes
-}
-
-// validDay returns the calendar day of t, or nil with a note when its year
-// is outside 1..9999.
-func validDay(t time.Time, what string, notes *[]string) *time.Time {
-	d := plugin.DateOnly(t)
-	if d.Year() < 1 || d.Year() > 9999 {
-		*notes = append(*notes, what+" date out of range, left empty")
-		return nil
-	}
-	return &d
-}
-
-func progressDef(kind plugin.KindDef, key string) (plugin.ProgressDef, bool) {
-	for _, d := range kind.Progress.Eligible {
-		if d.Key == key {
-			return d, true
-		}
-	}
-	return plugin.ProgressDef{}, false
-}
-
-// progressBound mirrors the library: percent is bounded at 100; a count,
-// pages or duration track only by a positive number in its total field.
-func progressBound(def plugin.ProgressDef, item *library.Item) (float64, bool) {
-	if def.Type == plugin.Percent {
-		return 100, true
-	}
-	if def.TotalField == "" {
-		return 0, false
-	}
-	if v, ok := item.Fields[def.TotalField]; ok && v.Num != nil && *v.Num > 0 {
-		return math.Floor(*v.Num), true
-	}
-	return 0, false
-}
-
-func truncate(s string, max int) string {
-	if utf8.RuneCountInString(s) <= max {
-		return s
-	}
-	return string([]rune(s)[:max])
 }

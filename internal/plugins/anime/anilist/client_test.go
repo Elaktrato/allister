@@ -287,10 +287,41 @@ func TestNotFoundMapsErrNotFound(t *testing.T) {
 	}
 }
 
-func TestMalformedJSONMapsUnavailable(t *testing.T) {
-	c := serve(t, 200, []byte(`{"data":`), nil)
-	if _, err := c.Search(context.Background(), "x"); !errors.Is(err, ErrUnavailable) {
-		t.Fatalf("err = %v", err)
+// TestErrorClassification: an answer that will be the same on every retry
+// (malformed data on a 200, a GraphQL error that is not "not found", an
+// unexpected 4xx) is ErrBadResponse, never ErrUnavailable, so an import
+// records the row as failed instead of retrying it for minutes; transport
+// trouble, 5xx and 429 stay retryable.
+func TestErrorClassification(t *testing.T) {
+	sentinels := []error{ErrNotFound, ErrRateLimited, ErrUnavailable, ErrBadResponse}
+	for _, c := range []struct {
+		name   string
+		status int
+		body   string
+		want   error
+	}{
+		{"malformed json on 200", 200, `{"data":`, ErrBadResponse},
+		{"malformed data on 200", 200, `{"data":{"Page":"not an object"}}`, ErrBadResponse},
+		{"graphql error on 200", 200, `{"errors":[{"message":"Invalid query","status":400}]}`, ErrBadResponse},
+		{"graphql error without status", 200, `{"errors":[{"message":"boom"}]}`, ErrBadResponse},
+		{"graphql rate limit on 200", 200, `{"errors":[{"message":"Too Many Requests.","status":429}]}`, ErrRateLimited},
+		{"graphql server error on 200", 200, `{"errors":[{"message":"Internal","status":500}]}`, ErrUnavailable},
+		{"teapot", 418, `{}`, ErrBadResponse},
+		{"bad request", 400, `{"errors":[{"message":"Validation","status":400}]}`, ErrBadResponse},
+		{"forbidden", 403, `oops`, ErrBadResponse},
+		{"server error", 500, `oops`, ErrUnavailable},
+		{"bad gateway", 502, `<html>`, ErrUnavailable},
+		{"rate limited", 429, `{}`, ErrRateLimited},
+		{"not found", 404, `{}`, ErrNotFound},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			_, err := serve(t, c.status, []byte(c.body), nil).Search(context.Background(), "x")
+			for _, s := range sentinels {
+				if got := errors.Is(err, s); got != (s == c.want) {
+					t.Errorf("err = %v: errors.Is(%v) = %v", err, s, got)
+				}
+			}
+		})
 	}
 }
 

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"log"
 	"net/http"
+	"strings"
 
 	"github.com/allister/allister/internal/library"
 	"github.com/allister/allister/internal/plugin"
@@ -57,21 +58,23 @@ func (s *server) fail(w http.ResponseWriter, r *http.Request, err error, retry s
 }
 
 // unmatchedHint explains an imported manual item that its importer's
-// external id did not resolve ("" when the item carries no such id).
-//
-// TEMPORARY: the anime plugin keeps the legacy sentence (asserted by the
-// match tests) until the importer becomes generic (Task 11); other plugins
-// get a neutral one built from the importer's ExternalIDType.
+// external id did not resolve ("" when the item carries no such id): the
+// importer's UnmatchedNote with every {id} replaced by the id, or a neutral
+// sentence naming the id by its label (its type when there is no label).
 func unmatchedHint(m plugin.Manifest, it *library.Item) string {
 	for _, imp := range m.Importers {
 		v := it.ExternalIDs[imp.ExternalIDType]
 		if imp.ExternalIDType == "" || v == "" {
 			continue
 		}
-		if m.ID == animePluginID {
-			return "Imported from Yamtrack; AniList had no match for MyAnimeList #" + v + "."
+		if imp.UnmatchedNote != "" {
+			return strings.ReplaceAll(imp.UnmatchedNote, "{id}", v)
 		}
-		return "Imported without a match; " + imp.ExternalIDType + " " + v
+		label := imp.ExternalIDLabel
+		if label == "" {
+			label = imp.ExternalIDType
+		}
+		return "Imported without a match (" + label + " #" + v + ")."
 	}
 	return ""
 }

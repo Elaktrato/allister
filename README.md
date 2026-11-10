@@ -45,7 +45,7 @@ Only anime rows with MyAnimeList ids are used. Each id is looked up on AniList a
 
 The page shows progress. You can cancel an import and resume it later. Entries AniList cannot match are kept as manual entries marked "unmatched". Importing the same file again skips rows already saved, matched by MyAnimeList id. The one exception is rare: if you matched an unmatched entry to an AniList page whose MyAnimeList id differs from the one in the export, a re-import can bring that row back as a new unmatched entry.
 
-An import made by an older version of Allister that was still running when you upgraded is marked failed ("created by an older version; upload the file again"): upload the file again, already saved rows are skipped.
+An import made by an older version of Allister cannot be continued after the upgrade: one that was still running is marked failed, and the unfinished rows of one that had failed or was cancelled are marked failed as well, so it can no longer be resumed (each says "created by an older version; upload the file again"). Upload the file again: already saved rows are skipped.
 
 ## Exporting
 

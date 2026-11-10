@@ -54,6 +54,9 @@ func checkKind(kind string) error {
 
 // mapErr maps an AniList client error onto the plugin sentinels while keeping
 // the cause: errors.Is matches both. Context errors pass through unchanged.
+// anilist.ErrBadResponse (an answer that a retry would not change) stays a
+// plain error, so an import records the row as failed and moves on instead
+// of retrying it as unavailable.
 func mapErr(err error) error {
 	if err == nil {
 		return nil
@@ -62,6 +65,8 @@ func mapErr(err error) error {
 	switch {
 	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
 		return err
+	case errors.Is(err, anilist.ErrBadResponse):
+		return fmt.Errorf("anime: %w", err)
 	case errors.Is(err, anilist.ErrNotFound):
 		target = plugin.ErrNotFound
 	case errors.Is(err, anilist.ErrRateLimited):
@@ -138,12 +143,14 @@ func (s *source) Lookup(ctx context.Context, kind, idType, value string) (plugin
 	if err := checkKind(kind); err != nil {
 		return plugin.ItemData{}, err
 	}
+	// An id type the source cannot look up fails alike for every row: a plain
+	// error (the import fails the row), neither not found nor unavailable.
 	if idType != "mal" {
-		return plugin.ItemData{}, fmt.Errorf("anime: cannot look up by %q: %w", idType, plugin.ErrNotFound)
+		return plugin.ItemData{}, fmt.Errorf("anime: cannot look up an anime by %q ids", idType)
 	}
 	ml, ok := s.c.(malLookup)
 	if !ok {
-		return plugin.ItemData{}, fmt.Errorf("anime: the provider cannot look up MAL ids: %w", plugin.ErrUnavailable)
+		return plugin.ItemData{}, errors.New("anime: the provider cannot look up MAL ids")
 	}
 	a, err := ml.AnimeByMALID(ctx, value)
 	if err != nil {

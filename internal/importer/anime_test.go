@@ -1107,3 +1107,40 @@ func TestImperfectFieldsKeepEntryAndAppendNotes(t *testing.T) {
 		t.Errorf("report: %+v", r)
 	}
 }
+
+// TestImportBadResponseFailsOnlyThatRow: AniList answering one row with data
+// it cannot use (the same on every retry) fails that row at once, without
+// retry waits, and the next rows still import; the job completes.
+func TestImportBadResponseFailsOnlyThatRow(t *testing.T) {
+	e := newEnv(t)
+	e.res.fn = func(mal string, n int) (anilist.Anime, error) {
+		if mal == "2" {
+			return anilist.Anime{}, fmt.Errorf("anilist: malformed data: %w: unexpected end of JSON input", anilist.ErrBadResponse)
+		}
+		return found(mal, n)
+	}
+	id := e.submit(csvOf("1|One|Planning||0", "2|Two|Planning||0", "3|Three|Planning||0"))
+	if err := e.run(id); err != nil {
+		t.Fatalf("the job must complete: %v", err)
+	}
+	r := e.report()
+	if r.State != "done" || r.Imported != 2 || r.Failed != 1 || len(r.FailedRows) != 1 || r.FailedRows[0].Title != "Two" ||
+		!strings.Contains(r.FailedRows[0].Message, "bad response") {
+		t.Fatalf("report: %+v", r)
+	}
+	n := 0
+	for _, c := range e.res.called() {
+		if c == "2" {
+			n++
+		}
+	}
+	if n != 1 {
+		t.Errorf("row 2 looked up %d times, want once (no retries)", n)
+	}
+	if e.clk.slept() >= time.Minute {
+		t.Errorf("slept %v: a bad response must not wait for a retry", e.clk.slept())
+	}
+	if _, en := e.entryByMAL("3"); en == nil {
+		t.Error("row 3 not imported")
+	}
+}

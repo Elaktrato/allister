@@ -613,3 +613,31 @@ func TestMatchSearchFormKeepsKind(t *testing.T) {
 	mustContain(t, b, `<input type="hidden" name="kind" value="comic">`, `action="/book/manual/c1/match?kind=comic"`)
 	mustNotContain(t, e.get("/anime/manual/x/match").Body.String(), `name="kind"`)
 }
+
+// The note on an unmatched imported item comes from its importer's
+// UnmatchedNote with every {id} replaced by the item's external id; without
+// a note the core words a neutral one from the id label or type.
+func TestUnmatchedNoteComesFromTheImporter(t *testing.T) {
+	e := newFixtureEnv(t, func(book, _ *plugintest.Plugin) {
+		book.M.Importers[0].UnmatchedNote = "Imported from <Books CSV>; no match for ISBN #{id} ({id})."
+	})
+	d := bookItem("m1", "Lost Book")
+	d.Source, d.ExternalURL, d.ExternalIDs = "manual", "", map[string]string{"isbn": "9780"}
+	e.saveFixture(t, "book", "book", d, library.WithSyncState("done"))
+	b := e.get("/book/manual/m1").Body.String()
+	mustContain(t, b, "Imported from &lt;Books CSV&gt;; no match for ISBN #9780 (9780).")
+
+	// no note: neutral wording with the label, else the id type
+	e2 := newFixtureEnv(t, func(book, _ *plugintest.Plugin) { book.M.Importers[0].ExternalIDLabel = "ISBN" })
+	e2.saveFixture(t, "book", "book", d, library.WithSyncState("done"))
+	mustContain(t, e2.get("/book/manual/m1").Body.String(), "Imported without a match (ISBN #9780).")
+	e3 := newFixtureEnv(t)
+	e3.saveFixture(t, "book", "book", d, library.WithSyncState("done"))
+	mustContain(t, e3.get("/book/manual/m1").Body.String(), "Imported without a match (isbn #9780).")
+
+	// an item without the importer's id gets no note
+	plain := bookItem("m2", "Typed Book")
+	plain.Source, plain.ExternalURL = "manual", ""
+	e.saveFixture(t, "book", "book", plain, library.WithSyncState("done"))
+	mustNotContain(t, e.get("/book/manual/m2").Body.String(), "Imported from", "Imported without")
+}

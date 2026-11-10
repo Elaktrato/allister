@@ -34,6 +34,8 @@ type genEnv struct {
 	pctImp  *plugintest.FakeImporter
 	pctSrc  *plugintest.LookupSource
 	dbh     *sql.DB
+	// bookPlugin is the registered book fixture (tests change its sources).
+	bookPlugin *plugintest.Plugin
 }
 
 func pf(f float64) *float64 { return &f }
@@ -108,6 +110,7 @@ func newGenEnv(t *testing.T) *genEnv {
 			"book": jobs.SyncJobFor("book"), "tv": jobs.SyncJobFor("tv"), "ebook": jobs.SyncJobFor("ebook")},
 		Now: e.clk.now, Sleep: e.clk.sleep})
 	e.dbh = d
+	e.bookPlugin = bk
 	return e
 }
 
@@ -317,8 +320,13 @@ func TestRunnerSkipsRowsOfUnknownKindOrWithoutExternalID(t *testing.T) {
 	}
 	id := e.submit("book", "books-csv")
 	r := e.report()
-	if r.Total != 4 || r.Ignored != 4 || r.Skipped != 2 || r.Remaining != 2 {
+	// ADAPTED (Task 13): the row without an isbn is skipped at submit time,
+	// not left pending until the job runs (was Skipped 2, Remaining 2).
+	if r.Total != 4 || r.Ignored != 4 || r.Skipped != 3 || r.Remaining != 1 {
 		t.Fatalf("after submit: %+v", r)
+	}
+	if !strings.Contains(e.message(id, 3), "no isbn") {
+		t.Errorf("row 3 message at submit = %q", e.message(id, 3))
 	}
 	if err := e.run("book", id); err != nil {
 		t.Fatal(err)
@@ -380,8 +388,8 @@ func TestRunnerLibraryRejectionFailsRowAndContinues(t *testing.T) {
 }
 
 // TestImportContinuesAfterOneRowFails is the legacy test on the book
-// fixture: the anime source maps every error that is not a sentinel to
-// plugin.ErrUnavailable, so a plain error row needs a generic source.
+// fixture: a lookup that returns a plain error fails that row only (see
+// TestImportBadResponseFailsOnlyThatRow for the anime source).
 func TestImportContinuesAfterOneRowFails(t *testing.T) {
 	e := newGenEnv(t)
 	e.bookSrc.Fn = func(_ context.Context, _, _, v string, _ int) (plugin.ItemData, error) {
@@ -403,8 +411,8 @@ func TestImportContinuesAfterOneRowFails(t *testing.T) {
 	}
 }
 
-// TestReportCapsListsAt200 is the legacy test on the book fixture (see
-// TestImportContinuesAfterOneRowFails for why).
+// TestReportCapsListsAt200 is the legacy test on the book fixture (a
+// generic source makes 250 failing rows easy to produce).
 func TestReportCapsListsAt200(t *testing.T) {
 	e := newGenEnv(t)
 	var rows []plugin.ParsedEntry
@@ -571,5 +579,88 @@ func TestReportOfImport(t *testing.T) {
 	}
 	if r, err := e.im.Report(context.Background(), id+1); r != nil || err != nil {
 		t.Fatalf("missing: %+v %v", r, err)
+	}
+}
+
+// A file whose entries all lack the importer's external id holds nothing
+// importable: Submit refuses it and stores nothing.
+func TestSubmitWithOnlyRowsWithoutExternalIDIsErrNoRows(t *testing.T) {
+	e := newGenEnv(t)
+	a, b := bookEntry("", "No Id", plugin.Planned, 0), bookEntry("", "Blank Id", plugin.Planned, 0)
+	a.ExternalIDs = nil
+	b.ExternalIDs = map[string]string{"isbn": " \n "}
+	e.bookImp.Result = plugin.ParseResult{Entries: []plugin.ParsedEntry{a, b}}
+	_, err := e.im.Submit(context.Background(), "book", "books-csv", "f.csv", strings.NewReader(""))
+	if !errors.Is(err, ErrNoRows) {
+		t.Fatalf("err = %v, want ErrNoRows", err)
+	}
+	if r, _ := e.im.Latest(context.Background()); r != nil || len(e.q.jobs) != 0 {
+		t.Fatalf("stored %+v %+v", r, e.q.jobs)
+	}
+}
+
+// An importer that names a ResolveVia source the plugin does not provide is
+// refused at Submit (its rows would otherwise all become manual entries);
+// only an empty ResolveVia means manual-only.
+func TestSubmitRefusesImporterWhoseSourceIsMissing(t *testing.T) {
+	e := newGenEnv(t)
+	e.bookImp.Result = plugin.ParseResult{Entries: []plugin.ParsedEntry{bookEntry("1", "One", plugin.Planned, 0)}}
+	e.bookPlugin.Sources = map[string]plugin.Source{} // Source("books") is nil
+	_, err := e.im.Submit(context.Background(), "book", "books-csv", "f.csv", strings.NewReader(""))
+	if !errors.Is(err, ErrSourceMissing) || !errors.Is(err, ErrUnknownImporter) {
+		t.Fatalf("err = %v, want ErrSourceMissing (an ErrUnknownImporter)", err)
+	}
+	if r, _ := e.im.Latest(context.Background()); r != nil || len(e.q.jobs) != 0 {
+		t.Fatalf("stored %+v %+v", r, e.q.jobs)
+	}
+}
+
+// When the source disappears after Submit (a plugin update), the job fails
+// the import with a note instead of saving every row as a manual entry.
+func TestRunFailsWhenTheSourceIsGone(t *testing.T) {
+	e := newGenEnv(t)
+	e.bookImp.Result = plugin.ParseResult{Entries: []plugin.ParsedEntry{bookEntry("1", "One", plugin.Planned, 0)}}
+	id := e.submit("book", "books-csv")
+	e.bookPlugin.Sources = map[string]plugin.Source{}
+	if err := e.run("book", id); err != nil {
+		t.Fatal(err)
+	}
+	r := e.report()
+	if r.State != "failed" || r.Imported != 0 || !strings.Contains(r.Note, "source") {
+		t.Fatalf("report: %+v", r)
+	}
+	if it, _ := e.lib.ItemByExternalID(context.Background(), "book", "book", "isbn", "1"); it != nil {
+		t.Fatalf("saved %+v", it)
+	}
+}
+
+// An importer without ResolveVia is manual-only: its rows become manual
+// entries that keep their external id.
+func TestManualOnlyImporterSavesManualEntries(t *testing.T) {
+	e := newGenEnv(t)
+	mb := plugintest.BookPlugin(plugintest.WithID("mbook"))
+	mb.M.Importers[0].ResolveVia = ""
+	src := &plugintest.LookupSource{Fn: func(_ context.Context, _, _, v string, _ int) (plugin.ItemData, error) {
+		return book(v, 300), nil
+	}}
+	mb.Sources = map[string]plugin.Source{"books": src}
+	mb.Importers = map[string]plugin.Importer{"books-csv": &plugintest.FakeImporter{
+		Result: plugin.ParseResult{Entries: []plugin.ParsedEntry{bookEntry("1", "One", plugin.Planned, 0)}}}}
+	if err := e.reg.Register(mb); err != nil {
+		t.Fatal(err)
+	}
+	id := e.submit("mbook", "books-csv")
+	if err := e.run("mbook", id); err != nil {
+		t.Fatal(err)
+	}
+	if r := e.report(); r.State != "done" || r.Unmatched != 1 {
+		t.Fatalf("report: %+v", r)
+	}
+	it, _ := e.item("mbook", "book", "isbn", "1")
+	if it.Source != "manual" {
+		t.Errorf("item = %+v", it)
+	}
+	if got := src.Looked(); len(got) != 0 {
+		t.Errorf("looked up %v", got)
 	}
 }

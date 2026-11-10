@@ -275,11 +275,35 @@ func TestSourceLookupNotFound(t *testing.T) {
 		t.Fatalf("err = %v, want ErrNotFound", err)
 	}
 	for _, c := range []struct{ kind, idType, value string }{
-		{"anime", "tmdb", "1"}, {"anime", "", "1"}, {"anime", "anilist", "154587"}, {"manga", "mal", "1"}, {"anime", "mal", "abc"},
+		{"manga", "mal", "1"}, {"anime", "mal", "abc"},
 	} {
 		if _, err := s.Lookup(ctx(), c.kind, c.idType, c.value); !errors.Is(err, plugin.ErrNotFound) {
 			t.Errorf("Lookup(%+v) err = %v, want ErrNotFound", c, err)
 		}
+	}
+}
+
+// isPlain reports that err is none of the plugin sentinels: the import
+// runner records such a row as failed and moves on.
+func isPlain(err error) bool {
+	return err != nil && !errors.Is(err, plugin.ErrNotFound) && !errors.Is(err, plugin.ErrRateLimited) &&
+		!errors.Is(err, plugin.ErrUnavailable) && !errors.Is(err, plugin.ErrBadInput)
+}
+
+// A lookup by an id type the source cannot look up fails the same way for
+// every row, so it is a plain error (the row fails), never not found (which
+// would save every row as a manual entry) and without a request.
+func TestSourceLookupUnsupportedIDTypeIsPlainError(t *testing.T) {
+	var queries []string
+	s := newSource(t, nil, 0, &queries)
+	for _, idType := range []string{"tmdb", "", "anilist"} {
+		_, err := s.Lookup(ctx(), "anime", idType, "154587")
+		if !isPlain(err) || !strings.Contains(err.Error(), "cannot look up") {
+			t.Errorf("Lookup(%q) err = %v, want a plain error", idType, err)
+		}
+	}
+	if len(queries) != 0 {
+		t.Errorf("made %d requests", len(queries))
 	}
 }
 
@@ -308,13 +332,15 @@ func TestSourceErrorMapping(t *testing.T) {
 		name   string
 		status int
 		body   string
-		want   error
+		want   error // nil: a plain error (none of the plugin sentinels)
 		legacy string
 	}{
 		{"not found", 404, string(fixtureOrEmpty("notfound.json")), plugin.ErrNotFound, "provider: not found"},
 		{"rate limited", 429, `{}`, plugin.ErrRateLimited, "provider: rate limited"},
 		{"server error", 500, `{}`, plugin.ErrUnavailable, "provider: unavailable"},
-		{"malformed", 200, `not json`, plugin.ErrUnavailable, "provider: unavailable"},
+		{"malformed", 200, `not json`, nil, "anilist: bad response"},
+		{"graphql error", 200, `{"errors":[{"message":"Invalid query","status":400}]}`, nil, "anilist: bad response"},
+		{"teapot", 418, `{}`, nil, "anilist: bad response"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			s := newSource(t, []byte(c.body), c.status, nil)
@@ -327,7 +353,10 @@ func TestSourceErrorMapping(t *testing.T) {
 			}
 			for name, call := range calls {
 				err := call()
-				if !errors.Is(err, c.want) {
+				if c.want == nil && !isPlain(err) {
+					t.Errorf("%s: err = %v, want a plain error", name, err)
+				}
+				if c.want != nil && !errors.Is(err, c.want) {
 					t.Errorf("%s: err = %v, want %v", name, err, c.want)
 				}
 				// the cause is preserved: the message still carries the legacy sentinel
@@ -625,8 +654,9 @@ func TestOptionsProviderReplacesTheClient(t *testing.T) {
 	if err != nil || sp.calls != 1 || d.Titles[0].Text != "Stub" {
 		t.Fatalf("details %+v %v calls %d", d, err, sp.calls)
 	}
-	// a provider without a MAL lookup cannot look up
-	if _, err := s.Lookup(ctx(), "anime", "mal", "1"); !errors.Is(err, plugin.ErrUnavailable) {
+	// a provider without a MAL lookup cannot look up: the same for every
+	// row, so a plain error (the import fails the row) and not unavailable
+	if _, err := s.Lookup(ctx(), "anime", "mal", "1"); !isPlain(err) || !strings.Contains(err.Error(), "cannot look up") {
 		t.Fatalf("lookup err = %v", err)
 	}
 }

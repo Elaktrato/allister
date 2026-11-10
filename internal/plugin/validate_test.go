@@ -244,3 +244,53 @@ func TestValidateImporterExternalIDLabel(t *testing.T) {
 		}
 	}
 }
+
+func TestValidateImporterUnmatchedNote(t *testing.T) {
+	for note, want := range map[string]string{
+		"":                       "",
+		"No match for #{id}.":    "",
+		"No match yet.":          "", // {id} is optional
+		strings.Repeat("é", 200): "",
+		"Two\nlines {id}":        `importers[0].unmatched_note: must be a single line without control characters`,
+		"tab\there":              `importers[0].unmatched_note: must be a single line without control characters`,
+		"bad \xff utf-8":         `importers[0].unmatched_note: must be a single line without control characters`,
+		strings.Repeat("é", 201): `importers[0].unmatched_note: longer than 200 characters`,
+	} {
+		m := book()
+		m.Importers[0].UnmatchedNote = note
+		err := plugin.Validate(m)
+		if (want == "") != (err == nil) || (err != nil && !strings.Contains(err.Error(), want)) {
+			t.Errorf("%q: %v, want %q", note, err, want)
+		}
+	}
+}
+
+// Source ids name the first segment after the plugin prefix (/{plugin}/{source}/...),
+// so the core's own segments there cannot be source ids.
+func TestValidateReservedSourceIDs(t *testing.T) {
+	for _, id := range []string{"manual", "export", "search"} {
+		m := book()
+		m.Sources[0].ID = id
+		m.Importers[0].ResolveVia = id
+		err := plugin.Validate(m)
+		want := `sources[0].id: "` + id + `" is reserved by the core`
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("source id %q: %v, want %q", id, err, want)
+		}
+	}
+	for _, id := range []string{"manuals", "searcher", "exports", "books"} {
+		m := book()
+		m.Sources[0].ID = id
+		m.Importers[0].ResolveVia = id
+		if err := plugin.Validate(m); err != nil {
+			t.Errorf("source id %q: %v", id, err)
+		}
+	}
+	// only source ids: an importer or exporter may be called "export"
+	m := book()
+	m.Importers[0].ID = "search"
+	m.Exporters = []plugin.ExporterInfo{{ID: "export", Name: "E", Extension: ".json", MIME: "application/json"}}
+	if err := plugin.Validate(m); err != nil {
+		t.Errorf("importer/exporter ids: %v", err)
+	}
+}

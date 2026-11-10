@@ -92,4 +92,8 @@ var (
 	ErrRateLimited = errors.New("provider: rate limited")
 	// ErrUnavailable: server error, network error, timeout or unreadable response.
 	ErrUnavailable = errors.New("provider: unavailable")
+	// ErrBadResponse: AniList answered with something the client cannot use
+	// and would answer the same on a retry (malformed data on a 200, a GraphQL
+	// error that is not "not found", an unexpected 4xx status).
+	ErrBadResponse = errors.New("anilist: bad response")
 )

@@ -10,10 +10,12 @@ import (
 )
 
 // maxUnitRunes is the longest FieldDef.Unit; maxIDLabelRunes the longest
-// ImporterInfo.ExternalIDLabel.
+// ImporterInfo.ExternalIDLabel; maxUnmatchedNoteRunes the longest
+// ImporterInfo.UnmatchedNote.
 const (
-	maxUnitRunes    = 20
-	maxIDLabelRunes = 40
+	maxUnitRunes          = 20
+	maxIDLabelRunes       = 40
+	maxUnmatchedNoteRunes = 200
 )
 
 var (
@@ -29,6 +31,11 @@ var reservedIDs = map[string]bool{
 	"list": true, "people": true, "settings": true, "covers": true,
 	"static": true, "healthz": true, "api": true,
 }
+
+// reservedSourceIDs are the core's segments right after a plugin's prefix
+// (/{plugin}/manual/..., /{plugin}/export/..., /{plugin}/search): a source
+// with such an id would be shadowed by them under /{plugin}/{source}/{id}.
+var reservedSourceIDs = map[string]bool{"manual": true, "export": true, "search": true}
 
 type problems struct{ list []error }
 
@@ -73,6 +80,9 @@ func Validate(m Manifest) error {
 	for i, s := range m.Sources {
 		path := fmt.Sprintf("sources[%d]", i)
 		checkID(&p, path+".id", s.ID, sources)
+		if reservedSourceIDs[s.ID] {
+			p.add(path+".id", "%q is reserved by the core", s.ID)
+		}
 		if s.Name == "" {
 			p.add(path+".name", "required")
 		}
@@ -97,6 +107,12 @@ func Validate(m Manifest) error {
 			p.add(path+".external_id_label", "must be a single line without control characters")
 		case utf8.RuneCountInString(l) > maxIDLabelRunes:
 			p.add(path+".external_id_label", "longer than %d characters", maxIDLabelRunes)
+		}
+		switch n := im.UnmatchedNote; {
+		case !utf8.ValidString(n) || strings.IndexFunc(n, isControl) >= 0:
+			p.add(path+".unmatched_note", "must be a single line without control characters")
+		case utf8.RuneCountInString(n) > maxUnmatchedNoteRunes:
+			p.add(path+".unmatched_note", "longer than %d characters", maxUnmatchedNoteRunes)
 		}
 		if im.ResolveVia != "" && !sources[im.ResolveVia] {
 			p.add(path+".resolve_via", "unknown source %q", im.ResolveVia)

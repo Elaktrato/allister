@@ -211,7 +211,13 @@ type SourceInfo struct {
 // language of the manual entry kept when nothing matches. ExternalIDLabel is
 // an optional human name of ExternalIDType ("Example DB"): a single line of
 // at most 40 characters; the core shows such an id as "<label> #<value>"
-// (the type itself when empty).
+// (the type itself when empty). UnmatchedNote is an optional sentence the
+// core shows on an imported item that the source did not match (a manual
+// item that still carries its ExternalIDType id), for example "Imported from
+// Example CSV; Example DB had no match for #{id}.": a single line of at most
+// 200 characters without control characters, in which every "{id}" is
+// replaced by the item's id of ExternalIDType. Empty means the core's own
+// neutral sentence.
 type ImporterInfo struct {
 	ID                string   `json:"id"`
 	Name              string   `json:"name"`
@@ -221,6 +227,7 @@ type ImporterInfo struct {
 	ExternalIDLabel   string   `json:"external_id_label,omitempty"`
 	ResolveVia        string   `json:"resolve_via,omitempty"`
 	FallbackTitleLang string   `json:"fallback_title_lang,omitempty"`
+	UnmatchedNote     string   `json:"unmatched_note,omitempty"`
 }
 
 // ExporterInfo describes an export format.

@@ -15,8 +15,11 @@ import (
 // the library, mapping the fake AniList data with the anime plugin's own
 // mapping (what its source returns is what the sync saves).
 
-// animeKind is the one kind of the anime plugin.
-const animeKind = "anime"
+// The anime plugin's id and its one kind.
+const (
+	animePluginID = "anime"
+	animeKind     = "anime"
+)
 
 // animeRegistry is the production wiring of cmd/allister for the tests: the
 // anime plugin on top of es, with p as its AniList client (nil: a client that

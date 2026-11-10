@@ -144,17 +144,27 @@ func (c *Client) do(ctx context.Context, query string, vars map[string]any, out 
 	if notFound(resp.StatusCode, r.Errors) {
 		return fmt.Errorf("anilist: %w", ErrNotFound)
 	}
+	// From here on the answer would be the same on a retry: ErrBadResponse,
+	// unless a GraphQL error itself says rate limited or server error.
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("anilist: unexpected http %d: %w", resp.StatusCode, ErrUnavailable)
+		return fmt.Errorf("anilist: unexpected http %d: %w", resp.StatusCode, ErrBadResponse)
 	}
 	if jsonErr != nil {
-		return fmt.Errorf("anilist: malformed response: %w: %v", ErrUnavailable, jsonErr)
+		return fmt.Errorf("anilist: malformed response: %w: %v", ErrBadResponse, jsonErr)
 	}
 	if len(r.Errors) > 0 {
-		return fmt.Errorf("anilist: graphql error %q: %w", r.Errors[0].Message, ErrUnavailable)
+		e := r.Errors[0]
+		target := ErrBadResponse
+		switch {
+		case e.Status == http.StatusTooManyRequests:
+			target = ErrRateLimited
+		case e.Status >= 500:
+			target = ErrUnavailable
+		}
+		return fmt.Errorf("anilist: graphql error %q: %w", e.Message, target)
 	}
 	if err := json.Unmarshal(r.Data, out); err != nil {
-		return fmt.Errorf("anilist: malformed data: %w: %v", ErrUnavailable, err)
+		return fmt.Errorf("anilist: malformed data: %w: %v", ErrBadResponse, err)
 	}
 	return nil
 }

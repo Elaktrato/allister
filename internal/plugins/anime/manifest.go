@@ -81,6 +81,7 @@ func manifest() plugin.Manifest {
 			ExternalIDLabel:   "MyAnimeList",
 			ResolveVia:        SourceID,
 			FallbackTitleLang: "ja-latn",
+			UnmatchedNote:     "Imported from Yamtrack; AniList had no match for MyAnimeList #{id}.",
 		}},
 		Exporters: []plugin.ExporterInfo{{
 			ID: ExporterID, Name: "JSON", Extension: ".json", MIME: "application/json",

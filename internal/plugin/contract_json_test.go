@@ -55,7 +55,7 @@ func TestManifestJSONRoundTrip(t *testing.T) {
 			TitleLanguages: []string{"en", "ja"},
 		}},
 		Sources:   []plugin.SourceInfo{{ID: "s", Name: "S", RequestsPerMinute: 30, ExternalIDTypes: []string{"s"}, SupportsLookup: true, LinkLabel: "View on S", URLPatterns: []string{"s.example/{id}"}}},
-		Importers: []plugin.ImporterInfo{{ID: "i", Name: "I", FileHint: "csv", Accept: []string{".csv"}, ExternalIDType: "s", ExternalIDLabel: "S id", ResolveVia: "s", FallbackTitleLang: "en"}},
+		Importers: []plugin.ImporterInfo{{ID: "i", Name: "I", FileHint: "csv", Accept: []string{".csv"}, ExternalIDType: "s", ExternalIDLabel: "S id", ResolveVia: "s", FallbackTitleLang: "en", UnmatchedNote: "No S match for #{id}."}},
 		Exporters: []plugin.ExporterInfo{{ID: "x", Name: "X", Extension: ".json", MIME: "application/json"}},
 	}
 	roundTrip(t, "full manifest", full)
@@ -162,5 +162,18 @@ func TestFieldUnitJSON(t *testing.T) {
 	f.Unit = ""
 	if b, _ = json.Marshal(f); strings.Contains(string(b), "unit") {
 		t.Fatalf("empty unit not omitted: %s", b)
+	}
+}
+
+func TestImporterUnmatchedNoteJSON(t *testing.T) {
+	im := plugin.ImporterInfo{ID: "i", Name: "I", ExternalIDType: "s", UnmatchedNote: "No S match for #{id}."}
+	b, err := json.Marshal(im)
+	if err != nil || !strings.Contains(string(b), `"unmatched_note":"No S match for #{id}."`) {
+		t.Fatalf("json %s %v", b, err)
+	}
+	roundTrip(t, "importer with unmatched note", im)
+	im.UnmatchedNote = ""
+	if b, _ = json.Marshal(im); strings.Contains(string(b), "unmatched_note") {
+		t.Fatalf("empty unmatched note not omitted: %s", b)
 	}
 }
