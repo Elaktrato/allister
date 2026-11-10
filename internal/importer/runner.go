@@ -411,12 +411,13 @@ func (r *Runner) fail(ctx context.Context, id int64, note string) error {
 
 // Handler is the import_run job handler. It processes the pending rows of
 // the import in order, recording each outcome at once, so a re-run (after a
-// crash, shutdown or ErrRetryLater) continues with the unfinished rows. On
-// context cancellation it returns the context's error; when the source stays
-// unavailable, or its plugin is disabled while it runs (the import pauses
-// after the current row), it returns an error wrapping jobs.ErrRetryLater. An import of
-// an older version, or of an importer that is no longer installed, is failed
-// with a note.
+// crash, shutdown, ErrRetryLater or a pause) continues with the unfinished
+// rows. On context cancellation it returns the context's error; when the
+// source stays unavailable it returns an error wrapping jobs.ErrRetryLater;
+// when its plugin is disabled while it runs it pauses with jobs.ErrPaused
+// (before the next row; an import whose last row is done finishes instead).
+// An import of an older version, or of an importer that is no longer
+// installed, is failed with a note.
 func (r *Runner) Handler() jobs.Handler {
 	return func(ctx context.Context, raw json.RawMessage) error {
 		var p Payload
@@ -460,19 +461,19 @@ func (r *Runner) Handler() jobs.Handler {
 			} else if state != stateRunning {
 				return nil // cancelled
 			}
-			// Switched off mid-run: stop after the current row. The queue
-			// keeps the job pending (its plugin gate holds it while the
-			// plugin is off) and the import stays running, so enabling the
-			// plugin resumes it with the unfinished rows.
-			if !r.d.Registry.IsEnabled(pluginID) {
-				return fmt.Errorf("import %d: plugin %q is disabled, paused: %w", p.ImportID, pluginID, jobs.ErrRetryLater)
-			}
 			row, ok, err := r.nextPending(ctx, p.ImportID)
 			if err != nil {
 				return err
 			}
 			if !ok {
-				break
+				break // no rows left: finish even when the plugin is off
+			}
+			// Switched off mid-run with rows left: stop before the next row.
+			// The queue keeps the job pending (its plugin gate holds it while
+			// the plugin is off) and the import stays running, so enabling
+			// the plugin resumes it with the unfinished rows.
+			if !r.d.Registry.IsEnabled(pluginID) {
+				return fmt.Errorf("import %d: plugin %q is disabled, paused: %w", p.ImportID, pluginID, jobs.ErrPaused)
 			}
 			if err := r.process(ctx, ref, p.ImportID, row); errors.Is(err, errStopped) {
 				return nil // cancelled while retrying

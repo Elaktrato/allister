@@ -30,6 +30,13 @@ var ErrRetryLater = errors.New("jobs: retry later")
 // at once instead of retrying.
 var ErrPermanent = errors.New("jobs: permanent failure")
 
+// ErrPaused, wrapped in a handler's error, means the job is deliberately on
+// hold: it goes back to pending without counting an attempt or a partial and
+// without a backoff, because something else (the plugin gate) holds it until
+// it may run again. Unlike ErrRetryLater it is not bounded; a handler must
+// only pause when something will hold the job until then.
+var ErrPaused = errors.New("jobs: paused")
+
 var errUnknownKind = errors.New("unknown job kind")
 
 // Handler processes one job payload.
@@ -263,7 +270,8 @@ func (q *Queue) call(ctx context.Context, h Handler, payload json.RawMessage) (e
 // finish records the outcome. The job row is updated even when the worker's
 // context is already cancelled. Unknown kinds and ErrPermanent fail at
 // once; when shutdown interrupted a handler the job goes back to pending
-// without counting an attempt.
+// without counting an attempt; ErrPaused also goes back to pending without
+// counting anything or waiting (the plugin gate holds the job).
 func (q *Queue) finish(id int64, kind string, attempts, partials int, herr error, interrupted bool) error {
 	ctx := context.Background()
 	now := q.now()
@@ -275,6 +283,10 @@ func (q *Queue) finish(id int64, kind string, attempts, partials int, herr error
 		_, err = q.db.ExecContext(ctx, `UPDATE jobs SET state='failed', last_error=? WHERE id=?`, herr.Error(), id)
 	case interrupted:
 		// interrupted by shutdown: run again after restart, no attempt used
+		_, err = q.db.ExecContext(ctx, `UPDATE jobs SET state='pending', last_error=? WHERE id=?`, herr.Error(), id)
+	case errors.Is(herr, ErrPaused):
+		// a deliberate pause: run again as soon as whatever paused it (the
+		// plugin gate) lets the job go, with no attempt, partial or backoff
 		_, err = q.db.ExecContext(ctx, `UPDATE jobs SET state='pending', last_error=? WHERE id=?`, herr.Error(), id)
 	case errors.Is(herr, ErrRetryLater):
 		partials++

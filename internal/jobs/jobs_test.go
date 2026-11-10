@@ -210,6 +210,43 @@ func TestRetryLaterDoesNotConsumeAttemptsButIsBounded(t *testing.T) {
 	}
 }
 
+// TestPausedJobRunsAgainWithoutCounting: an ErrPaused run is a deliberate
+// pause (the plugin gate holds the job while the plugin is off): the job
+// goes back to pending without an attempt, a partial or a backoff, and
+// pausing far beyond both caps never fails it.
+func TestPausedJobRunsAgainWithoutCounting(t *testing.T) {
+	d := openDB(t)
+	clk := newClock()
+	q := testQueue(t, d, clk)
+	var calls int
+	q.Register("k", func(ctx context.Context, p json.RawMessage) error {
+		calls++
+		if calls <= maxPartials+2 {
+			return fmt.Errorf("plugin off: %w", ErrPaused)
+		}
+		return nil
+	})
+	id := enqueue(t, q, "k", nil)
+	step(t, q)
+	want := clk.Now().UTC().Format(timeLayout)
+	if r := row(t, d, id); r.State != "pending" || r.Attempts != 0 || r.Partials != 0 ||
+		r.RunAfter != want || !strings.Contains(r.LastError, "plugin off") {
+		t.Fatalf("after pause: %+v want run_after %s", r, want)
+	}
+	for i := 0; i < maxPartials+1; i++ { // beyond maxPartials and maxAttempts
+		if !step(t, q) {
+			t.Fatalf("pause %d: the job must run again without waiting", i+2)
+		}
+	}
+	if r := row(t, d, id); r.State != "pending" || r.Attempts != 0 || r.Partials != 0 {
+		t.Fatalf("after %d pauses: %+v", maxPartials+2, r)
+	}
+	step(t, q)
+	if r := row(t, d, id); r.State != "done" || r.Attempts != 0 || r.Partials != 0 || calls != maxPartials+3 {
+		t.Fatalf("final: %+v calls=%d", r, calls)
+	}
+}
+
 func TestMinIntervalSpacesJobs(t *testing.T) {
 	d := openDB(t)
 	clk := newClock()

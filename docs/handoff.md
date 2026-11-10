@@ -20,7 +20,6 @@ State of the project when the work moved from Claude Code to another agent. `mai
 
 ## Known follow-ups (none blocking)
 
-- Import pause on plugin disable uses `jobs.ErrRetryLater`, which consumes one of 10 retry slots and waits one backoff on resume; a dedicated `jobs.ErrPaused` outcome would be cleaner. Also: pausing right after the last row leaves the import "running" until re-enable (check order in `internal/importer/runner.go`).
 - `sync_item` retries a People `ErrBadResponse` up to 5 times; wrap it in `ErrPermanent`.
 - AVIF detection on restore checks only the major brand (`mif1`/`miaf` files with `avif` as a compatible brand are dropped). Icon name test uses upstream's codepoint list as a proxy for the font's ligatures. Extractor in the icon test can be evaded by attribute order or data-driven names.
 - Match-to-source accepts numeric ids only; title sort ignores the fallback order.
