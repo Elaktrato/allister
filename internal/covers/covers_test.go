@@ -234,3 +234,46 @@ func TestSaveSameBytesOneFile(t *testing.T) {
 		t.Fatalf("files = %v", f)
 	}
 }
+
+// A cover a backup restores may be any type Download stores, AVIF included
+// (http.DetectContentType does not know AVIF, so Save alone would refuse it
+// and the restored item would lose its only copy of the cover).
+func TestSaveRestoredAcceptsDownloadTypes(t *testing.T) {
+	cases := map[string][]byte{
+		".png":   pngBytes("a"),
+		".jpg":   append([]byte("\xff\xd8\xff\xe0\x00\x10JFIF"), "a"...),
+		".avif":  []byte("\x00\x00\x00\x1cftypavif\x00\x00\x00\x00avifmif1miaf"),
+		".avif ": []byte("\x00\x00\x00\x1cftypavis\x00\x00\x00\x00avisavifmif1"), // image sequence brand
+	}
+	for name, body := range cases {
+		ext := strings.TrimSpace(name)
+		dir := t.TempDir()
+		rel, err := SaveRestored(dir, bytes.NewReader(body))
+		if err != nil || !strings.HasSuffix(rel, ext) || len(rel) != 64+len(ext) {
+			t.Errorf("%q: %q %v", name, rel, err)
+			continue
+		}
+		if got, _ := os.ReadFile(filepath.Join(dir, rel)); !bytes.Equal(got, body) {
+			t.Errorf("%q: content differs", name)
+		}
+	}
+	for name, body := range map[string][]byte{
+		"heic brand":   []byte("\x00\x00\x00\x18ftypheic\x00\x00\x00\x00mif1heic"),
+		"short ftyp":   []byte("\x00\x00\x00\x08ftyp"),
+		"svg":          []byte(`<svg xmlns="http://www.w3.org/2000/svg"/>`),
+		"text":         []byte("hello"),
+		"avif as text": []byte("ftypavif"),
+	} {
+		dir := t.TempDir()
+		if rel, err := SaveRestored(dir, bytes.NewReader(body)); !errors.Is(err, ErrNotImage) {
+			t.Errorf("%s: %q %v", name, rel, err)
+		}
+		if f := files(t, dir); len(f) != 0 {
+			t.Errorf("%s left files %v", name, f)
+		}
+	}
+	// user uploads stay limited to the sniffable types
+	if _, err := Save(t.TempDir(), bytes.NewReader(cases[".avif"])); !errors.Is(err, ErrNotImage) {
+		t.Fatalf("Save accepted AVIF: %v", err)
+	}
+}

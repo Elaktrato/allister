@@ -702,7 +702,7 @@ func (rs *restorer) storeCover(name string) (coverResult, error) {
 		return coverResult{note: what + " cannot be read: restored without a cover"}, nil
 	}
 	defer rc.Close()
-	stored, err := covers.Save(rs.opts.CoversDir, budgetReader{r: rc, b: rs.budget})
+	stored, err := covers.SaveRestored(rs.opts.CoversDir, budgetReader{r: rc, b: rs.budget})
 	var pathErr *fs.PathError
 	var linkErr *os.LinkError
 	switch {
@@ -711,7 +711,7 @@ func (rs *restorer) storeCover(name string) (coverResult, error) {
 	case errors.Is(err, errTotalTooLarge), errors.As(err, &pathErr), errors.As(err, &linkErr):
 		return coverResult{}, err
 	case errors.Is(err, covers.ErrNotImage):
-		return coverResult{note: what + " is not a supported image (jpeg, png, webp or gif): restored without a cover"}, nil
+		return coverResult{note: what + " is not a supported image (jpeg, png, webp, gif or avif): restored without a cover"}, nil
 	case errors.Is(err, covers.ErrTooLarge):
 		return coverResult{note: fmt.Sprintf("%s is larger than %d MiB: restored without a cover", what, covers.MaxUploadBytes>>20)}, nil
 	}

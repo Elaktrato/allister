@@ -127,6 +127,37 @@ func Save(dir string, r io.Reader) (string, error) {
 	return name, nil
 }
 
+// SaveRestored stores a cover file of a backup archive into dir like Save,
+// accepting every type Download stores: the sniffed types of Save plus AVIF,
+// which http.DetectContentType cannot recognise and which is checked by its
+// ISO-BMFF file type box (major brand avif or avis). A downloaded cover's
+// remote URL is not retained, so refusing its file would lose the cover.
+func SaveRestored(dir string, r io.Reader) (string, error) {
+	name, err := writeHashed(dir, r, MaxUploadBytes, func(head []byte) (string, error) {
+		if ext, ok := uploadTypes[http.DetectContentType(head)]; ok {
+			return ext, nil
+		}
+		if isAVIF(head) {
+			return ".avif", nil
+		}
+		return "", ErrNotImage
+	})
+	if err != nil {
+		return "", fmt.Errorf("save restored cover: %w", err)
+	}
+	return name, nil
+}
+
+// isAVIF reports whether head starts with an ISO-BMFF ftyp box whose major
+// brand is avif (still image) or avis (image sequence).
+func isAVIF(head []byte) bool {
+	if len(head) < 12 || string(head[4:8]) != "ftyp" {
+		return false
+	}
+	brand := string(head[8:12])
+	return brand == "avif" || brand == "avis"
+}
+
 // writeHashed reads r (at most limit bytes), asks pick for the extension given
 // the first 512 bytes, and stores the content as <sha256><ext> in dir through
 // a temp file and rename. Nothing is left behind on error.
