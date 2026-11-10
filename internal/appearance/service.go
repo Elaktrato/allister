@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"sync"
 )
@@ -35,18 +36,22 @@ func invalid(format string, a ...any) error {
 // Service reads and writes the appearance settings and keeps the rendered
 // stylesheet in memory until a setting changes.
 type Service struct {
-	set Store
+	set   Store
+	fonts *FontStore
 
 	mu      sync.Mutex
 	css     []byte
 	version string
 }
 
-// NewService returns a service over the settings store. A nil store
-// serves the defaults and refuses changes.
-func NewService(set Store) *Service {
-	return &Service{set: set}
+// NewService returns a service over the settings store; fonts may be nil
+// (no uploaded fonts). A nil store serves the defaults and refuses changes.
+func NewService(set Store, fonts *FontStore) *Service {
+	return &Service{set: set, fonts: fonts}
 }
+
+// Fonts returns the uploaded font store (nil when uploads are off).
+func (s *Service) Fonts() *FontStore { return s.fonts }
 
 // Config reads the stored settings as they are; Resolve applies the
 // fallbacks. A read error is logged and the value treated as unset.
@@ -74,8 +79,44 @@ func (s *Service) Config(ctx context.Context) Config {
 	return c
 }
 
-// Uploads lists the uploaded fonts.
+// Uploads lists the uploaded fonts (none when uploads are off or the list
+// cannot be read, which is logged).
 func (s *Service) Uploads(ctx context.Context) []Font {
+	if s.fonts == nil {
+		return nil
+	}
+	fs, err := s.fonts.List(ctx)
+	if err != nil {
+		log.Printf("appearance: list fonts: %v", err)
+		return nil
+	}
+	return fs
+}
+
+// AddFont stores an uploaded font (see FontStore.Add).
+func (s *Service) AddFont(ctx context.Context, name string, r io.Reader) (Font, bool, error) {
+	if s.fonts == nil {
+		return Font{}, false, errors.New("appearance: font uploads are off")
+	}
+	defer s.Invalidate()
+	return s.fonts.Add(ctx, name, r)
+}
+
+// DeleteFont removes an uploaded font; when it is the app font, the app
+// font goes back to the default.
+func (s *Service) DeleteFont(ctx context.Context, id int64) error {
+	if s.fonts == nil {
+		return ErrNoFont
+	}
+	defer s.Invalidate()
+	if err := s.fonts.Delete(ctx, id); err != nil {
+		return err
+	}
+	if s.set != nil {
+		if cur, _, err := s.set.Get(ctx, KeyFont); err == nil && cur == uploadedID(id) {
+			return s.set.Set(ctx, KeyFont, "")
+		}
+	}
 	return nil
 }
 

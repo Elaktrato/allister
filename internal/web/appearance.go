@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"html/template"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/allister/allister/internal/appearance"
@@ -23,6 +24,7 @@ func (s *server) mountAppearance(mux *http.ServeMux) {
 	mux.HandleFunc("POST /settings/appearance/palette", s.postAppearancePalette)
 	mux.HandleFunc("POST /settings/appearance/palette/reset", s.postAppearancePaletteReset)
 	mux.HandleFunc("POST /settings/appearance/font", s.postAppearanceFont)
+	s.mountFonts(mux)
 }
 
 // appearanceLink is the render-blocking link to the current stylesheet. Its
@@ -61,6 +63,12 @@ type appearancePage struct {
 	Groups       []colourGroup
 	Fonts        []fontRow
 	Scales       []scaleRow
+	// Uploads is set when fonts can be uploaded; Uploaded lists them.
+	Uploads    bool
+	Uploaded   []uploadRow
+	UploadMax  int
+	UploadFull bool
+	NameMax    int
 }
 
 type colourGroup struct {
@@ -121,6 +129,14 @@ func (s *server) appearancePage(ctx context.Context, msg string, typed map[strin
 	}
 	for _, sc := range appearance.Scales {
 		p.Scales = append(p.Scales, scaleRow{ID: sc.ID, Label: sc.Label, Checked: sc.ID == res.Scale.ID})
+	}
+	if s.appearance.Fonts() != nil {
+		p.Uploads, p.UploadMax, p.NameMax = true, appearance.MaxFonts, appearance.MaxFontName
+		for _, f := range uploads {
+			p.Uploaded = append(p.Uploaded, uploadRow{ID: f.ID, Name: f.Name, Format: formatNames[f.Format], Size: kib(f.Size),
+				Active: res.Font.ID == "upload-"+strconv.FormatInt(f.ID, 10)})
+		}
+		p.UploadFull = len(uploads) >= appearance.MaxFonts
 	}
 	return p
 }

@@ -14,6 +14,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/allister/allister/internal/appearance"
 	"github.com/allister/allister/internal/config"
 	"github.com/allister/allister/internal/db"
 	"github.com/allister/allister/internal/importer"
@@ -100,6 +101,8 @@ func run() error {
 			DataDir:   cfg.DataDir,
 			Imports:   imports,
 			Library:   lib,
+			// uploaded fonts live in DATA_DIR/fonts next to the covers
+			Appearance: appearance.NewService(settingsStore, appearance.NewFontStore(database, filepath.Join(cfg.DataDir, "fonts"))),
 		}),
 		ReadHeaderTimeout: 10 * time.Second,
 		IdleTimeout:       120 * time.Second,

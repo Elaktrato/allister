@@ -32,7 +32,7 @@ func (s *mapStore) Set(_ context.Context, k, v string) error {
 func TestServiceDefaultsAndCache(t *testing.T) {
 	ctx := context.Background()
 	st := &mapStore{m: map[string]string{}}
-	s := NewService(st)
+	s := NewService(st, nil)
 	css, v := s.Stylesheet(ctx)
 	if string(css) != string(CSS(Config{}, nil)) || len(v) != 16 {
 		t.Fatalf("default stylesheet %q version %q", css, v)
@@ -51,7 +51,7 @@ func TestServiceDefaultsAndCache(t *testing.T) {
 func TestServiceSettersValidateAndInvalidate(t *testing.T) {
 	ctx := context.Background()
 	st := &mapStore{m: map[string]string{}}
-	s := NewService(st)
+	s := NewService(st, nil)
 	_, v0 := s.Stylesheet(ctx)
 
 	if err := s.SetPreset(ctx, "forest"); err != nil {
@@ -112,27 +112,27 @@ func TestServiceInvalidStoredValuesFallBack(t *testing.T) {
 	st := &mapStore{m: map[string]string{
 		KeyPreset: "gone", KeyPalette: `{"bg":"red;}"}`, KeyFont: "x;}", KeyScale: "</style>",
 	}}
-	css, _ := NewService(st).Stylesheet(ctx)
+	css, _ := NewService(st, nil).Stylesheet(ctx)
 	if string(css) != string(CSS(Config{}, nil)) {
 		t.Errorf("broken settings did not fall back to the defaults:\n%s", css)
 	}
 	st.m[KeyPalette] = "not json"
-	if c := NewService(st).Config(ctx); c.Palette != nil {
+	if c := NewService(st, nil).Config(ctx); c.Palette != nil {
 		t.Error("a broken palette was returned")
 	}
 	// a failing store serves the defaults and refuses writes
 	bad := &mapStore{fail: errors.New("disk")}
-	s := NewService(bad)
+	s := NewService(bad, nil)
 	if css, _ := s.Stylesheet(ctx); string(css) != string(CSS(Config{}, nil)) {
 		t.Error("read error did not serve the defaults")
 	}
 	if err := s.SetPreset(ctx, "paper"); err == nil {
 		t.Error("write error swallowed")
 	}
-	if css, _ := NewService(nil).Stylesheet(ctx); string(css) != string(CSS(Config{}, nil)) {
+	if css, _ := NewService(nil, nil).Stylesheet(ctx); string(css) != string(CSS(Config{}, nil)) {
 		t.Error("nil store")
 	}
-	if err := NewService(nil).SetScale(ctx, "large"); err == nil {
+	if err := NewService(nil, nil).SetScale(ctx, "large"); err == nil {
 		t.Error("nil store accepted a write")
 	}
 }

@@ -142,7 +142,7 @@ func TestBundledFontsPinned(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	css, _ := appearance.NewService(nil).Stylesheet(context.Background())
+	css, _ := appearance.NewService(nil, nil).Stylesheet(context.Background())
 	for _, name := range bundledFontFiles {
 		font, err := staticFS.ReadFile("static/fonts/" + name)
 		if err != nil {

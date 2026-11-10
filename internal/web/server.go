@@ -136,7 +136,7 @@ func newServer(deps Deps, now func() time.Time) (*server, http.Handler) {
 		if deps.Settings != nil {
 			st = deps.Settings
 		}
-		deps.Appearance = appearance.NewService(st)
+		deps.Appearance = appearance.NewService(st, nil)
 	}
 	s := &server{deps: deps, pages: parsePages(), cache: newDetailCache(now, cacheMaxEntries, cacheTTL),
 		recs: newRecCache(now, recCacheMaxEntries, cacheTTL), recTimeout: recTimeout, now: now, maxBackupBody: maxBackupBody, backupWrite: backup.Write,
