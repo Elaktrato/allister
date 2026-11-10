@@ -53,6 +53,11 @@ The universal backup includes these settings and the uploaded fonts. A restore s
 | `/anime/anilist/{id}` | Overview of an AniList anime; `/anime/anilist/{id}/edit` edits its details |
 | `/anime/manual/new`, `/anime/manual/{id}` | Create and open manual entries; `/anime/manual/{id}/edit` edits details, `/anime/manual/{id}/match` matches to AniList |
 | `/anime/export/json` | The JSON export |
+| `/manga` | Your manga list (same search, filter and view parameters as `/anime`) |
+| `/manga/search?q=...` | Search AniList for manga |
+| `/manga/anilist/{id}` | Overview of an AniList manga; `/manga/anilist/{id}/edit` edits its details |
+| `/manga/manual/new`, `/manga/manual/{id}` | Create and open manual manga entries; `/manga/manual/{id}/edit` edits details, `/manga/manual/{id}/match` matches to AniList |
+| `/manga/export/json` | The manga JSON export |
 | `/list/{id}/edit` | The list entry's Edit dialog (status, rating, progress, dates, comment) |
 | `/people/{id}` | Person page |
 | `/settings`, `/settings/appearance`, `/settings/plugins`, `/settings/import`, `/settings/backup` | Settings sections: General (links to each plugin's settings), Appearance (see [Appearance](#appearance)), Plugins (switch plugins on and off), Import, Backup and restore |
@@ -67,7 +72,7 @@ Changes from the first version: a data volume from the first (pre-plugin) previe
 
 ## Imports
 
-The anime plugin's settings page has its own **Import** section with two importers: the **AniList account** (enter the username; its public list is imported with status, score and progress) and the **MyAnimeList XML export** (upload the file MyAnimeList offers from your list page). The Yamtrack CSV import lives on Settings > Import, together with the queue and the history of every import.
+The anime and manga plugins each have their own **Import** section on their settings page, with two importers: the **AniList account** (enter the username; its public list is imported with status, score and progress) and the **MyAnimeList XML export** (upload the file MyAnimeList offers from your list page). The manga importer reads the export's manga rows and maps chapters and volumes to the chapter and volume progress. The Yamtrack CSV import lives on Settings > Import, together with the queue and the history of every import.
 
 Each importer has a rule for entries already in your list: **Skip** leaves them alone (the default); **Update when the source is newer** applies the source's status, score and progress only when its entry was modified after your local one — formats without modification times (like the XML export) never update under this rule; **Always update** applies them unconditionally. Updates touch only status, score and progress of the list entry — never comments, dates, or item data like covers and credits.
 
@@ -75,16 +80,16 @@ The AniList import can repeat: **off, daily or weekly**. Saving a schedule start
 
 ## Calendar
 
-The app has its own month view at `/calendar` (in the sidebar): the current month's stored releases as chips, one per day, with previous/next/Today links and the air time shown in your timezone. The same data feeds `/calendar.ics`, an iCalendar feed for any calendar app on your network (Thunderbird, KOrganizer and friends: add a calendar "from URL", no account needed). It lists one timed 30-minute event per upcoming release of every entry you have marked as watching, for sources that declare schedules (the anime plugin does: AniList's air dates). The summary is the entry's title in your chosen title language plus the kind's progress label — "Frieren — Episode 12" — and the description links back to the item. Each event starts at the source's air time, so your calendar shows it in your timezone.
+The app has its own month view at `/calendar` (in the sidebar): the current month's stored releases as chips, one per day, with previous/next/Today links and the air time shown in your timezone. The same data feeds `/calendar.ics`, an iCalendar feed for any calendar app on your network (Thunderbird, KOrganizer and friends: add a calendar "from URL", no account needed). It lists one timed 30-minute event per upcoming release of every entry you have marked as watching, for sources that declare schedules (the anime plugin does: AniList's air dates). The manga plugin declares no schedule because AniList has no chapter release dates, so manga never appears in the calendar. The summary is the entry's title in your chosen title language plus the kind's progress label — "Frieren — Episode 12" — and the description links back to the item. Each event starts at the source's air time, so your calendar shows it in your timezone.
 
 Schedules are not fetched while a calendar app polls: the database answers, and entries whose schedule is missing or older than 12 hours are refreshed in the background through the normal paced job queue (at most 20 per request). An entry added as watching gets its schedule with its first sync, so it appears in the feed after the next poll. Air dates only cover what the source knows (a finished show has none; a newly announced episode appears after the next refresh). The feed is unauthenticated like the rest of the app — subscribe to it over your private network or tailnet, not from the internet.
 
 ## Known limitations
 
-- Only the anime plugin exists. Plugins are compiled in, and there is no marketplace or runtime installation.
+- Only the anime and manga plugins exist. Plugins are compiled in, and there is no marketplace or runtime installation. Manga is off after a fresh install; enable it in Settings > Plugins.
 - The title language is one per plugin, not per kind; the column choice is per kind.
 - "Match to AniList" accepts AniList URLs and numeric ids only.
-- A live overview of an anime that is not saved makes two AniList requests (details, then recommendations). Both are cached for 10 minutes.
+- A live overview of an item that is not saved makes two AniList requests (details, then recommendations). Both are cached for 10 minutes.
 - The JSON export builds the whole list in memory (fine for a few thousand entries).
 - A restored AVIF cover is recognised by the file's main brand only. A rare AVIF file that declares another main brand is restored without its cover.
 - Files of removed or re-matched entries are not deleted from `covers/` (see Disk use in the README).
@@ -103,7 +108,10 @@ Schedules are not fetched while a calendar app polls: the database answers, and 
 - `internal/jobs`: background queue and item sync
 - `internal/backup`: the universal backup archive (download and merge restore)
 - `internal/importer`: the generic import runner (every plugin's importers)
-- `internal/plugins/anime`: the anime plugin; `anilist`: its AniList client, `yamtrack`: its Yamtrack CSV parser
+- `internal/plugins/anime`: the anime plugin; `yamtrack`: its Yamtrack CSV parser
+- `internal/plugins/manga`: the manga plugin (AniList source, AniList-account and MyAnimeList-XML imports, chapters and volumes)
+- `internal/plugins/anilist`: the AniList client shared by both plugins (parameterised by media type)
+- `internal/plugins/jsonexport`: the JSON exporter shared by both plugins
 - `internal/plugin/plugintest`: test-only book and TV fixture plugins that prove the contract
 - `internal/guard`: tests that keep the core free of media-specific code and plugin imports
 - `internal/appearance`: colour tokens and presets, fonts, the generated `/appearance.css`, uploaded fonts

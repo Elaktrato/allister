@@ -1,6 +1,6 @@
 # Writing an Allister plugin
 
-This guide describes the plugin contract as it is implemented today (contract version 1, package `internal/plugin`). It is written for someone adding a media type, such as books or TV, next to the built-in anime plugin.
+This guide describes the plugin contract as it is implemented today (contract version 1, package `internal/plugin`). It is written for someone adding a media type, such as books or TV, next to the built-in anime and manga plugins.
 
 ## What a plugin is
 

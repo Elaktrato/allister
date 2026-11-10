@@ -30,7 +30,7 @@ A plugin adds one media type: what its entries look like (fields, statuses, prog
 
 The sidebar on the left (a top bar on phones) has one entry per enabled plugin, with the plugin's icon, and Settings at the bottom. Settings has its own column of sections: General, Appearance, Plugins, Import and Backup. Settings > Appearance (`/settings/appearance`) sets the colours (a preset, or every colour in Advanced with contrast warnings), the app font (system stacks, the bundled Inter, Source Serif 4 and JetBrains Mono, or up to 8 fonts you upload: woff2, woff, ttf or otf, 2 MiB each) and the text size, for the whole app; details in [docs/usage.md](docs/usage.md#appearance). Settings > Plugins lists the installed plugins with their version, kinds, sources, importers and exporters, a Settings link (the plugin's title language and list columns) and a Disable or Enable button. Disabling a plugin hides its sidebar entry, pages, person pages, import choices and export links (they answer 404), and pauses its background jobs and imports. All its data stays, and enabling it brings everything back. The home page opens the first enabled plugin's list, or Settings > Plugins when none is enabled.
 
-The **anime plugin** is on by default. It provides the anime kind (type, episodes, year, studio, synopsis, source, start and end dates, genres and tags), the AniList source (30 requests per minute), the Yamtrack CSV importer and the JSON exporter. Its pages live under `/anime`. To write a plugin, see [docs/plugins.md](docs/plugins.md).
+The **anime plugin** is on by default. It provides the anime kind (type, episodes, year, studio, synopsis, source, start and end dates, genres and tags), the AniList source (30 requests per minute), the Yamtrack CSV importer and the JSON exporter. Its pages live under `/anime`. The **manga plugin** is off until you enable it in Settings > Plugins: it provides the manga kind (type, chapters, volumes, year, author, synopsis, dates, genres and tags), the same AniList source, AniList-account and MyAnimeList-XML imports, and its JSON export; its pages live under `/manga`, and it has no calendar because AniList has no chapter release dates. To write a plugin, see [docs/plugins.md](docs/plugins.md).
 
 ## Title language and columns
 
@@ -57,11 +57,11 @@ Every saved entry (from AniList, manual, imported or unmatched) has an "Edit det
 
 ## Matching manual entries to AniList
 
-Open an unmatched entry (or any manual entry) and press "Match to AniList". Paste its AniList URL (or just the number), or search by title and pick a result. The entry becomes a normal AniList entry in place: your status, rating, progress, dates and comment stay exactly as they are, and cast and cover arrive in the background. If that AniList anime is already in your library, Allister refuses and links to the existing entry. If AniList is not answering, nothing is changed and you can try again.
+Open an unmatched entry (or any manual entry) and press "Match to AniList". Paste its AniList URL (or just the number), or search by title and pick a result. The entry becomes a normal AniList entry in place: your status, rating, progress, dates and comment stay exactly as they are, and cast and cover arrive in the background. If that AniList item is already in your library, Allister refuses and links to the existing entry. If AniList is not answering, nothing is changed and you can try again.
 
 ## URLs
 
-Anime pages live under `/anime` (list, `/anime/search`, overviews at `/anime/anilist/{id}`, manual entries at `/anime/manual/{id}`, each with `/edit` for Edit details). List entries are edited at `/list/{id}/edit`, people at `/people/{id}`, and Settings under `/settings` (sections `/settings/plugins`, each plugin's `/settings/plugins/{id}`, `/settings/import`, `/settings/backup`). A bookmark like `/anime?status=watching` from the first version now opens the All tab with a notice: statuses are the core's classes (`status=active`). The full table is in [docs/usage.md](docs/usage.md#urls).
+Anime pages live under `/anime` (list, `/anime/search`, overviews at `/anime/anilist/{id}`, manual entries at `/anime/manual/{id}`, each with `/edit` for Edit details); manga pages use `/manga` the same way. List entries are edited at `/list/{id}/edit`, people at `/people/{id}`, and Settings under `/settings` (sections `/settings/plugins`, each plugin's `/settings/plugins/{id}`, `/settings/import`, `/settings/backup`). A bookmark like `/anime?status=watching` from the first version now opens the All tab with a notice: statuses are the core's classes (`status=active`). The full table is in [docs/usage.md](docs/usage.md#urls).
 
 ## Updating and stopping
 
@@ -115,7 +115,7 @@ Covers and person images are stored locally in `covers/` inside the data volume.
 
 ## Known limitations
 
-- Only the anime plugin exists; plugins are compiled in (no marketplace or runtime installation).
+- Only the anime and manga plugins exist; plugins are compiled in (no marketplace or runtime installation).
 - Files of removed or re-matched entries are not deleted from `covers/`.
 - More in [docs/usage.md](docs/usage.md#known-limitations).
 
@@ -144,5 +144,5 @@ The plugin contract is documented in [docs/plugins.md](docs/plugins.md), the cod
 
 ## Roadmap
 
-- Other media types as plugins: manga, movies, TV, games, books.
+- Other media types as plugins: movies, TV, games, books.
 - Upgrade to a supported Go version.
