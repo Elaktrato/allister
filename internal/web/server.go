@@ -18,9 +18,7 @@ import (
 	"github.com/allister/allister/internal/importer"
 	"github.com/allister/allister/internal/library"
 	"github.com/allister/allister/internal/plugin"
-	"github.com/allister/allister/internal/plugins/anime/anilist"
 	"github.com/allister/allister/internal/settings"
-	"github.com/allister/allister/internal/store"
 )
 
 // app.css is built by the Tailwind stage in the Dockerfile and is not committed.
@@ -33,9 +31,7 @@ var templateFS embed.FS
 
 // Deps holds server dependencies; it grows in later tasks.
 type Deps struct {
-	Settings  *settings.Store
-	Store     *store.Store
-	Providers map[anilist.Source]anilist.Provider
+	Settings *settings.Store
 	// Jobs enqueues background jobs (see package jobs).
 	Jobs JobQueue
 	// SyncJobs maps a plugin id to the sync job of a newly saved item of
@@ -53,11 +49,12 @@ type Deps struct {
 	// when nil the import pages answer 404.
 	Imports *importer.Runner
 	// Registry holds the installed plugins and their enabled flags. Required
-	// in production (cmd/allister builds it); when nil NewServer builds a
-	// default one with the anime plugin on top of Settings.
+	// in production (cmd/allister builds it and registers the plugins); when
+	// nil NewServer uses an empty registry over Settings (no plugin pages).
 	Registry *plugin.Registry
-	// Library is the generic library over the registry's manifests. When nil
-	// NewServer builds one over Store's database.
+	// Library is the generic library over the registry's manifests. Required
+	// for every page that reads or writes items (cmd/allister builds it over
+	// the database and Registry).
 	Library *library.Library
 }
 
@@ -126,10 +123,7 @@ func NewServer(deps Deps) http.Handler {
 // newServer is NewServer with an injectable clock (used by the overview cache).
 func newServer(deps Deps, now func() time.Time) (*server, http.Handler) {
 	if deps.Registry == nil {
-		deps.Registry = defaultRegistry(deps)
-	}
-	if deps.Library == nil && deps.Store != nil {
-		deps.Library = library.New(deps.Store.DB(), deps.Registry)
+		deps.Registry = emptyRegistry(deps)
 	}
 	s := &server{deps: deps, pages: parsePages(), cache: newAnimeCache(now, cacheMaxEntries, cacheTTL),
 		recs: newRecCache(now, recCacheMaxEntries, cacheTTL), recTimeout: recTimeout, now: now, maxBackupBody: maxBackupBody, backupWrite: backup.Write}

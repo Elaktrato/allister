@@ -15,7 +15,6 @@ import (
 	"github.com/allister/allister/internal/plugin"
 	"github.com/allister/allister/internal/plugin/plugintest"
 	"github.com/allister/allister/internal/plugins/anime/anilist"
-	"github.com/allister/allister/internal/store"
 )
 
 // okAddForm is a valid add form. The status is a core class (the generic
@@ -52,12 +51,12 @@ func TestAddCreatesEntryAndJob(t *testing.T) {
 		t.Fatalf("got %d %v", rec.Code, rec.Header())
 	}
 	ctx := context.Background()
-	sv, _ := e.st.FindBySource(ctx, anilist.AniList, "1535")
+	sv, _ := findBySource(ctx, e.lib, anilist.AniList, "1535")
 	if sv == nil {
 		t.Fatal("not saved")
 	}
-	en, _ := e.st.GetListEntry(ctx, sv.ID)
-	if en == nil || en.Status != store.Watching || en.Rating == nil || *en.Rating != 8 || en.Progress != 3 ||
+	en, _ := getEntry(ctx, e.lib, sv.ID)
+	if en == nil || en.Status != library.Active || en.Rating == nil || *en.Rating != 8 || en.Progress != 3 ||
 		en.StartedOn == nil || en.StartedOn.Format("2006-01-02") != "2024-01-02" || en.FinishedOn != nil || en.Comment != "nice" {
 		t.Fatalf("%+v", en)
 	}
@@ -85,8 +84,8 @@ func TestAddRatingBlankAndZero(t *testing.T) {
 		if rec := e.post(f, true); rec.Code != 204 {
 			t.Fatalf("got %d", rec.Code)
 		}
-		sv, _ := e.st.FindBySource(context.Background(), anilist.AniList, "1535")
-		en, _ := e.st.GetListEntry(context.Background(), sv.ID)
+		sv, _ := findBySource(context.Background(), e.lib, anilist.AniList, "1535")
+		en, _ := getEntry(context.Background(), e.lib, sv.ID)
 		if (tc.want == nil) != (en.Rating == nil) || (tc.want != nil && *tc.want != *en.Rating) {
 			t.Fatalf("%q -> %v", tc.in, en.Rating)
 		}
@@ -109,7 +108,7 @@ func TestAddRejectsInvalidRating(t *testing.T) {
 
 func assertNothingSaved(t *testing.T, e *env) {
 	t.Helper()
-	if sv, _ := e.st.FindBySource(context.Background(), anilist.AniList, "1535"); sv != nil {
+	if sv, _ := findBySource(context.Background(), e.lib, anilist.AniList, "1535"); sv != nil {
 		t.Fatal("anime saved")
 	}
 	if len(e.jobs.got) != 0 {
@@ -147,8 +146,8 @@ func TestAddBlankProgressAndDatesAndCommentCap(t *testing.T) {
 	if rec := e.post(f, true); rec.Code != 204 {
 		t.Fatalf("got %d", rec.Code)
 	}
-	sv, _ := e.st.FindBySource(context.Background(), anilist.AniList, "1535")
-	en, _ := e.st.GetListEntry(context.Background(), sv.ID)
+	sv, _ := findBySource(context.Background(), e.lib, anilist.AniList, "1535")
+	en, _ := getEntry(context.Background(), e.lib, sv.ID)
 	if en.Progress != 0 || en.StartedOn != nil || len([]rune(en.Comment)) != 2000 {
 		t.Fatalf("%+v", en)
 	}
@@ -176,8 +175,8 @@ func TestAddSavedWithoutEntryGetsEntryNoJob(t *testing.T) {
 	if rec.Code != 204 {
 		t.Fatalf("got %d", rec.Code)
 	}
-	en, _ := e.st.GetListEntry(context.Background(), id)
-	if en == nil || en.Status != store.Watching {
+	en, _ := getEntry(context.Background(), e.lib, id)
+	if en == nil || en.Status != library.Active {
 		t.Fatalf("%+v", en)
 	}
 	if len(e.jobs.got) != 0 {
@@ -196,7 +195,7 @@ func TestAddSavedWithoutEntryValidatesAgainstStoredEpisodes(t *testing.T) {
 	if rec := e.post(f, true); rec.Code != 422 {
 		t.Fatalf("got %d", rec.Code)
 	}
-	if en, _ := e.st.GetListEntry(context.Background(), id); en != nil {
+	if en, _ := getEntry(context.Background(), e.lib, id); en != nil {
 		t.Fatal("entry created")
 	}
 }
@@ -215,7 +214,7 @@ func TestAddWithProviderDownUsesAlreadyFetchedDetails(t *testing.T) {
 	if e.fp.animeCalls != before {
 		t.Fatal("provider was called again")
 	}
-	if sv, _ := e.st.FindBySource(context.Background(), anilist.AniList, "1535"); sv == nil {
+	if sv, _ := findBySource(context.Background(), e.lib, anilist.AniList, "1535"); sv == nil {
 		t.Fatal("not saved")
 	}
 }

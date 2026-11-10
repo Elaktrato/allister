@@ -396,7 +396,7 @@ func TestManualCoverSavedAndShown(t *testing.T) {
 func TestManualCoverWithoutCoversDir(t *testing.T) {
 	e := newEnv(t)
 	e.covers = ""
-	_, e.h = newServer(Deps{Settings: e.set, Store: e.st, Jobs: e.jobs}, time.Now)
+	_, e.h = newServer(Deps{Settings: e.set, Jobs: e.jobs, Registry: e.reg, Library: e.lib}, time.Now)
 	rec := e.postManual(t, validManualValues(), &upload{"cover", "c.png", "image/png", png1("")})
 	if rec.Code != 422 {
 		t.Fatalf("status %d", rec.Code)

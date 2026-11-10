@@ -21,9 +21,7 @@ import (
 	"github.com/allister/allister/internal/library"
 	"github.com/allister/allister/internal/plugin"
 	"github.com/allister/allister/internal/plugins/anime"
-	"github.com/allister/allister/internal/plugins/anime/anilist"
 	"github.com/allister/allister/internal/settings"
-	"github.com/allister/allister/internal/store"
 	"github.com/allister/allister/internal/web"
 )
 
@@ -46,12 +44,6 @@ func run() error {
 	}
 	defer database.Close()
 
-	st := store.New(database)
-	aniClient := anilist.New(anilist.DefaultURL, nil)
-	providers := map[anilist.Source]anilist.Provider{
-		anilist.AniList: aniClient,
-	}
-
 	sigCtx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 	// The worker outlives the HTTP drain: an in-flight request may still
@@ -61,7 +53,7 @@ func run() error {
 
 	settingsStore := settings.New(database)
 	registry := plugin.NewRegistry(settingsStore)
-	if err := registry.Register(anime.New(anime.Options{Provider: aniClient})); err != nil {
+	if err := registry.Register(anime.New(anime.Options{})); err != nil {
 		log.Printf("startup: %v", err)
 	}
 
@@ -102,8 +94,6 @@ func run() error {
 		Handler: web.NewServer(web.Deps{
 			Settings:  settingsStore,
 			Registry:  registry,
-			Store:     st,
-			Providers: providers,
 			Jobs:      queue,
 			SyncJobs:  syncJobsByPlugin,
 			CoversDir: coversDir,

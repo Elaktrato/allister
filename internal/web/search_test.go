@@ -3,6 +3,7 @@ package web
 import (
 	"context"
 	"errors"
+	"github.com/allister/allister/internal/library"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -48,7 +49,8 @@ func searchServer(t *testing.T, fp *fakeProvider) (http.Handler, *settings.Store
 	}
 	t.Cleanup(func() { d.Close() })
 	st := settings.New(d)
-	return NewServer(Deps{Settings: st, Providers: map[anilist.Source]anilist.Provider{anilist.AniList: fp}}), st
+	reg := animeRegistry(t, st, fp)
+	return NewServer(Deps{Settings: st, Registry: reg, Library: library.New(d, reg)}), st
 }
 
 func doSearch(h http.Handler, q string, htmx bool) *httptest.ResponseRecorder {

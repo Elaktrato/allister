@@ -121,12 +121,14 @@ Layout:
 
 - `cmd/allister`: wiring and startup
 - `internal/web`: HTTP handlers, templates, static assets
-- `internal/store`, `internal/db`: SQLite access and migrations
-- `internal/provider`: provider interface and the AniList client
-- `internal/jobs`: background queue and anime sync
+- `internal/plugin`: the plugin contract (manifest, source, importer, exporter) and the registry
+- `internal/library`: the generic library (items, list entries, people) over SQLite
+- `internal/db`: SQLite access and migrations
+- `internal/jobs`: background queue and item sync
 - `internal/backup`: the universal backup archive (download and merge restore)
-- `internal/importer`: the generic import runner (every plugin's importers); `internal/importer/yamtrack`: the Yamtrack CSV parser
-- `internal/covers`, `internal/settings`, `internal/titles`, `internal/config`: small helpers
+- `internal/importer`: the generic import runner (every plugin's importers)
+- `internal/plugins/anime`: the anime plugin; `anilist`: its AniList client, `yamtrack`: its Yamtrack CSV parser
+- `internal/covers`, `internal/settings`, `internal/config`, `internal/ids`: small helpers
 
 ## Roadmap
 

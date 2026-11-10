@@ -13,7 +13,6 @@ import (
 	"github.com/allister/allister/internal/plugin/plugintest"
 	"github.com/allister/allister/internal/plugins/anime/anilist"
 	"github.com/allister/allister/internal/settings"
-	"github.com/allister/allister/internal/store"
 )
 
 // Overview tests moved from anime_test.go (assertions unchanged) followed by
@@ -34,7 +33,7 @@ func TestOverviewLiveForUnsaved(t *testing.T) {
 	if e.fp.animeCalls != 1 || e.fp.castCall != 1 {
 		t.Fatalf("calls %d %d", e.fp.animeCalls, e.fp.castCall)
 	}
-	if ar, _ := e.st.FindBySource(context.Background(), anilist.AniList, "1535"); ar != nil {
+	if ar, _ := findBySource(context.Background(), e.lib, anilist.AniList, "1535"); ar != nil {
 		t.Fatal("overview must not save")
 	}
 }
@@ -134,7 +133,9 @@ func TestOverviewProviderErrors(t *testing.T) {
 func TestOverviewNilProviderIs503(t *testing.T) {
 	d, _ := db.Open(filepath.Join(t.TempDir(), "t.db"))
 	t.Cleanup(func() { d.Close() })
-	h := NewServer(Deps{Settings: settings.New(d), Store: store.New(d), Providers: map[anilist.Source]anilist.Provider{}})
+	set := settings.New(d)
+	reg := animeRegistry(t, set, nil)
+	h := NewServer(Deps{Settings: set, Registry: reg, Library: library.New(d, reg)})
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, httptest.NewRequest("GET", "/anime/anilist/1535", nil))
 	if rec.Code != 503 {
@@ -161,7 +162,7 @@ func TestOverviewManualFromDatabaseOnly(t *testing.T) {
 	}
 	m := anilist.Anime{SearchResult: anilist.SearchResult{Source: anilist.Manual, ID: "77", Type: "OVA",
 		Titles: []anilist.Title{{Lang: "en", Text: "My Manual Show"}}}}
-	if _, err := e.st.SaveAnime(context.Background(), m, store.WithSyncState("done")); err != nil {
+	if _, err := saveAnime(context.Background(), e.lib, m, library.WithSyncState("done")); err != nil {
 		t.Fatal(err)
 	}
 	rec := e.get("/anime/manual/77")
@@ -188,12 +189,12 @@ func TestPartialSyncBadge(t *testing.T) {
 	e := newEnv(t)
 	id := e.saved(t)
 	for _, st := range []string{"pending", "partial"} {
-		if err := e.st.SetSyncState(context.Background(), id, st); err != nil {
+		if err := e.lib.SetSyncState(context.Background(), id, st); err != nil {
 			t.Fatal(err)
 		}
 		mustContain(t, e.get("/anime/anilist/1535").Body.String(), "partially synced")
 	}
-	e.st.SetSyncState(context.Background(), id, "done")
+	e.lib.SetSyncState(context.Background(), id, "done")
 	mustNotContain(t, e.get("/anime/anilist/1535").Body.String(), "partially synced")
 }
 
@@ -204,7 +205,7 @@ func TestPersonLinksExternalOnlyWhenUnsaved(t *testing.T) {
 	mustNotContain(t, b, "/people/")
 
 	id := e.saved(t)
-	if err := e.st.SaveCast(context.Background(), id, e.fp.cast); err != nil {
+	if err := saveCast(context.Background(), e.lib, id, e.fp.cast); err != nil {
 		t.Fatal(err)
 	}
 	b = e.get("/anime/anilist/1535").Body.String()
@@ -214,7 +215,7 @@ func TestPersonLinksExternalOnlyWhenUnsaved(t *testing.T) {
 func TestSavedWithEntryShowsSummaryInsteadOfButton(t *testing.T) {
 	e := newEnv(t)
 	id := e.saved(t)
-	if err := e.st.UpsertListEntry(context.Background(), store.ListEntry{AnimeID: id, Status: store.Watching, Rating: ip(9), Progress: 5}); err != nil {
+	if err := upsertEntry(context.Background(), e.lib, listEntry{ItemID: id, Status: library.Active, Rating: ip(9), Progress: 5}); err != nil {
 		t.Fatal(err)
 	}
 	b := e.get("/anime/anilist/1535").Body.String()
@@ -613,11 +614,11 @@ func TestHostileNavMarkerIsEscaped(t *testing.T) {
 	a := e.fp.anime
 	a.Titles = []anilist.Title{{Lang: "ja", Text: "T" + navMarker}}
 	a.Synopsis = "S" + navMarker
-	id, err := e.st.SaveAnime(context.Background(), a)
+	id, err := saveAnime(context.Background(), e.lib, a)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := e.st.UpsertListEntry(context.Background(), store.ListEntry{AnimeID: id, Status: store.Watching, Comment: "C" + navMarker}); err != nil {
+	if err := upsertEntry(context.Background(), e.lib, listEntry{ItemID: id, Status: library.Active, Comment: "C" + navMarker}); err != nil {
 		t.Fatal(err)
 	}
 	b := e.get("/anime/anilist/1535").Body.String()

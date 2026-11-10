@@ -381,7 +381,7 @@ func TestEditDetailsReplacesCover(t *testing.T) {
 func TestEditDetailsCoverWithoutCoversDir(t *testing.T) {
 	e := newFixtureEnv(t)
 	e.saveFixture(t, "tv", "show", tvShow("5", "The Show"))
-	_, e.h = newServer(Deps{Settings: e.set, Store: e.st, Jobs: e.jobs, Registry: e.reg, Library: e.lib}, func() time.Time { return *e.now })
+	_, e.h = newServer(Deps{Settings: e.set, Jobs: e.jobs, Registry: e.reg, Library: e.lib}, func() time.Time { return *e.now })
 	mustNotContain(t, e.get("/tv/tvdata/5/edit").Body.String(), `name="cover"`)
 	rec := e.postMultipart(t, "/tv/tvdata/5/edit", titleRows("en", "X"), &upload{"cover", "c.png", "image/png", png1("")})
 	if rec.Code != 422 {

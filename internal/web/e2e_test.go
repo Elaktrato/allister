@@ -3,6 +3,7 @@ package web
 import (
 	"context"
 	"encoding/json"
+	"github.com/allister/allister/internal/library"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -28,9 +29,10 @@ func (s searchProvider) Search(ctx context.Context, q string) ([]anilist.SearchR
 func newE2EEnv(t *testing.T) *env {
 	t.Helper()
 	e := newEnv(t)
+	reg := animeRegistry(t, e.set, searchProvider{e.fp})
 	_, e.h = newServer(Deps{
-		Settings: e.set, Store: e.st, Jobs: e.jobs, SyncJobs: testSyncJobs(), CoversDir: e.covers,
-		Providers: map[anilist.Source]anilist.Provider{anilist.AniList: searchProvider{e.fp}},
+		Settings: e.set, Jobs: e.jobs, SyncJobs: testSyncJobs(), CoversDir: e.covers,
+		Registry: reg, Library: library.New(e.d, reg),
 	}, func() time.Time { return *e.now })
 	return e
 }
@@ -143,11 +145,11 @@ func TestManualEntryAndPersonFlow(t *testing.T) {
 		}
 	}
 	edit("0")
-	if en, _ := e.st.GetListEntry(context.Background(), mustID(t, id)); en == nil || en.Rating == nil || *en.Rating != 0 {
+	if en, _ := getEntry(context.Background(), e.lib, mustID(t, id)); en == nil || en.Rating == nil || *en.Rating != 0 {
 		t.Fatalf("rating 0 not stored: %+v", en)
 	}
 	edit("")
-	if en, _ := e.st.GetListEntry(context.Background(), mustID(t, id)); en == nil || en.Rating != nil {
+	if en, _ := getEntry(context.Background(), e.lib, mustID(t, id)); en == nil || en.Rating != nil {
 		t.Fatalf("blank rating must be unrated: %+v", en)
 	}
 
@@ -280,7 +282,7 @@ func TestMatchRefusesAlreadySavedAnime(t *testing.T) {
 	if len(e.jobs.got) != 0 {
 		t.Fatalf("jobs: %+v", e.jobs.got)
 	}
-	if sv, _ := e.st.GetByID(context.Background(), existing); sv == nil || sv.Source != anilist.AniList {
+	if sv, _ := e.lib.Item(context.Background(), existing); sv == nil || sv.Source != string(anilist.AniList) {
 		t.Fatal("existing entry touched")
 	}
 	mustContain(t, e.get("/anime").Body.String(), "unmatched")

@@ -14,21 +14,20 @@ import (
 	"github.com/allister/allister/internal/plugin"
 	"github.com/allister/allister/internal/plugins/anime/anilist"
 	"github.com/allister/allister/internal/settings"
-	"github.com/allister/allister/internal/store"
 )
 
 // addEntry saves an anime with the given titles and a list entry.
-func (e *env) addEntry(t *testing.T, src anilist.Source, sid string, eps *int, st store.Status, progress int, titles ...anilist.Title) int64 {
+func (e *env) addEntry(t *testing.T, src anilist.Source, sid string, eps *int, st library.Status, progress int, titles ...anilist.Title) int64 {
 	t.Helper()
 	if len(titles) == 0 {
 		titles = []anilist.Title{{Lang: "en", Text: "Title " + sid}}
 	}
 	a := anilist.Anime{SearchResult: anilist.SearchResult{Source: src, ID: sid, Episodes: eps, Type: "TV", Titles: titles}}
-	id, err := e.st.SaveAnime(context.Background(), a)
+	id, err := saveAnime(context.Background(), e.lib, a)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := e.st.UpsertListEntry(context.Background(), store.ListEntry{AnimeID: id, Status: st, Progress: progress}); err != nil {
+	if err := upsertEntry(context.Background(), e.lib, listEntry{ItemID: id, Status: st, Progress: progress}); err != nil {
 		t.Fatal(err)
 	}
 	return id
@@ -43,8 +42,8 @@ func idStr(id int64) string { return strconv.FormatInt(id, 10) }
 
 func TestListFiltersByStatus(t *testing.T) {
 	e := newEnv(t)
-	e.addEntry(t, anilist.AniList, "1", nil, store.Watching, 0, anilist.Title{Lang: "en", Text: "Alpha Show"})
-	e.addEntry(t, anilist.AniList, "2", nil, store.Completed, 0, anilist.Title{Lang: "en", Text: "Beta Show"})
+	e.addEntry(t, anilist.AniList, "1", nil, library.Active, 0, anilist.Title{Lang: "en", Text: "Alpha Show"})
+	e.addEntry(t, anilist.AniList, "2", nil, library.Completed, 0, anilist.Title{Lang: "en", Text: "Beta Show"})
 	all := e.get("/anime").Body.String()
 	mustContain(t, all, "Alpha Show", "Beta Show")
 	w := e.get("/anime?status=active")
@@ -60,9 +59,9 @@ func TestListFiltersByStatus(t *testing.T) {
 
 func TestListTabsShowCountsAndCurrent(t *testing.T) {
 	e := newEnv(t)
-	e.addEntry(t, anilist.AniList, "1", nil, store.Watching, 0)
-	e.addEntry(t, anilist.AniList, "2", nil, store.Watching, 0)
-	e.addEntry(t, anilist.AniList, "3", nil, store.Dropped, 0)
+	e.addEntry(t, anilist.AniList, "1", nil, library.Active, 0)
+	e.addEntry(t, anilist.AniList, "2", nil, library.Active, 0)
+	e.addEntry(t, anilist.AniList, "3", nil, library.Dropped, 0)
 	b := e.get("/anime?status=active").Body.String()
 	mustContain(t, b, `href="/anime"`, `href="/anime?status=active"`, `href="/anime?status=completed"`,
 		`href="/anime?status=planned"`, `href="/anime?status=paused"`, `href="/anime?status=dropped"`,
@@ -86,8 +85,8 @@ func TestListTabsShowCountsAndCurrent(t *testing.T) {
 
 func TestListUnknownStatusShowsAll(t *testing.T) {
 	e := newEnv(t)
-	e.addEntry(t, anilist.AniList, "1", nil, store.Watching, 0, anilist.Title{Lang: "en", Text: "Alpha Show"})
-	e.addEntry(t, anilist.AniList, "2", nil, store.Completed, 0, anilist.Title{Lang: "en", Text: "Beta Show"})
+	e.addEntry(t, anilist.AniList, "1", nil, library.Active, 0, anilist.Title{Lang: "en", Text: "Alpha Show"})
+	e.addEntry(t, anilist.AniList, "2", nil, library.Completed, 0, anilist.Title{Lang: "en", Text: "Beta Show"})
 	rec := e.get("/anime?status=bogus")
 	if rec.Code != 200 {
 		t.Fatal(rec.Code)
@@ -97,7 +96,7 @@ func TestListUnknownStatusShowsAll(t *testing.T) {
 
 func TestListShowsPreferredTitle(t *testing.T) {
 	e := newEnv(t)
-	e.addEntry(t, anilist.AniList, "77", nil, store.Watching, 0,
+	e.addEntry(t, anilist.AniList, "77", nil, library.Active, 0,
 		anilist.Title{Lang: "ja", Text: "デスノート"}, anilist.Title{Lang: "en", Text: "Death Note EN"})
 	if err := e.set.Set(context.Background(), settings.KeyTitleLang, "en"); err != nil {
 		t.Fatal(err)
@@ -113,35 +112,35 @@ func TestListShowsPreferredTitle(t *testing.T) {
 
 func TestListRowContent(t *testing.T) {
 	e := newEnv(t)
-	id := e.addEntry(t, anilist.AniList, "1", ip(12), store.Watching, 3)
+	id := e.addEntry(t, anilist.AniList, "1", ip(12), library.Active, 3)
 	b := e.get("/anime").Body.String()
 	mustContain(t, b, "3 / 12", `hx-post="/list/`+idStr(id)+`/increment"`, `hx-target="closest tr"`, `hx-swap="outerHTML"`,
 		`href="/list/`+idStr(id)+`/edit`, `/list/`+idStr(id)+`/remove`, `hx-confirm`, "Watching", "partially synced", "TV", "–")
 	mustNotContain(t, b, "unmatched")
 	e2 := newEnv(t)
-	e2.addEntry(t, anilist.AniList, "1", nil, store.Watching, 3)
+	e2.addEntry(t, anilist.AniList, "1", nil, library.Active, 3)
 	mustContain(t, e2.get("/anime").Body.String(), "3 / ?")
 }
 
 func TestListScoreZeroAndRated(t *testing.T) {
 	e := newEnv(t)
-	id := e.addEntry(t, anilist.AniList, "1", nil, store.Completed, 0)
-	if err := e.st.UpsertListEntry(context.Background(), store.ListEntry{AnimeID: id, Status: store.Completed, Rating: ip(0)}); err != nil {
+	id := e.addEntry(t, anilist.AniList, "1", nil, library.Completed, 0)
+	if err := upsertEntry(context.Background(), e.lib, listEntry{ItemID: id, Status: library.Completed, Rating: ip(0)}); err != nil {
 		t.Fatal(err)
 	}
 	mustContain(t, e.get("/anime").Body.String(), `data-score="0"`)
 	mustContain(t, newEnvWithRated(t, 9).get("/anime").Body.String(), `data-score="9"`)
 	mustContain(t, func() string {
 		e := newEnv(t)
-		e.addEntry(t, anilist.AniList, "1", nil, store.Completed, 0)
+		e.addEntry(t, anilist.AniList, "1", nil, library.Completed, 0)
 		return e.get("/anime").Body.String()
 	}(), `data-score="none"`)
 }
 
 func newEnvWithRated(t *testing.T, r int) *env {
 	e := newEnv(t)
-	id := e.addEntry(t, anilist.AniList, "1", nil, store.Completed, 0)
-	if err := e.st.UpsertListEntry(context.Background(), store.ListEntry{AnimeID: id, Status: store.Completed, Rating: &r}); err != nil {
+	id := e.addEntry(t, anilist.AniList, "1", nil, library.Completed, 0)
+	if err := upsertEntry(context.Background(), e.lib, listEntry{ItemID: id, Status: library.Completed, Rating: &r}); err != nil {
 		t.Fatal(err)
 	}
 	return e
@@ -149,9 +148,9 @@ func newEnvWithRated(t *testing.T, r int) *env {
 
 func TestListSyncBadgeOnlyWhilePending(t *testing.T) {
 	e := newEnv(t)
-	id := e.addEntry(t, anilist.AniList, "1", nil, store.Watching, 0)
+	id := e.addEntry(t, anilist.AniList, "1", nil, library.Active, 0)
 	mustContain(t, e.get("/anime").Body.String(), "partially synced")
-	if err := e.st.SetSyncState(context.Background(), id, "done"); err != nil {
+	if err := e.lib.SetSyncState(context.Background(), id, "done"); err != nil {
 		t.Fatal(err)
 	}
 	mustNotContain(t, e.get("/anime").Body.String(), "partially synced")
@@ -162,11 +161,11 @@ func TestListShowsUnmatchedBadge(t *testing.T) {
 	ctx := context.Background()
 	mk := func(src anilist.Source, sid, mal string) {
 		a := anilist.Anime{SearchResult: anilist.SearchResult{Source: src, ID: sid, Titles: []anilist.Title{{Lang: "en", Text: "T" + sid}}}, MALID: mal}
-		id, err := e.st.SaveAnime(ctx, a, store.WithSyncState("done"))
+		id, err := saveAnime(ctx, e.lib, a, library.WithSyncState("done"))
 		if err != nil {
 			t.Fatal(err)
 		}
-		e.st.UpsertListEntry(ctx, store.ListEntry{AnimeID: id, Status: store.Watching})
+		upsertEntry(ctx, e.lib, listEntry{ItemID: id, Status: library.Active})
 	}
 	mk(anilist.Manual, "m1", "555")
 	b := e.get("/anime").Body.String()
@@ -187,7 +186,7 @@ func TestEmptyListShowsHint(t *testing.T) {
 		t.Fatal(rec.Code)
 	}
 	mustContain(t, rec.Body.String(), `href="/anime/search"`, "Your list is empty")
-	e.addEntry(t, anilist.AniList, "1", nil, store.Watching, 0)
+	e.addEntry(t, anilist.AniList, "1", nil, library.Active, 0)
 	b := e.get("/anime?status=dropped").Body.String()
 	mustContain(t, b, "Nothing here yet")
 	mustNotContain(t, b, "Your list is empty")
@@ -196,13 +195,13 @@ func TestEmptyListShowsHint(t *testing.T) {
 func TestListPagination(t *testing.T) {
 	e := newEnv(t)
 	for i := 0; i < 101; i++ {
-		st := store.Watching
+		st := library.Active
 		if i >= 90 {
-			st = store.Dropped
+			st = library.Dropped
 		}
 		e.addEntry(t, anilist.AniList, fmt.Sprint(i+1), nil, st, 0)
 	}
-	e.st.UpsertListEntry(context.Background(), store.ListEntry{AnimeID: 1, Status: store.Watching})
+	upsertEntry(context.Background(), e.lib, listEntry{ItemID: 1, Status: library.Active})
 	// order: newest-updated first; all share timestamps within a second, tie broken by id desc
 	p1 := e.get("/anime").Body.String()
 	if n := strings.Count(p1, `data-row`); n != 100 {
@@ -228,7 +227,7 @@ func TestListPagination(t *testing.T) {
 	// 101 rows of one status paginate with the filter in links
 	e2 := newEnv(t)
 	for i := 0; i < 101; i++ {
-		e2.addEntry(t, anilist.AniList, fmt.Sprint(i+1), nil, store.Watching, 0)
+		e2.addEntry(t, anilist.AniList, fmt.Sprint(i+1), nil, library.Active, 0)
 	}
 	f := e2.get("/anime?status=active").Body.String()
 	mustContain(t, f, `href="/anime?page=2&amp;status=active"`)
@@ -238,7 +237,7 @@ func TestListPagination(t *testing.T) {
 
 func TestIncrementReturnsUpdatedRow(t *testing.T) {
 	e := newEnv(t)
-	id := e.addEntry(t, anilist.AniList, "1", ip(12), store.Watching, 3)
+	id := e.addEntry(t, anilist.AniList, "1", ip(12), library.Active, 3)
 	rec := e.do("POST", "/list/"+idStr(id)+"/increment", url.Values{}, true)
 	if rec.Code != 200 {
 		t.Fatal(rec.Code, rec.Body.String())
@@ -246,7 +245,7 @@ func TestIncrementReturnsUpdatedRow(t *testing.T) {
 	b := rec.Body.String()
 	mustContain(t, b, "4 / 12", "<tr")
 	mustNotContain(t, b, "<html", "<body")
-	en, _ := e.st.GetListEntry(context.Background(), id)
+	en, _ := getEntry(context.Background(), e.lib, id)
 	if en.Progress != 4 {
 		t.Fatal(en.Progress)
 	}
@@ -254,14 +253,14 @@ func TestIncrementReturnsUpdatedRow(t *testing.T) {
 
 func TestIncrementAtTotalDoesNotExceed(t *testing.T) {
 	e := newEnv(t)
-	id := e.addEntry(t, anilist.AniList, "1", ip(12), store.Watching, 12)
+	id := e.addEntry(t, anilist.AniList, "1", ip(12), library.Active, 12)
 	rec := e.do("POST", "/list/"+idStr(id)+"/increment", url.Values{}, true)
 	if rec.Code != 200 {
 		t.Fatal(rec.Code)
 	}
 	mustContain(t, rec.Body.String(), "12 / 12")
 	mustNotContain(t, rec.Body.String(), "/increment")
-	if en, _ := e.st.GetListEntry(context.Background(), id); en.Progress != 12 {
+	if en, _ := getEntry(context.Background(), e.lib, id); en.Progress != 12 {
 		t.Fatal(en.Progress)
 	}
 	// the list page hides +1 at the total too
@@ -270,7 +269,7 @@ func TestIncrementAtTotalDoesNotExceed(t *testing.T) {
 
 func TestIncrementPlainPostRedirects(t *testing.T) {
 	e := newEnv(t)
-	id := e.addEntry(t, anilist.AniList, "1", nil, store.Watching, 0)
+	id := e.addEntry(t, anilist.AniList, "1", nil, library.Active, 0)
 	rec := e.do("POST", "/list/"+idStr(id)+"/increment", url.Values{}, false)
 	if rec.Code != 303 || rec.Header().Get("Location") != "/anime" {
 		t.Fatal(rec.Code, rec.Header())
@@ -279,7 +278,7 @@ func TestIncrementPlainPostRedirects(t *testing.T) {
 	if rec.Header().Get("Location") != "/anime?status=watching" {
 		t.Fatal(rec.Header())
 	}
-	if en, _ := e.st.GetListEntry(context.Background(), id); en.Progress != 2 {
+	if en, _ := getEntry(context.Background(), e.lib, id); en.Progress != 2 {
 		t.Fatal(en.Progress)
 	}
 }
@@ -314,13 +313,13 @@ func TestListRoutesNotFound(t *testing.T) {
 
 func TestEditGetPrefilled(t *testing.T) {
 	e := newEnv(t)
-	id := e.addEntry(t, anilist.AniList, "1", ip(12), store.Paused, 5)
+	id := e.addEntry(t, anilist.AniList, "1", ip(12), library.Paused, 5)
 	b := e.do("GET", "/list/"+idStr(id)+"/edit", nil, true).Body.String()
 	mustContain(t, b, `action="/list/`+idStr(id)+`/edit"`, `<option value="paused" selected>`, `name="rating" value=""`,
 		`value="5"`, `max="12"`, "/ 12", "Save")
 	mustNotContain(t, b, "<html")
 	// rating 0 shows 0
-	e.st.UpsertListEntry(context.Background(), store.ListEntry{AnimeID: id, Status: store.Paused, Rating: ip(0), Comment: "note <b>x</b>"})
+	upsertEntry(context.Background(), e.lib, listEntry{ItemID: id, Status: library.Paused, Rating: ip(0), Comment: "note <b>x</b>"})
 	b = e.do("GET", "/list/"+idStr(id)+"/edit", nil, true).Body.String()
 	mustContain(t, b, `name="rating" value="0"`, "note &lt;b&gt;x&lt;/b&gt;")
 	// no JS: full page with dialog
@@ -330,8 +329,8 @@ func TestEditGetPrefilled(t *testing.T) {
 
 func TestEditGetDatesAndReturn(t *testing.T) {
 	e := newEnv(t)
-	id := e.addEntry(t, anilist.AniList, "1", nil, store.Completed, 0)
-	e.st.UpsertListEntry(context.Background(), store.ListEntry{AnimeID: id, Status: store.Completed, StartedOn: day(2024, 1, 2), FinishedOn: day(2024, 2, 3)})
+	id := e.addEntry(t, anilist.AniList, "1", nil, library.Completed, 0)
+	upsertEntry(context.Background(), e.lib, listEntry{ItemID: id, Status: library.Completed, StartedOn: day(2024, 1, 2), FinishedOn: day(2024, 2, 3)})
 	b := e.do("GET", "/list/"+idStr(id)+"/edit?return="+url.QueryEscape("/anime?status=completed"), nil, true).Body.String()
 	mustContain(t, b, `value="2024-01-02"`, `value="2024-02-03"`, `name="return" value="/anime?status=completed"`)
 	b = e.do("GET", "/list/"+idStr(id)+"/edit?return=//evil.com", nil, true).Body.String()
@@ -341,19 +340,19 @@ func TestEditGetDatesAndReturn(t *testing.T) {
 
 func TestEditPostSuccessLeavesAnimeUntouched(t *testing.T) {
 	e := newEnv(t)
-	id := e.addEntry(t, anilist.AniList, "1", ip(12), store.Watching, 1)
-	before, _ := e.st.GetByID(context.Background(), id)
+	id := e.addEntry(t, anilist.AniList, "1", ip(12), library.Active, 1)
+	before, _ := e.lib.Item(context.Background(), id)
 	form := url.Values{"status": {"completed"}, "rating": {"0"}, "progress": {"12"}, "started_on": {"2024-01-02"}, "finished_on": {"2024-02-03"}, "comment": {"great"}, "return": {"/anime?status=watching"}}
 	rec := e.do("POST", "/list/"+idStr(id)+"/edit", form, true)
 	if rec.Code != 204 || rec.Header().Get("HX-Redirect") != "/anime?status=watching" {
 		t.Fatal(rec.Code, rec.Header())
 	}
-	en, _ := e.st.GetListEntry(context.Background(), id)
-	if en.Status != store.Completed || en.Rating == nil || *en.Rating != 0 || en.Progress != 12 || en.Comment != "great" ||
+	en, _ := getEntry(context.Background(), e.lib, id)
+	if en.Status != library.Completed || en.Rating == nil || *en.Rating != 0 || en.Progress != 12 || en.Comment != "great" ||
 		en.StartedOn.Format("2006-01-02") != "2024-01-02" || en.FinishedOn.Format("2006-01-02") != "2024-02-03" {
 		t.Fatalf("%+v", en)
 	}
-	after, _ := e.st.GetByID(context.Background(), id)
+	after, _ := e.lib.Item(context.Background(), id)
 	if !reflect.DeepEqual(before, after) {
 		t.Fatalf("anime changed:\n%+v\n%+v", before, after)
 	}
@@ -371,7 +370,7 @@ func TestEditPostSuccessLeavesAnimeUntouched(t *testing.T) {
 
 func TestEditValidationReturns422(t *testing.T) {
 	e := newEnv(t)
-	id := e.addEntry(t, anilist.AniList, "1", ip(12), store.Watching, 1)
+	id := e.addEntry(t, anilist.AniList, "1", ip(12), library.Active, 1)
 	cases := []struct {
 		name string
 		mod  func(url.Values)
@@ -403,7 +402,7 @@ func TestEditValidationReturns422(t *testing.T) {
 			}
 		}
 	}
-	en, _ := e.st.GetListEntry(context.Background(), id)
+	en, _ := getEntry(context.Background(), e.lib, id)
 	if en.Progress != 1 || en.Comment != "" {
 		t.Fatalf("entry changed: %+v", en)
 	}
@@ -411,7 +410,7 @@ func TestEditValidationReturns422(t *testing.T) {
 
 func TestEditValidationKeepsInput(t *testing.T) {
 	e := newEnv(t)
-	id := e.addEntry(t, anilist.AniList, "1", ip(12), store.Watching, 1)
+	id := e.addEntry(t, anilist.AniList, "1", ip(12), library.Active, 1)
 	form := url.Values{"status": {"paused"}, "rating": {"11"}, "progress": {"4"}, "started_on": {"2024-03-04"}}
 	b := e.do("POST", "/list/"+idStr(id)+"/edit", form, true).Body.String()
 	mustContain(t, b, `name="rating" value="11"`, `value="4"`, `value="2024-03-04"`, `<option value="paused" selected>`, "/ 12")
@@ -457,7 +456,7 @@ func TestSafeReturn(t *testing.T) {
 
 func TestEditReturnHostileRedirectsToList(t *testing.T) {
 	e := newEnv(t)
-	id := e.addEntry(t, anilist.AniList, "1", nil, store.Watching, 0)
+	id := e.addEntry(t, anilist.AniList, "1", nil, library.Active, 0)
 	for _, h := range []string{"//evil.com", "https://evil.com", "/anime@evil", `/\evil`, "/animex"} {
 		form := okAddForm()
 		form.Set("return", h)
@@ -473,24 +472,24 @@ func TestEditReturnHostileRedirectsToList(t *testing.T) {
 		if rec.Header().Get("Location") != "/anime" {
 			t.Errorf("remove %q: %v", h, rec.Header())
 		}
-		e.addEntry(t, anilist.AniList, "again"+h, nil, store.Watching, 0) // keep an entry around
-		id = e.addEntry(t, anilist.AniList, "n"+h, nil, store.Watching, 0)
+		e.addEntry(t, anilist.AniList, "again"+h, nil, library.Active, 0) // keep an entry around
+		id = e.addEntry(t, anilist.AniList, "n"+h, nil, library.Active, 0)
 	}
 }
 
 func TestRemoveDeletesEntry(t *testing.T) {
 	e := newEnv(t)
 	ctx := context.Background()
-	id := e.addEntry(t, anilist.AniList, "1", nil, store.Watching, 0)
-	other := e.addEntry(t, anilist.AniList, "2", nil, store.Watching, 0)
+	id := e.addEntry(t, anilist.AniList, "1", nil, library.Active, 0)
+	other := e.addEntry(t, anilist.AniList, "2", nil, library.Active, 0)
 	rec := e.do("POST", "/list/"+idStr(id)+"/remove", url.Values{}, false)
 	if rec.Code != 303 || rec.Header().Get("Location") != "/anime" {
 		t.Fatal(rec.Code, rec.Header())
 	}
-	if sv, _ := e.st.GetByID(ctx, id); sv != nil {
+	if sv, _ := e.lib.Item(ctx, id); sv != nil {
 		t.Fatal("anime remains")
 	}
-	if en, _ := e.st.GetListEntry(ctx, other); en == nil {
+	if en, _ := getEntry(ctx, e.lib, other); en == nil {
 		t.Fatal("other removed")
 	}
 	// htmx path
@@ -498,7 +497,7 @@ func TestRemoveDeletesEntry(t *testing.T) {
 	if rec.Code != 204 || rec.Header().Get("HX-Redirect") != "/anime?status=watching" {
 		t.Fatal(rec.Code, rec.Header())
 	}
-	if en, _ := e.st.GetListEntry(ctx, other); en != nil {
+	if en, _ := getEntry(ctx, e.lib, other); en != nil {
 		t.Fatal("not removed")
 	}
 	if rec := e.do("POST", "/list/"+idStr(other)+"/remove", url.Values{}, false); rec.Code != 404 {
@@ -509,19 +508,19 @@ func TestRemoveDeletesEntry(t *testing.T) {
 func TestRemoveCascadesCastTitles(t *testing.T) {
 	e := newEnv(t)
 	ctx := context.Background()
-	id := e.addEntry(t, anilist.AniList, "1", nil, store.Watching, 0)
-	if err := e.st.SaveCast(ctx, id, e.fp.cast); err != nil {
+	id := e.addEntry(t, anilist.AniList, "1", nil, library.Active, 0)
+	if err := saveCast(ctx, e.lib, id, e.fp.cast); err != nil {
 		t.Fatal(err)
 	}
 	e.do("POST", "/list/"+idStr(id)+"/remove", url.Values{}, false)
-	if c, _ := e.st.Cast(ctx, id); len(c) != 0 {
+	if c, _ := e.lib.Credits(ctx, id); len(c) != 0 {
 		t.Fatal("cast remains")
 	}
 }
 
 func TestListRowsRenderedWithRemoveFormForNoJS(t *testing.T) {
 	e := newEnv(t)
-	id := e.addEntry(t, anilist.AniList, "1", nil, store.Watching, 0)
+	id := e.addEntry(t, anilist.AniList, "1", nil, library.Active, 0)
 	b := e.get("/anime?status=active&page=1").Body.String()
 	mustContain(t, b, `method="post" action="/list/`+idStr(id)+`/remove"`, `name="return" value="/anime?status=active"`,
 		`hx-confirm=`, `method="post" action="/list/`+idStr(id)+`/increment"`)
@@ -529,7 +528,7 @@ func TestListRowsRenderedWithRemoveFormForNoJS(t *testing.T) {
 
 func TestFormBodyTooLarge(t *testing.T) {
 	e := newEnv(t)
-	id := e.addEntry(t, anilist.AniList, "1", nil, store.Watching, 0)
+	id := e.addEntry(t, anilist.AniList, "1", nil, library.Active, 0)
 	big := okForm()
 	big.Set("comment", strings.Repeat("a", 70<<10))
 	for _, path := range []string{"/list/" + idStr(id) + "/edit", "/anime/anilist/1535/add", "/list/" + idStr(id) + "/remove"} {
@@ -541,7 +540,7 @@ func TestFormBodyTooLarge(t *testing.T) {
 
 func TestMalformedReturnDoesNotPanic(t *testing.T) {
 	e := newEnv(t)
-	id := e.addEntry(t, anilist.AniList, "1", ip(12), store.Watching, 1)
+	id := e.addEntry(t, anilist.AniList, "1", ip(12), library.Active, 1)
 	rec := e.get("/list/" + idStr(id) + "/edit?return=" + url.QueryEscape("/anime/%zz"))
 	if rec.Code != 200 {
 		t.Fatalf("GET: %d", rec.Code)
@@ -558,7 +557,7 @@ func TestMalformedReturnDoesNotPanic(t *testing.T) {
 func TestListPageParamClamping(t *testing.T) {
 	e := newEnv(t)
 	for i := 0; i < 101; i++ {
-		e.addEntry(t, anilist.AniList, fmt.Sprint(i+1), nil, store.Watching, 0)
+		e.addEntry(t, anilist.AniList, fmt.Sprint(i+1), nil, library.Active, 0)
 	}
 	for q, want := range map[string]string{
 		"9999999999999999999": "Showing 101–101 of 101",
@@ -654,7 +653,7 @@ func TestListScopedToPlugin(t *testing.T) {
 	e.addFixture(t, "book", "book", bookItem("1", "Book Title"), library.Entry{Status: library.Active})
 	e.addFixture(t, "tv", "show", tvShow("1", "Show Title"), library.Entry{Status: library.Active})
 	e.addFixture(t, "tv", "show", tvShow("2", "Other Show"), library.Entry{Status: library.Dropped})
-	e.addEntry(t, anilist.AniList, "9", nil, store.Watching, 0, anilist.Title{Lang: "en", Text: "Anime Title"})
+	e.addEntry(t, anilist.AniList, "9", nil, library.Active, 0, anilist.Title{Lang: "en", Text: "Anime Title"})
 	b := e.get("/book").Body.String()
 	mustContain(t, b, "Book Title", "All (1)", "Reading (1)", "Dropped (0)", "Showing 1–1 of 1", `href="/book/books/1"`)
 	mustNotContain(t, b, "Show Title", "Other Show", "Anime Title")

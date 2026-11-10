@@ -6,8 +6,6 @@ import (
 	"time"
 
 	"github.com/allister/allister/internal/covers"
-	"github.com/allister/allister/internal/plugins/anime/anilist"
-	"github.com/allister/allister/internal/titles"
 )
 
 // templateFuncs is the one FuncMap shared by every page template set.
@@ -16,8 +14,6 @@ var templateFuncs = template.FuncMap{
 	"navMarker": func() template.HTML { return template.HTML(navMarker) },
 	// coverSrc maps a stored image value to a URL (see covers.Src).
 	"coverSrc": covers.Src,
-	// title resolves a display title for the preferred language.
-	"title": func(ts []anilist.Title, lang string) string { return titles.Resolve(ts, lang) },
 	// langLabel is the human label of a language tag.
 	"langLabel": langLabel,
 	// date formats a calendar day as 2006-01-02 ("" for nil).

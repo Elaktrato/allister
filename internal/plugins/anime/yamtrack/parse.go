@@ -16,7 +16,7 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/allister/allister/internal/store"
+	"github.com/allister/allister/internal/plugin"
 )
 
 const (
@@ -34,7 +34,7 @@ var ErrBadFormat = errors.New("not a Yamtrack CSV export")
 type Row struct {
 	// MALID is the Yamtrack media_id, the MyAnimeList id.
 	MALID, Title, ImageURL string
-	Status                 store.Status
+	Status                 plugin.StatusClass
 	// Rating is nil for unrated rows; otherwise 0 to 10.
 	Rating     *int
 	Progress   int
@@ -55,12 +55,12 @@ type SkippedRow struct {
 
 var requiredColumns = []string{"media_id", "media_type", "status", "title"}
 
-var statusMap = map[string]store.Status{
-	"completed":   store.Completed,
-	"planning":    store.PlanToWatch,
-	"dropped":     store.Dropped,
-	"paused":      store.Paused,
-	"in progress": store.Watching,
+var statusMap = map[string]plugin.StatusClass{
+	"completed":   plugin.Completed,
+	"planning":    plugin.Planned,
+	"dropped":     plugin.Dropped,
+	"paused":      plugin.Paused,
+	"in progress": plugin.Active,
 }
 
 // Parse reads a Yamtrack export. Only rows with media_type anime and source mal

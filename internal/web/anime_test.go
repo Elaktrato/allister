@@ -18,7 +18,6 @@ import (
 	"github.com/allister/allister/internal/library"
 	"github.com/allister/allister/internal/plugins/anime/anilist"
 	"github.com/allister/allister/internal/settings"
-	"github.com/allister/allister/internal/store"
 )
 
 type animeProvider struct {
@@ -68,7 +67,6 @@ type env struct {
 	h    http.Handler
 	fp   *animeProvider
 	jobs *fakeJobs
-	st   *store.Store
 	set  *settings.Store
 	now  *time.Time
 	// covers is the temp covers dir configured as Deps.CoversDir.
@@ -94,19 +92,20 @@ func newEnvWith(t *testing.T, mk func(es plugin.EnabledStore) *plugin.Registry) 
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { d.Close() })
-	e := &env{fp: sampleAnimeProvider(), jobs: &fakeJobs{}, st: store.New(d), set: settings.New(d),
+	e := &env{fp: sampleAnimeProvider(), jobs: &fakeJobs{}, set: settings.New(d),
 		covers: filepath.Join(t.TempDir(), "covers"), d: d}
 	now := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
 	e.now = &now
 	if mk != nil {
 		e.reg = mk(e.set)
+	} else {
+		e.reg = animeRegistry(t, e.set, e.fp)
 	}
+	e.lib = library.New(d, e.reg)
 	e.srv, e.h = newServer(Deps{
-		Settings: e.set, Store: e.st, Jobs: e.jobs, SyncJobs: testSyncJobs(), CoversDir: e.covers, DataDir: filepath.Dir(e.covers), Registry: e.reg,
-		Providers: map[anilist.Source]anilist.Provider{anilist.AniList: e.fp},
+		Settings: e.set, Jobs: e.jobs, SyncJobs: testSyncJobs(), CoversDir: e.covers, DataDir: filepath.Dir(e.covers),
+		Registry: e.reg, Library: e.lib,
 	}, func() time.Time { return *e.now })
-	e.reg = e.srv.deps.Registry
-	e.lib = e.srv.deps.Library
 	return e
 }
 
@@ -191,7 +190,7 @@ func mustNotContain(t *testing.T, body string, subs ...string) {
 
 func (e *env) saved(t *testing.T) int64 {
 	t.Helper()
-	id, err := e.st.SaveAnime(context.Background(), e.fp.anime)
+	id, err := saveAnime(context.Background(), e.lib, e.fp.anime)
 	if err != nil {
 		t.Fatal(err)
 	}

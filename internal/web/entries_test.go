@@ -149,7 +149,7 @@ func TestEditFixtureDialogPrefill(t *testing.T) {
 	mustContain(t, full, "<html", `id="dialog-slot"`, `name="progress.percent"`, "Showing 1–2 of 2")
 
 	// one allowed combination: no selector
-	e.addEntry(t, "anilist", "5", ip(12), "watching", 3)
+	e.addEntry(t, "anilist", "5", ip(12), library.Active, 3)
 	aid := e.savedItems(t, "anime", "anilist", "5")[0].ID
 	mustNotContain(t, e.do("GET", "/list/"+idStr(aid)+"/edit", nil, true).Body.String(), "progress_keys")
 }
@@ -495,7 +495,7 @@ func TestEditDialogShowsEveryAllowedTrackOnce(t *testing.T) {
 		t.Fatalf("%d muted inputs", n)
 	}
 	// a single-combination kind is unchanged: only its own input, nothing muted
-	e.addEntry(t, "anilist", "5", ip(12), "watching", 3)
+	e.addEntry(t, "anilist", "5", ip(12), library.Active, 3)
 	aid := e.savedItems(t, "anime", "anilist", "5")[0].ID
 	ab := e.do("GET", "/list/"+idStr(aid)+"/edit", nil, true).Body.String()
 	if got := dialogInputs(ab); !reflect.DeepEqual(got, map[string]int{"episode": 1}) {

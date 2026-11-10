@@ -11,8 +11,6 @@ import (
 
 	"github.com/allister/allister/internal/library"
 	"github.com/allister/allister/internal/plugin"
-	"github.com/allister/allister/internal/plugins/anime"
-	"github.com/allister/allister/internal/plugins/anime/anilist"
 )
 
 // animePluginID is the id of the built-in anime plugin.
@@ -161,38 +159,14 @@ func (s *server) mountPlugins(mux *http.ServeMux) {
 	mux.HandleFunc("GET /people/{id}", s.getPerson)
 }
 
-// defaultRegistry is the registry used when Deps.Registry is nil: the anime
-// plugin on top of the settings store. Its AniList source is the configured
-// AniList provider (never a network client of its own); without one every
-// source call is unavailable.
-func defaultRegistry(deps Deps) *plugin.Registry {
+// emptyRegistry is the registry used when Deps.Registry is nil: no plugin,
+// enabled flags in the settings store (when there is one).
+func emptyRegistry(deps Deps) *plugin.Registry {
 	var store plugin.EnabledStore = defaultEnabled{}
 	if deps.Settings != nil {
 		store = deps.Settings
 	}
-	reg := plugin.NewRegistry(store)
-	var p anilist.Provider = unavailableProvider{}
-	if ap := deps.Providers[anilist.AniList]; ap != nil {
-		p = ap
-	}
-	if err := reg.Register(anime.New(anime.Options{Provider: p})); err != nil {
-		log.Printf("plugins: %v", err)
-	}
-	return reg
-}
-
-// unavailableProvider answers every call with anilist.ErrUnavailable.
-type unavailableProvider struct{}
-
-func (unavailableProvider) Name() anilist.Source { return anilist.AniList }
-func (unavailableProvider) Search(context.Context, string) ([]anilist.SearchResult, error) {
-	return nil, errNoProvider
-}
-func (unavailableProvider) Anime(context.Context, string) (anilist.Anime, error) {
-	return anilist.Anime{}, errNoProvider
-}
-func (unavailableProvider) Cast(context.Context, string) ([]anilist.CastMember, error) {
-	return nil, errNoProvider
+	return plugin.NewRegistry(store)
 }
 
 // defaultEnabled keeps nothing and answers with the manifest default.

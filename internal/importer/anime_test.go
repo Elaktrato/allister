@@ -301,7 +301,7 @@ func (e *env) outcomes(id int64) map[string]string {
 	return m
 }
 
-// addAnime saves the anime with a list entry (the legacy store.AddToList).
+// addAnime saves the anime with a list entry.
 func (e *env) addAnime(a anilist.Anime, en library.Entry, opts ...library.SaveOption) int64 {
 	e.t.Helper()
 	id, err := e.lib.AddToList(context.Background(), animeID, animeID, animemap.ItemData(a), en, opts...)

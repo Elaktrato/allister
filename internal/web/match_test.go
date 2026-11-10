@@ -45,9 +45,10 @@ func newMatchEnv(t *testing.T) *matchEnv {
 	t.Helper()
 	e := newEnv(t)
 	mp := &matchProvider{animeProvider: e.fp, results: []anilist.SearchResult{e.fp.anime.SearchResult}}
+	reg := animeRegistry(t, e.set, mp)
 	e.srv, e.h = newServer(Deps{
-		Settings: e.set, Store: e.st, Jobs: e.jobs, SyncJobs: testSyncJobs(), CoversDir: e.covers,
-		Providers: map[anilist.Source]anilist.Provider{anilist.AniList: mp},
+		Settings: e.set, Jobs: e.jobs, SyncJobs: testSyncJobs(), CoversDir: e.covers,
+		Registry: reg, Library: library.New(e.d, reg),
 	}, func() time.Time { return *e.now })
 	e.reg, e.lib = e.srv.deps.Registry, e.srv.deps.Library
 	return &matchEnv{env: e, mp: mp}

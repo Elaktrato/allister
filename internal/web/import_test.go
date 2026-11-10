@@ -23,7 +23,6 @@ import (
 	"github.com/allister/allister/internal/plugins/anime"
 	"github.com/allister/allister/internal/plugins/anime/anilist"
 	"github.com/allister/allister/internal/settings"
-	"github.com/allister/allister/internal/store"
 )
 
 // fnResolver is an AniList-like provider for the anime plugin: its MAL id
@@ -63,7 +62,6 @@ type impEnv struct {
 	h    http.Handler
 	jobs *fakeJobs
 	im   *importer.Runner
-	st   *store.Store
 	lib  *library.Library
 	reg  *plugin.Registry
 	set  *settings.Store
@@ -92,7 +90,6 @@ func newImpEnvWith(t *testing.T, mk func(plugin.EnabledStore) *plugin.Registry) 
 	e := &impEnv{d: d, jobs: &fakeJobs{}, set: settings.New(d)}
 	e.reg = mk(e.set)
 	e.lib = library.New(d, e.reg)
-	e.st = store.New(d)
 	syncJobs := map[string]func(int64) (string, any){}
 	for _, m := range e.reg.Manifests() {
 		syncJobs[m.ID] = jobs.SyncJobFor(m.ID)
@@ -103,7 +100,7 @@ func newImpEnvWith(t *testing.T, mk func(plugin.EnabledStore) *plugin.Registry) 
 		SyncJobs: syncJobs,
 		Now:      func() time.Time { now = now.Add(time.Hour); return now },
 		Sleep:    func(ctx context.Context, _ time.Duration) error { return ctx.Err() }})
-	e.h = NewServer(Deps{Settings: e.set, Store: e.st, Jobs: e.jobs, Imports: e.im, Registry: e.reg, Library: e.lib, SyncJobs: syncJobs})
+	e.h = NewServer(Deps{Settings: e.set, Jobs: e.jobs, Imports: e.im, Registry: e.reg, Library: e.lib, SyncJobs: syncJobs})
 	return e
 }
 
@@ -216,11 +213,11 @@ func TestImportPageShowsProgress(t *testing.T) {
 		"unknown status", "Lost &lt;b&gt;Show&lt;/b&gt;", "data-ignored",
 		"Not found on AniList: added as manual entries with the data from Yamtrack CSV.")
 	mustNotContain(t, body, "<b>Show</b>", "hx-trigger", "Cancel import", "and 0 more")
-	s, err := e.st.FindByMALID(context.Background(), "2")
+	s, err := findByMAL(context.Background(), e.lib, "2")
 	if err != nil || s == nil {
 		t.Fatal(err)
 	}
-	mustContain(t, body, `href="/anime/manual/`+url.PathEscape(s.Anime.ID)+`"`)
+	mustContain(t, body, `href="/anime/manual/`+url.PathEscape(s.SourceID)+`"`)
 	// counts: total 3 (game ignored), imported 1, unmatched 1, skipped 1
 	for _, want := range []string{"Total", "Imported", "Unmatched", "Failed", "Skipped"} {
 		mustContain(t, body, want)
@@ -384,7 +381,7 @@ func TestImportCancelEndpoint(t *testing.T) {
 	mustNotContain(t, body, "hx-trigger", "Cancel import")
 	// the job started later does nothing
 	e.runJob(t)
-	if s, _ := e.st.FindByMALID(context.Background(), "1"); s != nil {
+	if s, _ := findByMAL(context.Background(), e.lib, "1"); s != nil {
 		t.Error("cancelled import saved a row")
 	}
 	// cancelling again, with nothing active, is harmless

@@ -2,13 +2,13 @@ package web
 
 import (
 	"context"
+	"github.com/allister/allister/internal/library"
 	"net/http"
 	"strings"
 	"testing"
 
 	"github.com/allister/allister/internal/plugin"
 	"github.com/allister/allister/internal/plugins/anime/anilist"
-	"github.com/allister/allister/internal/store"
 )
 
 func pperson(id, name, img, ext string) anilist.Person {
@@ -18,7 +18,7 @@ func pperson(id, name, img, ext string) anilist.Person {
 // withCast saves cast for animeID.
 func (e *env) withCast(t *testing.T, animeID int64, cast ...anilist.CastMember) {
 	t.Helper()
-	if err := e.st.SaveCast(context.Background(), animeID, cast); err != nil {
+	if err := saveCast(context.Background(), e.lib, animeID, cast); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -27,7 +27,7 @@ func (e *env) withCast(t *testing.T, animeID int64, cast ...anilist.CastMember) 
 func (e *env) personPath(t *testing.T, sourceID string) string {
 	t.Helper()
 	for animeID := int64(1); animeID <= 20; animeID++ {
-		people, err := e.st.AnimePeople(context.Background(), animeID)
+		people, err := e.lib.ItemPeople(context.Background(), animeID)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -45,8 +45,8 @@ func titleEn(s string) []anilist.Title { return []anilist.Title{{Lang: "en", Tex
 
 func TestPersonPageListsSavedAnimeOnly(t *testing.T) {
 	e := newEnv(t)
-	a := e.addEntry(t, anilist.AniList, "1", nil, store.Watching, 0, titleEn("Saved Show")...)
-	b := e.addEntry(t, anilist.AniList, "2", nil, store.Watching, 0, titleEn("Other Show")...)
+	a := e.addEntry(t, anilist.AniList, "1", nil, library.Active, 0, titleEn("Saved Show")...)
+	b := e.addEntry(t, anilist.AniList, "2", nil, library.Active, 0, titleEn("Other Show")...)
 	va := pperson("v1", "Voice One", "", "")
 	e.withCast(t, a, anilist.CastMember{Character: pperson("c1", "Hero", "", ""), Actor: &va})
 	e.withCast(t, b, anilist.CastMember{Character: pperson("c2", "Villain", "", ""), Actor: &anilist.Person{Source: anilist.AniList, ID: "v2", Name: "Voice Two"}})
@@ -61,7 +61,7 @@ func TestPersonPageListsSavedAnimeOnly(t *testing.T) {
 
 func TestVoiceActorShowsCharacter(t *testing.T) {
 	e := newEnv(t)
-	a := e.addEntry(t, anilist.AniList, "1", nil, store.Watching, 0, titleEn("Show")...)
+	a := e.addEntry(t, anilist.AniList, "1", nil, library.Active, 0, titleEn("Show")...)
 	va := pperson("v1", "Voice One", "", "")
 	e.withCast(t, a, anilist.CastMember{Character: pperson("c1", "Hero", "", ""), Actor: &va})
 	body := e.get(e.personPath(t, "v1")).Body.String()
@@ -70,7 +70,7 @@ func TestVoiceActorShowsCharacter(t *testing.T) {
 
 func TestCharacterPageShowsAnimeWithoutCharacterLine(t *testing.T) {
 	e := newEnv(t)
-	a := e.addEntry(t, anilist.AniList, "1", nil, store.Watching, 0, titleEn("Show")...)
+	a := e.addEntry(t, anilist.AniList, "1", nil, library.Active, 0, titleEn("Show")...)
 	va := pperson("v1", "Voice One", "", "")
 	e.withCast(t, a, anilist.CastMember{Character: pperson("c1", "Hero", "", ""), Actor: &va})
 	body := e.get(e.personPath(t, "c1")).Body.String()
@@ -80,7 +80,7 @@ func TestCharacterPageShowsAnimeWithoutCharacterLine(t *testing.T) {
 
 func TestActorTwoCharactersInOneAnime(t *testing.T) {
 	e := newEnv(t)
-	a := e.addEntry(t, anilist.AniList, "1", nil, store.Watching, 0, titleEn("Show")...)
+	a := e.addEntry(t, anilist.AniList, "1", nil, library.Active, 0, titleEn("Show")...)
 	va := pperson("v1", "Voice One", "", "")
 	e.withCast(t, a,
 		anilist.CastMember{Character: pperson("c1", "Hero", "", ""), Actor: &va},
@@ -94,8 +94,8 @@ func TestActorTwoCharactersInOneAnime(t *testing.T) {
 
 func TestActorAcrossTwoAnime(t *testing.T) {
 	e := newEnv(t)
-	a := e.addEntry(t, anilist.AniList, "11", nil, store.Watching, 0, titleEn("Alpha")...)
-	b := e.addEntry(t, anilist.AniList, "22", nil, store.Watching, 0, titleEn("Beta")...)
+	a := e.addEntry(t, anilist.AniList, "11", nil, library.Active, 0, titleEn("Alpha")...)
+	b := e.addEntry(t, anilist.AniList, "22", nil, library.Active, 0, titleEn("Beta")...)
 	va := pperson("v1", "Voice One", "", "")
 	e.withCast(t, a, anilist.CastMember{Character: pperson("c1", "Hero", "", ""), Actor: &va})
 	e.withCast(t, b, anilist.CastMember{Character: pperson("c2", "Other", "", ""), Actor: &va})
@@ -105,12 +105,12 @@ func TestActorAcrossTwoAnime(t *testing.T) {
 
 func TestRemovedAnimeDisappearsAndEmptyPageRenders(t *testing.T) {
 	e := newEnv(t)
-	a := e.addEntry(t, anilist.AniList, "1", nil, store.Watching, 0, titleEn("Gone Show")...)
+	a := e.addEntry(t, anilist.AniList, "1", nil, library.Active, 0, titleEn("Gone Show")...)
 	va := pperson("v1", "Voice One", "", "")
 	e.withCast(t, a, anilist.CastMember{Character: pperson("c1", "Hero", "", ""), Actor: &va})
 	path := e.personPath(t, "v1")
 	mustContain(t, e.get(path).Body.String(), "Gone Show")
-	if err := e.st.DeleteAnime(context.Background(), a); err != nil {
+	if err := e.lib.DeleteItem(context.Background(), a); err != nil {
 		t.Fatal(err)
 	}
 	rec := e.get(path)
@@ -123,7 +123,7 @@ func TestRemovedAnimeDisappearsAndEmptyPageRenders(t *testing.T) {
 
 func TestPersonWithNoCastRowsRendersFriendlyMessage(t *testing.T) {
 	e := newEnv(t)
-	a := e.addEntry(t, anilist.AniList, "1", nil, store.Watching, 0, titleEn("Show")...)
+	a := e.addEntry(t, anilist.AniList, "1", nil, library.Active, 0, titleEn("Show")...)
 	va := pperson("v1", "Lonely", "", "")
 	e.withCast(t, a, anilist.CastMember{Character: pperson("c1", "Hero", "", ""), Actor: &va})
 	path := e.personPath(t, "v1")
@@ -138,7 +138,7 @@ func TestPersonWithNoCastRowsRendersFriendlyMessage(t *testing.T) {
 
 func TestPersonPageHasExternalLink(t *testing.T) {
 	e := newEnv(t)
-	a := e.addEntry(t, anilist.AniList, "1", nil, store.Watching, 0, titleEn("Show")...)
+	a := e.addEntry(t, anilist.AniList, "1", nil, library.Active, 0, titleEn("Show")...)
 	va := pperson("v1", "Voice One", "", "https://anilist.co/staff/1")
 	e.withCast(t, a, anilist.CastMember{Character: pperson("c1", "Hero", "", ""), Actor: &va})
 	mustContain(t, e.get(e.personPath(t, "v1")).Body.String(), `href="https://anilist.co/staff/1"`, "View on AniList", `rel="noopener noreferrer"`)
@@ -147,7 +147,7 @@ func TestPersonPageHasExternalLink(t *testing.T) {
 func TestPersonPageNonHTTPSExternalURLNoLink(t *testing.T) {
 	for _, u := range []string{"javascript:alert(1)", "http://anilist.co/staff/1", "//evil.example/x", "data:text/html,x"} {
 		e := newEnv(t)
-		a := e.addEntry(t, anilist.AniList, "1", nil, store.Watching, 0, titleEn("Show")...)
+		a := e.addEntry(t, anilist.AniList, "1", nil, library.Active, 0, titleEn("Show")...)
 		va := pperson("v1", "Voice One", "", u)
 		e.withCast(t, a, anilist.CastMember{Character: pperson("c1", "Hero", "", ""), Actor: &va})
 		// the store cleans or drops such URLs before storing them; put the
@@ -175,7 +175,7 @@ func TestUnknownPerson404(t *testing.T) {
 
 func TestPersonPagePreferredTitleLanguage(t *testing.T) {
 	e := newEnv(t)
-	a := e.addEntry(t, anilist.AniList, "1", nil, store.Watching, 0,
+	a := e.addEntry(t, anilist.AniList, "1", nil, library.Active, 0,
 		anilist.Title{Lang: "en", Text: "English Name"}, anilist.Title{Lang: "ja", Text: "Japanese Name"})
 	va := pperson("v1", "Voice One", "", "")
 	e.withCast(t, a, anilist.CastMember{Character: pperson("c1", "Hero", "", ""), Actor: &va})
@@ -196,7 +196,7 @@ func TestPersonPagePreferredTitleLanguage(t *testing.T) {
 
 func TestPersonPageImages(t *testing.T) {
 	e := newEnv(t)
-	a := e.addEntry(t, anilist.AniList, "1", nil, store.Watching, 0, titleEn("Show")...)
+	a := e.addEntry(t, anilist.AniList, "1", nil, library.Active, 0, titleEn("Show")...)
 	va := pperson("v1", "Remote", "https://img.example/v.jpg", "")
 	e.withCast(t, a, anilist.CastMember{Character: pperson("c1", "Hero", "", ""), Actor: &va})
 	mustContain(t, e.get(e.personPath(t, "v1")).Body.String(), `src="https://img.example/v.jpg"`)
@@ -207,7 +207,7 @@ func TestPersonPageImages(t *testing.T) {
 	for _, c := range id {
 		n = n*10 + int64(c-'0')
 	}
-	if err := e.st.SetPersonImagePath(context.Background(), n, "abc def.jpg"); err != nil {
+	if err := e.lib.SetPersonImagePath(context.Background(), n, "abc def.jpg"); err != nil {
 		t.Fatal(err)
 	}
 	body := e.get(pid).Body.String()
@@ -215,7 +215,7 @@ func TestPersonPageImages(t *testing.T) {
 	mustNotContain(t, body, "img.example/v.jpg")
 
 	// no image: placeholder, no img tag for the photo
-	if err := e.st.SetPersonImagePath(context.Background(), n, ""); err != nil {
+	if err := e.lib.SetPersonImagePath(context.Background(), n, ""); err != nil {
 		t.Fatal(err)
 	}
 	mustNotContain(t, e.get(pid).Body.String(), "/covers/", "img.example/v.jpg")
@@ -224,7 +224,7 @@ func TestPersonPageImages(t *testing.T) {
 func TestPersonPageAnimeCover(t *testing.T) {
 	e := newEnv(t)
 	a := anilist.Anime{SearchResult: anilist.SearchResult{Source: anilist.AniList, ID: "1", Titles: titleEn("Show"), CoverURL: "https://img.example/c.jpg"}}
-	id, err := e.st.SaveAnime(context.Background(), a)
+	id, err := saveAnime(context.Background(), e.lib, a)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -235,7 +235,7 @@ func TestPersonPageAnimeCover(t *testing.T) {
 
 func TestPersonPageEscapesHostileText(t *testing.T) {
 	e := newEnv(t)
-	a := e.addEntry(t, anilist.AniList, "1", nil, store.Watching, 0, titleEn(`<script>alert("t")</script>`)...)
+	a := e.addEntry(t, anilist.AniList, "1", nil, library.Active, 0, titleEn(`<script>alert("t")</script>`)...)
 	va := pperson("v1", `<img src=x onerror=alert(1)>`, "", "")
 	e.withCast(t, a, anilist.CastMember{Character: pperson("c1", `<b>Hero</b>`, "", ""), Actor: &va})
 	body := e.get(e.personPath(t, "v1")).Body.String()
@@ -246,9 +246,9 @@ func TestPersonPageEscapesHostileText(t *testing.T) {
 func TestPersonPageOrderIsDeterministicByTitle(t *testing.T) {
 	e := newEnv(t)
 	// insertion order differs from title order; mixed case sorts case-insensitively
-	c := e.addEntry(t, anilist.AniList, "1", nil, store.Watching, 0, titleEn("charlie")...)
-	a := e.addEntry(t, anilist.AniList, "2", nil, store.Watching, 0, titleEn("Alpha")...)
-	b := e.addEntry(t, anilist.AniList, "3", nil, store.Watching, 0, titleEn("bravo")...)
+	c := e.addEntry(t, anilist.AniList, "1", nil, library.Active, 0, titleEn("charlie")...)
+	a := e.addEntry(t, anilist.AniList, "2", nil, library.Active, 0, titleEn("Alpha")...)
+	b := e.addEntry(t, anilist.AniList, "3", nil, library.Active, 0, titleEn("bravo")...)
 	va := pperson("v1", "Voice One", "", "")
 	for _, id := range []int64{c, a, b} {
 		e.withCast(t, id, anilist.CastMember{Character: pperson("c1", "Hero", "", ""), Actor: &va})
@@ -265,7 +265,7 @@ func TestPersonPageOrderIsDeterministicByTitle(t *testing.T) {
 
 func TestPersonPageIsFullPageForHTMX(t *testing.T) {
 	e := newEnv(t)
-	a := e.addEntry(t, anilist.AniList, "1", nil, store.Watching, 0, titleEn("Show")...)
+	a := e.addEntry(t, anilist.AniList, "1", nil, library.Active, 0, titleEn("Show")...)
 	va := pperson("v1", "Voice One", "", "")
 	e.withCast(t, a, anilist.CastMember{Character: pperson("c1", "Hero", "", ""), Actor: &va})
 	rec := e.do("GET", e.personPath(t, "v1"), nil, true)
@@ -317,7 +317,7 @@ func TestGenericPersonPageForFixturePlugin(t *testing.T) {
 func TestPersonPageOfDisabledPlugin404(t *testing.T) {
 	e := newFixtureEnv(t)
 	actor, _, _ := tvPeople(t, e.env)
-	a := e.addEntry(t, anilist.AniList, "77", nil, store.Watching, 0, titleEn("Anime Show")...)
+	a := e.addEntry(t, anilist.AniList, "77", nil, library.Active, 0, titleEn("Anime Show")...)
 	va := pperson("v1", "Voice One", "", "")
 	e.withCast(t, a, anilist.CastMember{Character: pperson("c9", "Hero", "", ""), Actor: &va})
 	animePerson := e.personPath(t, "v1")

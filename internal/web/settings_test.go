@@ -3,6 +3,7 @@ package web
 import (
 	"context"
 	"database/sql"
+	"github.com/allister/allister/internal/library"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -23,7 +24,8 @@ func newTestServer(t *testing.T) (http.Handler, *settings.Store, *sql.DB) {
 	}
 	t.Cleanup(func() { d.Close() })
 	st := settings.New(d)
-	return NewServer(Deps{Settings: st}), st, d
+	reg := animeRegistry(t, st, nil)
+	return NewServer(Deps{Settings: st, Registry: reg, Library: library.New(d, reg)}), st, d
 }
 
 func postForm(h http.Handler, path string, v url.Values) *httptest.ResponseRecorder {

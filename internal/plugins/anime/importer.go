@@ -9,7 +9,6 @@ import (
 
 	"github.com/allister/allister/internal/plugin"
 	"github.com/allister/allister/internal/plugins/anime/yamtrack"
-	"github.com/allister/allister/internal/store"
 )
 
 // yamtrackImporter adapts yamtrack.Parse to plugin.Importer. Text taken from
@@ -20,14 +19,6 @@ import (
 // keeps its own cause. The importer reads the WHOLE stream: capping the upload
 // size is the web layer's job (POST /settings/import caps it at 20 MiB).
 type yamtrackImporter struct{}
-
-var statusClass = map[store.Status]plugin.StatusClass{
-	store.Watching:    plugin.Active,
-	store.PlanToWatch: plugin.Planned,
-	store.Paused:      plugin.Paused,
-	store.Completed:   plugin.Completed,
-	store.Dropped:     plugin.Dropped,
-}
 
 func (yamtrackImporter) Parse(ctx context.Context, r io.Reader) (plugin.ParseResult, error) {
 	if err := ctx.Err(); err != nil {
@@ -52,7 +43,7 @@ func (yamtrackImporter) Parse(ctx context.Context, r io.Reader) (plugin.ParseRes
 			Kind:        KindAnime,
 			Title:       plugin.SingleLine(row.Title, maxTitleRunes),
 			ExternalIDs: map[string]string{"mal": row.MALID},
-			Status:      statusClass[row.Status],
+			Status:      row.Status,
 			Rating:      row.Rating,
 			Progress:    map[string]float64{"episode": float64(row.Progress)},
 			StartedOn:   row.StartedOn,

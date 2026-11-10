@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/allister/allister/internal/store"
+	"github.com/allister/allister/internal/plugin"
 )
 
 func sample(t *testing.T) []byte {
@@ -71,23 +71,23 @@ func TestParseMapsFields(t *testing.T) {
 		byID[r.MALID] = r
 	}
 	c := byID["1001"]
-	if c.Title != "Completed Sample" || c.ImageURL != "https://img.example/1001.jpg" || c.Status != store.Completed ||
+	if c.Title != "Completed Sample" || c.ImageURL != "https://img.example/1001.jpg" || c.Status != plugin.Completed ||
 		c.Rating == nil || *c.Rating != 8 || c.Progress != 12 || c.Comment != "Great ending" {
 		t.Errorf("completed row: %+v", c)
 	}
 	if c.StartedOn == nil || !c.StartedOn.Equal(*day(2024, 1, 5)) || c.FinishedOn == nil || !c.FinishedOn.Equal(*day(2024, 2, 10)) {
 		t.Errorf("dates: %v %v", c.StartedOn, c.FinishedOn)
 	}
-	if r := byID["1002"]; r.Status != store.PlanToWatch || r.Rating != nil || r.StartedOn != nil || r.FinishedOn != nil || r.Progress != 0 {
+	if r := byID["1002"]; r.Status != plugin.Planned || r.Rating != nil || r.StartedOn != nil || r.FinishedOn != nil || r.Progress != 0 {
 		t.Errorf("planning row: %+v", r)
 	}
-	if r := byID["1003"]; r.Status != store.Dropped || r.Rating != nil || r.StartedOn == nil || r.FinishedOn != nil {
+	if r := byID["1003"]; r.Status != plugin.Dropped || r.Rating != nil || r.StartedOn == nil || r.FinishedOn != nil {
 		t.Errorf("dropped row (0.0 score is unrated): %+v", r)
 	}
-	if r := byID["1004"]; r.Status != store.Paused || r.Rating == nil || *r.Rating != 6 {
+	if r := byID["1004"]; r.Status != plugin.Paused || r.Rating == nil || *r.Rating != 6 {
 		t.Errorf("paused row: %+v", r)
 	}
-	if r := byID["1005"]; r.Status != store.Watching || r.Progress != 2 {
+	if r := byID["1005"]; r.Status != plugin.Active || r.Progress != 2 {
 		t.Errorf("watching row: %+v", r)
 	}
 	if r := byID["1006"]; r.Title != `Title, with "quotes" and comma` || r.Comment != "line one\nline two" {
@@ -218,9 +218,9 @@ func hasNote(r Row, sub string) bool {
 }
 
 func TestParseStatusMapping(t *testing.T) {
-	cases := map[string]store.Status{
-		"Completed": store.Completed, "Planning": store.PlanToWatch, "Dropped": store.Dropped,
-		"Paused": store.Paused, "In progress": store.Watching, " in progress ": store.Watching,
+	cases := map[string]plugin.StatusClass{
+		"Completed": plugin.Completed, "Planning": plugin.Planned, "Dropped": plugin.Dropped,
+		"Paused": plugin.Paused, "In progress": plugin.Active, " in progress ": plugin.Active,
 	}
 	for in, want := range cases {
 		r, sk := parseOne(t, `1,mal,anime,T,,,"`+in+`",,,,0`)
