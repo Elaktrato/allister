@@ -16,7 +16,7 @@ import (
 	"github.com/allister/allister/internal/library"
 	"github.com/allister/allister/internal/plugin"
 	"github.com/allister/allister/internal/plugin/plugintest"
-	"github.com/allister/allister/internal/plugins/anime/anilist"
+	"github.com/allister/allister/internal/plugins/anilist"
 )
 
 // matchProvider is the sample provider with a counted search.
@@ -28,7 +28,7 @@ type matchProvider struct {
 	results   []anilist.SearchResult
 }
 
-func (m *matchProvider) Search(ctx context.Context, q string) ([]anilist.SearchResult, error) {
+func (m *matchProvider) Search(ctx context.Context, typ, q string) ([]anilist.SearchResult, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.searches = append(m.searches, q)

@@ -12,7 +12,7 @@ import (
 	"github.com/allister/allister/internal/library"
 	"github.com/allister/allister/internal/plugin"
 	"github.com/allister/allister/internal/plugin/plugintest"
-	"github.com/allister/allister/internal/plugins/anime/anilist"
+	"github.com/allister/allister/internal/plugins/anilist"
 )
 
 // mainNav is the sidebar navigation of a full page: the <nav aria-label="Main">

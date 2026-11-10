@@ -16,7 +16,7 @@ import (
 	"github.com/allister/allister/internal/db"
 	"github.com/allister/allister/internal/plugin"
 	"github.com/allister/allister/internal/plugin/plugintest"
-	"github.com/allister/allister/internal/plugins/anime/anilist"
+	"github.com/allister/allister/internal/plugins/anilist"
 	"github.com/allister/allister/internal/settings"
 )
 
@@ -28,14 +28,14 @@ type fakeProvider struct {
 }
 
 func (f *fakeProvider) Name() anilist.Source { return anilist.AniList }
-func (f *fakeProvider) Search(ctx context.Context, q string) ([]anilist.SearchResult, error) {
+func (f *fakeProvider) Search(ctx context.Context, typ, q string) ([]anilist.SearchResult, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.queries = append(f.queries, q)
 	return f.results, f.err
 }
-func (f *fakeProvider) Anime(ctx context.Context, id string) (anilist.Anime, error) {
-	return anilist.Anime{}, anilist.ErrNotFound
+func (f *fakeProvider) Media(ctx context.Context, typ, id string) (anilist.Media, error) {
+	return anilist.Media{}, anilist.ErrNotFound
 }
 func (f *fakeProvider) Cast(ctx context.Context, id string) ([]anilist.CastMember, error) {
 	return nil, anilist.ErrNotFound

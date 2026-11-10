@@ -20,13 +20,13 @@ import (
 	"github.com/allister/allister/internal/jobs"
 	"github.com/allister/allister/internal/plugin"
 	"github.com/allister/allister/internal/plugin/plugintest"
-	"github.com/allister/allister/internal/plugins/anime/anilist"
+	"github.com/allister/allister/internal/plugins/anilist"
 )
 
 // searchProvider is the sample provider with a working search.
 type searchProvider struct{ *animeProvider }
 
-func (s searchProvider) Search(ctx context.Context, q string) ([]anilist.SearchResult, error) {
+func (s searchProvider) Search(ctx context.Context, typ, q string) ([]anilist.SearchResult, error) {
 	return []anilist.SearchResult{s.anime.SearchResult}, nil
 }
 

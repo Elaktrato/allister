@@ -10,7 +10,7 @@ import (
 
 	"github.com/allister/allister/internal/plugin"
 	"github.com/allister/allister/internal/plugin/plugintest"
-	"github.com/allister/allister/internal/plugins/anime/anilist"
+	"github.com/allister/allister/internal/plugins/anilist"
 )
 
 const recsURL = "/tv/tvdata/1/recommendations"

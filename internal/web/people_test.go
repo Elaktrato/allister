@@ -8,7 +8,7 @@ import (
 	"testing"
 
 	"github.com/allister/allister/internal/plugin"
-	"github.com/allister/allister/internal/plugins/anime/anilist"
+	"github.com/allister/allister/internal/plugins/anilist"
 )
 
 func pperson(id, name, img, ext string) anilist.Person {
@@ -223,7 +223,7 @@ func TestPersonPageImages(t *testing.T) {
 
 func TestPersonPageAnimeCover(t *testing.T) {
 	e := newEnv(t)
-	a := anilist.Anime{SearchResult: anilist.SearchResult{Source: anilist.AniList, ID: "1", Titles: titleEn("Show"), CoverURL: "https://img.example/c.jpg"}}
+	a := anilist.Media{SearchResult: anilist.SearchResult{Source: anilist.AniList, ID: "1", Titles: titleEn("Show"), CoverURL: "https://img.example/c.jpg"}}
 	id, err := saveAnime(context.Background(), e.lib, a)
 	if err != nil {
 		t.Fatal(err)

@@ -13,7 +13,7 @@ import (
 	"github.com/allister/allister/internal/library"
 	"github.com/allister/allister/internal/plugin"
 	"github.com/allister/allister/internal/plugin/plugintest"
-	"github.com/allister/allister/internal/plugins/anime/anilist"
+	"github.com/allister/allister/internal/plugins/anilist"
 	"github.com/allister/allister/internal/settings"
 )
 
@@ -162,7 +162,7 @@ func TestOverviewManualFromDatabaseOnly(t *testing.T) {
 	if rec := e.get("/anime/manual/77"); rec.Code != 404 {
 		t.Fatalf("got %d", rec.Code)
 	}
-	m := anilist.Anime{SearchResult: anilist.SearchResult{Source: anilist.Manual, ID: "77", Type: "OVA",
+	m := anilist.Media{SearchResult: anilist.SearchResult{Source: anilist.Manual, ID: "77", Type: "OVA",
 		Titles: []anilist.Title{{Lang: "en", Text: "My Manual Show"}}}}
 	if _, err := saveAnime(context.Background(), e.lib, m, library.WithSyncState("done")); err != nil {
 		t.Fatal(err)

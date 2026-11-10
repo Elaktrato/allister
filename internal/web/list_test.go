@@ -15,7 +15,7 @@ import (
 	"github.com/allister/allister/internal/library"
 	"github.com/allister/allister/internal/plugin"
 	"github.com/allister/allister/internal/plugin/plugintest"
-	"github.com/allister/allister/internal/plugins/anime/anilist"
+	"github.com/allister/allister/internal/plugins/anilist"
 )
 
 // addEntry saves an anime with the given titles and a list entry.
@@ -24,7 +24,7 @@ func (e *env) addEntry(t *testing.T, src anilist.Source, sid string, eps *int, s
 	if len(titles) == 0 {
 		titles = []anilist.Title{{Lang: "en", Text: "Title " + sid}}
 	}
-	a := anilist.Anime{SearchResult: anilist.SearchResult{Source: src, ID: sid, Episodes: eps, Type: "TV", Titles: titles}}
+	a := anilist.Media{SearchResult: anilist.SearchResult{Source: src, ID: sid, Episodes: eps, Type: "TV", Titles: titles}}
 	id, err := saveAnime(context.Background(), e.lib, a)
 	if err != nil {
 		t.Fatal(err)
@@ -172,7 +172,7 @@ func TestListShowsUnmatchedBadge(t *testing.T) {
 	e := newEnv(t)
 	ctx := context.Background()
 	mk := func(src anilist.Source, sid, mal string) {
-		a := anilist.Anime{SearchResult: anilist.SearchResult{Source: src, ID: sid, Titles: []anilist.Title{{Lang: "en", Text: "T" + sid}}}, MALID: mal}
+		a := anilist.Media{SearchResult: anilist.SearchResult{Source: src, ID: sid, Titles: []anilist.Title{{Lang: "en", Text: "T" + sid}}}, MALID: mal}
 		id, err := saveAnime(ctx, e.lib, a, library.WithSyncState("done"))
 		if err != nil {
 			t.Fatal(err)

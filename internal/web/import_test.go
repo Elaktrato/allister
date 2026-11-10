@@ -20,24 +20,24 @@ import (
 	"github.com/allister/allister/internal/library"
 	"github.com/allister/allister/internal/plugin"
 	"github.com/allister/allister/internal/plugin/plugintest"
+	"github.com/allister/allister/internal/plugins/anilist"
 	"github.com/allister/allister/internal/plugins/anime"
-	"github.com/allister/allister/internal/plugins/anime/anilist"
 	"github.com/allister/allister/internal/settings"
 )
 
 // fnResolver is an AniList-like provider for the anime plugin: its MAL id
 // lookup is the function, everything else is unavailable.
-type fnResolver func(malID string) (anilist.Anime, error)
+type fnResolver func(malID string) (anilist.Media, error)
 
-func (f fnResolver) AnimeByMALID(_ context.Context, malID string) (anilist.Anime, error) {
+func (f fnResolver) MediaByMALID(_ context.Context, typ, malID string) (anilist.Media, error) {
 	return f(malID)
 }
 func (f fnResolver) Name() anilist.Source { return anilist.AniList }
-func (f fnResolver) Search(context.Context, string) ([]anilist.SearchResult, error) {
+func (f fnResolver) Search(context.Context, string, string) ([]anilist.SearchResult, error) {
 	return nil, anilist.ErrUnavailable
 }
-func (f fnResolver) Anime(context.Context, string) (anilist.Anime, error) {
-	return anilist.Anime{}, anilist.ErrUnavailable
+func (f fnResolver) Media(context.Context, string, string) (anilist.Media, error) {
+	return anilist.Media{}, anilist.ErrUnavailable
 }
 func (f fnResolver) Cast(context.Context, string) ([]anilist.CastMember, error) {
 	return nil, anilist.ErrUnavailable
@@ -199,14 +199,14 @@ func (e *impEnv) runJob(t *testing.T) {
 }
 
 func notFoundExcept(ok ...string) fnResolver {
-	return func(mal string) (anilist.Anime, error) {
+	return func(mal string) (anilist.Media, error) {
 		for _, o := range ok {
 			if o == mal {
-				return anilist.Anime{SearchResult: anilist.SearchResult{Source: anilist.AniList, ID: "9" + mal,
+				return anilist.Media{SearchResult: anilist.SearchResult{Source: anilist.AniList, ID: "9" + mal,
 					Titles: []anilist.Title{{Lang: "en", Text: "T" + mal}}}, MALID: mal}, nil
 			}
 		}
-		return anilist.Anime{}, anilist.ErrNotFound
+		return anilist.Media{}, anilist.ErrNotFound
 	}
 }
 

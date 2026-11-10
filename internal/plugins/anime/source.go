@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/allister/allister/internal/plugin"
-	"github.com/allister/allister/internal/plugins/anime/anilist"
+	"github.com/allister/allister/internal/plugins/anilist"
 )
 
 // Limits of the importer (the source's limits live in mapping.go).
@@ -26,7 +26,7 @@ type source struct {
 
 // malLookup is the optional MAL id lookup of a provider (anilist.Client).
 type malLookup interface {
-	AnimeByMALID(ctx context.Context, malID string) (anilist.Anime, error)
+	MediaByMALID(ctx context.Context, typ, malID string) (anilist.Media, error)
 }
 
 // scheduleReader is the optional airing-schedule lookup of a provider
@@ -88,7 +88,7 @@ func (s *source) Search(ctx context.Context, kind, q string) ([]plugin.ItemSumma
 	if err := checkKind(kind); err != nil {
 		return nil, err
 	}
-	res, err := s.c.Search(ctx, q)
+	res, err := s.c.Search(ctx, anilist.TypeAnime, q)
 	if err != nil {
 		return nil, mapErr(err)
 	}
@@ -106,7 +106,7 @@ func (s *source) Details(ctx context.Context, kind, id string) (plugin.ItemData,
 	if err := checkID(id); err != nil {
 		return plugin.ItemData{}, err
 	}
-	a, err := s.c.Anime(ctx, id)
+	a, err := s.c.Media(ctx, anilist.TypeAnime, id)
 	if err != nil {
 		return plugin.ItemData{}, mapErr(err)
 	}
@@ -122,7 +122,7 @@ func (s *source) Recommendations(ctx context.Context, kind, id string) ([]plugin
 	if err := checkID(id); err != nil {
 		return nil, err
 	}
-	a, err := s.c.Anime(ctx, id)
+	a, err := s.c.Media(ctx, anilist.TypeAnime, id)
 	if err != nil {
 		return nil, mapErr(err)
 	}
@@ -188,7 +188,7 @@ func (s *source) Lookup(ctx context.Context, kind, idType, value string) (plugin
 	if !ok {
 		return plugin.ItemData{}, errors.New("anime: the provider cannot look up MAL ids")
 	}
-	a, err := ml.AnimeByMALID(ctx, value)
+	a, err := ml.MediaByMALID(ctx, anilist.TypeAnime, value)
 	if err != nil {
 		return plugin.ItemData{}, mapErr(err)
 	}

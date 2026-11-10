@@ -16,13 +16,13 @@ import (
 	"unicode"
 
 	"github.com/allister/allister/internal/plugin"
-	"github.com/allister/allister/internal/plugins/anime/anilist"
+	"github.com/allister/allister/internal/plugins/anilist"
 )
 
 // accountListReader is the optional account-list lookup of a provider
 // (anilist.Client); the manifest declares the account importer when it exists.
 type accountListReader interface {
-	MediaList(ctx context.Context, userName string) ([]anilist.AccountEntry, error)
+	MediaList(ctx context.Context, typ, userName string) ([]anilist.AccountEntry, error)
 }
 
 // accountStatus maps AniList list statuses onto the core classes.
@@ -60,7 +60,7 @@ func (ai accountImporter) ImportAccount(ctx context.Context, account string) (pl
 	if !ok {
 		return plugin.ParseResult{}, fmt.Errorf("anime: the provider cannot list accounts: %w", plugin.ErrUnavailable)
 	}
-	entries, err := r.MediaList(ctx, account)
+	entries, err := r.MediaList(ctx, anilist.TypeAnime, account)
 	if err != nil {
 		return plugin.ParseResult{}, mapErr(err)
 	}

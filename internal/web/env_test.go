@@ -18,23 +18,23 @@ import (
 	"github.com/allister/allister/internal/importer"
 	"github.com/allister/allister/internal/jobs"
 	"github.com/allister/allister/internal/library"
-	"github.com/allister/allister/internal/plugins/anime/anilist"
+	"github.com/allister/allister/internal/plugins/anilist"
 	"github.com/allister/allister/internal/settings"
 )
 
 type animeProvider struct {
 	mu                   sync.Mutex
-	anime                anilist.Anime
+	anime                anilist.Media
 	cast                 []anilist.CastMember
 	animeErr, castErr    error
 	animeCalls, castCall int
 }
 
 func (f *animeProvider) Name() anilist.Source { return anilist.AniList }
-func (f *animeProvider) Search(ctx context.Context, q string) ([]anilist.SearchResult, error) {
+func (f *animeProvider) Search(ctx context.Context, typ, q string) ([]anilist.SearchResult, error) {
 	return nil, nil
 }
-func (f *animeProvider) Anime(ctx context.Context, id string) (anilist.Anime, error) {
+func (f *animeProvider) Media(ctx context.Context, typ, id string) (anilist.Media, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.animeCalls++
@@ -133,7 +133,7 @@ func sampleAnimeProvider() *animeProvider {
 	start := time.Date(2006, 10, 4, 0, 0, 0, 0, time.UTC)
 	end := time.Date(2007, 6, 27, 0, 0, 0, 0, time.UTC)
 	return &animeProvider{
-		anime: anilist.Anime{
+		anime: anilist.Media{
 			SearchResult: anilist.SearchResult{
 				Source: anilist.AniList, ID: "1535",
 				Titles: []anilist.Title{{Lang: "ja", Text: "デスノート"}, {Lang: "ja-latn", Text: "Death Note"}, {Lang: "en", Text: "Death Note EN"}, {Lang: "de", Text: "Todesnotiz"}},

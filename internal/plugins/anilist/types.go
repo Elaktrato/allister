@@ -90,23 +90,33 @@ type AccountEntry struct {
 	} `json:"media"`
 }
 
-// Anime is the full detail of an anime.
-type Anime struct {
+// Media is the full detail of one media item (an anime or a manga).
+type Media struct {
 	SearchResult
 	StartDate, EndDate          *time.Time
 	SourceMaterial, ExternalURL string
 	MALID                       string
+	Chapters, Volumes           *int
+	Format, Status              string
+	Staff                       []StaffMember
 	Relations                   []Relation
 	Recommendations             []Recommendation
 	Genres                      []string
 	Tags                        []Tag
 }
 
+// StaffMember is one staff credit of a media item.
+type StaffMember struct {
+	Role          string
+	Name          string
+	ImageURL, URL string
+}
+
 // Provider is a metadata source.
 type Provider interface {
 	Name() Source
-	Search(ctx context.Context, q string) ([]SearchResult, error)
-	Anime(ctx context.Context, id string) (Anime, error)
+	Search(ctx context.Context, typ, q string) ([]SearchResult, error)
+	Media(ctx context.Context, typ, id string) (Media, error)
 	Cast(ctx context.Context, id string) ([]CastMember, error)
 }
 

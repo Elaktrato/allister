@@ -5,7 +5,7 @@ import (
 	"slices"
 
 	"github.com/allister/allister/internal/plugin"
-	"github.com/allister/allister/internal/plugins/anime/anilist"
+	"github.com/allister/allister/internal/plugins/anilist"
 )
 
 // This file is the ONE mapping from the AniList client's types (package
@@ -116,9 +116,9 @@ func (c cleaner) summary(r anilist.SearchResult) plugin.ItemSummary {
 // "source" relation points at a manga, every other one at an anime;
 // relations without an id or a kind are dropped). Recommendations are not
 // part of it (see Recommendations).
-func ItemData(a anilist.Anime) plugin.ItemData { return fromSource.itemData(a) }
+func ItemData(a anilist.Media) plugin.ItemData { return fromSource.itemData(a) }
 
-func (c cleaner) itemData(a anilist.Anime) plugin.ItemData {
+func (c cleaner) itemData(a anilist.Media) plugin.ItemData {
 	d := plugin.ItemData{
 		ItemSummary: c.summary(a.SearchResult),
 		ExternalURL: c.url(a.ExternalURL),

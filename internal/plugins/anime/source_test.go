@@ -17,12 +17,12 @@ import (
 	"github.com/allister/allister/internal/library"
 	"github.com/allister/allister/internal/plugin"
 	"github.com/allister/allister/internal/plugin/plugintest"
-	"github.com/allister/allister/internal/plugins/anime/anilist"
+	"github.com/allister/allister/internal/plugins/anilist"
 )
 
 func fixture(t *testing.T, name string) []byte {
 	t.Helper()
-	b, err := os.ReadFile(filepath.Join("anilist", "testdata", name))
+	b, err := os.ReadFile(filepath.Join("..", "anilist", "testdata", name))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -398,7 +398,7 @@ func TestSourceErrorMapping(t *testing.T) {
 }
 
 func fixtureOrEmpty(name string) []byte {
-	b, err := os.ReadFile(filepath.Join("anilist", "testdata", name))
+	b, err := os.ReadFile(filepath.Join("..", "anilist", "testdata", name))
 	if err != nil {
 		return nil
 	}
@@ -662,22 +662,22 @@ func TestSourceRejectsNonNumericIDs(t *testing.T) {
 }
 
 type stubProvider struct {
-	anime anilist.Anime
+	anime anilist.Media
 	calls int
 }
 
 func (p *stubProvider) Name() anilist.Source { return anilist.AniList }
-func (p *stubProvider) Search(context.Context, string) ([]anilist.SearchResult, error) {
+func (p *stubProvider) Search(context.Context, string, string) ([]anilist.SearchResult, error) {
 	return nil, nil
 }
-func (p *stubProvider) Anime(context.Context, string) (anilist.Anime, error) {
+func (p *stubProvider) Media(context.Context, string, string) (anilist.Media, error) {
 	p.calls++
 	return p.anime, nil
 }
 func (p *stubProvider) Cast(context.Context, string) ([]anilist.CastMember, error) { return nil, nil }
 
 func TestOptionsProviderReplacesTheClient(t *testing.T) {
-	sp := &stubProvider{anime: anilist.Anime{SearchResult: anilist.SearchResult{ID: "5", Titles: []anilist.Title{{Lang: "en", Text: "Stub"}}}}}
+	sp := &stubProvider{anime: anilist.Media{SearchResult: anilist.SearchResult{ID: "5", Titles: []anilist.Title{{Lang: "en", Text: "Stub"}}}}}
 	s := New(Options{Provider: sp}).Source("anilist")
 	d, err := s.Details(ctx(), "anime", "5")
 	if err != nil || sp.calls != 1 || d.Titles[0].Text != "Stub" {

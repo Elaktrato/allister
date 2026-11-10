@@ -59,7 +59,7 @@ func TestName(t *testing.T) {
 func TestSearchMapsResults(t *testing.T) {
 	var body string
 	c := serve(t, 200, fixture(t, "search.json"), &body)
-	res, err := c.Search(context.Background(), "  Sousou no Frieren ")
+	res, err := c.Search(context.Background(), TypeAnime, "  Sousou no Frieren ")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -101,7 +101,7 @@ func TestSearchEmptyQueryMakesNoRequest(t *testing.T) {
 	var n int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { atomic.AddInt32(&n, 1) }))
 	defer srv.Close()
-	res, err := New(srv.URL, nil).Search(context.Background(), "  \t")
+	res, err := New(srv.URL, nil).Search(context.Background(), TypeAnime, "  \t")
 	if err != nil || res == nil || len(res) != 0 {
 		t.Fatalf("res=%v err=%v, want empty non-nil slice", res, err)
 	}
@@ -113,7 +113,7 @@ func TestSearchEmptyQueryMakesNoRequest(t *testing.T) {
 func TestSearchCapsAtTwenty(t *testing.T) {
 	var body string
 	c := serve(t, 200, []byte(`{"data":{"Page":{"media":[]}}}`), &body)
-	if _, err := c.Search(context.Background(), "x"); err != nil {
+	if _, err := c.Search(context.Background(), TypeAnime, "x"); err != nil {
 		t.Fatal(err)
 	}
 	var req struct {
@@ -131,7 +131,7 @@ func TestSearchCapsAtTwenty(t *testing.T) {
 		items = append(items, `{"id":1,"title":{"romaji":"t"}}`)
 	}
 	c = serve(t, 200, []byte(`{"data":{"Page":{"media":[`+strings.Join(items, ",")+`]}}}`), nil)
-	res, err := c.Search(context.Background(), "x")
+	res, err := c.Search(context.Background(), TypeAnime, "x")
 	if err != nil || len(res) != 20 {
 		t.Fatalf("len=%d err=%v, want 20", len(res), err)
 	}
@@ -140,21 +140,21 @@ func TestSearchCapsAtTwenty(t *testing.T) {
 func TestOversizedResponseMapsUnavailable(t *testing.T) {
 	c := serve(t, 200, []byte(`{"data":{"Page":{"media":[]}}}`+strings.Repeat(" ", 100)), nil)
 	c.maxBody = 64
-	if _, err := c.Search(context.Background(), "x"); !errors.Is(err, ErrUnavailable) {
+	if _, err := c.Search(context.Background(), TypeAnime, "x"); !errors.Is(err, ErrUnavailable) {
 		t.Fatalf("err = %v", err)
 	}
 	// a body of exactly the limit is still accepted
 	body := `{"data":{"Page":{"media":[]}}}`
 	c = serve(t, 200, []byte(body), nil)
 	c.maxBody = int64(len(body))
-	if _, err := c.Search(context.Background(), "x"); err != nil {
+	if _, err := c.Search(context.Background(), TypeAnime, "x"); err != nil {
 		t.Fatalf("body at limit: %v", err)
 	}
 }
 
 func TestAnimeMapsTitlesRelationsRecsMALID(t *testing.T) {
 	c := serve(t, 200, fixture(t, "anime.json"), nil)
-	a, err := c.Anime(context.Background(), "154587")
+	a, err := c.Media(context.Background(), TypeAnime, "154587")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -210,7 +210,7 @@ func TestAnimeRelationsFilterAndRecsSkipNull(t *testing.T) {
 	  {"relationType":"SIDE_STORY","node":{"id":11,"type":"MANGA","format":"MANGA","title":{"romaji":"M"}}},
 	  {"relationType":"PREQUEL","node":{"id":12,"type":"ANIME","format":"TV","title":{"romaji":"P"}}}]},
 	 "recommendations":{"nodes":[{"mediaRecommendation":null},{"mediaRecommendation":{"id":5,"title":{"romaji":"R"},"coverImage":{"large":"u"}}}]}}}}`
-	a, err := serve(t, 200, []byte(body), nil).Anime(context.Background(), "1")
+	a, err := serve(t, 200, []byte(body), nil).Media(context.Background(), TypeAnime, "1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -261,7 +261,7 @@ func TestCastActorNilWhenNone(t *testing.T) {
 
 func TestRateLimitedMapsError(t *testing.T) {
 	c := serve(t, 429, []byte(`{"errors":[{"message":"Too Many Requests.","status":429}]}`), nil)
-	_, err := c.Search(context.Background(), "x")
+	_, err := c.Search(context.Background(), TypeAnime, "x")
 	if !errors.Is(err, ErrRateLimited) {
 		t.Fatalf("err = %v", err)
 	}
@@ -269,7 +269,7 @@ func TestRateLimitedMapsError(t *testing.T) {
 
 func TestServerErrorMapsUnavailable(t *testing.T) {
 	c := serve(t, 500, []byte(`oops`), nil)
-	_, err := c.Anime(context.Background(), "1")
+	_, err := c.Media(context.Background(), TypeAnime, "1")
 	if !errors.Is(err, ErrUnavailable) {
 		t.Fatalf("err = %v", err)
 	}
@@ -278,7 +278,7 @@ func TestServerErrorMapsUnavailable(t *testing.T) {
 func TestNotFoundMapsErrNotFound(t *testing.T) {
 	// GraphQL-level "Not Found." (AniList answers this with HTTP 404)
 	c := serve(t, 404, fixture(t, "notfound.json"), nil)
-	if _, err := c.Anime(context.Background(), "99999999"); !errors.Is(err, ErrNotFound) {
+	if _, err := c.Media(context.Background(), TypeAnime, "99999999"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("404: err = %v", err)
 	}
 	c = serve(t, 200, fixture(t, "notfound.json"), nil)
@@ -315,7 +315,7 @@ func TestErrorClassification(t *testing.T) {
 		{"not found", 404, `{}`, ErrNotFound},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			_, err := serve(t, c.status, []byte(c.body), nil).Search(context.Background(), "x")
+			_, err := serve(t, c.status, []byte(c.body), nil).Search(context.Background(), TypeAnime, "x")
 			for _, s := range sentinels {
 				if got := errors.Is(err, s); got != (s == c.want) {
 					t.Errorf("err = %v: errors.Is(%v) = %v", err, s, got)
@@ -329,7 +329,7 @@ func TestNetworkErrorMapsUnavailable(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
 	url := srv.URL
 	srv.Close()
-	if _, err := New(url, nil).Search(context.Background(), "x"); !errors.Is(err, ErrUnavailable) {
+	if _, err := New(url, nil).Search(context.Background(), TypeAnime, "x"); !errors.Is(err, ErrUnavailable) {
 		t.Fatalf("err = %v", err)
 	}
 }
@@ -338,7 +338,7 @@ func TestContextCancelled(t *testing.T) {
 	c := serve(t, 200, fixture(t, "search.json"), nil)
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if _, err := c.Search(ctx, "x"); !errors.Is(err, context.Canceled) {
+	if _, err := c.Search(ctx, TypeAnime, "x"); !errors.Is(err, context.Canceled) {
 		t.Fatalf("err = %v, want context.Canceled", err)
 	}
 }
@@ -346,7 +346,7 @@ func TestContextCancelled(t *testing.T) {
 func TestAnimeByMALIDMapsAnime(t *testing.T) {
 	var body string
 	c := serve(t, 200, fixture(t, "anime_mal.json"), &body)
-	a, err := c.AnimeByMALID(context.Background(), " 52991 ")
+	a, err := c.MediaByMALID(context.Background(), TypeAnime, " 52991 ")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -369,17 +369,17 @@ func TestAnimeByMALIDMapsAnime(t *testing.T) {
 
 func TestAnimeByMALIDNotFound(t *testing.T) {
 	c := serve(t, 404, fixture(t, "notfound_mal.json"), nil)
-	if _, err := c.AnimeByMALID(context.Background(), "99999999"); !errors.Is(err, ErrNotFound) {
+	if _, err := c.MediaByMALID(context.Background(), TypeAnime, "99999999"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("err = %v", err)
 	}
 	// A null Media without errors is not found either.
 	c = serve(t, 200, []byte(`{"data":{"Media":null}}`), nil)
-	if _, err := c.AnimeByMALID(context.Background(), "5"); !errors.Is(err, ErrNotFound) {
+	if _, err := c.MediaByMALID(context.Background(), TypeAnime, "5"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("null media: err = %v", err)
 	}
 	// A Media without an id is not found.
 	c = serve(t, 200, []byte(`{"data":{"Media":{"id":0}}}`), nil)
-	if _, err := c.AnimeByMALID(context.Background(), "5"); !errors.Is(err, ErrNotFound) {
+	if _, err := c.MediaByMALID(context.Background(), TypeAnime, "5"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("no id: err = %v", err)
 	}
 }
@@ -392,7 +392,7 @@ func TestAnimeByMALIDRejectsNonDigitsWithoutRequest(t *testing.T) {
 	defer srv.Close()
 	c := New(srv.URL, srv.Client())
 	for _, id := range []string{"", "abc", "12a", "-5", "1.5", "0", "99999999999999999999", "１２"} {
-		if _, err := c.AnimeByMALID(context.Background(), id); !errors.Is(err, ErrNotFound) {
+		if _, err := c.MediaByMALID(context.Background(), TypeAnime, id); !errors.Is(err, ErrNotFound) {
 			t.Errorf("%q: err = %v", id, err)
 		}
 	}
@@ -404,7 +404,7 @@ func TestAnimeByMALIDRejectsNonDigitsWithoutRequest(t *testing.T) {
 func TestAnimeMapsGenresAndTags(t *testing.T) {
 	var body string
 	c := serve(t, 200, fixture(t, "anime.json"), &body)
-	a, err := c.Anime(context.Background(), "154587")
+	a, err := c.Media(context.Background(), TypeAnime, "154587")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -445,7 +445,7 @@ func TestAnimeGenresAndTagsAreCleaned(t *testing.T) {
 	 "genres":[" Action ","","  ","Drama"],
 	 "tags":[{"name":" Magic ","rank":50,"isMediaSpoiler":false},{"name":"","rank":10},{"name":"  "},
 	  {"name":"Zero","rank":0},{"name":"Full","rank":100},{"name":"Over","rank":101},{"name":"Neg","rank":-1},{"name":"NoRank","rank":null,"isMediaSpoiler":true}]}}}`
-	a, err := serve(t, 200, []byte(body), nil).Anime(context.Background(), "1")
+	a, err := serve(t, 200, []byte(body), nil).Media(context.Background(), TypeAnime, "1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -490,10 +490,10 @@ func TestAniListRequestsMediumForPeopleAndLargeForCovers(t *testing.T) {
 		t.Errorf("cast images not mapped from medium: %+v", cast)
 	}
 	for name, call := range map[string]func(c *Client) error{
-		"anime": func(c *Client) error { _, err := c.Anime(context.Background(), "154587"); return err },
-		"mal":   func(c *Client) error { _, err := c.AnimeByMALID(context.Background(), "52991"); return err },
+		"anime": func(c *Client) error { _, err := c.Media(context.Background(), TypeAnime, "154587"); return err },
+		"mal":   func(c *Client) error { _, err := c.MediaByMALID(context.Background(), TypeAnime, "52991"); return err },
 		"search": func(c *Client) error {
-			_, err := c.Search(context.Background(), "frieren")
+			_, err := c.Search(context.Background(), TypeAnime, "frieren")
 			return err
 		},
 	} {
@@ -502,7 +502,7 @@ func TestAniListRequestsMediumForPeopleAndLargeForCovers(t *testing.T) {
 		if err := call(serve(t, 200, fixture(t, fx), &body)); err != nil {
 			t.Fatalf("%s: %v", name, err)
 		}
-		if !strings.Contains(body, "coverImage { large }") || strings.Contains(body, "medium") {
+		if !strings.Contains(body, "coverImage { large }") || strings.Contains(body, "coverImage { medium }") {
 			t.Errorf("%s query must request coverImage { large }: %s", name, body)
 		}
 	}

@@ -83,7 +83,7 @@ func TestAccountImporterUnknownUser(t *testing.T) {
 // TestMALXMLImporter: the export's rows map to entries; unusable rows are
 // reported, not imported.
 func TestMALXMLImporter(t *testing.T) {
-	f, err := os.Open(filepath.Join("anilist", "testdata", "account_mal.xml"))
+	f, err := os.Open(filepath.Join("..", "anilist", "testdata", "account_mal.xml"))
 	if err != nil {
 		t.Fatal(err)
 	}

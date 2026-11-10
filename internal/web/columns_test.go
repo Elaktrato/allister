@@ -12,7 +12,7 @@ import (
 	"github.com/allister/allister/internal/library"
 	"github.com/allister/allister/internal/plugin"
 	"github.com/allister/allister/internal/plugin/plugintest"
-	"github.com/allister/allister/internal/plugins/anime/anilist"
+	"github.com/allister/allister/internal/plugins/anilist"
 )
 
 var thLabelRe = regexp.MustCompile(`(?s)<th scope="col"[^>]*>(.*?)</th>`)
@@ -220,7 +220,7 @@ func TestColumnSettingsForm(t *testing.T) {
 // sort control still offers every sort key.
 func TestPostColumnsChangesTheList(t *testing.T) {
 	e := newEnv(t)
-	a := anilist.Anime{SearchResult: anilist.SearchResult{Source: anilist.AniList, ID: "1", Episodes: ip(12), Type: "TV",
+	a := anilist.Media{SearchResult: anilist.SearchResult{Source: anilist.AniList, ID: "1", Episodes: ip(12), Type: "TV",
 		Titles: titleEn("Title 1"), Studio: "Madhouse"}}
 	id, err := addToList(context.Background(), e.lib, a, listEntry{Status: library.Active, Progress: 3})
 	if err != nil {

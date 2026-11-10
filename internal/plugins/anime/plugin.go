@@ -8,7 +8,7 @@ import (
 	"net/http"
 
 	"github.com/allister/allister/internal/plugin"
-	"github.com/allister/allister/internal/plugins/anime/anilist"
+	"github.com/allister/allister/internal/plugins/anilist"
 )
 
 // Options configures the plugin. The zero value talks to the real AniList.
@@ -19,7 +19,7 @@ type Options struct {
 	HTTP *http.Client
 	// Provider, when set, replaces the AniList client (AniListURL and HTTP
 	// are then ignored): tests inject a fake this way. Lookup needs a
-	// provider with an AnimeByMALID method.
+	// provider with a MediaByMALID method.
 	Provider anilist.Provider
 }
 

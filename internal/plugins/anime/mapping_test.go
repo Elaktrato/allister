@@ -3,11 +3,11 @@ package anime
 import (
 	"testing"
 
-	"github.com/allister/allister/internal/plugins/anime/anilist"
+	"github.com/allister/allister/internal/plugins/anilist"
 )
 
 func TestItemDataRelationsAndSource(t *testing.T) {
-	a := anilist.Anime{SearchResult: anilist.SearchResult{Source: anilist.Manual, ID: "m1", Titles: []anilist.Title{{Lang: "en", Text: "T"}}}}
+	a := anilist.Media{SearchResult: anilist.SearchResult{Source: anilist.Manual, ID: "m1", Titles: []anilist.Title{{Lang: "en", Text: "T"}}}}
 	a.Relations = []anilist.Relation{
 		{Kind: "source", Source: anilist.AniList, ID: "1"},
 		{Kind: "", Source: anilist.AniList, ID: "2"},       // no kind: dropped
@@ -26,7 +26,7 @@ func TestItemDataRelationsAndSource(t *testing.T) {
 
 func TestItemDataGuardsFields(t *testing.T) {
 	zero, big, old := 0, 20000, 1800
-	a := anilist.Anime{SearchResult: anilist.SearchResult{ID: "1", Type: "tv", Episodes: &zero, Year: &old}}
+	a := anilist.Media{SearchResult: anilist.SearchResult{ID: "1", Type: "tv", Episodes: &zero, Year: &old}}
 	if f := ItemData(a).Fields; len(f) != 0 {
 		t.Fatalf("out of range values kept: %+v", f)
 	}
@@ -53,7 +53,7 @@ func TestCreditsDropUnusablePeople(t *testing.T) {
 
 func TestItemDataCleansSourceText(t *testing.T) {
 	zero := 0
-	a := anilist.Anime{SearchResult: anilist.SearchResult{Source: anilist.Manual, ID: "m", Type: "tv", Episodes: &zero,
+	a := anilist.Media{SearchResult: anilist.SearchResult{Source: anilist.Manual, ID: "m", Type: "tv", Episodes: &zero,
 		Titles: []anilist.Title{{Lang: "en", Text: "My  Show"}}, Synopsis: "a\r\n\r\nb", CoverURL: "upload.png"}}
 	s := ItemData(a)
 	if s.Titles[0].Text != "My Show" || s.Fields["synopsis"].Text != "a\n\nb" || len(s.Fields) != 1 || s.CoverURL != "" {
@@ -62,7 +62,7 @@ func TestItemDataCleansSourceText(t *testing.T) {
 }
 
 func TestItemDataRelationURLs(t *testing.T) {
-	a := anilist.Anime{SearchResult: anilist.SearchResult{Source: anilist.AniList, ID: "1"}}
+	a := anilist.Media{SearchResult: anilist.SearchResult{Source: anilist.AniList, ID: "1"}}
 	a.Relations = []anilist.Relation{
 		{Kind: "source", Source: anilist.AniList, ID: "30021"},
 		{Kind: "sequel", Source: anilist.AniList, ID: "2000"},

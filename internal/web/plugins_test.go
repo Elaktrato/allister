@@ -14,8 +14,8 @@ import (
 	"github.com/allister/allister/internal/jobs"
 	"github.com/allister/allister/internal/plugin"
 	"github.com/allister/allister/internal/plugin/plugintest"
+	"github.com/allister/allister/internal/plugins/anilist"
 	"github.com/allister/allister/internal/plugins/anime"
-	"github.com/allister/allister/internal/plugins/anime/anilist"
 )
 
 // withPlugins builds a registry with the real anime plugin followed by extra.
@@ -374,7 +374,7 @@ func TestAllExistingAnimeURLsStillWork(t *testing.T) {
 	e := newEnv(t)
 	e.saved(t)
 	id := e.addEntry(t, anilist.AniList, "1", nil, library.Active, 0)
-	man := anilist.Anime{SearchResult: anilist.SearchResult{Source: anilist.Manual, ID: "man1", Titles: []anilist.Title{{Lang: "en", Text: "M"}}}}
+	man := anilist.Media{SearchResult: anilist.SearchResult{Source: anilist.Manual, ID: "man1", Titles: []anilist.Title{{Lang: "en", Text: "M"}}}}
 	if _, err := addToList(context.Background(), e.lib, man, listEntry{Status: library.Active}); err != nil {
 		t.Fatal(err)
 	}
