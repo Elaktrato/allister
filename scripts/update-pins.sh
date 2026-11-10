@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Refresh the pins recorded in PINS.md: the digest of every pinned image
-# (name:tag@sha256:...) in the Dockerfile, scripts/go.sh and README.md, and the
+# (name:tag@sha256:...) in the Dockerfile, scripts/go.sh, scripts/ci.sh and README.md, and the
 # per-architecture sha256 of the Tailwind CLI release named by the Dockerfile's
 # TAILWIND_VERSION. It also checks the vendored htmx file, icon font and
 # bundled app fonts against their .sha256 files.
@@ -46,7 +46,7 @@ for tool in docker curl sha256sum awk diff grep sed stat mktemp; do
 	}
 done
 
-files=(Dockerfile scripts/go.sh README.md PINS.md)
+files=(Dockerfile scripts/go.sh scripts/ci.sh README.md PINS.md)
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 for f in "${files[@]}"; do
@@ -72,7 +72,7 @@ replace() {
 hex64='^[0-9a-f]{64}$'
 
 # --- images: resolve each name:tag to its current (multi-arch index) digest
-refs=$(grep -ohE '[a-z0-9][a-z0-9._/:-]*:[A-Za-z0-9._-]+@sha256:[0-9a-f]{64}' Dockerfile scripts/go.sh README.md | sort -u)
+refs=$(grep -ohE '[a-z0-9][a-z0-9._/:-]*:[A-Za-z0-9._-]+@sha256:[0-9a-f]{64}' Dockerfile scripts/go.sh scripts/ci.sh README.md | sort -u)
 if [ -z "$refs" ]; then
 	echo "update-pins: no pinned image references found" >&2
 	exit 1

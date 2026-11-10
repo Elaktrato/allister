@@ -199,7 +199,7 @@ func (l *Library) UpdateDetails(ctx context.Context, itemID int64, u DetailsUpda
 		for _, k := range p.editable {
 			args = append(args, k)
 		}
-		if _, err := tx.ExecContext(ctx, `DELETE FROM item_fields WHERE item_id = ? AND key IN (`+placeholders(len(p.editable))+`)`, args...); err != nil {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM item_fields WHERE item_id = ? AND key IN (`+placeholders(len(p.editable))+`)`, args...); err != nil { //nolint:gosec // G202: constant SQL and placeholders; values are bound
 			return fmt.Errorf("update details: %w", err)
 		}
 	}

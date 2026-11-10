@@ -433,7 +433,7 @@ func TestBackupDownloadFailureIsNeverAFinishedZip(t *testing.T) {
 	// a client that went away needs nothing
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	rec, p = serveRecover(e.h, httptest.NewRequest("GET", "/settings/backup/download", nil).WithContext(ctx))
+	_, p = serveRecover(e.h, httptest.NewRequest("GET", "/settings/backup/download", nil).WithContext(ctx))
 	if p != nil {
 		t.Fatalf("cancelled request panicked: %v", p)
 	}

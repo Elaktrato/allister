@@ -49,10 +49,10 @@ func (s *server) fail(w http.ResponseWriter, r *http.Request, err error, retry s
 	case errors.Is(err, plugin.ErrNotFound):
 		s.errorPage(w, r, http.StatusNotFound, "Not found", "There is no such item.", "")
 	case errors.Is(err, plugin.ErrRateLimited), errors.Is(err, plugin.ErrUnavailable):
-		log.Printf("%s %s: %v", r.Method, r.URL.Path, err)
+		log.Printf("%s %q: %v", r.Method, r.URL.Path, err)
 		s.errorPage(w, r, http.StatusServiceUnavailable, "Temporarily unavailable", unavailableMessage(err), retry)
 	default:
-		log.Printf("%s %s: %v", r.Method, r.URL.Path, err)
+		log.Printf("%s %q: %v", r.Method, r.URL.Path, err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
 	}
 }

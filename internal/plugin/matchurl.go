@@ -92,9 +92,7 @@ func MatchURL(patterns []string, raw string) (id string, ok bool) {
 	}
 	host, path, _ := strings.Cut(s, "/")
 	host = strings.ToLower(host)
-	if strings.HasPrefix(host, "www.") {
-		host = host[len("www."):]
-	}
+	host = strings.TrimPrefix(host, "www.")
 	if host == "" {
 		return "", false
 	}
@@ -154,9 +152,7 @@ func matchPattern(pattern, host string, segs []string) (string, bool) {
 	}
 	ph, pp, _ := strings.Cut(pattern, "/")
 	ph = strings.ToLower(ph)
-	if strings.HasPrefix(ph, "www.") {
-		ph = ph[len("www."):]
-	}
+	ph = strings.TrimPrefix(ph, "www.")
 	if ph != host {
 		return "", false
 	}

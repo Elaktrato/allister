@@ -14,12 +14,12 @@ import (
 // templateFuncs is the one FuncMap shared by every page template set.
 var templateFuncs = template.FuncMap{
 	// navMarker marks where base.html's navigation goes (see executeFor).
-	"navMarker": func() template.HTML { return template.HTML(navMarker) },
+	"navMarker": func() template.HTML { return template.HTML(navMarker) }, //nolint:gosec // G203: a constant marker
 	// appearanceMarker marks where base.html's appearance stylesheet link
 	// goes (see fillMarkers).
-	"appearanceMarker": func() template.HTML { return template.HTML(appearanceMarker) },
+	"appearanceMarker": func() template.HTML { return template.HTML(appearanceMarker) }, //nolint:gosec // G203: a constant marker
 	// settingsTabsMarker marks where a settings page's section tabs go.
-	"settingsTabsMarker": func() template.HTML { return template.HTML(settingsTabsMarker) },
+	"settingsTabsMarker": func() template.HTML { return template.HTML(settingsTabsMarker) }, //nolint:gosec // G203: a constant marker
 	// dialogStatuses is the dialog slot's data-swap-statuses value: the
 	// statuses app.js allows the slot to swap (dialogSwapStatuses).
 	"dialogStatuses": dialogStatuses,

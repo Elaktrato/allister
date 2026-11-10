@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"github.com/allister/allister/internal/library"
 	"html"
 	"net/http"
 	"net/http/httptest"
@@ -18,6 +17,7 @@ import (
 
 	"github.com/allister/allister/internal/importer"
 	"github.com/allister/allister/internal/jobs"
+	"github.com/allister/allister/internal/library"
 	"github.com/allister/allister/internal/plugin"
 	"github.com/allister/allister/internal/plugin/plugintest"
 	"github.com/allister/allister/internal/plugins/anilist"

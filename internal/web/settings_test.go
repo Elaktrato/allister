@@ -3,7 +3,6 @@ package web
 import (
 	"context"
 	"database/sql"
-	"github.com/allister/allister/internal/library"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -12,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/allister/allister/internal/db"
+	"github.com/allister/allister/internal/library"
 	"github.com/allister/allister/internal/settings"
 )
 

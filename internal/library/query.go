@@ -850,6 +850,7 @@ func (l *Library) loadRows(ctx context.Context, unmatched clause, whereSQL strin
 	args := append(slices.Clone(unmatched.args), whereArgs...)
 	args = append(args, orderArgs...)
 	args = append(args, limit, offset)
+	//nolint:gosec // G202: the query builder joins constant SQL and placeholders; values are bound
 	rows, err := l.db.QueryContext(ctx, `SELECT items.id, items.plugin_id, items.kind, items.source, items.source_id, items.cover_path,
 		items.external_url, items.sync_state, items.progress_keys, e.status, e.rating, e.comment, e.started_on, e.finished_on, e.updated_at,
 		(`+unmatched.sql+`), (items.sync_state <> 'done')`+fromSQL+whereSQL+order+` LIMIT ? OFFSET ?`, args...)
@@ -1023,7 +1024,7 @@ func (l *Library) Counts(ctx context.Context, q Query) (map[Status]int, error) {
 		return nil, err
 	}
 	whereSQL, args := c.where("status")
-	rows, err := l.db.QueryContext(ctx, `SELECT e.status, COUNT(*)`+fromSQL+whereSQL+` GROUP BY e.status`, args...)
+	rows, err := l.db.QueryContext(ctx, `SELECT e.status, COUNT(*)`+fromSQL+whereSQL+` GROUP BY e.status`, args...) //nolint:gosec // G202: constant SQL and placeholders; values are bound
 	if err != nil {
 		return nil, fmt.Errorf("counts: %w", err)
 	}
@@ -1074,6 +1075,7 @@ func (l *Library) Terms(ctx context.Context, q Query, kind string) ([]TermCount,
 	whereSQL, whereArgs := c.where(skip)
 	args := append([]any{kind}, whereArgs...)
 	args = append(args, maxTermsListed)
+	//nolint:gosec // G202: the query builder joins constant SQL and placeholders; values are bound
 	rows, err := l.db.QueryContext(ctx, `SELECT MIN(t.term), COUNT(DISTINCT items.id) AS n`+fromSQL+
 		` JOIN item_terms t ON t.item_id = items.id AND t.kind = ?`+whereSQL+
 		` GROUP BY t.term_key ORDER BY n DESC, t.term_key LIMIT ?`, args...)

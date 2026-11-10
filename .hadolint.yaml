@@ -1,0 +1,8 @@
+# hadolint configuration (run with `scripts/ci.sh hadolint`).
+failure-threshold: info
+ignored:
+  # Pin versions in apt-get install: curl and ca-certificates come from the
+  # digest-pinned base image's signed Debian repositories; exact Debian
+  # package versions disappear from the mirrors after updates and would break
+  # rebuilds (see PINS.md, "Not pinned").
+  - DL3008

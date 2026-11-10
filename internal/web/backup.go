@@ -172,7 +172,7 @@ func (s *server) postBackupRestore(w http.ResponseWriter, r *http.Request) {
 	if s.spoolHook != nil {
 		s.spoolHook(path)
 	}
-	f, err := os.Open(path)
+	f, err := os.Open(path) //nolint:gosec // G304: path is the spool file this handler created in DATA_DIR/tmp
 	if err != nil {
 		s.internalError(w, r, err)
 		return
@@ -223,7 +223,7 @@ func (s *server) spoolBackup(r *http.Request) (string, error) {
 	}
 	for {
 		part, err := mr.NextPart()
-		if err == io.EOF {
+		if errors.Is(err, io.EOF) {
 			return "", errNoBackupFile
 		}
 		if err != nil {

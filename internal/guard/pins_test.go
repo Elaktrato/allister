@@ -435,7 +435,7 @@ var digestOrSum = regexp.MustCompile(`[0-9a-f]{64}`)
 // every .sha256 of a vendored file (static files, their test data).
 func pinnedFiles(t *testing.T) []string {
 	t.Helper()
-	files := []string{"Dockerfile", "scripts/go.sh", "README.md"}
+	files := []string{"Dockerfile", "scripts/go.sh", "scripts/ci.sh", "README.md"}
 	for _, dir := range []string{"internal/web/static", "internal/web/testdata"} {
 		err := filepath.WalkDir(filepath.Join(root, dir), func(path string, d os.DirEntry, err error) error {
 			if err != nil || d.IsDir() || !strings.HasSuffix(path, ".sha256") {
@@ -584,5 +584,78 @@ func TestDockerfileSmokeChecksTheBuiltCSS(t *testing.T) {
 	}
 	if !copied || !ran {
 		t.Errorf("the css stage does not copy and run css-smoke.sh on app.css after building it (copied %v, ran %v)", copied, ran)
+	}
+}
+
+// imageVar is a tool image assignment of scripts/ci.sh: NAME_IMAGE=ref.
+var imageVar = regexp.MustCompile(`(?m)^([A-Z][A-Z0-9_]*_IMAGE)=(\S+)$`)
+
+// TestCIScriptImagesPinned: every tool image scripts/ci.sh runs is pinned by
+// digest (tag kept), and every docker run there uses one of those variables
+// (or the Go image of scripts/go.sh), never a literal image.
+func TestCIScriptImagesPinned(t *testing.T) {
+	src := readRoot(t, "scripts/ci.sh")
+	vars := map[string]bool{"GO_IMAGE": true}
+	m := imageVar.FindAllStringSubmatch(src, -1)
+	if len(m) < 5 {
+		t.Fatalf("scripts/ci.sh: want the golangci-lint, hadolint, actionlint, gitleaks and trivy images, found %d", len(m))
+	}
+	for _, v := range m {
+		vars[v[1]] = true
+		if why := checkPinned(v[2]); why != "" {
+			t.Errorf("scripts/ci.sh: %s=%s: %s", v[1], v[2], why)
+		}
+	}
+	// the Go image comes from scripts/go.sh, not a second copy
+	if !strings.Contains(src, "GO_IMAGE=$(grep") || !strings.Contains(src, "scripts/go.sh") {
+		t.Error("scripts/ci.sh must take GO_IMAGE from scripts/go.sh")
+	}
+	runs := 0
+	lines, starts := logicalLines(src)
+	useVar := regexp.MustCompile(`"\$([A-Z][A-Z0-9_]*_IMAGE)"`)
+	for i, l := range lines {
+		if !strings.Contains(l, "docker run") {
+			continue
+		}
+		runs++
+		if strings.Contains(l, `"$image"`) {
+			continue // the smoke test runs the image under test, built from the Dockerfile
+		}
+		u := useVar.FindStringSubmatch(l)
+		if u == nil || !vars[u[1]] {
+			t.Errorf("scripts/ci.sh:%d: docker run without a pinned image variable: %s", starts[i], l)
+		}
+	}
+	if runs == 0 {
+		t.Error("scripts/ci.sh: no docker run found")
+	}
+}
+
+// TestPinsDocumentListsTools: the tools module (govulncheck, gremlins) is
+// pinned by version in tools/go.mod (and by hash in tools/go.sum), and
+// PINS.md records the same versions.
+func TestPinsDocumentListsTools(t *testing.T) {
+	mod := readRoot(t, "tools/go.mod")
+	sum := readRoot(t, "tools/go.sum")
+	pins := readRoot(t, "PINS.md")
+	for _, tool := range []struct{ module, cmd string }{
+		{"golang.org/x/vuln", "golang.org/x/vuln/cmd/govulncheck"},
+		{"github.com/go-gremlins/gremlins", "github.com/go-gremlins/gremlins/cmd/gremlins"},
+	} {
+		if !regexp.MustCompile(`(?m)^\s*(tool\s+)?` + regexp.QuoteMeta(tool.cmd) + `$`).MatchString(mod) {
+			t.Errorf("tools/go.mod: no tool directive for %s", tool.cmd)
+		}
+		v := regexp.MustCompile(`(?m)^\s*` + regexp.QuoteMeta(tool.module) + ` (v\d+\.\d+\.\d+)\b`).FindStringSubmatch(mod)
+		if v == nil {
+			t.Errorf("tools/go.mod: %s is not required at an exact release", tool.module)
+			continue
+		}
+		if !strings.Contains(sum, tool.module+" "+v[1]+" h1:") {
+			t.Errorf("tools/go.sum: no hash for %s %s", tool.module, v[1])
+		}
+		row := "| `" + tool.module + "` | `" + v[1] + "` |"
+		if !strings.Contains(pins, row) {
+			t.Errorf("PINS.md does not record %s", row)
+		}
 	}
 }

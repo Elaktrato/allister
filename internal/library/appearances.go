@@ -74,7 +74,7 @@ func (l *Library) Appearances(ctx context.Context, personID int64) ([]Appearance
 			ids = append(ids, a.ItemID)
 		}
 	}
-	trows, err := l.db.QueryContext(ctx, `SELECT item_id, lang, text FROM item_titles WHERE item_id IN (`+placeholders(len(ids))+`) ORDER BY rowid`, ids...)
+	trows, err := l.db.QueryContext(ctx, `SELECT item_id, lang, text FROM item_titles WHERE item_id IN (`+placeholders(len(ids))+`) ORDER BY rowid`, ids...) //nolint:gosec // G202: constant SQL and placeholders; values are bound
 	if err != nil {
 		return nil, fmt.Errorf("appearances: titles: %w", err)
 	}

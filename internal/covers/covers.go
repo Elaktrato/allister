@@ -190,7 +190,7 @@ func writeHashed(dir string, r io.Reader, limit int64, pick func(head []byte) (s
 	if err != nil {
 		return "", err
 	}
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o755); err != nil { //nolint:gosec // G301: same mode as DATA_DIR/covers (cmd/allister)
 		return "", err
 	}
 	tmp, err := os.CreateTemp(dir, ".download-*")
