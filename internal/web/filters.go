@@ -444,13 +444,14 @@ type filterBar struct {
 	Unmatched     bool
 	Partial       bool
 	ShowUnmatched bool
-	Sorts, Dirs   []option
+	Sort, Dir     string // hidden inputs: the sort chosen in the table head
 	ClearURL      string // "" when nothing is set
-	OOB           bool   // the Clear slot is rendered as an out-of-band swap
+	OOB           bool   // the Clear and sort slots are rendered as out-of-band swaps
 }
 
-// outOfBand marks the Clear slot for an out-of-band swap. (The genre/tag
-// option lists always go out of band in a rows partial: list_partial.)
+// outOfBand marks the Clear and sort slots for an out-of-band swap. (The
+// genre/tag option lists always go out of band in a rows partial:
+// list_partial.)
 func (b *filterBar) outOfBand() { b.OOB = true }
 
 // buildFilterBar draws the bar of kind k from the schema: only Filterable
@@ -515,24 +516,7 @@ func buildFilterBar(m plugin.Manifest, k plugin.KindDef, lq listQuery, genres, t
 			b.Progress = append(b.Progress, option{Value: string(st), Label: progressStateLabels[st], Selected: f.Progress == st})
 		}
 	}
-	b.Sorts = []option{{Value: "updated", Label: "Recently updated"}, {Value: "title", Label: "Title"}, {Value: "rating", Label: "Score"}}
-	if k.Progress.PrimaryKey != "" {
-		b.Sorts = append(b.Sorts, option{Value: "progress", Label: "Progress"})
-	}
-	for _, fd := range k.Fields {
-		if fd.Sortable && library.CheckSort(k, library.Sort{Kind: library.SortField, Field: fd.Key}) == nil {
-			b.Sorts = append(b.Sorts, option{Value: fd.Key, Label: fd.Label})
-		}
-	}
-	cur := f.Sort
-	if cur == "" {
-		cur = "updated"
-	}
-	for i := range b.Sorts {
-		b.Sorts[i].Selected = b.Sorts[i].Value == cur
-	}
-	b.Dirs = []option{{Value: "", Label: "Default order", Selected: f.Dir == ""},
-		{Value: "asc", Label: "Ascending", Selected: f.Dir == "asc"}, {Value: "desc", Label: "Descending", Selected: f.Dir == "desc"}}
+	b.Sort, b.Dir = f.Sort, f.Dir
 	return b
 }
 

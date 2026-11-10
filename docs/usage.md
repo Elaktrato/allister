@@ -17,7 +17,7 @@ The filter bar above the list searches only your own entries and updates as you 
 | `progress` | `not_started`, `in_progress` or `finished`. |
 | `rmin`, `rmax` | Score range 0 to 10. `unrated=1` and `zero=1` add unrated entries and entries scored 0 (rows matching any checked score choice are shown). |
 | `unmatched=1`, `partial=1` | Only unmatched entries, or only entries whose cast or images are still syncing. |
-| `sort`, `dir` | `updated` (recently updated, the default), `title`, `rating`, `year` or `progress`, and `asc` or `desc` (title defaults to ascending, the others to descending). |
+| `sort`, `dir` | `updated` (recently updated, the default), `title`, `rating`, `year` or `progress`, and `asc` or `desc` (title defaults to ascending, the others to descending). Set by clicking a column heading of the table (Title, Year, Progress, Score, Updated): the first click sorts by that column in its default direction, a second click reverses it. The sorted column shows an arrow. Sorting keeps the filters and goes back to page 1. |
 
 Unknown or invalid parameters are ignored, and a notice names them.
 

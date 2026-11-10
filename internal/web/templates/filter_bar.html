@@ -1,11 +1,12 @@
 {{/* The list's search and filters, generated from the kind's schema. A plain
 GET form without JavaScript; with htmx it refreshes the rows region live. */}}
 {{define "filter_bar"}}
-<form method="get" action="{{.Action}}" role="search" aria-label="Search and filter the list"
+<form id="list-filter" method="get" action="{{.Action}}" role="search" aria-label="Search and filter the list"
   hx-get="{{.Action}}" hx-trigger="keyup changed delay:300ms, change" hx-target="#list-rows" hx-push-url="true" hx-sync="this:replace"
   class="mb-4 rounded border border-slate-800 bg-slate-900 p-3 text-sm">
   {{if .Kind}}<input type="hidden" name="kind" value="{{.Kind}}">{{end}}
   {{if .Status}}<input type="hidden" name="status" value="{{.Status}}">{{end}}
+  {{template "filter_sort" .}}
   <div class="flex flex-wrap items-end gap-3">
     <label class="flex min-w-48 flex-1 flex-col gap-1"><span class="text-slate-400">Title</span>
       <input type="search" name="q" value="{{.Q}}" maxlength="200" autocomplete="off" placeholder="Search titles in any language"
@@ -51,14 +52,6 @@ GET form without JavaScript; with htmx it refreshes the rows region live. */}}
       {{if .ShowUnmatched}}<label class="flex items-center gap-2"><input type="checkbox" name="unmatched" value="1"{{if .Unmatched}} checked{{end}}> Unmatched</label>{{end}}
       <label class="flex items-center gap-2"><input type="checkbox" name="partial" value="1"{{if .Partial}} checked{{end}}> Partially synced</label>
     </fieldset>
-    <label class="flex flex-col gap-1"><span class="text-slate-400">Sort by</span>
-      <select name="sort" class="rounded border border-slate-700 bg-slate-950 px-2 py-1">
-        {{range .Sorts}}<option value="{{.Value}}"{{if .Selected}} selected{{end}}>{{.Label}}</option>{{end}}
-      </select></label>
-    <label class="flex flex-col gap-1"><span class="text-slate-400">Order</span>
-      <select name="dir" class="rounded border border-slate-700 bg-slate-950 px-2 py-1">
-        {{range .Dirs}}<option value="{{.Value}}"{{if .Selected}} selected{{end}}>{{.Label}}</option>{{end}}
-      </select></label>
   </div>
   <div class="mt-3 flex items-center gap-4">
     <button type="submit" class="rounded bg-indigo-600 px-3 py-1 font-medium hover:bg-indigo-500">Apply</button>
@@ -66,6 +59,9 @@ GET form without JavaScript; with htmx it refreshes the rows region live. */}}
   </div>
 </form>
 {{end}}
+
+{{/* the sort chosen in the table head, so a filter change keeps it (hidden inputs never hold focus, so a rows partial swaps them out of band) */}}
+{{define "filter_sort"}}<span id="filter-sort"{{if .OOB}} hx-swap-oob="true"{{end}}>{{with .Sort}}<input type="hidden" name="sort" value="{{.}}">{{end}}{{with .Dir}}<input type="hidden" name="dir" value="{{.}}">{{end}}</span>{{end}}
 
 {{define "filter_clear"}}<span id="filter-clear"{{if .OOB}} hx-swap-oob="true"{{end}}>{{with .ClearURL}}<a class="text-indigo-300 hover:underline" href="{{.}}">Clear filters</a>{{end}}</span>{{end}}
 
