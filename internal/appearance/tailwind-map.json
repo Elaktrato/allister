@@ -33,7 +33,9 @@
     "slate-600": "border-strong",
     "indigo-500": "focus",
     "amber-700": "warning-border",
-    "amber-800": "warning-border"
+    "amber-800": "warning-border",
+    "emerald-500": "success",
+    "rose-500": "danger"
   },
   "ringColor": {
     "DEFAULT": "focus",
