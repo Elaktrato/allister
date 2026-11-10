@@ -33,6 +33,7 @@
   </dl>
   {{if .Ignored}}<p class="mt-2 text-sm text-slate-400" data-ignored>{{.Ignored}} rows the importer does not handle (other media types) were ignored.</p>{{end}}
   {{if .Note}}<p class="mt-3 text-sm text-amber-300" data-note>{{.Note}}</p>{{end}}
+  {{with $.Paused}}<p class="mt-3 text-sm text-amber-300" data-paused>{{.}}</p>{{end}}
   {{if .CanResume}}
   <form method="post" action="/settings/import/resume" class="mt-4">
     <button type="submit" class="rounded bg-indigo-600 px-4 py-2 font-medium hover:bg-indigo-500">Resume import</button>

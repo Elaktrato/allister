@@ -48,6 +48,9 @@ type importPage struct {
 	Report    *importer.Report
 	State     string
 	ETA       string
+	// Paused explains an active import whose plugin is disabled (the job
+	// queue holds its job until the plugin is enabled again).
+	Paused string
 	// Lists holds the non-empty row lists (unmatched, failed, skipped).
 	Lists []importList
 }
@@ -146,6 +149,13 @@ func (s *server) loadImport(r *http.Request, p importPage) (importPage, error) {
 		add(importList{Heading: "Skipped", Count: rep.Skipped, More: rep.MoreSkipped, Rows: importLines(m, rep.SkippedRows, false)})
 		if rep.Active {
 			p.ETA = formatETA(rep.ETA)
+			if !s.deps.Registry.IsEnabled(rep.PluginID) {
+				name := rep.PluginID
+				if m.Name != "" {
+					name = m.Name
+				}
+				p.Paused = "This import is paused because the " + name + " plugin is disabled. Enable it in Settings to continue, or cancel the import."
+			}
 		}
 	}
 	return p, nil

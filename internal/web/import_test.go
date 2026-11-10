@@ -563,6 +563,36 @@ func TestImportOfDisabledPluginIsNotOfferedAndRefused(t *testing.T) {
 	}
 }
 
+// An import whose plugin is disabled waits in the job queue; the page says
+// why while it is active, and stops saying so once the plugin is enabled.
+func TestImportPageExplainsImportPausedByDisabledPlugin(t *testing.T) {
+	e, _ := newTwoImporterEnv(t)
+	if rec := e.uploadTo(t, url.Values{"importer": {"book/books-csv"}}, "file", "b.csv", []byte("x")); rec.Code != 303 {
+		t.Fatalf("upload: %d", rec.Code)
+	}
+	const paused = "This import is paused because the Books plugin is disabled. Enable it in Settings to continue, or cancel the import."
+	mustNotContain(t, e.get("/settings/import", false).Body.String(), paused)
+	if err := e.reg.SetEnabled(context.Background(), "book", false); err != nil {
+		t.Fatal(err)
+	}
+	mustContain(t, e.get("/settings/import", true).Body.String(), `data-state="pending"`, paused, "Cancel import")
+	rec := e.uploadTo(t, url.Values{"importer": {"anime/yamtrack"}}, "file", "a.csv", []byte(impHeader+impRow(1, "One", "Planning")))
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("second import: %d", rec.Code)
+	}
+	mustContain(t, rec.Body.String(), paused)
+	if err := e.reg.SetEnabled(context.Background(), "book", true); err != nil {
+		t.Fatal(err)
+	}
+	mustNotContain(t, e.get("/settings/import", false).Body.String(), "is paused because")
+	// a finished import of a disabled plugin is not "paused"
+	e.runJob(t)
+	e.reg.SetEnabled(context.Background(), "book", false)
+	b := e.get("/settings/import", false).Body.String()
+	mustContain(t, b, `data-state="done"`)
+	mustNotContain(t, b, "is paused because")
+}
+
 // The unmatched link of a plugin with several kinds names the kind.
 func TestImportUnmatchedLinkOfMultiKindPlugin(t *testing.T) {
 	b := newBookImport()
