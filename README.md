@@ -64,7 +64,7 @@ Anime pages live under `/anime` (list, `/anime/search`, overviews at `/anime/ani
 
 ## Updating and stopping
 
-After `git pull`, run `docker compose up -d --build`. **Upgrading from the first (pre-plugin) preview build: a volume from that build starts empty after this upgrade, because its anime tables are dropped, not copied. If it holds data you want, make a cold backup of the volume first (see below).** `docker compose down` stops and removes the container but keeps the data volume; compose gives the app 30 seconds (`stop_grace_period`) to finish open requests and hand the running background job back to the queue. **`docker compose down -v` deletes the volume and all your data.**
+**Upgrading from the first (pre-plugin) preview build: your library starts empty after this upgrade, because the old anime tables are dropped, not copied. If it holds data you want, make a cold backup of the volume first (see below).** Then, after `git pull`, run `docker compose up -d --build`. `docker compose down` stops and removes the container but keeps the data volume; compose gives the app 30 seconds (`stop_grace_period`) to finish open requests and hand the running background job back to the queue. **`docker compose down -v` deletes the volume and all your data.**
 
 Every image (the build and runtime base images and the helper images in the commands below) is pinned by digest, and the Tailwind CLI and htmx are checked against recorded sha256 sums (see `PINS.md`). A rebuild therefore never picks up a base-image security update by itself: base-image security updates now need running `scripts/update-pins.sh` (it shows the new pins as a diff; `scripts/update-pins.sh --write` applies them), then `docker compose up -d --build`.
 
