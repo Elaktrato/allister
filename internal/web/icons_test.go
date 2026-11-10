@@ -199,9 +199,10 @@ func TestIconNamesExistInThePinnedFont(t *testing.T) {
 	// field here is a new icon source — extend this list only together with
 	// the check that covers it
 	covered := map[string]string{
-		"Icon": "the manifest icons, checked below",
-		"Href": "only compared against literals (settings vs the rest)",
-		"Sort": "only compared against literals (ascending or descending)",
+		"Icon":    "the manifest icons, checked below",
+		"Href":    "only compared against literals (settings vs the rest)",
+		"Sort":    "only compared against literals (ascending or descending)",
+		"DirIcon": "the two arrow icons, literal values in filters.go (must-find list)",
 	}
 	for field, file := range dataFields {
 		if covered[field] == "" {

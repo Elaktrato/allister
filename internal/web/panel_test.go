@@ -76,10 +76,18 @@ func TestFilterPanelClosedByDefault(t *testing.T) {
 		// every other control is inside the panel (submitted with the form without JavaScript)
 		panel := form[d:]
 		for _, name := range []string{`name="f.year.from"`, `name="genre"`, `name="genre_mode"`, `name="tag"`, `name="progress"`,
-			`name="rmin"`, `name="rmax"`, `name="unrated"`, `name="zero"`, `name="partial"`, `type="submit"`, `id="filter-clear"`} {
+			`name="rmin"`, `name="rmax"`, `name="unrated"`, `name="zero"`, `name="partial"`, `id="filter-clear"`} {
 			if !strings.Contains(panel, name) || strings.Contains(top, name) {
 				t.Errorf("%s: %s not (only) in the panel", target, name)
 			}
+		}
+		// the panel's Apply is its only submit — except the card view's
+		// direction toggle, which applies the shown list's direction by design
+		if !strings.Contains(panel, `type="submit"`) {
+			t.Errorf("%s: no submit button in the panel", target)
+		}
+		if n := strings.Count(top, `type="submit"`); n != 1 || !strings.Contains(top, `id="filter-dir-toggle"`) {
+			t.Errorf("%s: %d submit buttons outside the panel", target, n)
 		}
 		// the status tabs stay outside the form, above it
 		if i := strings.Index(b, `id="list-tabs"`); i < 0 || i > strings.Index(b, `<form id="list-filter"`) {
