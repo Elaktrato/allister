@@ -61,6 +61,10 @@ var Formats = map[string]struct{ Ext, CSS, MIME string }{
 // fontFile is a stored font file name: a sha256 and a known extension.
 var fontFile = regexp.MustCompile(`^[0-9a-f]{64}\.(woff2|woff|ttf|otf)$`)
 
+// IsStoredFontName reports whether name has the form of a stored font file
+// name (<sha256>.<woff2|woff|ttf|otf>), whatever its format.
+func IsStoredFontName(name string) bool { return fontFile.MatchString(name) }
+
 // ValidFontFile reports whether name is a stored font file name whose
 // extension matches format.
 func ValidFontFile(name, format string) bool {
