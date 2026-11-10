@@ -23,6 +23,36 @@ const (
 // when that is empty or itself a remote URL, so a downloaded local file
 // survives a re-sync. Counterparts (Credit.With) are upserted as people too.
 func (l *Library) SaveCredits(ctx context.Context, itemID int64, credits []plugin.Credit) error {
+	if err := checkCredits(credits); err != nil {
+		return err
+	}
+	tx, err := l.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("save credits: %w", err)
+	}
+	defer tx.Rollback()
+	var pluginID, source string
+	err = tx.QueryRowContext(ctx, `SELECT plugin_id, source FROM items WHERE id = ?`, itemID).Scan(&pluginID, &source)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrNoEntry
+	}
+	if err != nil {
+		return fmt.Errorf("save credits: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM credits WHERE item_id = ?`, itemID); err != nil {
+		return fmt.Errorf("save credits: %w", err)
+	}
+	if err := insertCredits(ctx, tx, itemID, pluginID, source, credits); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("save credits: %w", err)
+	}
+	return nil
+}
+
+// checkCredits applies the credit rules (count, text, detail length, people).
+func checkCredits(credits []plugin.Credit) error {
 	if len(credits) > maxCredits {
 		return invalid("more than %d credits", maxCredits)
 	}
@@ -48,22 +78,12 @@ func (l *Library) SaveCredits(ctx context.Context, itemID int64, credits []plugi
 			}
 		}
 	}
-	tx, err := l.db.BeginTx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("save credits: %w", err)
-	}
-	defer tx.Rollback()
-	var pluginID, source string
-	err = tx.QueryRowContext(ctx, `SELECT plugin_id, source FROM items WHERE id = ?`, itemID).Scan(&pluginID, &source)
-	if errors.Is(err, sql.ErrNoRows) {
-		return ErrNoEntry
-	}
-	if err != nil {
-		return fmt.Errorf("save credits: %w", err)
-	}
-	if _, err := tx.ExecContext(ctx, `DELETE FROM credits WHERE item_id = ?`, itemID); err != nil {
-		return fmt.Errorf("save credits: %w", err)
-	}
+	return nil
+}
+
+// insertCredits writes checked credits of the item inside tx, upserting their
+// people (see SaveCredits).
+func insertCredits(ctx context.Context, tx *sql.Tx, itemID int64, pluginID, source string, credits []plugin.Credit) error {
 	for i, c := range credits {
 		pid, err := upsertPerson(ctx, tx, pluginID, source, c.Person)
 		if err != nil {
@@ -81,9 +101,6 @@ func (l *Library) SaveCredits(ctx context.Context, itemID int64, credits []plugi
 			VALUES (?,?,?,?,?,?,?)`, itemID, i, c.Role, c.Detail, pid, with, c.WithRole); err != nil {
 			return fmt.Errorf("save credits: %w", err)
 		}
-	}
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("save credits: %w", err)
 	}
 	return nil
 }
