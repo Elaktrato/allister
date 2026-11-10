@@ -2,7 +2,8 @@
 # Refresh the pins recorded in PINS.md: the digest of every pinned image
 # (name:tag@sha256:...) in the Dockerfile, scripts/go.sh and README.md, and the
 # per-architecture sha256 of the Tailwind CLI release named by the Dockerfile's
-# TAILWIND_VERSION. It also checks the vendored htmx file against its .sha256.
+# TAILWIND_VERSION. It also checks the vendored htmx file and icon font against
+# their .sha256 files.
 #
 # Usage: scripts/update-pins.sh          print the changes as a diff (no writes)
 #        scripts/update-pins.sh --write  apply them
@@ -13,7 +14,7 @@
 set -euo pipefail
 
 usage() {
-	sed -n '2,12s/^# \{0,1\}//p' "$0"
+	sed -n '2,13s/^# \{0,1\}//p' "$0"
 }
 
 write=0
@@ -136,6 +137,13 @@ done
 	exit 1
 }
 echo "htmx $(grep -o 'version:"[0-9.]*"' internal/web/static/htmx.min.js | head -n 1): checksum ok" >&2
+
+# --- the Material Symbols font is vendored too: never rewritten, only checked
+(cd internal/web/static && sha256sum -c --quiet material-symbols-outlined-v383.woff2.sha256) || {
+	echo "update-pins: internal/web/static/material-symbols-outlined-v383.woff2 does not match its .sha256" >&2
+	exit 1
+}
+echo "material symbols v383: checksum ok" >&2
 
 changed=0
 for f in "${files[@]}"; do

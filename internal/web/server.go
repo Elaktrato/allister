@@ -131,7 +131,7 @@ func newServer(deps Deps, now func() time.Time) (*server, http.Handler) {
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("ok"))
 	})
-	mux.Handle("GET /static/", http.FileServerFS(staticFS))
+	mux.Handle("GET /static/", staticHandler())
 	if deps.CoversDir != "" {
 		mux.Handle("GET /covers/", coversHandler(deps.CoversDir))
 	}
@@ -229,6 +229,47 @@ func (s *server) index(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	http.Redirect(w, r, "/settings", http.StatusSeeOther)
+}
+
+// staticHandler serves the embedded static files. A font gets its MIME type
+// set explicitly (the runtime image has no mime.types) and, because its file
+// name carries its version, a year-long immutable cache and nosniff. Other
+// files (app.css, htmx.min.js) keep their names across versions and are
+// served without a cache header.
+func staticHandler() http.Handler {
+	fs := http.FileServerFS(staticFS)
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, ".woff2") {
+			w = &fontWriter{ResponseWriter: w}
+		}
+		fs.ServeHTTP(w, r)
+	})
+}
+
+// fontWriter sets the font headers on successful responses only (a 404 stays
+// uncached).
+type fontWriter struct {
+	http.ResponseWriter
+	wrote bool
+}
+
+func (f *fontWriter) WriteHeader(code int) {
+	if !f.wrote {
+		f.wrote = true
+		if code == http.StatusOK || code == http.StatusPartialContent || code == http.StatusNotModified {
+			f.Header().Set("Content-Type", "font/woff2")
+			f.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+			f.Header().Set("X-Content-Type-Options", "nosniff")
+		}
+	}
+	f.ResponseWriter.WriteHeader(code)
+}
+
+func (f *fontWriter) Write(b []byte) (int, error) {
+	if !f.wrote {
+		f.WriteHeader(http.StatusOK)
+	}
+	return f.ResponseWriter.Write(b)
 }
 
 // coversHandler serves files (never directory listings) from dir. Names are

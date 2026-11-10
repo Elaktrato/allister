@@ -1,3 +1,41 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/* Material Symbols Outlined (Apache 2.0), vendored and pinned: see PINS.md.
+   Served from the embedded static files, never from a CDN. font-display:
+   block keeps a ligature name from flashing as text while the font loads
+   (every page also preloads it). */
+@font-face {
+  font-family: "Material Symbols Outlined";
+  font-style: normal;
+  font-weight: 400;
+  font-display: block;
+  src: url("/static/material-symbols-outlined-v383.woff2") format("woff2");
+}
+
+@layer components {
+  /* An icon is decorative: always aria-hidden="true" next to a text label.
+     The box is one em square and clips, so a name the font lacks never
+     spills out as text. */
+  .icon {
+    font-family: "Material Symbols Outlined";
+    font-weight: normal;
+    font-style: normal;
+    font-size: 1.25rem;
+    line-height: 1;
+    letter-spacing: normal;
+    text-transform: none;
+    display: inline-block;
+    flex-shrink: 0;
+    width: 1em;
+    height: 1em;
+    overflow: hidden;
+    white-space: nowrap;
+    word-wrap: normal;
+    direction: ltr;
+    font-feature-settings: "liga";
+    -webkit-font-smoothing: antialiased;
+    user-select: none;
+  }
+}

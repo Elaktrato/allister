@@ -403,7 +403,7 @@ var digestOrSum = regexp.MustCompile(`[0-9a-f]{64}`)
 // use, so a refresh that forgets the record (or the other way round) fails.
 func TestPinsDocumentListsEveryPin(t *testing.T) {
 	pins := readRoot(t, "PINS.md")
-	for _, rel := range []string{"Dockerfile", "scripts/go.sh", "README.md", "internal/web/static/htmx.min.js.sha256"} {
+	for _, rel := range []string{"Dockerfile", "scripts/go.sh", "README.md", "internal/web/static/htmx.min.js.sha256", "internal/web/static/material-symbols-outlined-v383.woff2.sha256"} {
 		found := digestOrSum.FindAllString(readRoot(t, rel), -1)
 		if len(found) == 0 {
 			t.Errorf("%s: no pinned digest or checksum found", rel)
@@ -416,7 +416,7 @@ func TestPinsDocumentListsEveryPin(t *testing.T) {
 	}
 	for _, d := range digestOrSum.FindAllString(pins, -1) {
 		used := false
-		for _, rel := range []string{"Dockerfile", "scripts/go.sh", "README.md", "internal/web/static/htmx.min.js.sha256"} {
+		for _, rel := range []string{"Dockerfile", "scripts/go.sh", "README.md", "internal/web/static/htmx.min.js.sha256", "internal/web/static/material-symbols-outlined-v383.woff2.sha256"} {
 			if strings.Contains(readRoot(t, rel), d) {
 				used = true
 			}
