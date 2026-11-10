@@ -6,7 +6,6 @@ GET form without JavaScript; with htmx it refreshes the rows region live. */}}
   class="relative mb-5 text-sm">
   {{if .Kind}}<input type="hidden" name="kind" value="{{.Kind}}">{{end}}
   {{if .Status}}<input type="hidden" name="status" value="{{.Status}}">{{end}}
-  {{template "filter_sort" .}}
   {{/* the search bar; the Filters toggle (the panel's summary) sits at its right edge */}}
   <div class="pr-32">
     <label class="relative block">
@@ -62,6 +61,14 @@ GET form without JavaScript; with htmx it refreshes the rows region live. */}}
           <label class="flex items-center gap-2"><input type="checkbox" name="zero" value="1"{{if .Zero}} checked{{end}}> Scored 0</label>
           <span class="max-w-48 text-xs text-slate-500">Rows matching any checked score choice are shown.</span>
         </fieldset>
+        {{/* the form's only sort and dir fields: the table head's links set
+             the sort on large screens (CSS hides this there; a rows partial
+             keeps its options in sync), the columns of Year and Updated are
+             hidden on small screens, so this control sorts there */}}
+        <fieldset id="filter-sort-control" class="flex flex-col gap-1 lg:hidden"><legend class="mb-1 text-slate-400">Sort by</legend>
+          <select id="filter-sort-select" name="sort" aria-label="Sort by" class="rounded-md border border-slate-700 bg-slate-950 px-2 py-1.5 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500">{{template "filter_options" .Sorts}}</select>
+          <select id="filter-dir-select" name="dir" aria-label="Order" class="rounded-md border border-slate-700 bg-slate-950 px-2 py-1.5 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500">{{template "filter_options" .Dirs}}</select>
+        </fieldset>
         <fieldset class="flex flex-col gap-1"><legend class="mb-1 text-slate-400">Show only</legend>
           {{if .ShowUnmatched}}<label class="flex items-center gap-2"><input type="checkbox" name="unmatched" value="1"{{if .Unmatched}} checked{{end}}> Unmatched</label>{{end}}
           <label class="flex items-center gap-2"><input type="checkbox" name="partial" value="1"{{if .Partial}} checked{{end}}> Partially synced</label>
@@ -79,8 +86,10 @@ GET form without JavaScript; with htmx it refreshes the rows region live. */}}
 {{/* the number of panel filters set, on the Filters toggle */}}
 {{define "filter_count"}}<span id="filter-count"{{if .OOB}} hx-swap-oob="true"{{end}}>{{with .Active}}<span class="ml-0.5 rounded-full bg-indigo-600 px-1.5 py-0.5 text-xs font-semibold leading-none text-white">{{.}}<span class="sr-only"> active</span></span>{{end}}</span>{{end}}
 
-{{/* the sort chosen in the table head, so a filter change keeps it (hidden inputs never hold focus, so a rows partial swaps them out of band) */}}
-{{define "filter_sort"}}<span id="filter-sort"{{if .OOB}} hx-swap-oob="true"{{end}}>{{with .Sort}}<input type="hidden" name="sort" value="{{.}}">{{end}}{{with .Dir}}<input type="hidden" name="dir" value="{{.}}">{{end}}</span>{{end}}
+{{define "filter_options"}}{{range .}}<option value="{{.Value}}"{{if .Selected}} selected{{end}}>{{.Label}}</option>{{end}}{{end}}
+
+{{/* the sort control's option lists as out-of-band swaps into the existing selects (which keep focus) */}}
+{{define "filter_sort_oob"}}<div hx-swap-oob="innerHTML:#filter-sort-select">{{template "filter_options" .Sorts}}</div><div hx-swap-oob="innerHTML:#filter-dir-select">{{template "filter_options" .Dirs}}</div>{{end}}
 
 {{define "filter_clear"}}<span id="filter-clear"{{if .OOB}} hx-swap-oob="true"{{end}}>{{with .ClearURL}}<a class="text-indigo-300 hover:underline" href="{{.}}">Clear filters</a>{{end}}</span>{{end}}
 

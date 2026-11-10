@@ -515,9 +515,9 @@ func TestSortOptionsAndDirection(t *testing.T) {
 		}
 	}
 	// the choices are the table head's sort links (sort_test.go has the
-	// details); the chosen sort rides along in the form's hidden inputs
+	// details), and the panel's compact sort control has them all selected
 	b := e.listGet(t, "/tv?sort=year&dir=asc")
-	mustContain(t, b, `<input type="hidden" name="sort" value="year">`, `<input type="hidden" name="dir" value="asc">`,
+	mustContain(t, b, `<option value="year" selected>Year</option>`, `<option value="asc" selected>Ascending</option>`,
 		`id="sort-updated"`, `id="sort-title"`, `id="sort-rating"`, `id="sort-progress"`, `id="sort-year"`)
 	mustContain(t, headCell(t, thead(t, b), "Year"), `aria-sort="ascending"`)
 	// the book fixture has no sortable field
@@ -648,7 +648,7 @@ func TestFilterBarOnlyShowsFilterableFields(t *testing.T) {
 	bk := form(e.listGet(t, "/book"))
 	mustContain(t, bk, `action="/book"`, `name="q"`, `name="f.author"`, ">Author<", `name="genre"`, `name="genre_mode"`,
 		`hx-trigger="keyup changed delay:300ms, change"`, `hx-push-url="true"`, `hx-target="#list-rows"`, `hx-get="/book"`,
-		`type="submit"`, `name="rmin"`, `name="rmax"`, `name="unrated"`, `name="zero"`, `<span id="filter-sort"></span>`)
+		`type="submit"`, `name="rmin"`, `name="rmax"`, `name="unrated"`, `name="zero"`, `name="sort"`, `name="dir"`)
 	mustNotContain(t, bk, `name="f.pages`, `name="f.isbn`, `name="tag"`, `name="f.year`, "anime", "episode")
 	tv := form(e.listGet(t, "/tv"))
 	mustContain(t, tv, `name="f.year.from"`, `name="f.year.to"`, `type="number"`, ">Year<", `name="genre"`, `name="tag"`, `name="tag_mode"`)
@@ -748,7 +748,7 @@ func TestPartialSwapsTermCountsAndClearOutOfBand(t *testing.T) {
 	// never a select, fieldset, the any/all switch or the text inputs (focus stays)
 	mustNotContain(t, b, "<select", "<fieldset", `name="genre_mode"`, `name="tag_mode"`, `name="q"`, `name="rmin"`, `name="sort"`,
 		`id="filter-genre"`, `id="filter-tag"`)
-	if n := strings.Count(b, "hx-swap-oob"); n != 6 { // tabs, clear, the hidden sort inputs, the Filters badge, two option lists
+	if n := strings.Count(b, "hx-swap-oob"); n != 7 { // tabs, clear, the Filters badge, the sort and dir option lists, the genre and tag option lists
 		t.Errorf("%d oob blocks", n)
 	}
 	// without filters the Clear slot is swapped empty

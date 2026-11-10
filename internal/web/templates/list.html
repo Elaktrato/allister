@@ -30,8 +30,8 @@
 </nav>
 {{end}}
 
-{{/* list_partial answers the filter bar and the sort links of the table head: the rows region (with the head) plus, out of band, the tabs, the Clear link, the hidden sort inputs, the Filters badge and the genre/tag option lists (never a visible input or a select, which keep focus) */}}
-{{define "list_partial"}}{{template "list_rows" .}}{{template "list_tabs" .}}{{with .Filters}}{{template "filter_clear" .}}{{template "filter_sort" .}}{{template "filter_count" .}}{{with .Genres}}{{template "filter_term_options_oob" .}}{{end}}{{with .Tags}}{{template "filter_term_options_oob" .}}{{end}}{{end}}{{end}}
+{{/* list_partial answers the filter bar and the sort links of the table head: the rows region (with the head) plus, out of band, the tabs, the Clear link, the sort control's options, the Filters badge and the genre/tag option lists (never a visible input or a select, which keep focus) */}}
+{{define "list_partial"}}{{template "list_rows" .}}{{template "list_tabs" .}}{{with .Filters}}{{template "filter_clear" .}}{{template "filter_sort_oob" .}}{{template "filter_count" .}}{{with .Genres}}{{template "filter_term_options_oob" .}}{{end}}{{with .Tags}}{{template "filter_term_options_oob" .}}{{end}}{{end}}{{end}}
 
 {{define "list_rows"}}
 {{if .Notice}}<p data-filter-notice role="status" class="mb-4 rounded border border-amber-800 bg-slate-900 p-3 text-sm text-amber-200">Ignored unknown or invalid parameters: {{range $i, $k := .Notice}}{{if $i}}, {{end}}<code>{{$k}}</code>{{end}}{{if .NoticeMore}} and {{.NoticeMore}} more{{end}}.</p>{{end}}

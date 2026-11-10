@@ -459,14 +459,17 @@ type filterBar struct {
 	Unmatched     bool
 	Partial       bool
 	ShowUnmatched bool
-	Sort, Dir     string // hidden inputs: the sort chosen in the table head
-	Active        int    // the filters set besides q and the sort (the toggle's badge)
-	Open          bool   // the panel starts open (a full page with Active filters)
-	ClearURL      string // "" when nothing is set
-	OOB           bool   // the Clear, sort and badge slots are rendered as out-of-band swaps
+	// Sorts and Dirs are the compact sort control (the form's only sort and
+	// dir fields): every key the table head sorts by, the current one selected.
+	Sorts, Dirs []option
+	Active      int    // the filters set besides q and the sort (the toggle's badge)
+	Open        bool   // the panel starts open (a full page with Active filters)
+	ClearURL    string // "" when nothing is set
+	OOB         bool   // the Clear slot, the badge and the sort options are rendered as out-of-band swaps
 }
 
-// outOfBand marks the Clear, sort and badge slots for an out-of-band swap.
+// outOfBand marks the Clear slot, the badge and the sort control's option
+// lists for an out-of-band swap.
 // (The genre/tag option lists always go out of band in a rows partial:
 // list_partial. The panel itself is never swapped, so it stays open or
 // closed as the user left it.)
@@ -534,10 +537,33 @@ func buildFilterBar(m plugin.Manifest, k plugin.KindDef, lq listQuery, genres, t
 			b.Progress = append(b.Progress, option{Value: string(st), Label: progressStateLabels[st], Selected: f.Progress == st})
 		}
 	}
-	b.Sort, b.Dir = f.Sort, f.Dir
+	b.Sorts, b.Dirs = sortOptions(k, f)
 	b.Active = f.panelCount()
 	b.Open = b.Active > 0
 	return b
+}
+
+// sortOptions are the choices of the compact sort control: the keys the
+// table head sorts by (the columns hidden on small screens
+// included) and the three directions, the request's state selected.
+func sortOptions(k plugin.KindDef, f listFilters) (sorts, dirs []option) {
+	sorts = []option{{Value: "updated", Label: "Recently updated"}, {Value: "title", Label: "Title"}, {Value: "rating", Label: "Score"}}
+	if k.Progress.PrimaryKey != "" {
+		sorts = append(sorts, option{Value: "progress", Label: "Progress"})
+	}
+	for _, fd := range sortFields(k) {
+		sorts = append(sorts, option{Value: fd.Key, Label: fd.Label})
+	}
+	cur := f.Sort
+	if cur == "" {
+		cur = "updated"
+	}
+	for i := range sorts {
+		sorts[i].Selected = sorts[i].Value == cur
+	}
+	dirs = []option{{Value: "", Label: "Default order", Selected: f.Dir == ""},
+		{Value: "asc", Label: "Ascending", Selected: f.Dir == "asc"}, {Value: "desc", Label: "Descending", Selected: f.Dir == "desc"}}
+	return sorts, dirs
 }
 
 func termBar(def plugin.TermDef, name string, selected []string, all bool, counts []library.TermCount) *termInput {

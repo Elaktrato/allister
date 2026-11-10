@@ -144,27 +144,64 @@ func TestSortHeaderWorksWithoutJavaScript(t *testing.T) {
 	}
 }
 
-// TestSortSelectGoneStateRidesInHiddenInputs: the filter form no longer has a
-// sort select; the sort travels in hidden inputs so a filter change keeps it,
-// and the rows partial carries the head (aria-sort, arrows) and swaps the
-// hidden inputs out of band (never a visible input).
-func TestSortSelectGoneStateRidesInHiddenInputs(t *testing.T) {
+// TestCompactSortControlIsTheOnlySortField: the filter panel holds a
+// compact sort control ("Sort by" and a direction), shown below lg only
+// (the table hides Year below md and Updated below lg, so their head links
+// are not reachable there). It is the ONE pair of sort/dir fields of the
+// form (also on lg+, where CSS hides it and the head links set the sort):
+// its options are every key the table head can sort by, the hidden
+// columns included; a rows partial swaps its options out of band (the
+// selects keep focus), and a plain GET submit sorts.
+func TestCompactSortControlIsTheOnlySortField(t *testing.T) {
 	e := sortEnv(t)
 	b := e.listGet(t, "/tv?sort=year&dir=asc&q=d")
-	mustNotContain(t, b, `<select name="sort"`, `<select name="dir"`, "Sort by", "Recently updated")
-	mustContain(t, b, `<span id="filter-sort"><input type="hidden" name="sort" value="year"><input type="hidden" name="dir" value="asc"></span>`)
-	plain := e.listGet(t, "/tv")
-	mustContain(t, plain, `<span id="filter-sort"></span>`)
-	mustNotContain(t, plain, `name="sort"`, `name="dir"`)
+	form := filterForm(t, b)
+	for _, name := range []string{`name="sort"`, `name="dir"`} {
+		if n := strings.Count(b, name); n != 1 {
+			t.Errorf("%s appears %d times", name, n)
+		}
+	}
+	mustNotContain(t, b, `type="hidden" name="sort"`, `type="hidden" name="dir"`, `id="filter-sort"`)
+	panel := form[strings.Index(form, `<details id="filter-panel"`):]
+	i := strings.Index(panel, `id="filter-sort-control"`)
+	if i < 0 {
+		t.Fatalf("no sort control in the panel: %s", panel)
+	}
+	ctl := panel[strings.LastIndex(panel[:i], "<"):]
+	ctl = ctl[:strings.Index(ctl, "</fieldset>")]
+	mustContain(t, ctl, "lg:hidden", "<legend", "Sort by",
+		`<select id="filter-sort-select" name="sort"`, `<select id="filter-dir-select" name="dir"`,
+		`<option value="updated">Recently updated</option>`, `<option value="title">Title</option>`,
+		`<option value="rating">Score</option>`, `<option value="progress">Progress</option>`,
+		`<option value="year" selected>Year</option>`, `<option value="asc" selected>Ascending</option>`)
+	// the default sort selects "Recently updated" and the default order
+	plain := filterForm(t, e.listGet(t, "/tv"))
+	mustContain(t, plain, `<option value="updated" selected>Recently updated</option>`, `<option value="" selected>Default order</option>`)
 
+	// a no-JS submit of the form (every field as a browser sends it) sorts
+	vals := submitted(t, form)
+	vals.Set("sort", "title")
+	vals.Set("dir", "desc")
+	sorted := e.listGet(t, "/tv?"+vals.Encode())
+	wantOrder(t, "submitted", sorted, "Dune Days", "Deep", "Dark")
+	if n := noticeOf(sorted); n != "" {
+		t.Errorf("notice %q", n)
+	}
+	vals.Set("sort", "updated")
+	vals.Set("dir", "")
+	if n := noticeOf(e.listGet(t, "/tv?"+vals.Encode())); n != "" {
+		t.Errorf("default submit notice %q", n)
+	}
+
+	// a head link's partial keeps the control in sync, out of band (options
+	// only: never a select element, which would lose focus)
 	hx := map[string]string{"HX-Request": "true", "HX-Target": "list-rows"}
 	p := e.getWith("/tv?sort=title&q=d", hx).Body.String()
-	mustNotContain(t, p, `<form method="get"`, "<html", `name="q"`)
+	mustNotContain(t, p, `<form method="get"`, "<html", `name="q"`, "<select", `name="sort"`)
 	mustContain(t, headCell(t, thead(t, p), "Title"), `aria-sort="ascending"`)
-	mustContain(t, p, `<span id="filter-sort" hx-swap-oob="true"><input type="hidden" name="sort" value="title"></span>`)
+	mustContain(t, oobBlock(t, p, "innerHTML:#filter-sort-select"), `<option value="title" selected>Title</option>`, `<option value="year">Year</option>`)
+	mustContain(t, oobBlock(t, p, "innerHTML:#filter-dir-select"), `<option value="" selected>Default order</option>`)
 	wantOrder(t, "partial", p, "Dark", "Deep", "Dune Days")
-	// default sort: the slot is swapped empty
-	mustContain(t, e.getWith("/tv?q=d", hx).Body.String(), `<span id="filter-sort" hx-swap-oob="true"></span>`)
 }
 
 // TestSortHeaderColumnsFollowTheSchema: the book fixture has no sortable
