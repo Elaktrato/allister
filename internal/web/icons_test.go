@@ -185,7 +185,7 @@ func TestIconNamesExistInThePinnedFont(t *testing.T) {
 	// the extractor must see the core's icons (sidebar, default plugin icon,
 	// sort arrows, settings tabs, search bar), or it would check nothing
 	for _, want := range []string{"collections_bookmark", "settings", "category", "arrow_upward", "arrow_downward", "unfold_more",
-		"search", "filter_list", "add", "tune", "extension", "upload_file", "backup"} {
+		"search", "filter_list", "add", "tune", "extension", "upload_file", "backup", "grid_view", "table_view"} {
 		if used[want] == "" {
 			t.Errorf("extractor did not find %q in the templates", want)
 		}
