@@ -210,7 +210,12 @@ func TestWorkflowsHardened(t *testing.T) {
 		if !regexp.MustCompile(`(?m)^permissions:`).MatchString(src) {
 			t.Errorf("%s: no top-level permissions", rel)
 		}
-		jobs := regexp.MustCompile(`(?m)^  [a-z][a-z0-9_-]*:\n`).FindAllStringIndex(src[strings.Index(src, "\njobs:\n"):], -1)
+		at := strings.Index(src, "\njobs:\n")
+		if at < 0 {
+			t.Errorf("%s: no jobs", rel)
+			continue
+		}
+		jobs := regexp.MustCompile(`(?m)^  [a-z][a-z0-9_-]*:\n`).FindAllStringIndex(src[at:], -1)
 		timeouts := regexp.MustCompile(`(?m)^    timeout-minutes: \d+$`).FindAllString(src, -1)
 		calls := regexp.MustCompile(`(?m)^    uses: `).FindAllString(src, -1) // reusable workflow jobs take no timeout
 		if len(timeouts)+len(calls) != len(jobs) {
@@ -239,5 +244,28 @@ func TestCIScriptExecutable(t *testing.T) {
 		if fi.Mode()&0o111 == 0 {
 			t.Errorf("%s is not executable", rel)
 		}
+	}
+}
+
+// TestPinsDocumentListsCosign: the cosign release the release workflow
+// installs (verified by cosign-installer) is an exact version recorded in
+// PINS.md.
+func TestPinsDocumentListsCosign(t *testing.T) {
+	re := regexp.MustCompile(`(?m)^\s*cosign-release:\s*(\S+)\s*$`)
+	pins := readRoot(t, "PINS.md")
+	found := 0
+	for _, rel := range workflowFiles(t) {
+		for _, m := range re.FindAllStringSubmatch(readRoot(t, rel), -1) {
+			found++
+			if !regexp.MustCompile(`^v\d+\.\d+\.\d+$`).MatchString(m[1]) {
+				t.Errorf("%s: cosign-release %s is not an exact release", rel, m[1])
+			}
+			if !strings.Contains(pins, "| cosign | `"+m[1]+"` |") {
+				t.Errorf("PINS.md does not record cosign %s", m[1])
+			}
+		}
+	}
+	if strings.Contains(strings.Join(workflowFiles(t), " "), "release.yml") && found == 0 {
+		t.Error("the release workflow installs cosign without a pinned cosign-release")
 	}
 }

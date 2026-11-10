@@ -249,7 +249,8 @@ func TestDockerfilePinsEveryFromByDigest(t *testing.T) {
 	}
 }
 
-// tailwindArgs are the checksum ARGs of the css stage, per Docker TARGETARCH.
+// tailwindArgs are the checksum ARGs of the css stage, per Docker architecture
+// (BUILDARCH: the Tailwind CLI runs on the build machine).
 var tailwindArgs = map[string]string{
 	"amd64": "TAILWIND_SHA256_AMD64",
 	"arm64": "TAILWIND_SHA256_ARM64",

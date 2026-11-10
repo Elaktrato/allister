@@ -1,0 +1,186 @@
+# Release on a version tag (vMAJOR.MINOR.PATCH, pre-releases -rc.N; see
+# docs/ci.md for the procedure). It checks the tag, runs the whole CI again,
+# then publishes:
+#   - the multi-architecture image (linux/amd64, linux/arm64) to
+#     ghcr.io/<owner>/<repo> with the tags X.Y.Z, X.Y, X (not for 0.x) and
+#     latest (none of these but X.Y.Z-rc.N for a pre-release), with provenance
+#     and SBOM attestations, signed keyless with cosign;
+#   - a GitHub release with generated notes (.github/release.yml), the static
+#     binaries, an SPDX SBOM and checksums.txt (signed keyless with cosign).
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions: {}
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    name: Check the tag
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      prerelease: ${{ steps.tag.outputs.prerelease }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0 # main's history, to check the tag is on it
+      - id: tag
+        name: Semantic version on main
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          scripts/release-check.sh --tag-only "$TAG"
+          case "$TAG" in
+          *-*) echo "prerelease=true" >>"$GITHUB_OUTPUT" ;;
+          *) echo "prerelease=false" >>"$GITHUB_OUTPUT" ;;
+          esac
+
+  ci:
+    name: CI
+    needs: verify
+    permissions:
+      contents: read
+      security-events: write
+    uses: ./.github/workflows/ci.yml
+
+  publish:
+    name: Publish
+    needs: [verify, ci]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      contents: write # create the release
+      packages: write # push to GHCR
+      id-token: write # keyless cosign signing (Sigstore OIDC)
+    env:
+      TAG: ${{ github.ref_name }}
+      PRERELEASE: ${{ needs.verify.outputs.prerelease }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0 # the previous tag, for the release notes
+      - id: info
+        name: Image name and build information
+        run: |
+          # GHCR names are lower case; the repository comes from the context
+          echo "image=ghcr.io/${GITHUB_REPOSITORY,,}" >>"$GITHUB_OUTPUT"
+          echo "date=$(git log -1 --format=%cd --date=format-local:%Y-%m-%dT%H:%M:%SZ)" >>"$GITHUB_OUTPUT"
+        env:
+          TZ: UTC
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: meta
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        with:
+          images: ${{ steps.info.outputs.image }}
+          # X.Y and X are not set for pre-releases (metadata-action skips
+          # them), X not for 0.x (0.y releases may break each other);
+          # latest follows the newest non-pre-release tag
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}},enable=${{ !startsWith(github.ref_name, 'v0.') }}
+          flavor: |
+            latest=${{ needs.verify.outputs.prerelease == 'false' }}
+      - id: build
+        name: Build and push the image
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            VERSION=${{ github.ref_name }}
+            COMMIT=${{ github.sha }}
+            DATE=${{ steps.info.outputs.date }}
+          provenance: mode=max
+          sbom: true
+          cache-from: type=gha,scope=release
+          cache-to: type=gha,scope=release,mode=max
+      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+        with:
+          cosign-release: v3.1.4
+      - name: Sign the image (keyless)
+        env:
+          IMAGE: ${{ steps.info.outputs.image }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: cosign sign --yes "${IMAGE}@${DIGEST}"
+      - name: Build the binaries
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          target: binary
+          outputs: type=local,dest=.ci/binaries
+          build-args: |
+            VERSION=${{ github.ref_name }}
+            COMMIT=${{ github.sha }}
+            DATE=${{ steps.info.outputs.date }}
+          provenance: false
+          cache-from: type=gha,scope=release
+      - name: Load the amd64 image for the SBOM and a last smoke test
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          platforms: linux/amd64
+          load: true
+          tags: allister-release:${{ github.ref_name }}
+          build-args: |
+            VERSION=${{ github.ref_name }}
+            COMMIT=${{ github.sha }}
+            DATE=${{ steps.info.outputs.date }}
+          provenance: false
+          cache-from: type=gha,scope=release
+      - name: Smoke test
+        run: scripts/ci.sh smoke "allister-release:${TAG}"
+      - name: Release assets
+        run: |
+          mkdir -p dist
+          for arch in amd64 arm64; do
+            cp ".ci/binaries/linux_${arch}/allister" "dist/allister-${TAG}-linux-${arch}"
+          done
+          scripts/ci.sh sbom "allister-release:${TAG}" "dist/allister-${TAG}.spdx.json"
+          (cd dist && sha256sum -- * >checksums.txt && cat checksums.txt)
+          cosign sign-blob --yes --bundle dist/checksums.txt.sigstore.json dist/checksums.txt
+      - name: GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          flags=()
+          if [ "$PRERELEASE" = true ]; then flags+=(--prerelease --latest=false); fi
+          # commits grouped by Conventional Commit prefix, then GitHub's
+          # generated notes (merged pull requests by label, .github/release.yml)
+          scripts/release-notes.sh "$TAG" >.ci/notes.md
+          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --verify-tag --generate-notes \
+            --notes-file .ci/notes.md --title "Allister $TAG" "${flags[@]}" dist/*
+      - name: Summary
+        env:
+          IMAGE: ${{ steps.info.outputs.image }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+          TAGS: ${{ steps.meta.outputs.tags }}
+        run: |
+          {
+            echo "### Released ${TAG}"
+            echo
+            echo "Image: \`${IMAGE}@${DIGEST}\`"
+            echo
+            echo '```'
+            echo "$TAGS"
+            echo '```'
+          } >>"$GITHUB_STEP_SUMMARY"

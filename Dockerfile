@@ -2,19 +2,24 @@
 # humans (Docker pulls the digest). Base-image security updates therefore
 # need scripts/update-pins.sh (see PINS.md), as do Tailwind upgrades.
 
+# The css and build stages run on the build machine's platform (BUILDPLATFORM)
+# for every target: the CSS is the same everywhere and Go cross-compiles, so
+# a multi-architecture build (linux/amd64 and linux/arm64) needs no emulation.
+
 # debian:bookworm-slim
-FROM debian:bookworm-slim@sha256:734a72b3d6142a71993b4bc580ca01d8ca687f77a2c422d96a961d3376b179bc AS css
+FROM --platform=$BUILDPLATFORM debian:bookworm-slim@sha256:734a72b3d6142a71993b4bc580ca01d8ca687f77a2c422d96a961d3376b179bc AS css
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
-ARG TARGETARCH
+# the Tailwind CLI runs here, so it is the build machine's architecture
+ARG BUILDARCH
 ARG TAILWIND_VERSION=v3.4.17
 # sha256 of tailwindcss-linux-x64 and tailwindcss-linux-arm64 of TAILWIND_VERSION
 ARG TAILWIND_SHA256_AMD64=7d24f7fa191d2193b78cd5f5a42a6093e14409521908529f42d80b11fde1f1d4
 ARG TAILWIND_SHA256_ARM64=69b1378b8133192d7d2feb12a116fa12d035594f58db3eff215879e4ad8cf39b
 RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates && rm -rf /var/lib/apt/lists/*
-RUN case "$TARGETARCH" in \
+RUN case "$BUILDARCH" in \
       amd64) ARCH=x64; SUM="${TAILWIND_SHA256_AMD64}" ;; \
       arm64) ARCH=arm64; SUM="${TAILWIND_SHA256_ARM64}" ;; \
-      *) echo "unsupported TARGETARCH '$TARGETARCH' (amd64 or arm64)" >&2; exit 1 ;; \
+      *) echo "unsupported BUILDARCH '$BUILDARCH' (amd64 or arm64)" >&2; exit 1 ;; \
     esac && \
     curl -fsSL -o /usr/local/bin/tailwindcss \
       "https://github.com/tailwindlabs/tailwindcss/releases/download/${TAILWIND_VERSION}/tailwindcss-linux-${ARCH}" && \
@@ -31,7 +36,7 @@ COPY internal/appearance/css-smoke.sh ./internal/appearance/css-smoke.sh
 RUN sh internal/appearance/css-smoke.sh app.css
 
 # golang:1.27.3-bookworm (keep in step with go.mod's toolchain and scripts/go.sh)
-FROM golang:1.27.3-bookworm@sha256:dc0963f32053e4bc451d24d87e3892d42d01021b61f093e98eb95c0352bb84b0 AS build
+FROM --platform=$BUILDPLATFORM golang:1.27.3-bookworm@sha256:dc0963f32053e4bc451d24d87e3892d42d01021b61f093e98eb95c0352bb84b0 AS build
 WORKDIR /src
 COPY go.mod go.sum* ./
 RUN go mod download
@@ -42,9 +47,16 @@ COPY --from=css /src/app.css internal/web/static/app.css
 ARG VERSION=dev
 ARG COMMIT=unknown
 ARG DATE=unknown
-RUN CGO_ENABLED=0 go build -trimpath \
+ARG TARGETOS
+ARG TARGETARCH
+RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath \
       -ldflags="-s -w -X github.com/allister/allister/internal/version.Version=${VERSION} -X github.com/allister/allister/internal/version.Commit=${COMMIT} -X github.com/allister/allister/internal/version.Date=${DATE}" \
       -o /allister ./cmd/allister
+
+# The bare binary, for release assets: docker buildx build --target binary
+# --output type=local,dest=dist (one directory per platform).
+FROM scratch AS binary
+COPY --from=build /allister /allister
 
 # gcr.io/distroless/static-debian12:latest
 FROM gcr.io/distroless/static-debian12:latest@sha256:d75cdd72874d4790092fcb1b058493ecf6bb5bf2b2b897045b00ff01d91843f2
