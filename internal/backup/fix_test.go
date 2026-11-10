@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/allister/allister/internal/covers"
 	"github.com/allister/allister/internal/library"
 	"github.com/allister/allister/internal/plugin"
 )
@@ -63,7 +64,7 @@ func TestBackupZipDirectoryIsWalkedBeforeLoading(t *testing.T) {
 		wantReject(t, err, "more than 1000 files")
 		// a declared count that is small does not hide the real directory
 		_, err = e.restore(craftedDir(3000, 3000-2048, "", nil), Limits{MaxEntries: 1000}, nil)
-		wantReject(t, err, "")
+		wantReject(t, err, "more than 1000 files")
 	})
 	t.Run("trailing bytes after the end record", func(t *testing.T) {
 		zipped := zipOf(t, entry{name: "backup.json", body: jsonOf(t, bookItem("1"))}, entry{name: "covers/a.png", body: pngBytes(1)})
@@ -105,6 +106,9 @@ func TestBackupZipDirectoryIsWalkedBeforeLoading(t *testing.T) {
 		zw.Close()
 		data := b.Bytes()
 		_, goErr := zip.NewReader(bytes.NewReader(data), int64(len(data)))
+		if goErr == nil {
+			t.Fatal("premise: archive/zip must refuse this archive")
+		}
 		e := newEnv(t)
 		rep, err := e.restore(data, Limits{}, nil)
 		// consistent with archive/zip: refused as not a zip when it refuses
@@ -241,5 +245,125 @@ func TestBackupRestoreQueuesManualItemsWithRemoteCovers(t *testing.T) {
 	}
 	if len(queued) != 2 {
 		t.Fatalf("queued = %v (want the remote-cover manual item and the sourced item)", queued)
+	}
+}
+
+// decoyArchive is the base-offset exploit: a decoy central directory header
+// at offset 0 that archive/zip refuses (CompressedSize 0xFFFFFFFF without a
+// zip64 extra), junk, then n cheap headers at the real base X, and an end
+// record declaring 1 entry at directory offset 0 with size endOff-X, so the
+// computed base offset is X.
+func decoyArchive(n int) []byte {
+	le := binary.LittleEndian
+	decoy := make([]byte, 47)
+	le.PutUint32(decoy, 0x02014b50)
+	le.PutUint32(decoy[20:], 0xFFFFFFFF) // compressed size: needs a zip64 extra
+	le.PutUint16(decoy[28:], 1)
+	decoy[46] = 'a'
+	out := append(decoy, bytes.Repeat([]byte{'J'}, 100)...)
+	x := len(out)
+	hdr := make([]byte, 47)
+	le.PutUint32(hdr, 0x02014b50)
+	le.PutUint16(hdr[28:], 1)
+	hdr[46] = 'b'
+	out = append(out, bytes.Repeat(hdr, n)...)
+	end := make([]byte, 22)
+	le.PutUint32(end, 0x06054b50)
+	le.PutUint16(end[8:], 1)
+	le.PutUint16(end[10:], 1)
+	le.PutUint32(end[12:], uint32(len(out)-x))
+	le.PutUint32(end[16:], 0)
+	return append(out, end...)
+}
+
+func TestBackupRefusesDataBeforeTheZipDirectory(t *testing.T) {
+	t.Run("decoy header with a base offset", func(t *testing.T) {
+		data := decoyArchive(3000)
+		e := newEnv(t)
+		_, err := e.restore(data, Limits{MaxEntries: 1000}, nil)
+		wantReject(t, err, "unexpected data before the zip directory")
+		// with 65536*k+1 headers archive/zip itself would load them all
+		big := decoyArchive(65536 + 1)
+		if zr, err := zip.NewReader(bytes.NewReader(big), int64(len(big))); err != nil || len(zr.File) != 65537 {
+			t.Fatalf("premise: archive/zip read %v, %v", zr, err)
+		}
+		_, err = e.restore(big, Limits{}, nil)
+		wantReject(t, err, "unexpected data before the zip directory")
+	})
+	t.Run("prepended bytes (self-extracting style)", func(t *testing.T) {
+		zipped := zipOf(t, entry{name: "backup.json", body: jsonOf(t, bookItem("1"))})
+		data := append([]byte("#!/bin/sh\nexec unzip \"$0\"\n"), zipped...)
+		if _, err := zip.NewReader(bytes.NewReader(data), int64(len(data))); err != nil {
+			t.Fatalf("premise: archive/zip reads prefixed archives: %v", err)
+		}
+		e := newEnv(t)
+		_, err := e.restore(data, Limits{}, nil)
+		wantReject(t, err, "unexpected data before the zip directory")
+		if n := itemCount(t, e); n != 0 {
+			t.Fatalf("items = %d", n)
+		}
+	})
+}
+
+func TestBackupOwnArchivesPassTheDirectoryScan(t *testing.T) {
+	a := newEnv(t)
+	for i := 0; i < 840; i++ {
+		img := append(pngBytes(uint8(i)), byte(i>>8), byte(i)) // distinct content, still a PNG
+		name, err := covers.Save(a.covers, bytes.NewReader(img))
+		if err != nil {
+			t.Fatal(err)
+		}
+		a.book(fmt.Sprint(i), name, nil)
+	}
+	data := a.archive()
+	walked, declared, err := scanDirectory(bytes.NewReader(data), int64(len(data)), DefaultLimits().MaxEntries)
+	if err != nil || walked != declared || walked != 841 {
+		t.Fatalf("scan = %d of %d, %v", walked, declared, err)
+	}
+	b := newEnv(t)
+	rep := mustRestore(t, b, data)
+	if rep.Created != 840 || len(rep.Notes) != 0 {
+		t.Fatalf("report: created %d, notes %d", rep.Created, len(rep.Notes))
+	}
+	// a zip64 directory written by archive/zip (over 65535 entries) scans to its real count
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+	w, _ := zw.Create("backup.json")
+	w.Write(jsonOf(t, bookItem("1")))
+	for i := 0; i < 65600; i++ {
+		zw.CreateHeader(&zip.FileHeader{Name: fmt.Sprint("covers/c", i), Method: zip.Store})
+	}
+	zw.Close()
+	z := buf.Bytes()
+	if walked, declared, err := scanDirectory(bytes.NewReader(z), int64(len(z)), DefaultLimits().MaxEntries); err != nil || walked != 65601 || declared != 65601 {
+		t.Fatalf("zip64 scan = %d of %d, %v", walked, declared, err)
+	}
+	if rep := mustRestore(t, newEnv(t), z); rep.Created != 1 {
+		t.Fatalf("zip64 restore = %+v", rep)
+	}
+}
+
+func TestBackupCapsUnknownHeaderMembers(t *testing.T) {
+	item, _ := itemJSON(t, bookItem("1"))
+	big := `"` + strings.Repeat("z", 600) + `"`
+	e := newEnv(t)
+	doc := `{"format":"allister.backup","format_version":1,"note":` + big + `,"items":[` + item + `]}`
+	_, err := e.restore(zipOf(t, entry{name: "backup.json", body: []byte(doc)}), Limits{MaxMemberBytes: 500}, nil)
+	wantReject(t, err, "larger than 500 bytes")
+	if n := itemCount(t, e); n != 0 {
+		t.Fatalf("items = %d", n)
+	}
+	doc = `{"format":"allister.backup","format_version":1,"items":[` + item + `],"note":` + big + `}`
+	rep, err := e.restore(zipOf(t, entry{name: "backup.json", body: []byte(doc)}), Limits{MaxMemberBytes: 500}, nil)
+	if err != nil || rep.Created != 1 || !strings.Contains(rep.Aborted, "larger than 500 bytes") {
+		t.Fatalf("report = %+v, %v", rep, err)
+	}
+	if DefaultLimits().MaxMemberBytes != 1<<20 {
+		t.Fatalf("default member cap = %d", DefaultLimits().MaxMemberBytes)
+	}
+	// small unknown members are fine
+	doc = `{"format":"allister.backup","format_version":1,"note":"hi","items":[` + item + `]}`
+	if rep := mustRestore(t, newEnv(t), zipOf(t, entry{name: "backup.json", body: []byte(doc)})); rep.Created != 1 {
+		t.Fatalf("report = %+v", rep)
 	}
 }

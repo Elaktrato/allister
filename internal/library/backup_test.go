@@ -418,7 +418,7 @@ func TestRestoreItemLinksExistingPeopleUnchanged(t *testing.T) {
 	bi := collect(t, a.lib, 200)[0]
 
 	b := newEnv(t)
-	// B already knows the character (c1) and the voice actor (p1) from another item
+	// B already knows the credited person (c1) and the counterpart (p1) from another item
 	other := mustSave(t, b.lib, "tv", "show", tvData("other", nil))
 	if err := b.lib.SaveCredits(bg, other, []plugin.Credit{{Role: "actor",
 		Person: plugin.PersonRef{ID: "c1", Name: "Hero (edited in B)", URL: "https://tv.example/c/b-c1"},
@@ -484,7 +484,7 @@ func TestRestoreItemPersonWithoutNameFailsAtPlanTime(t *testing.T) {
 	bi.Credits[0].Person.Name = "Named"
 	w := "  "
 	bi.Credits[0].With = &BackupPerson{SourceID: "y", Name: w}
-	if res, _ := e.lib.RestoreItem(bg, bi, RestoreOptions{}); res.Outcome != RestoreFailed {
+	if res, _ := e.lib.RestoreItem(bg, bi, RestoreOptions{}); res.Outcome != RestoreFailed || !strings.Contains(res.Reason, `"y"`) || strings.Contains(res.Reason, `"x"`) {
 		t.Fatalf("counterpart without name = %+v", res)
 	}
 }

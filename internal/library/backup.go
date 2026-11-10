@@ -415,7 +415,9 @@ type RestoreOptions struct {
 	// ReleaseCover is called with a name ResolveCover returned when the
 	// item was not written after all (skipped, failed or an error) and no
 	// item or person references the stored file, so the caller can delete
-	// it. It may be nil.
+	// it. It may be nil. Residual race (accepted for a single-user app): a concurrent
+	// save or sync that stores byte-identical content between the
+	// ImageReferenced check and the caller's delete can lose its file.
 	ReleaseCover func(ctx context.Context, stored string)
 }
 
@@ -592,8 +594,11 @@ func (l *Library) planRestore(bi BackupItem) (*restorePlan, error) {
 	for _, c := range bi.Credits {
 		// every person needs a name: a new one is created from it, and the
 		// transaction must not fail on it after the cover was stored
-		if strings.TrimSpace(c.Person.Name) == "" || (c.With != nil && strings.TrimSpace(c.With.Name) == "") {
+		if strings.TrimSpace(c.Person.Name) == "" {
 			return nil, invalid("credited person %q needs a name", truncateRunes(c.Person.SourceID, 40))
+		}
+		if c.With != nil && strings.TrimSpace(c.With.Name) == "" {
+			return nil, invalid("credit counterpart person %q needs a name", truncateRunes(c.With.SourceID, 40))
 		}
 		pc := plugin.Credit{Role: c.Role, Detail: c.Detail, WithRole: c.WithRole, Person: personRef(c.Person)}
 		if err := checkRemoteImage("credit person image", c.Person.ImageURL); err != nil {

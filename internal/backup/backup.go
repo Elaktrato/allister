@@ -90,11 +90,14 @@ type Limits struct {
 	MaxItems int
 	// MaxItemBytes caps one item's JSON (default 4 MiB).
 	MaxItemBytes int64
+	// MaxMemberBytes caps one unknown top-level member of backup.json
+	// (default 1 MiB).
+	MaxMemberBytes int64
 }
 
 // DefaultLimits returns the production limits.
 func DefaultLimits() Limits {
-	return Limits{MaxJSONBytes: 256 << 20, MaxTotalBytes: 2 << 30, MaxEntries: 200_000, MaxItems: 100_000, MaxItemBytes: 4 << 20}
+	return Limits{MaxJSONBytes: 256 << 20, MaxTotalBytes: 2 << 30, MaxEntries: 200_000, MaxItems: 100_000, MaxItemBytes: 4 << 20, MaxMemberBytes: 1 << 20}
 }
 
 func (l Limits) withDefaults() Limits {
@@ -113,6 +116,9 @@ func (l Limits) withDefaults() Limits {
 	}
 	if l.MaxItemBytes <= 0 {
 		l.MaxItemBytes = d.MaxItemBytes
+	}
+	if l.MaxMemberBytes <= 0 {
+		l.MaxMemberBytes = d.MaxMemberBytes
 	}
 	return l
 }
@@ -279,9 +285,10 @@ func addRow(list *[]Row, more *int, r Row) {
 }
 
 var (
-	errJSONTooLarge  = errors.New("backup.json too large")
-	errTotalTooLarge = errors.New("archive too large")
-	errItemTooLarge  = errors.New("item too large")
+	errJSONTooLarge   = errors.New("backup.json too large")
+	errTotalTooLarge  = errors.New("archive too large")
+	errItemTooLarge   = errors.New("item too large")
+	errMemberTooLarge = errors.New("member too large")
 	// errStopped unwinds the decoder after abort recorded Report.Aborted.
 	errStopped = errors.New("restore stopped")
 )
@@ -336,13 +343,14 @@ type restorer struct {
 type itemLimiter struct {
 	r           io.Reader
 	read, limit int64
+	err         error // returned when the limit is reached
 }
 
 func (l *itemLimiter) Read(p []byte) (int, error) {
 	if l.limit >= 0 {
 		allowed := l.limit - l.read
 		if allowed <= 0 {
-			return 0, errItemTooLarge
+			return 0, l.err
 		}
 		if int64(len(p)) > allowed {
 			p = p[:allowed]
@@ -369,6 +377,8 @@ func Restore(ctx context.Context, ra io.ReaderAt, size int64, opts Options) (*Re
 	switch {
 	case errors.Is(err, errNotZip):
 		return rs.rep, reject("%s (it is not a zip archive).", notBackup)
+	case errors.Is(err, errPrefix):
+		return rs.rep, reject("This file is not an Allister backup archive (unexpected data before the zip directory). Only archives written by Allister are accepted.")
 	case err != nil:
 		return rs.rep, err
 	case walked > uint64(rs.lim.MaxEntries):
@@ -468,14 +478,14 @@ func (rs *restorer) decode(ctx context.Context, dec *json.Decoder) error {
 		switch key {
 		case "format":
 			var s any
-			if err := dec.Decode(&s); err != nil {
-				return rs.syntax(err)
+			if err := rs.member(dec, &s, seen["items"]); err != nil {
+				return err
 			}
 			format, _ = s.(string)
 		case "format_version":
 			var v any
-			if err := dec.Decode(&v); err != nil {
-				return rs.syntax(err)
+			if err := rs.member(dec, &v, seen["items"]); err != nil {
+				return err
 			}
 			haveVersion = true
 			if n, ok := v.(json.Number); ok {
@@ -496,8 +506,8 @@ func (rs *restorer) decode(ctx context.Context, dec *json.Decoder) error {
 			}
 		default:
 			var skip json.RawMessage
-			if err := dec.Decode(&skip); err != nil {
-				return rs.syntax(err)
+			if err := rs.member(dec, &skip, seen["items"]); err != nil {
+				return err
 			}
 		}
 	}
@@ -515,6 +525,29 @@ func (rs *restorer) decode(ctx context.Context, dec *json.Decoder) error {
 		return rs.syntax(err) // a read error: limits, damaged archive entry
 	}
 	return nil
+}
+
+// decodeCapped decodes the next value with at most limit bytes read for it
+// (tooLarge reports an overrun).
+func (rs *restorer) decodeCapped(dec *json.Decoder, v any, limit int64, tooLarge error) error {
+	rs.limiter.limit, rs.limiter.err = dec.InputOffset()+limit, tooLarge
+	err := dec.Decode(v)
+	rs.limiter.limit = -1
+	return err
+}
+
+// member decodes a top-level member other than "items" under
+// Limits.MaxMemberBytes: too large is refused before any item was restored
+// and stops the restore after.
+func (rs *restorer) member(dec *json.Decoder, v any, afterItems bool) error {
+	err := rs.decodeCapped(dec, v, rs.lim.MaxMemberBytes, errMemberTooLarge)
+	switch {
+	case err == nil:
+		return nil
+	case errors.Is(err, errMemberTooLarge) && !afterItems:
+		return reject("%s: %s.", notBackup, rs.limitMessage(err))
+	}
+	return rs.syntax(err)
 }
 
 // items restores the items array; the decoder stands before '['.
@@ -535,9 +568,7 @@ func (rs *restorer) items(ctx context.Context, dec *json.Decoder) error {
 			return rs.abort(fmt.Sprintf("backup.json holds more than %d items", rs.lim.MaxItems))
 		}
 		var raw json.RawMessage
-		rs.limiter.limit = dec.InputOffset() + rs.lim.MaxItemBytes
-		err := dec.Decode(&raw)
-		rs.limiter.limit = -1
+		err := rs.decodeCapped(dec, &raw, rs.lim.MaxItemBytes, errItemTooLarge)
 		if err != nil {
 			return rs.syntax(err)
 		}
@@ -641,6 +672,11 @@ func (rs *restorer) resolver() func(ctx context.Context, name string) (string, s
 // release deletes a stored cover the library found unreferenced after the
 // item that wanted it was not written, and forgets it, so a later item with
 // the same archive cover stores it again.
+//
+// Accepted residual race: between the library's ImageReferenced check and
+// this os.Remove, a concurrent save or sync could store byte-identical
+// content under the same content-hash name and reference it; that file
+// would then be removed. For a single-user app this window is accepted.
 func (rs *restorer) release(_ context.Context, stored string) {
 	if rs.opts.CoversDir == "" || !library.ValidFileName(stored) {
 		return
@@ -692,6 +728,8 @@ func (rs *restorer) limitMessage(err error) string {
 		return fmt.Sprintf("the archive unpacks to more than %s", size(rs.lim.MaxTotalBytes))
 	case errors.Is(err, errItemTooLarge):
 		return fmt.Sprintf("an item in backup.json is larger than %s", size(rs.lim.MaxItemBytes))
+	case errors.Is(err, errMemberTooLarge):
+		return fmt.Sprintf("a top-level member of backup.json is larger than %s", size(rs.lim.MaxMemberBytes))
 	}
 	return ""
 }
@@ -744,6 +782,9 @@ func clip(s string, n int) string {
 
 // errNotZip: archive/zip would not read the archive either.
 var errNotZip = errors.New("not a zip archive")
+
+// errPrefix: the archive has data before its zip directory (base offset).
+var errPrefix = errors.New("data before the zip directory")
 
 // scanDirectory finds the end of central directory record exactly the way
 // zip.NewReader does (the last signature within the last 1 KiB, then 65 KiB,
@@ -798,12 +839,16 @@ func scanDirectory(ra io.ReaderAt, size int64, max int) (walked, declared uint64
 	if o := base + int64(dirOffset); o < 0 || o >= size {
 		return 0, 0, errNotZip
 	}
-	if base > 0 {
-		if _, ok := nextHeader(bufio.NewReader(io.NewSectionReader(ra, int64(dirOffset), size-int64(dirOffset)))); ok {
-			base = 0
-		}
+	// archive/zip accepts data before the archive (a base offset, with a
+	// fallback to 0 when a header parses at the plain offset). Following
+	// that fallback exactly would mean re-implementing its full header
+	// parser, and any difference lets the two walk different directories.
+	// zip.Writer never prepends data, so only base 0 (an archive written by
+	// this app) is accepted.
+	if base != 0 {
+		return 0, 0, errPrefix
 	}
-	start := base + int64(dirOffset)
+	start := int64(dirOffset)
 	br := bufio.NewReaderSize(io.NewSectionReader(ra, start, size-start), 64<<10)
 	for walked <= uint64(max) {
 		if _, ok := nextHeader(br); !ok {
