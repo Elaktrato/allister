@@ -59,6 +59,22 @@
     document.documentElement.style.setProperty("--al-" + token, (n >> 16) + " " + ((n >> 8) & 255) + " " + (n & 255));
   });
 
+  // A calendar airing time is rendered as UTC by the server (a fallback that
+  // works without JavaScript); show it in the visitor's timezone instead.
+  function localTimes(root) {
+    var nodes = (root || document).querySelectorAll("time[data-local]");
+    for (var i = 0; i < nodes.length; i++) {
+      var d = new Date(nodes[i].getAttribute("datetime"));
+      if (!isNaN(d.getTime())) {
+        nodes[i].textContent = d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+      }
+    }
+  }
+  localTimes();
+  document.addEventListener("htmx:afterSwap", function (event) {
+    localTimes(event.detail.target);
+  });
+
   // A form marked data-no-submit never navigates: its fields drive their
   // own htmx requests (the match dialog's search form).
   document.addEventListener("submit", function (event) {

@@ -9,8 +9,9 @@
       {{end}}
     </ul>
     <ul class="ml-auto flex gap-1 lg:mt-auto lg:ml-0 lg:flex-col lg:border-t lg:border-slate-800 lg:pt-3">
+      <li>{{template "nav_row" .Calendar}}</li>
       <li>{{template "nav_row" .Settings}}</li>
     </ul>
   </nav>
 </div>
-{{define "nav_row"}}<a href="{{.Href}}"{{if .Active}} aria-current="page"{{end}} class="group flex items-center gap-3 rounded-md px-2.5 py-1.5 text-sm font-medium focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 lg:px-3 lg:py-2 {{if .Active}}bg-slate-800 text-white{{else}}text-slate-400 hover:bg-slate-800/60 hover:text-slate-100{{end}}"><span class="icon {{if .Active}}text-indigo-400{{else}}text-slate-500 group-hover:text-slate-300{{end}}" aria-hidden="true">{{if eq .Href "/settings"}}settings{{else}}{{with .Icon}}{{.}}{{else}}category{{end}}{{end}}</span><span>{{.Label}}</span></a>{{end}}
+{{define "nav_row"}}<a href="{{.Href}}"{{if .Active}} aria-current="page"{{end}} class="group flex items-center gap-3 rounded-md px-2.5 py-1.5 text-sm font-medium focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 lg:px-3 lg:py-2 {{if .Active}}bg-slate-800 text-white{{else}}text-slate-400 hover:bg-slate-800/60 hover:text-slate-100{{end}}"><span class="icon {{if .Active}}text-indigo-400{{else}}text-slate-500 group-hover:text-slate-300{{end}}" aria-hidden="true">{{if eq .Href "/settings"}}settings{{else if eq .Href "/calendar"}}calendar_month{{else}}{{with .Icon}}{{.}}{{else}}category{{end}}{{end}}</span><span>{{.Label}}</span></a>{{end}}

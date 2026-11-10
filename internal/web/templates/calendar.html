@@ -1,0 +1,42 @@
+{{define "title"}}Calendar - Allister{{end}}
+{{define "content"}}
+<div class="mb-5 flex flex-wrap items-center gap-3">
+  <h1 class="text-3xl font-semibold">Calendar</h1>
+  <div class="ml-auto flex items-center gap-1 text-sm">
+    <a href="{{.PrevURL}}" hx-get="{{.PrevURL}}" hx-target="#calendar-grid" hx-push-url="true" aria-label="Previous month" class="rounded p-1.5 text-slate-400 hover:bg-slate-800 hover:text-slate-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"><span class="icon text-[1.125rem]" aria-hidden="true">chevron_left</span></a>
+    <span class="min-w-40 text-center font-medium">{{.MonthLabel}}</span>
+    <a href="{{.NextURL}}" hx-get="{{.NextURL}}" hx-target="#calendar-grid" hx-push-url="true" aria-label="Next month" class="rounded p-1.5 text-slate-400 hover:bg-slate-800 hover:text-slate-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"><span class="icon text-[1.125rem]" aria-hidden="true">chevron_right</span></a>
+    <a href="{{.TodayURL}}" hx-get="{{.TodayURL}}" hx-target="#calendar-grid" hx-push-url="true" class="ml-1 rounded-md border border-slate-700 px-2.5 py-1 text-slate-300 hover:bg-slate-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500">Today</a>
+  </div>
+</div>
+{{template "calendar_grid" .}}
+{{end}}
+
+{{/* the month grid; htmx month links swap this region alone */}}
+{{define "calendar_grid"}}
+<div id="calendar-grid" class="overflow-x-auto">
+  <table class="w-full table-fixed border-collapse text-left text-sm">
+    <thead>
+      <tr class="text-xs uppercase tracking-wide text-slate-500">
+        {{range .Weekdays}}<th scope="col" class="border-b border-slate-800 px-1.5 py-2 font-medium">{{.}}</th>{{end}}
+      </tr>
+    </thead>
+    <tbody>
+      {{range .Weeks}}
+      <tr>
+        {{range .}}
+        <td class="h-24 border-b border-slate-800/60 px-1.5 py-1.5 align-top{{if not .InMonth}} opacity-40{{end}}">
+          <div class="mb-1 text-xs {{if .Today}}inline-flex h-5 w-5 items-center justify-center rounded-full bg-indigo-600 font-semibold{{else}}text-slate-400{{end}}">{{.Day}}</div>
+          <div class="flex flex-col gap-1">
+            {{range .Releases}}
+            <a href="{{.Href}}" class="truncate rounded bg-slate-800 px-1.5 py-0.5 text-xs text-indigo-300 hover:bg-slate-700" title="{{.Title}} — {{.Label}} {{.Number}}"><time datetime="{{.At.Format "2006-01-02T15:04:05Z07:00"}}" data-local>{{.At.Format "15:04"}} UTC</time> {{.Title}}</a>
+            {{end}}
+          </div>
+        </td>
+        {{end}}
+      </tr>
+      {{end}}
+    </tbody>
+  </table>
+</div>
+{{end}}

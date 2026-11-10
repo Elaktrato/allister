@@ -185,6 +185,7 @@ type navItem struct {
 // navView is the sidebar: one row per enabled plugin, Settings at the bottom.
 type navView struct {
 	Items    []navItem
+	Calendar navItem
 	Settings navItem
 }
 
@@ -220,6 +221,7 @@ func (s *server) navItems(r *http.Request) navView {
 		href := "/" + m.ID
 		v.Items = append(v.Items, navItem{Label: label, Href: href, Icon: m.Icon, Active: underPrefix(r.URL.Path, href) || marked == m.ID})
 	}
+	v.Calendar = navItem{Label: "Calendar", Href: "/calendar", Active: underPrefix(r.URL.Path, "/calendar")}
 	v.Settings = navItem{Label: "Settings", Href: "/settings", Active: underPrefix(r.URL.Path, "/settings")}
 	return v
 }

@@ -118,4 +118,39 @@ func TestCalendarWithoutScheduleJobs(t *testing.T) {
 	}
 }
 
+// TestCalendarPage: the month grid lists the stored releases of watching
+// entries on their days, navigates months, and answers htmx with just the
+// grid.
+func TestCalendarPage(t *testing.T) {
+	e := newFixtureEnv(t)
+	now := time.Date(2026, 11, 10, 12, 0, 0, 0, time.UTC)
+	e.env.now = &now
+	id := e.addFixture(t, "tv", "show", tvShow("1", "Dark"), library.Entry{Status: library.Active})
+	err := e.lib.SaveSchedule(context.Background(), id, []library.Airing{
+		{Number: 3, AirsAt: time.Date(2026, 11, 12, 18, 30, 0, 0, time.UTC)},
+		{Number: 4, AirsAt: time.Date(2026, 12, 2, 18, 30, 0, 0, time.UTC)},
+	}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b := e.get("/calendar").Body.String()
+	mustContain(t, b, ">Calendar</h1>", "November 2026", ">Mon</th>", ">Sun</th>",
+		`href="/calendar?month=2026-10"`, `href="/calendar?month=2026-12"`,
+		`href="/tv/tvdata/1"`, "Dark", "Episode 3", "12")
+	mustNotContain(t, b, "Episode 4") // December, not this month
+	// another month, and an invalid one falls back to the current
+	mustContain(t, e.get("/calendar?month=2026-12").Body.String(), "December 2026", "Episode 4")
+	mustContain(t, e.get("/calendar?month=nope").Body.String(), "November 2026")
+	// htmx asks for the grid only
+	rec := e.getWith("/calendar?month=2026-12", map[string]string{"HX-Request": "true", "HX-Target": "calendar-grid"})
+	body := rec.Body.String()
+	mustContain(t, body, `id="calendar-grid"`, "Episode 4")
+	mustNotContain(t, body, "<html", "<header")
+	if v := rec.Header().Get("Vary"); !strings.Contains(v, "HX-Request") {
+		t.Fatalf("Vary = %q", v)
+	}
+	// the sidebar links the calendar and marks it current
+	mustContain(t, b, `href="/calendar"`, `aria-current="page"`)
+}
+
 var _ = plugin.Airing{}
