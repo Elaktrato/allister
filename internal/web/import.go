@@ -18,7 +18,6 @@ const (
 	// so this is the only size limit.
 	maxImportBody   = 20 << 20
 	maxImportMemory = 1 << 20
-	manualSourceID  = "manual"
 )
 
 var importStateLabels = map[string]string{
@@ -86,7 +85,7 @@ func importLines(m plugin.Manifest, items []importer.Item, link bool) []importLi
 	for _, it := range items {
 		l := importLine{Title: it.Title, Message: it.Message}
 		if link && it.SourceID != "" && m.ID != "" {
-			l.URL = itemURL(m, manualSourceID, it.SourceID, it.Kind)
+			l.URL = itemURL(m, manualSource, it.SourceID, it.Kind)
 		}
 		out = append(out, l)
 	}
