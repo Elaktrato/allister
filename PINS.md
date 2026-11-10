@@ -107,6 +107,9 @@ Every third-party action in `.github/workflows` is referenced by its full commit
 | `docker/setup-buildx-action` | `v4.4.1` | `f87e5991a6d7451dcb8d9637bfbc97413f497069` |
 | `docker/build-push-action` | `v7.4.0` | `c3c9e263c25d99ce0380d002d59b67737d91b0dc` |
 | `github/codeql-action` | `v4.39.1` | `9b3254085494b55a0f7c4c2b3d2d52cc712ce370` |
+| `actions/setup-go` | `v7.0.0` | `b7ad1dad31e06c5925ef5d2fc7ad053ef454303e` |
+| `actions/dependency-review-action` | `v5.0.0` | `a1d282b36b6f3519aa1f3fc636f609c47dddb294` |
+| `ossf/scorecard-action` | `v2.5.0` | `fa7117db83c52d787ae5a89f350999701505d78e` |
 
 ## Go tools
 
