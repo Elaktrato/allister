@@ -50,7 +50,17 @@ Vendored as `internal/web/static/material-symbols-outlined-v383.woff2`: Material
 
 ## App fonts
 
-Three fonts can be chosen as the app font in Settings > Appearance (besides system font stacks and uploaded fonts). Each is the variable font (weight axis) from the Fontsource npm package `@fontsource-variable/<name>`, as the two subsets Google Fonts publishes for Latin script: Latin and Latin Extended, declared with their `unicode-range` so a browser downloads the Latin Extended file only for text that needs it. All three are under the SIL Open Font License 1.1 (OFL-1.1); the licence texts are the packages' `LICENSE` files: `LICENSES/inter-OFL-1.1.txt`, `LICENSES/source-serif-4-OFL-1.1.txt`, `LICENSES/jetbrains-mono-OFL-1.1.txt`.
+Three fonts can be chosen as the app font in Settings > Appearance (besides system font stacks and uploaded fonts). Each is the variable font (weight axis) from the Fontsource npm package `@fontsource-variable/<name>`, as the two subsets Google Fonts publishes for Latin script: Latin and Latin Extended, declared with their `unicode-range` so a browser downloads the Latin Extended file only for text that needs it. All three are under the SIL Open Font License 1.1 (OFL-1.1). The licence texts are the upstream projects' own files, copied unchanged with their copyright lines (the npm packages' `LICENSE` files carry generated copyright lines, for Source Serif 4 a wrong one, so they are not used). Each was downloaded twice with identical content:
+
+| Licence file | Upstream |
+|---|---|
+| `LICENSES/inter-OFL-1.1.txt` | `https://raw.githubusercontent.com/rsms/inter/353b61b9f4430d5f420d56605a6e7993e0941470/LICENSE.txt` ("Copyright (c) 2016 The Inter Project Authors") |
+| `LICENSES/source-serif-4-OFL-1.1.txt` | `https://raw.githubusercontent.com/adobe-fonts/source-serif/80d3f8894c09c937bebfa9011247d2e1c79fd6f4/LICENSE.md` ("Copyright 2014 - 2023 Adobe (http://www.adobe.com/), with Reserved Font Name ‘Source’") |
+| `LICENSES/jetbrains-mono-OFL-1.1.txt` | `https://raw.githubusercontent.com/JetBrains/JetBrainsMono/19371302b95d218af43299bce79ddbddd0bc364d/OFL.txt` ("Copyright 2020 The JetBrains Mono Project Authors") |
+
+The image carries every licence: the Dockerfile's final stage copies `LICENSES/` to `/licenses` (checked by `TestLicencesShipWithTheImage`).
+
+**Reserved Font Name.** Source Serif's licence reserves the name "Source": a Modified Version of the font may not use it. Subsetting counts as modifying under the OFL. Allister does not modify the files: it redistributes, byte for byte, the Latin and Latin Extended subsets that Google Fonts publishes (Fontsource repackages Google's files; Google Fonts distributes Source Serif 4 under that name with its subsets). The fonts' internal names are unchanged ("Source Serif 4"). To stay clear of the reserved name on our side, the CSS family alias is `Allister Bundled Serif`, never "Source"; the picker labels the choice "Source Serif 4" as attribution of the upstream font. This reading is a judgement, not legal advice: if the owner prefers no doubt at all, replace Source Serif 4 by a serif without a Reserved Font Name (for example Literata, also OFL) following "Refreshing" below. Inter and JetBrains Mono declare no Reserved Font Name.
 
 | Font | Package | Weights |
 |---|---|---|
@@ -69,7 +79,7 @@ Three fonts can be chosen as the app font in Settings > Appearance (besides syst
 
 - Source: `files/<name>-latin-wght-normal.woff2` and `files/<name>-latin-ext-wght-normal.woff2` of each package version above. Downloaded twice from jsDelivr (`https://cdn.jsdelivr.net/npm/@fontsource-variable/<name>@<version>/files/...`) on 2026-11-10 with identical sums, and cross-checked against the npm registry tarball of the same version, whose `dist.integrity` (sha512) matched; the files inside the tarball had the same sha256. The licence files came from the same tarballs.
 - Each sum is recorded next to its file (`<file>.sha256`, sha256sum format). The version is in the file name, so cached copies are never reused for a new file. Served from the embedded static files as `font/woff2` with the same immutable cache as the icon font, declared by the generated `/appearance.css` with `font-display: swap`. Nothing is fetched from a CDN at run time.
-- Refreshing: download the new package version's two files per font (twice; the sums must match; compare with the npm tarball), save them under the new version's names, regenerate the `.sha256` files (`cd internal/web/static/fonts && sha256sum <file> > <file>.sha256`), replace the licence file if it changed, and update the version in `internal/appearance/bundled.go`, `internal/web/static_test.go` and this section. `scripts/update-pins.sh` never rewrites the fonts; it only checks them.
+- Refreshing: download the new package version's two files per font (twice; the sums must match; compare with the npm tarball), save them under the new version's names, regenerate the `.sha256` files (`cd internal/web/static/fonts && sha256sum <file> > <file>.sha256`), check the upstream licence file (copy it unchanged when it changed, update the table above), and update the version in `internal/appearance/bundled.go`, `internal/web/static_test.go` and this section. `scripts/update-pins.sh` never rewrites the fonts; it only checks them.
 
 ## Refreshing
 

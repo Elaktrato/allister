@@ -498,3 +498,70 @@ func TestPinsDocumentListsEveryPin(t *testing.T) {
 		}
 	}
 }
+
+// TestLicencesShipWithTheImage: the runtime image carries LICENSES/ (the
+// final stage copies it to /licenses), and every vendored font in the
+// static files (each has a .sha256) has its licence there: the bundled app
+// fonts <family>-latin...woff2 need LICENSES/<family>-OFL-1.1.txt, the icon
+// font material-symbols-...woff2 LICENSES/material-symbols-Apache-2.0.txt.
+// The licence texts are upstream's, with their copyright lines.
+func TestLicencesShipWithTheImage(t *testing.T) {
+	lines, _ := logicalLines(readRoot(t, "Dockerfile"))
+	last := -1
+	for i, l := range lines {
+		if strings.HasPrefix(strings.ToUpper(l), "FROM ") {
+			last = i
+		}
+	}
+	copied := false
+	for _, l := range lines[last+1:] {
+		if f := strings.Fields(l); len(f) == 3 && strings.EqualFold(f[0], "COPY") && f[1] == "LICENSES" && f[2] == "/licenses" {
+			copied = true
+		}
+	}
+	if !copied {
+		t.Error("the Dockerfile's final stage does not COPY LICENSES /licenses")
+	}
+	if strings.Contains(readRoot(t, ".dockerignore"), "LICENSES") {
+		t.Error(".dockerignore excludes LICENSES")
+	}
+	fonts := 0
+	for _, rel := range pinnedFiles(t) {
+		name := strings.TrimSuffix(filepath.Base(rel), ".sha256")
+		if !strings.HasSuffix(name, ".woff2") || !strings.HasPrefix(rel, "internal/web/static/") {
+			continue
+		}
+		fonts++
+		var lic string
+		switch {
+		case strings.HasPrefix(name, "material-symbols-"):
+			lic = "LICENSES/material-symbols-Apache-2.0.txt"
+		case strings.Contains(name, "-latin"):
+			lic = "LICENSES/" + name[:strings.Index(name, "-latin")] + "-OFL-1.1.txt"
+		default:
+			t.Errorf("%s: no licence rule for this font", rel)
+			continue
+		}
+		if _, err := os.Stat(filepath.Join(root, lic)); err != nil {
+			t.Errorf("%s: licence %s missing", rel, lic)
+		}
+	}
+	if fonts != 7 {
+		t.Errorf("%d vendored fonts found, want 7 (icon font and 6 app font files)", fonts)
+	}
+	for lic, want := range map[string][]string{
+		"LICENSES/source-serif-4-OFL-1.1.txt": {"Copyright 2014 - 2023 Adobe (http://www.adobe.com/), with Reserved Font Name ‘Source’", "SIL Open Font License, Version 1.1"},
+		"LICENSES/inter-OFL-1.1.txt":          {"Copyright (c) 2016 The Inter Project Authors (https://github.com/rsms/inter)", "SIL Open Font License, Version 1.1"},
+		"LICENSES/jetbrains-mono-OFL-1.1.txt": {"Copyright 2020 The JetBrains Mono Project Authors (https://github.com/JetBrains/JetBrainsMono)", "SIL Open Font License, Version 1.1"},
+	} {
+		body := readRoot(t, lic)
+		for _, w := range want {
+			if !strings.Contains(body, w) {
+				t.Errorf("%s lacks %q", lic, w)
+			}
+		}
+		if strings.HasPrefix(body, "Google Inc.") {
+			t.Errorf("%s still carries the packaged copyright line", lic)
+		}
+	}
+}

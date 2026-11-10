@@ -38,6 +38,8 @@ RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /allister ./cmd/alliste
 # gcr.io/distroless/static-debian12:latest
 FROM gcr.io/distroless/static-debian12:latest@sha256:d75cdd72874d4790092fcb1b058493ecf6bb5bf2b2b897045b00ff01d91843f2
 COPY --from=build /allister /allister
+# licences of the vendored fonts (OFL-1.1, Apache-2.0), see PINS.md
+COPY LICENSES /licenses
 ENV PORT=8080 DATA_DIR=/data
 VOLUME /data
 EXPOSE 8080

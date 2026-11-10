@@ -12,8 +12,8 @@ const (
 
 // bundled builds a bundled font: a variable woff2 per subset in
 // /static/fonts/ (versioned file names, pinned in PINS.md, licences in
-// LICENSES/). The family name is prefixed so an installed font of the same
-// name never stands in for the bundled file.
+// LICENSES/). The CSS family name is an "Allister ..." alias, so an
+// installed font of the same name never stands in for the bundled file.
 func bundled(id, name, family, weight, version, extRange, fallback string) FontChoice {
 	f := "Allister " + family
 	return FontChoice{
@@ -29,6 +29,8 @@ func bundled(id, name, family, weight, version, extRange, fallback string) FontC
 // Font License 1.1.
 var BundledFonts = []FontChoice{
 	bundled("inter", "Inter", "Inter", "100 900", "5.3.0", rangeLatinExt, defaultStack),
-	bundled("source-serif-4", "Source Serif 4", "Source Serif 4", "200 900", "5.3.1", rangeLatinExtSerif, `ui-serif, Georgia, Cambria, "Times New Roman", Times, serif`),
+	// "Source" is a Reserved Font Name of Adobe: the CSS alias avoids it
+	// (the file itself is redistributed unchanged, see PINS.md)
+	bundled("source-serif-4", "Source Serif 4", "Bundled Serif", "200 900", "5.3.1", rangeLatinExtSerif, `ui-serif, Georgia, Cambria, "Times New Roman", Times, serif`),
 	bundled("jetbrains-mono", "JetBrains Mono", "JetBrains Mono", "100 800", "5.3.0", rangeLatinExt, `ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace`),
 }
