@@ -59,10 +59,12 @@ func isRemote(p string) bool {
 // done, or partial plus a wrapped ErrRetryLater when only images failed, or
 // partial plus the source's error when the credits could not be fetched
 // (wrapped with ErrRetryLater for rate limits and unavailability,
-// ErrPermanent for a bad answer, a plain error otherwise). A deleted item is
-// a success; a payload whose plugin id does not match the item fails at once
-// (ErrPermanent). A manual item, or an item whose plugin does not provide
-// its source, has nothing to fetch: only its remote cover is downloaded.
+// ErrPermanent for a bad answer, a plain error otherwise); a source that
+// still needs its credential (ErrNotConfigured) keeps the stored credits and
+// finishes done. A deleted item is a success; a payload whose plugin id does
+// not match the item fails at once (ErrPermanent). A manual item, or an item
+// whose plugin does not provide its source, has nothing to fetch: only its
+// remote cover is downloaded.
 func SyncItem(deps SyncDeps) Handler {
 	return func(ctx context.Context, raw json.RawMessage) error {
 		var p SyncPayload
@@ -105,10 +107,16 @@ func SyncItem(deps SyncDeps) Handler {
 			return err
 		}
 
+		var skipCredits bool
 		credits, err := src.People(ctx, it.Kind, it.SourceID)
 		switch {
 		case errors.Is(err, plugin.ErrNotFound):
 			credits = nil
+		case errors.Is(err, plugin.ErrNotConfigured):
+			// The source has no usable credential: it cannot answer until the
+			// user configures it, so retrying is pointless. Keep the stored
+			// credits and images and finish; the key itself is never logged.
+			skipCredits = true
 		case err != nil:
 			if ctx.Err() != nil {
 				return ctx.Err()
@@ -128,31 +136,33 @@ func SyncItem(deps SyncDeps) Handler {
 			}
 			return fmt.Errorf("sync item %d: people: %w", it.ID, err)
 		}
-		if err := lib.SaveCredits(ctx, it.ID, credits); err != nil {
-			return fmt.Errorf("sync item %d: %w", it.ID, err)
-		}
-		people, err := lib.ItemPeople(ctx, it.ID)
-		if err != nil {
-			return fmt.Errorf("sync item %d: %w", it.ID, err)
-		}
-		for _, person := range people {
-			if err := ctx.Err(); err != nil {
-				return err
+		if !skipCredits {
+			if err := lib.SaveCredits(ctx, it.ID, credits); err != nil {
+				return fmt.Errorf("sync item %d: %w", it.ID, err)
 			}
-			if !isRemote(person.ImagePath) {
-				continue
-			}
-			name, err := covers.Download(ctx, deps.HTTP, deps.CoversDir, person.ImagePath)
-			if err != nil {
-				failures = append(failures, fmt.Sprintf("person %d: %v", person.ID, err))
-				continue
-			}
-			ok, err := lib.SetPersonImagePathIf(ctx, person.ID, person.ImagePath, name)
+			people, err := lib.ItemPeople(ctx, it.ID)
 			if err != nil {
 				return fmt.Errorf("sync item %d: %w", it.ID, err)
 			}
-			if !ok {
-				discardDownload(ctx, deps, name)
+			for _, person := range people {
+				if err := ctx.Err(); err != nil {
+					return err
+				}
+				if !isRemote(person.ImagePath) {
+					continue
+				}
+				name, err := covers.Download(ctx, deps.HTTP, deps.CoversDir, person.ImagePath)
+				if err != nil {
+					failures = append(failures, fmt.Sprintf("person %d: %v", person.ID, err))
+					continue
+				}
+				ok, err := lib.SetPersonImagePathIf(ctx, person.ID, person.ImagePath, name)
+				if err != nil {
+					return fmt.Errorf("sync item %d: %w", it.ID, err)
+				}
+				if !ok {
+					discardDownload(ctx, deps, name)
+				}
 			}
 		}
 		if err := ctx.Err(); err != nil {

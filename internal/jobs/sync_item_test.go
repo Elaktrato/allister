@@ -313,6 +313,27 @@ func TestSyncItemPeopleNotFoundIsDone(t *testing.T) {
 	}
 }
 
+func TestSyncItemNotConfiguredKeepsCreditsAndFinishes(t *testing.T) {
+	e := newSyncEnv(t)
+	id := e.save(t, "tvdata", "")
+	ctx := context.Background()
+	if err := e.lib.SaveCredits(ctx, id, []plugin.Credit{{Role: "actor", Person: plugin.PersonRef{ID: "p1", Name: "P1"}}}); err != nil {
+		t.Fatal(err)
+	}
+	e.src.Errs = map[string]error{plugintest.OpPeople: plugin.ErrNotConfigured}
+	if err := SyncItem(e.deps)(ctx, payload(id, "tv")); err != nil {
+		t.Fatal(err)
+	}
+	it, err := e.lib.Item(ctx, id)
+	if err != nil || it.SyncState != "done" {
+		t.Fatalf("item = %+v, %v", it, err)
+	}
+	people, err := e.lib.ItemPeople(ctx, id)
+	if err != nil || len(people) != 1 {
+		t.Fatalf("credits = %+v, %v", people, err)
+	}
+}
+
 func TestSyncItemDeletedItemSucceeds(t *testing.T) {
 	e := newSyncEnv(t)
 	id := e.save(t, "tvdata", e.srv.URL+"/ok/cover")
