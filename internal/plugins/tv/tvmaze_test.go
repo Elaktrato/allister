@@ -13,7 +13,7 @@ import (
 
 func tvServer(t *testing.T) *httptest.Server {
 	t.Helper()
-	show := `{"id":1,"name":"Dark","type":"Scripted","language":"German","status":"Ended","runtime":60,"premiered":"2017-12-01","ended":"2020-06-27","genres":["Mystery","Drama"],"summary":"<p>Time travel.</p>","image":{"medium":"https://img/m.jpg","original":"https://img/o.jpg"},"network":{"name":"Netflix","country":{"name":"Germany"}},"externals":{"thetvdb":123,"imdb":456}}`
+	show := `{"id":1,"name":"Dark","type":"Scripted","language":"German","status":"Ended","runtime":60,"premiered":"2017-12-01","ended":"2020-06-27","genres":["Mystery","Drama"],"summary":"<p>Time travel.</p>","image":{"medium":"https://img/m.jpg","original":"https://img/o.jpg"},"network":{"name":"Netflix","country":{"name":"Germany"}},"externals":{"thetvdb":123,"imdb":"tt456"}}`
 	cast := `{"id":1,"name":"Dark","type":"Scripted","status":"Ended","image":{"medium":"","original":""},"externals":{},"_embedded":{"cast":[{"person":{"id":2,"name":"Louis Actor","url":"https://tvmaze.com/people/2","image":{"medium":"https://img/p.jpg","original":""}},"character":{"id":3,"name":"Jonas","url":"https://tvmaze.com/characters/3","image":{"medium":"https://img/c.jpg","original":""}}}]}}`
 	eps := `[{"season":1,"number":1,"airstamp":"2020-01-02T20:00:00+00:00"},{"season":2,"number":3,"airstamp":"2020-01-09T20:00:00+00:00"}]`
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -48,7 +48,7 @@ func TestTVmazeSearchDetailsCastAndSchedule(t *testing.T) {
 	if err != nil || d.Fields["seasons"].Num == nil || *d.Fields["seasons"].Num != 2 ||
 		d.Fields["episodes"].Num == nil || *d.Fields["episodes"].Num != 2 ||
 		d.Fields["type"].Text != "series" || d.Fields["network"].Text != "Netflix" ||
-		d.Fields["country"].Text != "Germany" || d.ExternalIDs["tvdb"] != "123" || d.ExternalIDs["imdb"] != "456" ||
+		d.Fields["country"].Text != "Germany" || d.ExternalIDs["tvdb"] != "123" || d.ExternalIDs["imdb"] != "tt456" ||
 		!strings.Contains(d.Fields["synopsis"].Text, "Time travel.") {
 		t.Fatalf("%+v %v", d, err)
 	}

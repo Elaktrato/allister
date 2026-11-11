@@ -40,8 +40,8 @@ type tvShow struct {
 	} `json:"network"`
 	WebChannel *struct{ Name string } `json:"webChannel"`
 	Externals  struct {
-		TVDB *int `json:"thetvdb"`
-		IMDB *int `json:"imdb"`
+		TVDB *int   `json:"thetvdb"`
+		IMDB string `json:"imdb"`
 	} `json:"externals"`
 	Embedded struct {
 		Cast []tvCast `json:"cast"`
@@ -289,8 +289,8 @@ func tvmazeData(s tvShow, eps []tvEpisode) plugin.ItemData {
 	if s.Externals.TVDB != nil {
 		ext["tvdb"] = fmt.Sprint(*s.Externals.TVDB)
 	}
-	if s.Externals.IMDB != nil {
-		ext["imdb"] = fmt.Sprint(*s.Externals.IMDB)
+	if s.Externals.IMDB != "" {
+		ext["imdb"] = s.Externals.IMDB
 	}
 	return showData(showRecord{
 		Source: SourceTVmaze, ID: fmt.Sprint(s.ID),
