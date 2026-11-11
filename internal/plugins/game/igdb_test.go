@@ -881,6 +881,31 @@ func TestIGDBLookupIGDBIDAndSlug(t *testing.T) {
 		}
 	})
 
+	t.Run("details resolves a slug to the numeric id", func(t *testing.T) {
+		rec := &igdbTestRecorder{}
+		c := newIGDBTestClient(t, rec, igdbOKToken("token-1", 3600), func(w http.ResponseWriter, r *http.Request) {
+			switch r.URL.Path {
+			case "/games":
+				body, _ := io.ReadAll(r.Body)
+				if want := igdbTestGameFields + ` where slug = "the-elder-scrolls-v-skyrim"; limit 1;`; string(body) != want {
+					t.Errorf("body = %q, want %q", body, want)
+				}
+				io.WriteString(w, igdbSkyrimJSON)
+			case "/game_time_to_beats":
+				io.WriteString(w, `[]`)
+			default:
+				t.Errorf("unexpected path %q", r.URL.Path)
+			}
+		})
+		d, err := (&igdbSource{c: c}).Details(context.Background(), KindGame, "the-elder-scrolls-v-skyrim")
+		if err != nil {
+			t.Fatalf("Details: %v", err)
+		}
+		if d.ID != "9606" || d.ExternalIDs["igdb"] != "9606" {
+			t.Errorf("data = %+v", d.ItemSummary)
+		}
+	})
+
 	t.Run("non-positive numeric id makes no slug query", func(t *testing.T) {
 		for _, value := range []string{"0", "-5"} {
 			if _, err := (&igdbSource{}).Lookup(context.Background(), KindGame, "igdb", value); !errors.Is(err, plugin.ErrNotFound) {
@@ -980,10 +1005,16 @@ func TestIGDBKindGuards(t *testing.T) {
 	if _, err := s.Lookup(ctx, "movie", "igdb", "1"); !errors.Is(err, plugin.ErrNotFound) {
 		t.Errorf("Lookup err = %v", err)
 	}
-	// A non-numeric details id is not a lookup and makes no request; the nil
-	// client would panic if one were attempted.
-	if _, err := s.Details(ctx, KindGame, "the-elder-scrolls-v-skyrim"); !errors.Is(err, plugin.ErrNotFound) {
-		t.Errorf("Details slug err = %v", err)
+	// An empty or non-positive details id makes no request; the nil client
+	// would panic if one were attempted. A slug is a real lookup and is
+	// covered by TestIGDBLookupIGDBIDAndSlug.
+	if _, err := s.Details(ctx, KindGame, "  "); !errors.Is(err, plugin.ErrNotFound) {
+		t.Errorf("Details empty id err = %v", err)
+	}
+	for _, value := range []string{"0", "-5"} {
+		if _, err := s.Details(ctx, KindGame, value); !errors.Is(err, plugin.ErrNotFound) {
+			t.Errorf("Details(%q) err = %v", value, err)
+		}
 	}
 	if _, err := s.Recommendations(ctx, KindGame, "not-a-number"); !errors.Is(err, plugin.ErrNotFound) {
 		t.Errorf("Recommendations id err = %v", err)

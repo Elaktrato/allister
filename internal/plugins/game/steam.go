@@ -454,12 +454,14 @@ func (s *steamSource) Search(ctx context.Context, kind, q string) ([]plugin.Item
 	if kind != KindGame {
 		return nil, plugin.ErrNotFound
 	}
-	if _, err := s.c.requireKey(ctx); err != nil {
-		return nil, err
-	}
-	q = plugin.SingleLine(q, maxTermRunes)
+	// The term is a title, so it takes the title cap; an empty query is
+	// answered before the key gate, so it never needs a key.
+	q = plugin.SingleLine(q, maxTitleRunes)
 	if q == "" {
 		return []plugin.ItemSummary{}, nil
+	}
+	if _, err := s.c.requireKey(ctx); err != nil {
+		return nil, err
 	}
 	return s.c.search(ctx, q)
 }

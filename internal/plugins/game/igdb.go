@@ -327,15 +327,33 @@ func (s *igdbSource) Search(ctx context.Context, kind, q string) ([]plugin.ItemS
 	return out, nil
 }
 
+// Details resolves a positive numeric IGDB id or a non-empty slug (a pasted
+// IGDB URL carries the slug) and returns the game with its numeric id, so a
+// matched slug and a search-add converge on one item. An empty or
+// non-positive numeric id is not found.
 func (s *igdbSource) Details(ctx context.Context, kind, id string) (plugin.ItemData, error) {
 	if kind != KindGame {
 		return plugin.ItemData{}, plugin.ErrNotFound
 	}
-	n, err := strconv.Atoi(strings.TrimSpace(id))
-	if err != nil || n <= 0 {
+	return s.byIDOrSlug(ctx, id)
+}
+
+// byIDOrSlug runs the details query for a numeric id (where id = <n>) or, for
+// anything else, a slug (where slug = "<slug>"). Lookup and Details share it,
+// so the two cannot drift.
+func (s *igdbSource) byIDOrSlug(ctx context.Context, id string) (plugin.ItemData, error) {
+	id = strings.TrimSpace(id)
+	if n, err := strconv.Atoi(id); err == nil {
+		if n <= 0 {
+			return plugin.ItemData{}, plugin.ErrNotFound
+		}
+		return s.details(ctx, "where id = "+strconv.Itoa(n)+"; limit 1;")
+	}
+	slug := plugin.SingleLine(id, maxIDRunes)
+	if slug == "" {
 		return plugin.ItemData{}, plugin.ErrNotFound
 	}
-	return s.details(ctx, "where id = "+strconv.Itoa(n)+"; limit 1;")
+	return s.details(ctx, `where slug = "`+igdbQuote(slug)+`"; limit 1;`)
 }
 
 func (s *igdbSource) People(_ context.Context, kind, _ string) ([]plugin.Credit, error) {
@@ -374,17 +392,7 @@ func (s *igdbSource) Lookup(ctx context.Context, kind, idType, value string) (pl
 	value = strings.TrimSpace(value)
 	switch idType {
 	case "igdb":
-		if n, err := strconv.Atoi(value); err == nil {
-			if n <= 0 {
-				return plugin.ItemData{}, plugin.ErrNotFound
-			}
-			return s.details(ctx, "where id = "+strconv.Itoa(n)+"; limit 1;")
-		}
-		slug := plugin.SingleLine(value, maxIDRunes)
-		if slug == "" {
-			return plugin.ItemData{}, plugin.ErrNotFound
-		}
-		return s.details(ctx, `where slug = "`+igdbQuote(slug)+`"; limit 1;`)
+		return s.byIDOrSlug(ctx, value)
 	case "steam":
 		appID := plugin.SingleLine(value, maxIDRunes)
 		if appID == "" {

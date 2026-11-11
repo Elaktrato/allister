@@ -326,6 +326,32 @@ func TestSteamSourceSearchKindAndEmptyTerm(t *testing.T) {
 	if got := rec.count(); got != 0 {
 		t.Errorf("empty term made %d requests", got)
 	}
+
+	// An empty term is answered before the key gate: a source without a key
+	// still returns an empty result.
+	_, keyless := newSteamTestClient(t, rec, nil, nil, "")
+	if got, err := keyless.Search(context.Background(), KindGame, "   "); err != nil || len(got) != 0 {
+		t.Errorf("empty term without a key = %v, %v; want empty result", got, err)
+	}
+	if got := rec.count(); got != 0 {
+		t.Errorf("empty keyless term made %d requests", got)
+	}
+}
+
+// The store search accepts a title-length term (maxTitleRunes), like IGDB, not
+// the short term cap.
+func TestSteamSourceSearchTruncatesLongTerm(t *testing.T) {
+	rec := &steamTestRecorder{}
+	_, src := newSteamTestClient(t, rec, nil, func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `{"total":0,"items":[]}`)
+	}, "secret-key")
+
+	if _, err := src.Search(context.Background(), KindGame, strings.Repeat("é", maxTitleRunes+100)); err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if got := len([]rune(rec.only(t, "store").query.Get("term"))); got != maxTitleRunes {
+		t.Errorf("term runes = %d, want %d", got, maxTitleRunes)
+	}
 }
 
 func TestSteamSourceSearchStatusErrors(t *testing.T) {

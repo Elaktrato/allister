@@ -575,14 +575,18 @@ func TestMatchSourcesFollowKind(t *testing.T) {
 func TestMatchWithSeveralSources(t *testing.T) {
 	alt := &plugintest.FakeSource{Data: tvShow("5", "Alt Show")}
 	e := newFixtureEnv(t, twoSources(alt))
+	// With a stored key "Fake TV" (tvdata) is the configured default: it is
+	// the lookup source. The request then names "tvalt" explicitly, so the
+	// test proves a real switch away from the default.
+	if err := e.set.SetSourceKey(context.Background(), "tvdata", "secret-key"); err != nil {
+		t.Fatal(err)
+	}
 	id := tvManual(t, e.env)
 	e.tv.Data = tvShow("77", "Found")
-	// default: the configured source ("tvalt" needs no key, "Fake TV"'s is
-	// missing)
 	b := e.do("GET", "/tv/manual/m1/match", nil, true).Body.String()
-	mustContain(t, b, `name="source" value="tvalt"`, "Alt TV", `href="/tv/manual/m1/match?source=tvdata"`)
+	mustContain(t, b, `name="source" value="tvdata"`, "Match to Fake TV", `href="/tv/manual/m1/match?source=tvalt"`)
 	b = e.do("GET", "/tv/manual/m1/match?source=tvalt", nil, true).Body.String()
-	mustContain(t, b, `name="source" value="tvalt"`, `placeholder="https://alt.example/s/123"`, `hx-get="/tv/manual/m1/match/search?source=tvalt"`)
+	mustContain(t, b, `name="source" value="tvalt"`, "Match to Alt TV", `placeholder="https://alt.example/s/123"`, `hx-get="/tv/manual/m1/match/search?source=tvalt"`)
 	e.do("GET", "/tv/manual/m1/match/search?source=tvalt&q=x", nil, true)
 	if alt.Calls(plugintest.OpSearch) != 1 || e.tv.Calls(plugintest.OpSearch) != 0 {
 		t.Fatal("searched the wrong source")

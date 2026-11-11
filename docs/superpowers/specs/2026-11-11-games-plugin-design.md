@@ -181,10 +181,11 @@ The card on `GET /settings/plugins` renders:
   helper: single key non-empty, or every multi-field non-empty. A source with
   no key fields is always configured. Unconfigured keyed sources keep their
   `" (needs key)"` label.
-- The account import form (`postPluginImport`) maps `ErrNotConfigured` to the
-  same actionable message: "<Source> needs a valid <key label>. Add or replace
-  it in Settings > Plugins." The Steam importer lets the sentinel through; the
-  form never shows the raw "plugin: source is not configured".
+- The account import form (`postPluginImport`) shows the actionable key
+  message: `steamAccountImporter.ImportAccount` maps `ErrNotConfigured` to
+  `ErrBadInput` with "The Steam Web API key is missing or refused; add it in
+  Settings > Plugins." The form renders the bad-input message, so it never
+  shows the raw "plugin: source is not configured".
 - The search/match default source becomes server-aware: the first source
   serving the kind that is configured, else the first as today. This matters
   for games (IGDB first, but Steam when only the Steam key is set).
@@ -534,9 +535,11 @@ source that returns a different canonical id from the input.
 3. **Steam non-game owned apps** — no pre-filter; they stay manual rows with
    their Steam appid and the unmatched note, and the user deletes them. The
    alternative (an unpaced per-app type check at submit time) is rejected.
-4. **Steam key on the account form** — the web import form maps
-   `ErrNotConfigured` to the same actionable key message; the importer lets the
-   sentinel through.
+4. **Steam key on the account form** — `steamAccountImporter.ImportAccount`
+   maps `ErrNotConfigured` to `ErrBadInput` with the actionable key message
+   ("The Steam Web API key is missing or refused; add it in Settings >
+   Plugins."); the generic import form renders that bad-input message rather
+   than the raw sentinel.
 5. **Links** — one link per item, the item's own source link; an IGDB item
    shows IGDB, a Steam item shows Steam. The stored `steam` external id is not
    a second link; no URL field or core Links change.

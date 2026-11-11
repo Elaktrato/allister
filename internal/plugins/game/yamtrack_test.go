@@ -24,6 +24,7 @@ const yamtrackGameCSV = `media_id,source,media_type,title,image,season_number,ep
 108,igdb,GAME,Upper Case Game,,,,,Completed,,,,2min
 109,igdb,game,Noted Game,,,,,Completed,Great game,,,1min
 abc,igdb,game,Slug Game,,,,,Completed,,,,1min
+110,IGDB,game,Upper Case Source Game,,,,,Completed,,,,1min
 `
 
 func TestYamtrackGameRows(t *testing.T) {
@@ -31,7 +32,7 @@ func TestYamtrackGameRows(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(res.Entries) != 9 || res.Ignored != 1 || len(res.Skipped) != 4 {
+	if len(res.Entries) != 10 || res.Ignored != 1 || len(res.Skipped) != 4 {
 		t.Fatalf("entries=%+v ignored=%d skipped=%+v", res.Entries, res.Ignored, res.Skipped)
 	}
 	for i, e := range res.Entries {
@@ -60,9 +61,13 @@ func TestYamtrackGameRows(t *testing.T) {
 	if paused := res.Entries[1]; paused.Status != plugin.Paused || paused.Progress["playtime"] != 960 {
 		t.Fatalf("paused = %+v", paused)
 	}
-	if planned := res.Entries[2]; planned.Status != plugin.Planned ||
-		planned.Progress["playtime"] != 0 || planned.Rating != nil {
+	if planned := res.Entries[2]; planned.Status != plugin.Planned || planned.Rating != nil {
 		t.Fatalf("planned = %+v", planned)
+	}
+	// "0min" is a real playtime of zero: the key must exist with the value 0,
+	// not be absent.
+	if minutes, ok := res.Entries[2].Progress["playtime"]; !ok || minutes != 0 {
+		t.Fatalf("planned playtime = %v (present %t), want 0", minutes, ok)
 	}
 	if manual := res.Entries[3]; manual.Status != plugin.Completed || len(manual.ExternalIDs) != 0 ||
 		len(manual.Notes) != 0 || manual.Progress["playtime"] != 2700 {
@@ -86,6 +91,11 @@ func TestYamtrackGameRows(t *testing.T) {
 	if slug := res.Entries[8]; len(slug.ExternalIDs) != 0 || !hasNote(slug.Notes, "not valid") ||
 		slug.Title != "Slug Game" {
 		t.Fatalf("invalid IGDB id = %+v", slug)
+	}
+	// The source is matched case-insensitively, like the media type.
+	if upperSource := res.Entries[9]; upperSource.Title != "Upper Case Source Game" ||
+		upperSource.ExternalIDs["igdb"] != "110" || len(upperSource.Notes) != 0 {
+		t.Fatalf("upper-case source = %+v", upperSource)
 	}
 
 	// The duplicate is reported while scanning the rows; the bad status, the

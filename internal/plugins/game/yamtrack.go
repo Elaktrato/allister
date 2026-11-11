@@ -82,8 +82,9 @@ func yamtrackGameKey(row yamtrack.RawRow) string {
 // yamtrackGameEntry maps one grouped row to the contract entry. The second
 // return is a skip reason; the entry is valid when it is empty.
 func yamtrackGameEntry(row yamtrack.RawRow) (plugin.ParsedEntry, string) {
+	igdbSource := strings.EqualFold(row.Source, SourceIGDB)
 	igdbID := ""
-	if row.Source == SourceIGDB {
+	if igdbSource {
 		igdbID = numericID(row.MediaID)
 	}
 	title := plugin.SingleLine(row.Title, maxTitleRunes)
@@ -113,7 +114,7 @@ func yamtrackGameEntry(row yamtrack.RawRow) (plugin.ParsedEntry, string) {
 	switch {
 	case igdbID != "":
 		entry.ExternalIDs = map[string]string{"igdb": igdbID}
-	case row.MediaID != "" && row.Source == SourceIGDB:
+	case row.MediaID != "" && igdbSource:
 		entry.Notes = append(entry.Notes, fmt.Sprintf("IGDB id %q is not valid; saved as a manual entry", plugin.SingleLine(row.MediaID, maxIDRunes)))
 	case row.MediaID != "":
 		entry.Notes = append(entry.Notes, fmt.Sprintf("source %q is not IGDB; saved as a manual entry", plugin.SingleLine(row.Source, maxIDRunes)))
