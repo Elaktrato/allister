@@ -16,10 +16,19 @@
           <p class="mt-1 text-sm text-slate-400">{{.Label}}{{with .Help}} — {{.}}{{end}}</p>
           {{if .Configured}}<p class="mt-2 text-sm text-emerald-400">A key is configured.</p>{{end}}
           <form method="post" action="{{.Action}}" class="mt-3 flex flex-wrap items-end gap-3">
+            {{if .Fields}}
+            {{range .Fields}}
+            <label class="flex min-w-0 flex-1 flex-col gap-1 text-sm">
+              <span class="text-slate-400">{{.Label}}</span>
+              {{if .Secret}}<input type="password" name="field.{{.Name}}" autocomplete="new-password" spellcheck="false" class="w-full rounded-md border border-slate-700 bg-slate-900 px-2 py-1.5 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500">{{else}}<input type="text" name="field.{{.Name}}" autocomplete="new-password" spellcheck="false" class="w-full rounded-md border border-slate-700 bg-slate-900 px-2 py-1.5 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500">{{end}}
+            </label>
+            {{end}}
+            {{else}}
             <label class="flex min-w-0 flex-1 flex-col gap-1 text-sm">
               <span class="text-slate-400">{{.Label}}</span>
               <input type="password" name="key" autocomplete="new-password" spellcheck="false" class="w-full rounded-md border border-slate-700 bg-slate-900 px-2 py-1.5 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500">
             </label>
+            {{end}}
             <button type="submit" class="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium hover:bg-indigo-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400">Save</button>
             {{if .Stored}}<button type="submit" name="remove" value="1" class="rounded-md bg-slate-700 px-3 py-2 text-sm font-medium hover:bg-slate-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500">Remove</button>{{end}}
           </form>

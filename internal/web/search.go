@@ -136,17 +136,11 @@ func sourcesForKind(m plugin.Manifest, kind string) []plugin.SourceInfo {
 }
 
 // sourceChoiceLabel is a source's name in a source switch, marked with
-// " (needs key)" while the source declares a key label and no effective key is
-// configured. It never changes the heading or the result badges.
+// " (needs key)" while the source is not configured (a key label with no
+// effective key, or a multi-field source with a field missing). It never
+// changes the heading or the result badges.
 func (s *server) sourceChoiceLabel(ctx context.Context, si plugin.SourceInfo) string {
-	if si.KeyLabel == "" {
-		return si.Name
-	}
-	key, err := s.sourceKey(ctx, si.ID)
-	if err != nil {
-		log.Printf("source choice %s: read key: %v", si.ID, err)
-	}
-	if key != "" {
+	if s.sourceConfigured(ctx, si) {
 		return si.Name
 	}
 	return si.Name + " (needs key)"

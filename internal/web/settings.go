@@ -3,9 +3,12 @@ package web
 import (
 	"context"
 	"html/template"
+	"log"
 	"net/http"
 	"net/url"
 	"strings"
+
+	"github.com/allister/allister/internal/plugin"
 )
 
 // langNames are display names of common title language tags; any other tag
@@ -56,8 +59,17 @@ func (s *server) renderPlugins(w http.ResponseWriter, r *http.Request, status in
 // sourceKeyView is one source's API key form on the plugins page.
 type sourceKeyView struct {
 	ID, Name, Label, Help, Action string
-	Configured                    bool // an effective key is set (stored or from the environment)
-	Stored                        bool // this install stores a key, so it can be removed
+	Configured                    bool // every effective credential is set (stored or from the environment)
+	Stored                        bool // this install stores a credential, so it can be removed
+	// Fields are the named inputs of a multi-field source; empty for a
+	// single-key source.
+	Fields []sourceKeyFieldView
+}
+
+// sourceKeyFieldView is one named credential input of a multi-field source.
+type sourceKeyFieldView struct {
+	Name, Label string
+	Secret      bool // render the input as a password field
 }
 
 // sourceKeyViews builds the API key forms of the plugins page: one per source
@@ -72,18 +84,37 @@ func (s *server) sourceKeyViews(ctx context.Context) ([]sourceKeyView, error) {
 				continue
 			}
 			seen[src.ID] = true
-			key, err := s.sourceKey(ctx, src.ID)
-			if err != nil {
-				return nil, err
-			}
-			stored := ""
-			if s.deps.Settings != nil {
-				if stored, err = s.deps.Settings.SourceKey(ctx, src.ID); err != nil {
+			v := sourceKeyView{ID: src.ID, Name: src.Name, Label: src.KeyLabel, Help: src.KeyHelp,
+				Action: sourceKeyURL(src.ID)}
+			if len(src.KeyFields) > 0 {
+				v.Configured = true
+				for _, f := range src.KeyFields {
+					v.Fields = append(v.Fields, sourceKeyFieldView{Name: f.Name, Label: f.Label, Secret: f.Secret})
+					effective, err := s.sourceKeyField(ctx, src.ID, f.Name)
+					if err != nil {
+						return nil, err
+					}
+					if effective == "" {
+						v.Configured = false
+					}
+					stored, err := s.storedSourceKeyField(ctx, src.ID, f.Name)
+					if err != nil {
+						return nil, err
+					}
+					v.Stored = v.Stored || stored != ""
+				}
+			} else {
+				key, err := s.sourceKey(ctx, src.ID)
+				if err != nil {
 					return nil, err
 				}
+				stored, err := s.storedSourceKeyField(ctx, src.ID, "key")
+				if err != nil {
+					return nil, err
+				}
+				v.Configured, v.Stored = key != "", stored != ""
 			}
-			out = append(out, sourceKeyView{ID: src.ID, Name: src.Name, Label: src.KeyLabel, Help: src.KeyHelp,
-				Action: sourceKeyURL(src.ID), Configured: key != "", Stored: stored != ""})
+			out = append(out, v)
 		}
 	}
 	return out, nil
@@ -91,35 +122,96 @@ func (s *server) sourceKeyViews(ctx context.Context) ([]sourceKeyView, error) {
 
 // sourceKey is the effective API key of source id: the Deps.SourceKey resolver
 // (which may answer with a key from the environment) when wired, else the
-// stored key, else "".
+// effective "key" field.
 func (s *server) sourceKey(ctx context.Context, id string) (string, error) {
 	if s.deps.SourceKey != nil {
 		return s.deps.SourceKey(ctx, id)
 	}
-	if s.deps.Settings != nil {
-		return s.deps.Settings.SourceKey(ctx, id)
+	return s.sourceKeyField(ctx, id, "key")
+}
+
+// sourceKeyField is the effective value of one named credential field of
+// source id: the Deps.SourceKeyField resolver (which may answer with a value
+// from the environment) when wired, else the stored field, else "".
+func (s *server) sourceKeyField(ctx context.Context, id, field string) (string, error) {
+	if s.deps.SourceKeyField != nil {
+		return s.deps.SourceKeyField(ctx, id, field)
 	}
-	return "", nil
+	return s.storedSourceKeyField(ctx, id, field)
+}
+
+// storedSourceKeyField is the value this install stores for one field of
+// source id (never one the environment supplies), so the page can tell a
+// configured source from a removable one.
+func (s *server) storedSourceKeyField(ctx context.Context, id, field string) (string, error) {
+	if s.deps.Settings == nil {
+		return "", nil
+	}
+	return s.deps.Settings.SourceKeyField(ctx, id, field)
+}
+
+// sourceConfigured reports whether si has everything it needs: a source that
+// declares no key label is always configured, a single-key source needs a
+// non-empty effective key, and a multi-field source needs every effective
+// field.
+func (s *server) sourceConfigured(ctx context.Context, si plugin.SourceInfo) bool {
+	if si.KeyLabel == "" {
+		return true
+	}
+	if len(si.KeyFields) == 0 {
+		key, err := s.sourceKey(ctx, si.ID)
+		if err != nil {
+			log.Printf("source %s: read key: %v", si.ID, err)
+		}
+		return key != ""
+	}
+	for _, f := range si.KeyFields {
+		value, err := s.sourceKeyField(ctx, si.ID, f.Name)
+		if err != nil {
+			log.Printf("source %s: read %s: %v", si.ID, f.Name, err)
+			return false
+		}
+		if value == "" {
+			return false
+		}
+	}
+	return true
 }
 
 // sourceKeyURL is the form action that saves the key of source id.
 func sourceKeyURL(id string) string { return "/settings/plugins/" + url.PathEscape(id) + "/key" }
 
-// keyedSource reports whether an installed manifest declares source id with a
-// key label (only such a source can have a key).
-func (s *server) keyedSource(id string) bool {
+// keyedSourceInfo is the installed source info of source id: the first
+// manifest entry that declares it with a key label. ok is false for unknown
+// and unkeyed sources (only such a source can have a key).
+func (s *server) keyedSourceInfo(id string) (plugin.SourceInfo, bool) {
 	for _, m := range s.deps.Registry.Manifests() {
 		for _, src := range m.Sources {
 			if src.ID == id && src.KeyLabel != "" {
-				return true
+				return src, true
 			}
 		}
 	}
-	return false
+	return plugin.SourceInfo{}, false
 }
 
 // maxSourceKey is the longest API key accepted, in characters.
 const maxSourceKey = 500
+
+// validCredential reports whether value is 1 to maxSourceKey printable ASCII
+// characters (0x21-0x7E), without spaces; single keys and named fields share
+// the rule.
+func validCredential(value string) bool {
+	if value == "" || len(value) > maxSourceKey {
+		return false
+	}
+	for i := 0; i < len(value); i++ {
+		if c := value[i]; c < 0x21 || c > 0x7e {
+			return false
+		}
+	}
+	return true
+}
 
 // sourceKeyProblem reports why key is not acceptable, "" when it is: 1 to 500
 // printable ASCII characters (0x21-0x7E), without spaces.
@@ -129,22 +221,37 @@ func sourceKeyProblem(key string) string {
 		return "Please enter the key."
 	case len(key) > maxSourceKey:
 		return "The key is longer than 500 characters."
+	case !validCredential(key):
+		return "The key must be printable ASCII characters without spaces."
 	}
-	for i := 0; i < len(key); i++ {
-		if c := key[i]; c < 0x21 || c > 0x7e {
-			return "The key must be printable ASCII characters without spaces."
-		}
+	return ""
+}
+
+// sourceFieldProblem reports why value is not acceptable for the named
+// credential field label, "" when it is; the wording names the field instead of
+// "the key".
+func sourceFieldProblem(label, value string) string {
+	switch {
+	case value == "":
+		return "Please enter " + label + "."
+	case len(value) > maxSourceKey:
+		return label + " is longer than 500 characters."
+	case !validCredential(value):
+		return label + " must be printable ASCII characters without spaces."
 	}
 	return ""
 }
 
 // postSourceKey saves or removes the API key of a source
-// (POST /settings/plugins/{source}/key: field key, or remove=1). The key is
-// never echoed: the page only reports whether one is configured. Sources no
-// installed manifest declares with a key label answer 404.
+// (POST /settings/plugins/{source}/key). A single-key source posts field key; a
+// multi-field source posts every field.<name>. A credential is never echoed:
+// the page only reports whether one is configured. Remove clears either the
+// one key or every named field. Sources no installed manifest declares with a
+// key label answer 404.
 func (s *server) postSourceKey(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("source")
-	if !s.keyedSource(id) {
+	si, ok := s.keyedSourceInfo(id)
+	if !ok {
 		s.errorPage(w, r, http.StatusNotFound, "Not found", "There is no such source.", "")
 		return
 	}
@@ -154,11 +261,21 @@ func (s *server) postSourceKey(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx := r.Context()
 	if r.PostForm.Get("remove") == "1" {
-		if err := s.deps.Settings.ClearSourceKey(ctx, id); err != nil {
+		var err error
+		if len(si.KeyFields) > 0 {
+			err = s.deps.Settings.ClearSourceKeys(ctx, id)
+		} else {
+			err = s.deps.Settings.ClearSourceKey(ctx, id)
+		}
+		if err != nil {
 			s.internalError(w, r, err)
 			return
 		}
 		http.Redirect(w, r, "/settings/plugins#source-keys", http.StatusSeeOther)
+		return
+	}
+	if len(si.KeyFields) > 0 {
+		s.storeSourceKeyFields(w, r, si)
 		return
 	}
 	key := strings.TrimSpace(r.PostForm.Get("key"))
@@ -169,6 +286,28 @@ func (s *server) postSourceKey(w http.ResponseWriter, r *http.Request) {
 	if err := s.deps.Settings.SetSourceKey(ctx, id, key); err != nil {
 		s.internalError(w, r, err)
 		return
+	}
+	http.Redirect(w, r, "/settings/plugins#source-keys", http.StatusSeeOther)
+}
+
+// storeSourceKeyFields saves every named credential field of si. Every field
+// is required; a rejected form re-renders the page and stores nothing (all
+// fields are checked before the first write).
+func (s *server) storeSourceKeyFields(w http.ResponseWriter, r *http.Request, si plugin.SourceInfo) {
+	values := make(map[string]string, len(si.KeyFields))
+	for _, f := range si.KeyFields {
+		value := strings.TrimSpace(r.PostForm.Get("field." + f.Name))
+		if problem := sourceFieldProblem(f.Label, value); problem != "" {
+			s.renderPlugins(w, r, http.StatusBadRequest, problem)
+			return
+		}
+		values[f.Name] = value
+	}
+	for _, f := range si.KeyFields {
+		if err := s.deps.Settings.SetSourceKeyField(r.Context(), si.ID, f.Name, values[f.Name]); err != nil {
+			s.internalError(w, r, err)
+			return
+		}
 	}
 	http.Redirect(w, r, "/settings/plugins#source-keys", http.StatusSeeOther)
 }
