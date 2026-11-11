@@ -522,7 +522,7 @@ git commit -m "feat: edit source API keys in the web UI"
 Use a fixture source with `Errs` set per operation. Test:
 
 ```go
-func TestSearchNeedsConfiguration(t *testing.T)      // 503, body has "needs a valid API key", "Settings > Plugins"
+func TestSearchNeedsConfiguration(t *testing.T)      // 503 full page; 200 htmx partial with the same message
 func TestLiveOverviewNeedsConfiguration(t *testing.T) // GET /book/books/1 -> 503, same message
 func TestAddDialogNeedsConfiguration(t *testing.T)    // htmx GET /book/books/1/add -> 503, dialog keeps the form
 func TestMatchNeedsConfiguration(t *testing.T)        // POST match -> 503, "Nothing was changed."
@@ -540,7 +540,7 @@ Expected: FAIL — 500s/generic messages, no labels.
 
 `sourceMessage`: on `ErrNotConfigured`, return `"<Source> needs a valid <key label>. Add or replace it in Settings > Plugins."` (`KeyLabel` lower-cased; neutral text without one).
 
-Search: add `Status int` to `searchView`. In `runSearch`, on `ErrNotConfigured` set the message, the retry flag and `Status = http.StatusServiceUnavailable`; keep the existing 200-with-message behaviour for other errors. In `search`, render with `renderStatus`/`renderPartialStatus` when `Status != 0`. In `getMatchSearch`, if `v.Search.Status != 0`, pass it to `matchResponse` (which already uses `renderPartialStatus` for htmx).
+Search: add `Status int` to `searchView`. In `runSearch`, on `ErrNotConfigured` set the message, the retry flag and `Status = http.StatusServiceUnavailable`; keep the existing 200-with-message behaviour for other errors. In `search`, render the full page with 503 when `Status != 0`; render the htmx partial with 200 and the same message (htmx does not swap 5xx outside the dialog slot). In `getMatchSearch`, if `v.Search.Status != 0`, pass it to `matchResponse` (which already uses `renderPartialStatus` for htmx).
 
 `itemFail`: add `ErrNotConfigured` to the 503 branch (title “Not configured”, message, retry). `addFailure`: include it in the branch that re-renders the dialog with 503. `postMatch`: return 503 with the message plus “Nothing was changed.”.
 

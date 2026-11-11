@@ -160,7 +160,7 @@ Web status matrix (all use the single `sourceMessage` sentence):
 
 | Surface | Status | Behaviour |
 |---|---|---|
-| Search | 503 | results page, message, retry link |
+| Search | 503 full page; 200 for the htmx partial so it swaps | results page, message, retry link |
 | Live overview (`/{plugin}/{source}/{id}`) | 503 | error page, message, retry link |
 | Add dialog (GET/POST) | 503 | dialog re-rendered, form kept, message |
 | Match search/POST | 503 | match dialog re-rendered, nothing changed, message |
