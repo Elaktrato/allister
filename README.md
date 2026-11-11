@@ -1,5 +1,10 @@
 # Allister
 
+> I'm vibe-coding this mainly for myself and to keep track of my stuff without having to go to x amount of sites.
+> If there's a new thing I can and want to list, I want to be able to add and enable/disable it on the go.
+> Hence the plug-in idea for every type of media. But in case anyone else has similar ideas and tastes to what I built here, please enjoy.
+> All + List + Alistor... I swear I can be creative when I want to be!
+
 Allister is a self-hosted personal tracker for the things you watch, read and play. A generic core stores your library and draws every page. Each media type is a plugin that you can switch on and off. Anime is the first and, for now, the only plugin. Manga, movies, TV, games and books are planned as further plugins.
 
 It is a single Go binary with a SQLite database, server-rendered pages, htmx and Tailwind. Anime metadata comes from AniList.
