@@ -63,6 +63,11 @@ The universal backup includes these settings and the uploaded fonts. A restore s
 | `/book/{source}/{id}` | Overview of a book or series; add `?kind=book` or `?kind=series` when needed; `/edit` edits its details |
 | `/book/manual/new`, `/book/manual/{id}` | Create and open manual books; `/book/manual/{id}/edit` edits details, `/book/manual/{id}/match` matches a source |
 | `/book/export/json` | The books JSON export |
+| `/tv` | Your TV list (same search, filter and view parameters) |
+| `/tv/search?q=...&source=tvmaze` | Search TVmaze; TMDB is available when `TMDB_API_KEY` is set |
+| `/tv/{source}/{id}` | Overview of a TV show; `/edit` edits its details |
+| `/tv/manual/new`, `/tv/manual/{id}` | Create and open manual shows; `/edit` edits details, `/match` matches a source |
+| `/tv/export/json` | The TV JSON export |
 | `/list/{id}/edit` | The list entry's Edit dialog (status, rating, progress, dates, comment) |
 | `/people/{id}` | Person page |
 | `/settings`, `/settings/appearance`, `/settings/plugins`, `/settings/import`, `/settings/backup` | Settings sections: General (links to each plugin's settings), Appearance (see [Appearance](#appearance)), Plugins (switch plugins on and off), Import, Backup and restore |
@@ -77,7 +82,7 @@ Changes from the first version: a data volume from the first (pre-plugin) previe
 
 ## Imports
 
-The anime and manga plugins each have their own **Import** section on their settings page, with two importers: the **AniList account** (enter the username; its public list is imported with status, score and progress) and the **MyAnimeList XML export** (upload the file MyAnimeList offers from your list page). The manga importer reads the export's manga rows and maps chapters and volumes to the chapter and volume progress. Books have their own **Import** section: the **Goodreads CSV** export (ISBNs resolve through Open Library, then Google Books; rows without an ISBN become manual entries) and the **AniList account** importer, which keeps only light novels and maps chapter and volume progress. The Yamtrack CSV import lives on Settings > Import, together with the queue and the history of every import.
+The anime and manga plugins each have their own **Import** section on their settings page, with two importers: the **AniList account** (enter the username; its public list is imported with status, score and progress) and the **MyAnimeList XML export** (upload the file MyAnimeList offers from your list page). The manga importer reads the export's manga rows and maps chapters and volumes to the chapter and volume progress. Books have their own **Import** section: the **Goodreads CSV** export (ISBNs resolve through Open Library, then Google Books; rows without an ISBN become manual entries) and the **AniList account** importer, which keeps only light novels and maps chapter and volume progress. TV has a **Yamtrack TV CSV** importer: it groups the `tv`, `season` and `episode` rows into one show, keeps the TMDB id for later matching and reads watched episodes, season progress and the show's status, score and dates. The anime/manga Yamtrack CSV and the generic queue/history live on Settings > Import.
 
 Each importer has a rule for entries already in your list: **Skip** leaves them alone (the default); **Update when the source is newer** applies the source's status, score and progress only when its entry was modified after your local one — formats without modification times (like the XML export) never update under this rule; **Always update** applies them unconditionally. Updates touch only status, score and progress of the list entry — never comments, dates, or item data like covers and credits.
 
@@ -85,13 +90,14 @@ The AniList import can repeat: **off, daily or weekly**. Saving a schedule start
 
 ## Calendar
 
-The app has its own month view at `/calendar` (in the sidebar): the current month's stored releases as chips, one per day, with previous/next/Today links and the air time shown in your timezone. The same data feeds `/calendar.ics`, an iCalendar feed for any calendar app on your network (Thunderbird, KOrganizer and friends: add a calendar "from URL", no account needed). It lists one timed 30-minute event per upcoming release of every entry you have marked as watching, for sources that declare schedules (the anime plugin does: AniList's air dates). The manga plugin has no chapter schedule (AniList has none), and books have no release-schedule source, so neither appears in the calendar. The summary is the entry's title in your chosen title language plus the kind's progress label — "Frieren — Episode 12" — and the description links back to the item. Each event starts at the source's air time, so your calendar shows it in your timezone.
+The app has its own month view at `/calendar` (in the sidebar): the current month's stored releases as chips, one per day, with previous/next/Today links and the air time shown in your timezone. The same data feeds `/calendar.ics`, an iCalendar feed for any calendar app on your network (Thunderbird, KOrganizer and friends: add a calendar "from URL", no account needed). It lists one timed 30-minute event per upcoming release of every entry you have marked as watching, for sources that declare schedules (the anime plugin does: AniList's air dates). The manga plugin has no chapter schedule (AniList has none), and books have no release-schedule source, so neither appears in the calendar. The TV plugin uses TVmaze episode air times; the calendar shows the season and episode (`Season 2, Episode 5`). Shows added from TMDB have no calendar events because TMDB has no air time. The summary is the entry's title in your chosen title language plus the kind's progress label — "Frieren — Episode 12" — and the description links back to the item. Each event starts at the source's air time, so your calendar shows it in your timezone.
 
 Schedules are not fetched while a calendar app polls: the database answers, and entries whose schedule is missing or older than 12 hours are refreshed in the background through the normal paced job queue (at most 20 per request). An entry added as watching gets its schedule with its first sync, so it appears in the feed after the next poll. Air dates only cover what the source knows (a finished show has none; a newly announced episode appears after the next refresh). The feed is unauthenticated like the rest of the app — subscribe to it over your private network or tailnet, not from the internet.
 
 ## Known limitations
 
-- Only the anime, manga and books plugins exist. Plugins are compiled in, and there is no marketplace or runtime installation. Manga and books are off after a fresh install; enable them in Settings > Plugins.
+- Only the anime, manga, books and TV plugins exist. Plugins are compiled in, and there is no marketplace or runtime installation. Manga, books and TV are off after a fresh install; enable them in Settings > Plugins.
+- TV sources: TVmaze is free and has schedules; TMDB needs `TMDB_API_KEY`, has no air times and is optional. MyDramaList, Trakt and TV Time are deferred (GitHub issues #2 and #3). The Yamtrack TV import is manual-only first: shows with a TMDB id are kept as manual entries and can be matched later.
 - Google Books without `GOOGLE_BOOKS_API_KEY` is limited by the public quota; the source then reports rate limiting. The Goodreads import resolves through Open Library first and only falls back to Google Books when Open Library has no match. Mixing sources can create duplicate items for the same ISBN; the Goodreads import skips IDs it already knows.
 - Book series are flat: one series entry tracks volumes and cumulative chapters, without per-volume child items. General book series use the optional `series` and `series number` fields.
 - The title language is one per plugin, not per kind; the column choice is per kind.
@@ -115,9 +121,11 @@ Schedules are not fetched while a calendar app polls: the database answers, and 
 - `internal/jobs`: background queue and item sync
 - `internal/backup`: the universal backup archive (download and merge restore)
 - `internal/importer`: the generic import runner (every plugin's importers)
-- `internal/plugins/anime`: the anime plugin; `yamtrack`: its Yamtrack CSV parser
+- `internal/plugins/anime`: the anime plugin
 - `internal/plugins/manga`: the manga plugin (AniList source, AniList-account and MyAnimeList-XML imports, chapters and volumes)
 - `internal/plugins/book`: the books plugin (Open Library, Google Books and AniList sources; book and series kinds; Goodreads and AniList imports)
+- `internal/plugins/tv`: the TV plugin (TVmaze and optional TMDB sources; Show kind; Yamtrack TV import)
+- `internal/plugins/yamtrack`: the shared Yamtrack CSV parser used by anime and TV
 - `internal/plugins/anilist`: the AniList client shared by anime, manga and books (parameterised by media type and format search)
 - `internal/plugins/jsonexport`: the JSON exporter shared by the plugins
 - `internal/plugin/plugintest`: test-only book and TV fixture plugins that prove the contract

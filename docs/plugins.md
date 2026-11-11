@@ -17,7 +17,7 @@ if err := registry.Register(anime.New(anime.Options{})); err != nil {
 }
 ```
 
-The reference implementations are `internal/plugins/anime` and `internal/plugins/book` (three sources and two kinds). The test-only fixtures `plugintest.BookPlugin()` and `plugintest.TVPlugin()` in `internal/plugin/plugintest` show a book-like kind (pages or percent progress, authors as people) and a TV-like kind (season, episode and position tracks). `internal/web/contract_proof_test.go` runs both through the real server next to anime.
+The reference implementations are `internal/plugins/anime`, `internal/plugins/book` (three sources, two kinds) and `internal/plugins/tv` (two sources, a schedule). The test-only fixtures `plugintest.BookPlugin()` and `plugintest.TVPlugin()` in `internal/plugin/plugintest` show a book-like kind (pages or percent progress, authors as people) and a TV-like kind (season, episode and position tracks). `internal/web/contract_proof_test.go` runs both through the real server next to anime.
 
 ## The Go interface
 
@@ -155,6 +155,7 @@ Rules enforced by `Validate`:
 - `TotalField` must name a **number** field of the kind, and is not allowed on `percent`.
 - When anything is eligible, `Defaults` and at least one combination are required. Every key in them must be eligible and listed once, no combination may be empty, and `Defaults` must equal one of the combinations (as a set).
 - `PrimaryKey`, when set, must be an eligible `count` or `pages` track.
+- `ResetOnPrimary` is for a track that belongs to the release the +1 advances: the TV position is cleared when the episode increments. It is not set on the primary track.
 
 Behaviour: an item starts with the default combination. The **entry dialog** (Edit on a list row or on the overview, route `/list/{id}/edit`) offers the allowed combinations when there is more than one, for example a book switching from pages to percent. Values of tracks that become inactive are kept and come back when the user switches again. Edit details does not change the combination. A bounded track cannot exceed its total. "Finished" means every active bounded track is at its total (percent at 100), "not started" means every active track is 0, and anything else is "in progress". The list's progress filter (`progress=not_started|in_progress|finished`) uses these rules. Setting the status to completed does not change progress. "+1" raises the primary track by one, capped at its total. It is hidden when there is no primary key or the primary track is not active.
 
@@ -195,7 +196,7 @@ type SourceInfo struct {
 - `RequestsPerMinute` paces the import runner's lookups through this source. Background jobs run one at a time, with at least 2 seconds between them. Interactive requests (search, overview, recommendations) are not paced. Overview details and recommendations are cached, searches are not.
 - `SupportsLookup` and `ExternalIDTypes` say which external ids `Lookup` resolves. Importers use them, and the "Match to <source>" dialog offers its search through the first source that supports lookups.
 - `Kinds` restricts a source to some of the plugin's kinds. The search page and match dialog then offer it only for those kinds; empty means every kind. A plugin with several sources can therefore put Open Library and Google Books on books and AniList on light-novel series without dead combinations.
-- `SupportsSchedule` declares the optional `ScheduleSource` capability: `Schedule(ctx, kind, id) ([]Airing, error)`, where an `Airing` is a release number and its air time. The core keeps such schedules of watching entries and lists their upcoming releases in the calendar feed (`/calendar.ics`); it refreshes them through the job queue (at most daily through the feed, and once when an entry is added or synced). Sources without the capability simply have no calendar events. Errors follow the same rules as the other source calls.
+- `SupportsSchedule` declares the optional `ScheduleSource` capability: `Schedule(ctx, kind, id) ([]Airing, error)`, where an `Airing` is a season (0 for none), a release number and its air time. The core keeps such schedules of watching entries and lists their upcoming releases in the calendar feed (`/calendar.ics`); it refreshes them through the job queue (at most daily through the feed, and once when an entry is added or synced). Sources without the capability simply have no calendar events. Errors follow the same rules as the other source calls. The calendar labels a season-aware airing as `Season 2, Episode 5`; season 0 keeps the old `Episode 12` form.
 - `URLPatterns` let the core turn a pasted URL into an id, so no plugin code parses URLs. A pattern is `host/segment/.../{id}[/...]` with exactly one `{id}`. A leading `www.` is ignored, and the URL may end with one slug segment, a trailing slash, a query or a fragment. `{id}` (and a bare id typed into the match dialog) is 1 to 12 ASCII digits with leading zeros removed and not zero, or — for sources with non-numeric ids — 1 to 64 bytes of ASCII letters, digits, `_` and `-` that starts and ends with an alphanumeric.
 
 ### Errors
