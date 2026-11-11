@@ -17,3 +17,10 @@ func TestLoadEnv(t *testing.T) {
 		t.Fatalf("got %+v", c)
 	}
 }
+
+func TestLoadGoogleBooksKey(t *testing.T) {
+	t.Setenv("GOOGLE_BOOKS_API_KEY", "abc")
+	if c := Load(); c.GoogleBooksKey != "abc" {
+		t.Fatalf("got %+v", c)
+	}
+}

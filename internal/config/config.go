@@ -4,14 +4,16 @@ package config
 import "os"
 
 type Config struct {
-	Port    string
-	DataDir string
+	Port           string
+	DataDir        string
+	GoogleBooksKey string
 }
 
 func Load() Config {
 	return Config{
-		Port:    env("PORT", "8080"),
-		DataDir: env("DATA_DIR", "/data"),
+		Port:           env("PORT", "8080"),
+		DataDir:        env("DATA_DIR", "/data"),
+		GoogleBooksKey: env("GOOGLE_BOOKS_API_KEY", ""),
 	}
 }
 

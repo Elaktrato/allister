@@ -4,6 +4,8 @@ import (
 	"net/http"
 
 	"github.com/allister/allister/internal/plugin"
+	"github.com/allister/allister/internal/plugins/anilist"
+	"github.com/allister/allister/internal/plugins/jsonexport"
 )
 
 // Options configure the plugin. The URL fields exist for tests; empty means
@@ -26,7 +28,27 @@ type booksPlugin struct {
 // added by the files in this package; this constructor only wires the ids the
 // manifest declares.
 func New(opts Options) plugin.Plugin {
-	return &booksPlugin{}
+	hc := opts.HTTP
+	if hc == nil {
+		hc = http.DefaultClient
+	}
+	anilistURL := opts.AniListURL
+	if anilistURL == "" {
+		anilistURL = anilist.DefaultURL
+	}
+	ac := anilist.New(anilistURL, hc)
+	return &booksPlugin{
+		sources: map[string]plugin.Source{
+			SourceOpenLibrary: &openLibrarySource{c: newOpenLibraryClient(opts.OpenLibraryURL, hc)},
+			SourceGoogleBooks: &googleBooksSource{c: newGoogleBooksClient(opts.GoogleBooksURL, opts.GoogleBooksKey, hc)},
+			SourceAniList:     &anilistSource{c: ac},
+		},
+		importers: map[string]plugin.Importer{
+			ImporterGoodreads: goodreadsImporter{},
+			ImporterAniList:   anilistAccountImporter{c: ac},
+		},
+		exporter: jsonexport.New(exportFormat),
+	}
 }
 
 func (p *booksPlugin) Manifest() plugin.Manifest { return manifest() }
