@@ -23,14 +23,14 @@ const (
 
 // bookRecord is the source-neutral shape both book sources produce.
 type bookRecord struct {
-	Source, ID, Title, Subtitle, Author, ISBN, Publisher, Language, Synopsis string
-	CoverURL, ExternalURL, Series                                            string
-	Pages, Year                                                              int
-	PublishedOn                                                              *time.Time
-	Genres                                                                   []string
-	Tags                                                                     []plugin.Tag
-	Credits                                                                  []plugin.Credit
-	ExternalIDs                                                              map[string]string
+	Source, ID, Title, Subtitle, AltTitle, AltLanguage, Author, ISBN, Publisher, Language, Synopsis string
+	CoverURL, ExternalURL, Series                                                                   string
+	Pages, Year                                                                                     int
+	PublishedOn                                                                                     *time.Time
+	Genres                                                                                          []string
+	Tags                                                                                            []plugin.Tag
+	Credits                                                                                         []plugin.Credit
+	ExternalIDs                                                                                     map[string]string
 }
 
 // bookData maps a source record to the book contract. Empty or out-of-range
@@ -59,6 +59,13 @@ func bookData(r bookRecord) plugin.ItemData {
 	}
 	if title != "" {
 		d.Titles = []plugin.Title{{Lang: lang, Text: title}}
+	}
+	if alt := plugin.SingleLine(r.AltTitle, maxTitleRunes); alt != "" && alt != title {
+		altLang := plugin.SingleLine(r.AltLanguage, 20)
+		if altLang == "" {
+			altLang = lang
+		}
+		d.Titles = append(d.Titles, plugin.Title{Lang: altLang, Text: alt})
 	}
 	d.Fields = map[string]plugin.FieldValue{}
 	if v := plugin.SingleLine(r.Author, maxNameRunes); v != "" {
