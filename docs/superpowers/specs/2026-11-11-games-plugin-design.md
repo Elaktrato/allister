@@ -272,7 +272,8 @@ Queries:
   platforms.name,genres.name,themes.name,keywords.name,
   involved_companies.company.name,involved_companies.developer,
   involved_companies.publisher,cover.url,similar_games.id,similar_games.name,
-  similar_games.cover.url,external_games.uid,external_games.external_game_source;
+  similar_games.first_release_date,similar_games.cover.url,external_games.uid,
+  external_games.external_game_source;
   where id = <id>; limit 1;`. A slug lookup uses `where slug = "<slug>"`.
 - Time to beat: `/v4/game_time_to_beats`, body `fields hastily,normally,completely,count;
   where game_id = <id>; limit 1;`. Map seconds to whole minutes:
