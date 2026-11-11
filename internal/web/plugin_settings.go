@@ -116,6 +116,22 @@ func (s *server) settingsPlugin(w http.ResponseWriter, r *http.Request) (plugin.
 	return m, true
 }
 
+// postPluginAction routes POST /settings/plugins/{id}/{action} to the plugin
+// setting it changes. The key forms (/settings/plugins/keys/{source}) match
+// their own, more specific route and never arrive here.
+func (s *server) postPluginAction(w http.ResponseWriter, r *http.Request) {
+	switch r.PathValue("action") {
+	case "title-language":
+		s.postTitleLanguage(w, r)
+	case "home":
+		s.postHomeSettings(w, r)
+	case "columns":
+		s.postColumns(w, r)
+	default:
+		s.errorPage(w, r, http.StatusNotFound, "Not found", "There is no such settings page.", "")
+	}
+}
+
 // pluginSettingsView is the data of a plugin's settings page.
 type pluginSettingsView struct {
 	ID, Name     string
@@ -130,6 +146,11 @@ type pluginSettingsView struct {
 	Imports      []importForm
 	Error        string
 	Columns      []columnsForm
+	// MissingKeys names the plugin's sources that declare a key label and
+	// have no effective key; OtherSources says the plugin also has a source
+	// that needs no key, so the rest still works.
+	MissingKeys  []string
+	OtherSources bool
 }
 
 // importForm is one importer of the plugin on its settings page.
@@ -182,7 +203,32 @@ func (s *server) pluginSettingsData(r *http.Request, m plugin.Manifest) pluginSe
 		}
 		v.Imports = append(v.Imports, f)
 	}
+	v.MissingKeys, v.OtherSources = s.sourceKeyState(ctx, m)
 	return v
+}
+
+// sourceKeyState names m's sources that declare a key label and have no
+// effective key, and reports whether m also has a source that needs no key.
+func (s *server) sourceKeyState(ctx context.Context, m plugin.Manifest) (missing []string, other bool) {
+	seen := map[string]bool{}
+	for _, src := range m.Sources {
+		if seen[src.ID] {
+			continue
+		}
+		seen[src.ID] = true
+		if src.KeyLabel == "" {
+			other = true
+			continue
+		}
+		key, err := s.sourceKey(ctx, src.ID)
+		if err != nil {
+			log.Printf("settings %s: read key of source %s: %v", m.ID, src.ID, err)
+		}
+		if key == "" {
+			missing = append(missing, src.Name)
+		}
+	}
+	return missing, other
 }
 
 // postPluginImport stores an importer's settings - the rule for existing
