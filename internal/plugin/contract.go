@@ -245,6 +245,8 @@ type SourceInfo struct {
 	SupportsSchedule bool     `json:"supports_schedule,omitempty"`
 	LinkLabel        string   `json:"link_label,omitempty"`
 	URLPatterns      []string `json:"url_patterns,omitempty"`
+	// Kinds lists the kinds this source serves. Empty means every kind.
+	Kinds []string `json:"kinds,omitempty"`
 }
 
 // ImporterInfo describes an import format. ResolveVia names the declared

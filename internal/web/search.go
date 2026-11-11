@@ -106,19 +106,79 @@ func isTextSectionField(k plugin.KindDef, key string) bool {
 	return false
 }
 
+// sourceServesKind reports whether a source declares the kind (or declares
+// no restriction at all).
+func sourceServesKind(si plugin.SourceInfo, kind string) bool {
+	if len(si.Kinds) == 0 {
+		return true
+	}
+	for _, k := range si.Kinds {
+		if k == kind {
+			return true
+		}
+	}
+	return false
+}
+
+// sourcesForKind returns the sources in manifest order that serve kind.
+func sourcesForKind(m plugin.Manifest, kind string) []plugin.SourceInfo {
+	var out []plugin.SourceInfo
+	for _, si := range m.Sources {
+		if sourceServesKind(si, kind) {
+			out = append(out, si)
+		}
+	}
+	return out
+}
+
+// defaultSourceForKind is the first source serving kind that supports lookup,
+// else the first one serving it. A plugin whose sources have no Kinds keeps
+// the old default.
+func defaultSourceForKind(m plugin.Manifest, kind string) plugin.SourceInfo {
+	valid := sourcesForKind(m, kind)
+	for _, si := range valid {
+		if si.SupportsLookup {
+			return si
+		}
+	}
+	if len(valid) > 0 {
+		return valid[0]
+	}
+	return plugin.SourceInfo{}
+}
+
+// chooseSourceForKind is the source a request names. An empty or non-serving
+// id falls back to the kind's default; an unknown id is not a source at all.
+func chooseSourceForKind(m plugin.Manifest, kind, id string) (plugin.SourceInfo, bool) {
+	if id == "" {
+		si := defaultSourceForKind(m, kind)
+		return si, si.ID != ""
+	}
+	si, ok := sourceInfo(m, id)
+	if !ok {
+		return plugin.SourceInfo{}, false
+	}
+	if !sourceServesKind(si, kind) {
+		si = defaultSourceForKind(m, kind)
+		return si, si.ID != ""
+	}
+	return si, true
+}
+
 func (s *server) search(w http.ResponseWriter, r *http.Request, pluginID string) {
 	m, ok := s.deps.Registry.Manifest(pluginID)
 	qs := r.URL.Query()
-	srcID, kindKey := qs.Get("source"), qs.Get("kind")
-	if ok && srcID == "" && len(m.Sources) > 0 {
-		srcID = m.Sources[0].ID
-	}
+	kindKey := qs.Get("kind")
 	if ok && kindKey == "" && len(m.Kinds) > 0 {
 		kindKey = m.Kinds[0].Key
 	}
-	si, okSrc := sourceInfo(m, srcID)
 	k, okKind := kindDef(m, kindKey)
-	if !ok || !okSrc || !okKind {
+	if !ok || !okKind {
+		s.errorPage(w, r, http.StatusNotFound, "Not found", "There is no such search.", "")
+		return
+	}
+	si, okSrc := chooseSourceForKind(m, k.Key, qs.Get("source"))
+	if !okSrc {
 		s.errorPage(w, r, http.StatusNotFound, "Not found", "There is no such search.", "")
 		return
 	}
@@ -132,11 +192,12 @@ func (s *server) search(w http.ResponseWriter, r *http.Request, pluginID string)
 		Query:       q,
 	}
 	v.RetryURL = v.Action + "?q=" + url.QueryEscape(q)
-	if len(m.Sources) > 1 {
-		for _, x := range m.Sources {
+	validSources := sourcesForKind(m, k.Key)
+	if len(validSources) > 1 {
+		for _, x := range validSources {
 			v.Sources = append(v.Sources, choice{Value: x.ID, Label: x.Name, Selected: x.ID == si.ID})
 		}
-		if si.ID != m.Sources[0].ID {
+		if si.ID != validSources[0].ID {
 			v.RetryURL += "&source=" + url.QueryEscape(si.ID)
 		}
 	}

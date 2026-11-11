@@ -106,6 +106,8 @@ func TestValidateRejects(t *testing.T) {
 		{"duplicate source", book, func(m *plugin.Manifest) { m.Sources = append(m.Sources, m.Sources[0]) }, `sources[1].id: duplicate`},
 		{"source without rate limit", book, func(m *plugin.Manifest) { m.Sources[0].RequestsPerMinute = 0 }, `sources[0].requests_per_minute: must be positive`},
 		{"url pattern without id", book, func(m *plugin.Manifest) { m.Sources[0].URLPatterns = []string{"example.com/x"} }, `sources[0].url_patterns[0]: must contain "{id}"`},
+		{"unknown source kind", book, func(m *plugin.Manifest) { m.Sources[0].Kinds = []string{"nope"} }, `sources[0].kinds[0]: unknown kind "nope"`},
+		{"duplicate source kind", book, func(m *plugin.Manifest) { m.Sources[0].Kinds = []string{"book", "book"} }, `sources[0].kinds[1]: duplicate "book"`},
 		{"duplicate importer", book, func(m *plugin.Manifest) { m.Importers = append(m.Importers, m.Importers[0]) }, `importers[1].id: duplicate`},
 		{"exporter without extension", book, func(m *plugin.Manifest) {
 			m.Exporters = []plugin.ExporterInfo{{ID: "j", Name: "J", MIME: "application/json"}}

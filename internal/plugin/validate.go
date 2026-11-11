@@ -101,6 +101,16 @@ func Validate(m Manifest) error {
 				p.add(fmt.Sprintf("%s.url_patterns[%d]", path, j), "%v", err)
 			}
 		}
+		sourceKinds := map[string]bool{}
+		for j, kind := range s.Kinds {
+			kp := fmt.Sprintf("%s.kinds[%d]", path, j)
+			if !seenKind[kind] {
+				p.add(kp, "unknown kind %q", kind)
+			} else if sourceKinds[kind] {
+				p.add(kp, "duplicate %q", kind)
+			}
+			sourceKinds[kind] = true
+		}
 	}
 	importers := map[string]bool{}
 	for i, im := range m.Importers {
