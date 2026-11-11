@@ -498,6 +498,7 @@ func (m *apiMedia) media() Media {
 		SourceMaterial: m.Source,
 		ExternalURL:    m.SiteURL,
 		Status:         m.Status,
+		Format:         m.Format,
 	}
 	for _, e := range m.Staff.Edges {
 		a.Staff = append(a.Staff, StaffMember{Role: e.Role, Name: e.Node.Name.Full,

@@ -161,7 +161,7 @@ func TestAnimeMapsTitlesRelationsRecsMALID(t *testing.T) {
 	if a.ID != "154587" || a.Source != AniList || a.MALID != "52991" {
 		t.Errorf("identity: %+v", a.SearchResult)
 	}
-	if a.ExternalURL != "https://anilist.co/anime/154587" || a.SourceMaterial != "MANGA" {
+	if a.ExternalURL != "https://anilist.co/anime/154587" || a.SourceMaterial != "MANGA" || a.Format != "TV" {
 		t.Errorf("url/source = %q/%q", a.ExternalURL, a.SourceMaterial)
 	}
 	if tm := titleMap(a.Titles); len(tm) != 3 || tm["ja-latn"] != "Sousou no Frieren" {
