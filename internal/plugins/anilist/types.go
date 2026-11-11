@@ -76,14 +76,16 @@ type Tag struct {
 
 // AccountEntry is one entry of a user's AniList list, media included.
 type AccountEntry struct {
-	Status    string  `json:"status"` // CURRENT, PLANNING, COMPLETED, PAUSED, DROPPED, REPEATING
-	Score     float64 `json:"score"`  // 0–10 (the query asks for POINT_10)
-	Progress  int     `json:"progress"`
-	UpdatedAt int64   `json:"updatedAt"` // unix seconds
-	Media     struct {
-		ID    int `json:"id"`
-		MALID int `json:"idMal"`
-		Title struct {
+	Status          string  `json:"status"` // CURRENT, PLANNING, COMPLETED, PAUSED, DROPPED, REPEATING
+	Score           float64 `json:"score"`  // 0–10 (the query asks for POINT_10)
+	Progress        int     `json:"progress"`
+	ProgressVolumes int     `json:"progressVolumes"`
+	UpdatedAt       int64   `json:"updatedAt"` // unix seconds
+	Media           struct {
+		ID     int    `json:"id"`
+		MALID  int    `json:"idMal"`
+		Format string `json:"format"`
+		Title  struct {
 			Romaji, English, Native string
 		} `json:"title"`
 		Cover struct {
