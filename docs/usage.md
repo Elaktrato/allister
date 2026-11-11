@@ -31,6 +31,14 @@ Every installed plugin (enabled or not) has a settings page at `/settings/plugin
 
 Upgrading: the earlier global title language (Settings > General) is moved to the anime plugin's setting by a database migration, so nothing changes on screen.
 
+## API keys
+
+Settings > Plugins (`/settings/plugins`) has an **API keys** card for every installed source that needs a credential, whether its plugin is enabled or not. Today that is TMDB, listed once: the TV and Movies plugins both declare the source `tmdb`, so they share one key. Each block shows the source, its key label and an optional hint where to get a key. Saving a key stores it as the setting `source.<source-id>.key`; saving another replaces it, and Remove deletes the stored key (a key from the environment cannot be removed there). The forms are plain forms (no JavaScript needed) and refuse requests from other sites. They post to `POST /settings/plugins/{source}/key` with the field `key`, or `remove=1` to clear the key; a source that is unknown or needs no key answers 404. The card is hidden when no installed source needs a key.
+
+A stored key is never echoed: the page only says "A key is configured.", and the input is always empty. A key is 1 to 500 printable ASCII characters without spaces. It is read per request, so a saved key takes effect at once, without a restart. The stored key wins over the `TMDB_API_KEY` environment variable, which remains a fallback. TMDB accepts both credential forms: a v3 API key (sent as the `api_key` query parameter) and a v4 API Read Access Token (a JWT starting `eyJ`, sent as a bearer token). The same key serves TV and Movies. Without a key, a keyed source stays in search and match pickers marked "(needs key)"; selecting it explains the setting, and items already saved from the source keep rendering from the database.
+
+The key is a plaintext setting in the database, like every other setting. It is not part of the universal backup or a JSON export (a restore on another machine needs it again), and errors and logs never include it.
+
 ## Appearance
 
 Settings > Appearance (`/settings/appearance`) changes the look of every page for the whole installation (there is one user). Every form is a plain form (no JavaScript needed) and refuses requests from other sites; a change applies on the next page.
@@ -64,13 +72,19 @@ The universal backup includes these settings and the uploaded fonts. A restore s
 | `/book/manual/new`, `/book/manual/{id}` | Create and open manual books; `/book/manual/{id}/edit` edits details, `/book/manual/{id}/match` matches a source |
 | `/book/export/json` | The books JSON export |
 | `/tv` | Your TV list (same search, filter and view parameters) |
-| `/tv/search?q=...&source=tvmaze` | Search TVmaze; TMDB is available when `TMDB_API_KEY` is set |
+| `/tv/search?q=...&source=tvmaze` | Search TVmaze; TMDB needs a configured key (see [API keys](#api-keys)) |
 | `/tv/{source}/{id}` | Overview of a TV show; `/edit` edits its details |
 | `/tv/manual/new`, `/tv/manual/{id}` | Create and open manual shows; `/edit` edits details, `/match` matches a source |
 | `/tv/export/json` | The TV JSON export |
+| `/movie` | Your movies list (same search, filter and view parameters) |
+| `/movie/search?q=...&source=tmdb` | Search TMDB (needs a configured key) |
+| `/movie/{source}/{id}` | Overview of a movie; `/edit` edits its details |
+| `/movie/manual/new`, `/movie/manual/{id}` | Create and open manual movies; `/edit` edits details, `/match` matches a source |
+| `/movie/export/json` | The movies JSON export |
+| `POST /settings/plugins/{source}/key` | Save (`key`) or remove (`remove=1`) a source's API key and redirect back (see [API keys](#api-keys)) |
 | `/list/{id}/edit` | The list entry's Edit dialog (status, rating, progress, dates, comment) |
 | `/people/{id}` | Person page |
-| `/settings`, `/settings/appearance`, `/settings/plugins`, `/settings/import`, `/settings/backup` | Settings sections: General (links to each plugin's settings), Appearance (see [Appearance](#appearance)), Plugins (switch plugins on and off), Import, Backup and restore |
+| `/settings`, `/settings/appearance`, `/settings/plugins`, `/settings/import`, `/settings/backup` | Settings sections: General (links to each plugin's settings), Appearance (see [Appearance](#appearance)), Plugins (API keys, switching plugins on and off), Import, Backup and restore |
 | `/settings/plugins/{id}` | A plugin's settings: title language, home view and status, and table columns (see [Plugin settings](#plugin-settings)) |
 | `/appearance.css?v=...` | The generated stylesheet of the appearance settings (linked by every page) |
 | `/fonts/{file}` | An uploaded font file (only fonts listed on the Appearance page) |
@@ -82,7 +96,7 @@ Changes from the first version: a data volume from the first (pre-plugin) previe
 
 ## Imports
 
-The anime and manga plugins each have their own **Import** section on their settings page, with two importers: the **AniList account** (enter the username; its public list is imported with status, score and progress) and the **MyAnimeList XML export** (upload the file MyAnimeList offers from your list page). The manga importer reads the export's manga rows and maps chapters and volumes to the chapter and volume progress. Books have their own **Import** section: the **Goodreads CSV** export (ISBNs resolve through Open Library, then Google Books; rows without an ISBN become manual entries) and the **AniList account** importer, which keeps only light novels and maps chapter and volume progress. TV has a **Yamtrack TV CSV** importer: it groups the `tv`, `season` and `episode` rows into one show, accepts blank episode statuses (the row means watched), reads season/TV progress, and keeps the show's status, score and dates. Without `TMDB_API_KEY` the import is manual-only; with a key, TMDB ids resolve automatically and other ids stay manual. The anime/manga Yamtrack CSV and the generic queue/history live on Settings > Import.
+The anime and manga plugins each have their own **Import** section on their settings page, with two importers: the **AniList account** (enter the username; its public list is imported with status, score and progress) and the **MyAnimeList XML export** (upload the file MyAnimeList offers from your list page). The manga importer reads the export's manga rows and maps chapters and volumes to the chapter and volume progress. Books have their own **Import** section: the **Goodreads CSV** export (ISBNs resolve through Open Library, then Google Books; rows without an ISBN become manual entries) and the **AniList account** importer, which keeps only light novels and maps chapter and volume progress. TV has a **Yamtrack TV CSV** importer: it groups the `tv`, `season` and `episode` rows into one show, accepts blank episode statuses (the row means watched), reads season/TV progress, and keeps the show's status, score and dates. Movies have a **Yamtrack Movie CSV** importer: only movie rows are used (rows of other media types are counted as ignored), duplicates by source and id are reported once, and status, score, dates, comment and cover are kept; a numeric TMDB id resolves through TMDB, while a row without one (or with another source) becomes a manual entry with a note. Without a TMDB key the TV and movie imports are manual-only; with a key, TMDB ids resolve automatically and other ids stay manual. The anime/manga Yamtrack CSV and the generic queue/history live on Settings > Import.
 
 Each importer has a rule for entries already in your list: **Skip** leaves them alone (the default); **Update when the source is newer** applies the source's status, score and progress only when its entry was modified after your local one — formats without modification times (like the XML export) never update under this rule; **Always update** applies them unconditionally. Updates touch only status, score and progress of the list entry — never comments, dates, or item data like covers and credits.
 
@@ -90,14 +104,15 @@ The AniList import can repeat: **off, daily or weekly**. Saving a schedule start
 
 ## Calendar
 
-The app has its own month view at `/calendar` (in the sidebar): the current month's stored releases as chips, one per day, with previous/next/Today links and the air time shown in your timezone. The same data feeds `/calendar.ics`, an iCalendar feed for any calendar app on your network (Thunderbird, KOrganizer and friends: add a calendar "from URL", no account needed). It lists one timed 30-minute event per upcoming release of every entry you have marked as watching, for sources that declare schedules (the anime plugin does: AniList's air dates). The manga plugin has no chapter schedule (AniList has none), and books have no release-schedule source, so neither appears in the calendar. The TV plugin uses TVmaze episode air times; the calendar shows the season and episode (`Season 2, Episode 5`). Shows added from TMDB have no calendar events because TMDB has no air time. The summary is the entry's title in your chosen title language plus the kind's progress label — "Frieren — Episode 12" — and the description links back to the item. Each event starts at the source's air time, so your calendar shows it in your timezone.
+The app has its own month view at `/calendar` (in the sidebar): the current month's stored releases as chips, one per day, with previous/next/Today links and the air time shown in your timezone. The same data feeds `/calendar.ics`, an iCalendar feed for any calendar app on your network (Thunderbird, KOrganizer and friends: add a calendar "from URL", no account needed). It lists one timed 30-minute event per upcoming release of every entry you have marked as watching, for sources that declare schedules (the anime plugin does: AniList's air dates). The manga plugin has no chapter schedule (AniList has none), books have no release-schedule source, and movies have release dates but no air times, so none of them appears in the calendar. The TV plugin uses TVmaze episode air times; the calendar shows the season and episode (`Season 2, Episode 5`). Shows added from TMDB have no calendar events because TMDB has no air time. The summary is the entry's title in your chosen title language plus the kind's progress label — "Frieren — Episode 12" — and the description links back to the item. Each event starts at the source's air time, so your calendar shows it in your timezone.
 
 Schedules are not fetched while a calendar app polls: the database answers, and entries whose schedule is missing or older than 12 hours are refreshed in the background through the normal paced job queue (at most 20 per request). An entry added as watching gets its schedule with its first sync, so it appears in the feed after the next poll. Air dates only cover what the source knows (a finished show has none; a newly announced episode appears after the next refresh). The feed is unauthenticated like the rest of the app — subscribe to it over your private network or tailnet, not from the internet.
 
 ## Known limitations
 
-- Only the anime, manga, books and TV plugins exist. Plugins are compiled in, and there is no marketplace or runtime installation. Manga, books and TV are off after a fresh install; enable them in Settings > Plugins.
-- TV sources: TVmaze is free and has schedules; TMDB needs `TMDB_API_KEY`, has no air times and is optional. MyDramaList, Trakt and TV Time are deferred (GitHub issues #2 and #3). Without a TMDB key the Yamtrack TV import is manual; with a key, TMDB ids resolve automatically.
+- Only the anime, manga, books, TV and movies plugins exist. Plugins are compiled in, and there is no marketplace or runtime installation. Manga, books, TV and movies are off after a fresh install; enable them in Settings > Plugins.
+- TV sources: TVmaze is free and has schedules; TMDB needs a key (Settings > Plugins, or `TMDB_API_KEY` as a fallback), has no air times and adds cast, genres and details where TVmaze lacks them. MyDramaList, Trakt and TV Time are deferred (GitHub issues #2 and #3). Without a TMDB key the Yamtrack TV import is manual; with a key, TMDB ids resolve automatically.
+- Movies: TMDB only, so live search, overviews and import resolution need a key. Without one the plugin is manual-only and has no calendar (TMDB has release dates, not air times). Letterboxd, IMDb and other movie imports are not built.
 - Google Books without `GOOGLE_BOOKS_API_KEY` is limited by the public quota; the source then reports rate limiting. The Goodreads import resolves through Open Library first and only falls back to Google Books when Open Library has no match. Mixing sources can create duplicate items for the same ISBN; the Goodreads import skips IDs it already knows.
 - Book series are flat: one series entry tracks volumes and cumulative chapters, without per-volume child items. General book series use the optional `series` and `series number` fields.
 - The title language is one per plugin, not per kind; the column choice is per kind.
@@ -124,8 +139,10 @@ Schedules are not fetched while a calendar app polls: the database answers, and 
 - `internal/plugins/anime`: the anime plugin
 - `internal/plugins/manga`: the manga plugin (AniList source, AniList-account and MyAnimeList-XML imports, chapters and volumes)
 - `internal/plugins/book`: the books plugin (Open Library, Google Books and AniList sources; book and series kinds; Goodreads and AniList imports)
-- `internal/plugins/tv`: the TV plugin (TVmaze and optional TMDB sources; Show kind; Yamtrack TV import)
-- `internal/plugins/yamtrack`: the shared Yamtrack CSV parser used by anime and TV
+- `internal/plugins/tv`: the TV plugin (TVmaze and TMDB sources; Show kind; Yamtrack TV import)
+- `internal/plugins/movie`: the movies plugin (TMDB source; Movie kind; Yamtrack movie import)
+- `internal/plugins/tmdb`: the TMDB client shared by TV and movies, with the per-request key
+- `internal/plugins/yamtrack`: the shared Yamtrack CSV parser used by anime, TV and movies
 - `internal/plugins/anilist`: the AniList client shared by anime, manga and books (parameterised by media type and format search)
 - `internal/plugins/jsonexport`: the JSON exporter shared by the plugins
 - `internal/plugin/plugintest`: test-only book and TV fixture plugins that prove the contract

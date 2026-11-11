@@ -2,9 +2,9 @@
 
 > I'm vibe-coding this mainly for myself and to keep track of my stuff without having to go to x amount of sites. If there's a new thing I can and want to list, I want to be able to add and enable/disable it on the go. Hence the plug-in idea for every type of media. But in case anyone else has similar ideas and tastes to what I built here, please enjoy. All + List + Alistor... I swear I can be creative when I want to be!
 
-Allister is a self-hosted personal tracker for the things you watch, read and play. A generic core stores your library and draws every page. Each media type is a plugin that you can switch on and off. Anime, manga, books and TV are the first plugins; movies and games are planned.
+Allister is a self-hosted personal tracker for the things you watch, read and play. A generic core stores your library and draws every page. Each media type is a plugin that you can switch on and off. Anime, manga, books, TV and movies are the first plugins; games are planned.
 
-It is a single Go binary with a SQLite database, server-rendered pages, htmx and Tailwind. Anime metadata comes from AniList.
+It is a single Go binary with a SQLite database, server-rendered pages, htmx and Tailwind. Anime metadata comes from AniList; TV uses TVmaze and TMDB, movies TMDB.
 
 ## Features
 
@@ -24,15 +24,15 @@ docker compose up -d
 
 Open http://localhost:8080. To use another port: `PORT=9000 docker compose up -d`.
 
-All data lives in the named volume `allister-data`, mounted at `/data`. It holds the SQLite database (`allister.db`) and the `covers/` and `fonts/` (uploaded fonts) directories. Configuration: `PORT` (default `8080`, the HTTP port), `DATA_DIR` (default `/data`, the database, `covers/` and `fonts/`) and the optional `GOOGLE_BOOKS_API_KEY` for books and `TMDB_API_KEY` for TV.
+All data lives in the named volume `allister-data`, mounted at `/data`. It holds the SQLite database (`allister.db`) and the `covers/` and `fonts/` (uploaded fonts) directories. Configuration: `PORT` (default `8080`, the HTTP port), `DATA_DIR` (default `/data`, the database, `covers/` and `fonts/`) and the optional `GOOGLE_BOOKS_API_KEY` for books and `TMDB_API_KEY` for TV and movies. A TMDB key saved in Settings > Plugins wins over `TMDB_API_KEY`.
 
 ## Plugins
 
 A plugin adds one media type: what its entries look like (fields, statuses, progress tracks, the blocks of the overview page), where the data comes from (a source such as AniList), and how lists get in and out (importers and exporters). Plugins are data only: they never ship HTML or JavaScript. The core draws every page, runs search, filters, imports, exports and backups, and stores everything in one database. Plugins are compiled into the binary. There is no marketplace or runtime installation yet.
 
-The sidebar on the left (a top bar on phones) has one entry per enabled plugin, with the plugin's icon, and Settings at the bottom. Settings has its own column of sections: General, Appearance, Plugins, Import and Backup. Settings > Appearance (`/settings/appearance`) sets the colours (a preset, or every colour in Advanced with contrast warnings), the app font (system stacks, the bundled Inter, Source Serif 4 and JetBrains Mono, or up to 8 fonts you upload: woff2, woff, ttf or otf, 2 MiB each) and the text size, for the whole app; details in [docs/usage.md](docs/usage.md#appearance). Settings > Plugins lists the installed plugins with their version, kinds, sources, importers and exporters, a Settings link (the plugin's title language and list columns) and a Disable or Enable button. Disabling a plugin hides its sidebar entry, pages, person pages, import choices and export links (they answer 404), and pauses its background jobs and imports. All its data stays, and enabling it brings everything back. The home page opens the first enabled plugin's list, or Settings > Plugins when none is enabled.
+The sidebar on the left (a top bar on phones) has one entry per enabled plugin, with the plugin's icon, and Settings at the bottom. Settings has its own column of sections: General, Appearance, Plugins, Import and Backup. Settings > Appearance (`/settings/appearance`) sets the colours (a preset, or every colour in Advanced with contrast warnings), the app font (system stacks, the bundled Inter, Source Serif 4 and JetBrains Mono, or up to 8 fonts you upload: woff2, woff, ttf or otf, 2 MiB each) and the text size, for the whole app; details in [docs/usage.md](docs/usage.md#appearance). Settings > Plugins has an **API keys** card for sources that need one (today TMDB, shared by TV and movies): save a key, save a new one to replace it, or remove it; a stored key is never shown again. It also lists the installed plugins with their version, kinds, sources, importers and exporters, a Settings link (the plugin's title language and list columns) and a Disable or Enable button. Disabling a plugin hides its sidebar entry, pages, person pages, import choices and export links (they answer 404), and pauses its background jobs and imports. All its data stays, and enabling it brings everything back. The home page opens the first enabled plugin's list, or Settings > Plugins when none is enabled.
 
-The **anime plugin** is on by default. It provides the anime kind (type, episodes, year, studio, synopsis, source, start and end dates, genres and tags), the AniList source (30 requests per minute), the Yamtrack CSV importer and the JSON exporter. Its pages live under `/anime`. The **manga plugin** is off until you enable it in Settings > Plugins: it provides the manga kind (type, chapters, volumes, year, author, synopsis, dates, genres and tags), the same AniList source, AniList-account and MyAnimeList-XML imports, and its JSON export; its pages live under `/manga`, and it has no calendar because AniList has no chapter release dates. The **books plugin** is off until you enable it: it provides the book kind (author, pages, year, publisher, ISBN, series, synopsis, dates, genres and tags) and the light-novel series kind (volume and chapter progress), with Open Library, Google Books and AniList sources, Goodreads CSV and AniList-account imports and JSON export; its pages live under `/book`. The **TV plugin** is off until you enable it: one Show kind with season, episode and playback-position progress, TVmaze plus optional TMDB sources, Yamtrack TV CSV import, JSON export and calendar events from TVmaze; its pages live under `/tv`. To write a plugin, see [docs/plugins.md](docs/plugins.md).
+The **anime plugin** is on by default. It provides the anime kind (type, episodes, year, studio, synopsis, source, start and end dates, genres and tags), the AniList source (30 requests per minute), the Yamtrack CSV importer and the JSON exporter. Its pages live under `/anime`. The **manga plugin** is off until you enable it in Settings > Plugins: it provides the manga kind (type, chapters, volumes, year, author, synopsis, dates, genres and tags), the same AniList source, AniList-account and MyAnimeList-XML imports, and its JSON export; its pages live under `/manga`, and it has no calendar because AniList has no chapter release dates. The **books plugin** is off until you enable it: it provides the book kind (author, pages, year, publisher, ISBN, series, synopsis, dates, genres and tags) and the light-novel series kind (volume and chapter progress), with Open Library, Google Books and AniList sources, Goodreads CSV and AniList-account imports and JSON export; its pages live under `/book`. The **TV plugin** is off until you enable it: one Show kind with season, episode and playback-position progress, TVmaze plus TMDB (which needs a key), Yamtrack TV CSV import, JSON export and calendar events from TVmaze; its pages live under `/tv`. The **movies plugin** is off until you enable it: one Movie kind (Want to watch, Watching, Paused, Seen and Dropped, with an optional playback position, director, studio, country, language, collection and runtime), the TMDB source, the Yamtrack movie CSV import and JSON export, and no calendar; its pages live under `/movie`. To write a plugin, see [docs/plugins.md](docs/plugins.md).
 
 ## Title language and columns
 
@@ -43,7 +43,7 @@ Each plugin has its own settings page (Settings > Plugins > Settings, `/settings
 1. In Yamtrack, export the general CSV.
 2. In Allister, open Settings > Import and upload the file (up to 20 MiB).
 
-Only anime rows with MyAnimeList ids are used. Each id is looked up on AniList at 30 requests per minute, so about 830 entries take about 30 minutes. Cast and cover downloads then continue in the background for another hour or two.
+The anime import uses only anime rows with MyAnimeList ids. Each id is looked up on AniList at 30 requests per minute, so about 830 entries take about 30 minutes. Cast and cover downloads then continue in the background for another hour or two.
 
 The page shows progress. You can cancel an import and resume it later. Entries AniList cannot match are kept as manual entries marked "unmatched". Importing the same file again skips rows already saved, matched by MyAnimeList id. The one exception is rare: if you matched an unmatched entry to an AniList page whose MyAnimeList id differs from the one in the export, a re-import can bring that row back as a new unmatched entry.
 
@@ -63,7 +63,7 @@ Open an unmatched entry (or any manual entry) and press "Match to AniList". Past
 
 ## URLs
 
-Anime pages live under `/anime` (list, `/anime/search`, overviews at `/anime/anilist/{id}`, manual entries at `/anime/manual/{id}`, each with `/edit` for Edit details); manga pages use `/manga` the same way, and books pages use `/book`, and TV pages use `/tv`. List entries are edited at `/list/{id}/edit`, people at `/people/{id}`, and Settings under `/settings` (sections `/settings/plugins`, each plugin's `/settings/plugins/{id}`, `/settings/import`, `/settings/backup`). A bookmark like `/anime?status=watching` from the first version now opens the All tab with a notice: statuses are the core's classes (`status=active`). The full table is in [docs/usage.md](docs/usage.md#urls).
+Anime pages live under `/anime` (list, `/anime/search`, overviews at `/anime/anilist/{id}`, manual entries at `/anime/manual/{id}`, each with `/edit` for Edit details); manga pages use `/manga` the same way, books pages use `/book`, TV pages use `/tv`, and movie pages use `/movie`. List entries are edited at `/list/{id}/edit`, people at `/people/{id}`, and Settings under `/settings` (sections `/settings/plugins`, each plugin's `/settings/plugins/{id}`, `/settings/import`, `/settings/backup`). A bookmark like `/anime?status=watching` from the first version now opens the All tab with a notice: statuses are the core's classes (`status=active`). The full table is in [docs/usage.md](docs/usage.md#urls).
 
 ## Updating and stopping
 
@@ -117,7 +117,7 @@ Covers and person images are stored locally in `covers/` inside the data volume.
 
 ## Known limitations
 
-- Only the anime, manga, books and TV plugins exist; plugins are compiled in (no marketplace or runtime installation).
+- Only the anime, manga, books, TV and movies plugins exist; plugins are compiled in (no marketplace or runtime installation).
 - Files of removed or re-matched entries are not deleted from `covers/`.
 - More in [docs/usage.md](docs/usage.md#known-limitations).
 
@@ -146,5 +146,5 @@ The plugin contract is documented in [docs/plugins.md](docs/plugins.md), the cod
 
 ## Roadmap
 
-- Other media types as plugins: movies, games.
+- Other media types as plugins: games.
 - Upgrade to a supported Go version.
