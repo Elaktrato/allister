@@ -619,7 +619,10 @@ func (r *Runner) process(ctx context.Context, ref *importerRef, importID int64, 
 	if rc.idType != "" {
 		rc.value = plugin.SingleLine(rc.entry.ExternalIDs[rc.idType], maxTitleRunes)
 	}
-	if rc.value == "" { // rows stored by an older version; Submit skips these now
+	if rc.value == "" { // no declared id: a manual-only row, or an older stored row
+		if ref.info.ManualRows && rc.entry.Title != "" {
+			return r.saveManualRow(context.WithoutCancel(ctx), rc, "saved as a manual entry (no "+ref.idLabel()+")")
+		}
 		return r.record(ctx, importID, pr.seq, outcomeSkipped, 0, noIDMessage(ref))
 	}
 	if saved, err := r.d.Library.ItemByExternalID(ctx, rc.pluginID(), kind.Key, rc.idType, rc.value); err != nil {
@@ -796,11 +799,27 @@ func joinNotes(notes ...string) string {
 	return strings.Join(out, "; ")
 }
 
-// saveUnmatched keeps a row the source does not know as a manual item: the
-// row's title in the importer's fallback language (default the kind's first
-// title language), its external id and its remote cover (downloaded by the
-// sync job).
+// saveUnmatched keeps a row the source does not know as a manual item.
 func (r *Runner) saveUnmatched(ctx context.Context, rc *rowCtx, reason string) error {
+	return r.saveManual(ctx, rc, reason, outcomeUnmatched)
+}
+
+// saveManualRow keeps a row that has no source id as a normal imported
+// manual item.
+func (r *Runner) saveManualRow(ctx context.Context, rc *rowCtx, reason string) error {
+	return r.saveManual(ctx, rc, reason, outcomeImported)
+}
+
+// saveManual stores a manual item with the row's title, all external ids and
+// the row fields (which also supply progress totals), then records the row.
+func (r *Runner) saveManual(ctx context.Context, rc *rowCtx, reason, outcome string) error {
+	title := rc.entry.Title
+	if title == "" && rc.value != "" {
+		title = rc.ref.idLabel() + " #" + rc.value
+	}
+	if title == "" {
+		return r.record(ctx, rc.importID, rc.seq, outcomeSkipped, 0, "row has no title")
+	}
 	manualID, err := ids.NewManualID()
 	if err != nil {
 		return r.record(ctx, rc.importID, rc.seq, outcomeFailed, 0, err.Error())
@@ -809,19 +828,26 @@ func (r *Runner) saveUnmatched(ctx context.Context, rc *rowCtx, reason string) e
 	if lang == "" && len(rc.kind.TitleLanguages) > 0 {
 		lang = rc.kind.TitleLanguages[0]
 	}
-	title := rc.entry.Title
-	if title == "" {
-		title = rc.ref.idLabel() + " #" + rc.value
-	}
 	d := plugin.ItemData{
 		ItemSummary: plugin.ItemSummary{Source: manualSource, ID: manualID, Kind: rc.kind.Key,
 			Titles: []plugin.Title{{Lang: lang, Text: title}}},
-		ExternalIDs: map[string]string{rc.idType: rc.value},
+	}
+	if len(rc.entry.ExternalIDs) > 0 {
+		d.ExternalIDs = make(map[string]string, len(rc.entry.ExternalIDs))
+		for k, v := range rc.entry.ExternalIDs {
+			d.ExternalIDs[k] = v
+		}
+	}
+	if len(rc.entry.Fields) > 0 {
+		d.Fields = make(map[string]plugin.FieldValue, len(rc.entry.Fields))
+		for k, v := range rc.entry.Fields {
+			d.Fields[k] = v
+		}
 	}
 	if u := plugin.HTTPSURL(rc.entry.CoverURL); u != "" {
 		d.CoverURL = u
 	}
-	entry, notes := buildEntry(rc.kind, &library.Item{ProgressKeys: rc.kind.Progress.Defaults}, rc.entry)
+	entry, notes := buildEntry(rc.kind, &library.Item{ProgressKeys: rc.kind.Progress.Defaults, Fields: d.Fields}, rc.entry)
 	id, err := r.d.Library.AddToList(ctx, rc.pluginID(), rc.kind.Key, d, entry, library.WithSyncState("pending"))
 	switch {
 	case errors.Is(err, library.ErrAlreadySaved):
@@ -829,7 +855,7 @@ func (r *Runner) saveUnmatched(ctx context.Context, rc *rowCtx, reason string) e
 	case err != nil:
 		return r.record(ctx, rc.importID, rc.seq, outcomeFailed, 0, err.Error())
 	}
-	return r.finishSaved(ctx, rc, id, outcomeUnmatched, joinNotes(append([]string{reason}, notes...)...))
+	return r.finishSaved(ctx, rc, id, outcome, joinNotes(append([]string{reason}, notes...)...))
 }
 
 // finishSaved enqueues the sync job (cover, credits) for a saved item and

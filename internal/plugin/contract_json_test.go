@@ -57,7 +57,7 @@ func TestManifestJSONRoundTrip(t *testing.T) {
 			Columns:        []plugin.ColumnDef{{Key: "n", Label: "Number", Default: true, Hide: "md"}, {Key: "rating"}},
 		}},
 		Sources:   []plugin.SourceInfo{{ID: "s", Name: "S", RequestsPerMinute: 30, ExternalIDTypes: []string{"s"}, SupportsLookup: true, LinkLabel: "View on S", URLPatterns: []string{"s.example/{id}"}, Kinds: []string{"k"}}},
-		Importers: []plugin.ImporterInfo{{ID: "i", Name: "I", FileHint: "csv", Accept: []string{".csv"}, ExternalIDType: "s", ExternalIDLabel: "S id", ResolveVia: "s", ResolveViaFallback: []string{"s2"}, FallbackTitleLang: "en", UnmatchedNote: "No S match for #{id}."}},
+		Importers: []plugin.ImporterInfo{{ID: "i", Name: "I", FileHint: "csv", Accept: []string{".csv"}, ExternalIDType: "s", ExternalIDLabel: "S id", ResolveVia: "s", ResolveViaFallback: []string{"s2"}, ManualRows: true, FallbackTitleLang: "en", UnmatchedNote: "No S match for #{id}."}},
 		Exporters: []plugin.ExporterInfo{{ID: "x", Name: "X", Extension: ".json", MIME: "application/json"}},
 	}
 	roundTrip(t, "full manifest", full)
@@ -96,6 +96,7 @@ func TestRuntimeDataJSONRoundTrip(t *testing.T) {
 		Kind: "k", Title: "T", ExternalIDs: map[string]string{"mal": "5"}, Status: plugin.Completed, Rating: iptr(0),
 		Progress: map[string]float64{"episode": 12, "position": 90}, StartedOn: &day, FinishedOn: &day,
 		Comment: "c", CoverURL: "http://c", Notes: []string{"n"},
+		Fields: map[string]plugin.FieldValue{"pages": {Num: fptr(300)}},
 	}
 	roundTrip(t, "parsedentry", entry)
 	roundTrip(t, "skipped", plugin.SkippedRow{Line: 4, Title: "T", Reason: "bad"})

@@ -275,6 +275,7 @@ type ImporterInfo struct {
 	ExternalIDLabel    string   `json:"external_id_label,omitempty"`
 	ResolveVia         string   `json:"resolve_via,omitempty"`
 	ResolveViaFallback []string `json:"resolve_via_fallback,omitempty"`
+	ManualRows         bool     `json:"manual_rows,omitempty"`
 	FallbackTitleLang  string   `json:"fallback_title_lang,omitempty"`
 	UnmatchedNote      string   `json:"unmatched_note,omitempty"`
 }

@@ -93,16 +93,17 @@ type ItemData struct {
 
 // ParsedEntry is one normalised row produced by an importer.
 type ParsedEntry struct {
-	Kind        string             `json:"kind"`
-	Title       string             `json:"title"`
-	ExternalIDs map[string]string  `json:"external_ids,omitempty"`
-	Status      StatusClass        `json:"status,omitempty"`
-	Rating      *int               `json:"rating,omitempty"`
-	Progress    map[string]float64 `json:"progress,omitempty"`
-	StartedOn   *time.Time         `json:"started_on,omitempty"`  // calendar day, UTC midnight by convention (see DateOnly)
-	FinishedOn  *time.Time         `json:"finished_on,omitempty"` // calendar day, UTC midnight by convention (see DateOnly)
-	Comment     string             `json:"comment,omitempty"`
-	CoverURL    string             `json:"cover_url,omitempty"`
+	Kind        string                `json:"kind"`
+	Title       string                `json:"title"`
+	ExternalIDs map[string]string     `json:"external_ids,omitempty"`
+	Status      StatusClass           `json:"status,omitempty"`
+	Rating      *int                  `json:"rating,omitempty"`
+	Progress    map[string]float64    `json:"progress,omitempty"`
+	StartedOn   *time.Time            `json:"started_on,omitempty"`  // calendar day, UTC midnight by convention (see DateOnly)
+	FinishedOn  *time.Time            `json:"finished_on,omitempty"` // calendar day, UTC midnight by convention (see DateOnly)
+	Comment     string                `json:"comment,omitempty"`
+	CoverURL    string                `json:"cover_url,omitempty"`
+	Fields      map[string]FieldValue `json:"fields,omitempty"`
 	// UpdatedAt is the entry's source-side modification time when the source
 	// knows one (an account import does; a file export usually does not).
 	UpdatedAt *time.Time `json:"updated_at,omitempty"`

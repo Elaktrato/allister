@@ -66,11 +66,13 @@ func bookEntry(isbn, title string, status plugin.StatusClass, pages float64) plu
 		Status: status, Progress: map[string]float64{"pages": pages}, CoverURL: "https://covers.example/" + isbn + ".jpg"}
 }
 
-func newGenEnv(t *testing.T) *genEnv { return newGenEnvWith(t, false) }
+func newGenEnv(t *testing.T) *genEnv { return newGenEnvWith(t, false, false) }
 
-func newGenEnvWithFallback(t *testing.T) *genEnv { return newGenEnvWith(t, true) }
+func newGenEnvWithFallback(t *testing.T) *genEnv { return newGenEnvWith(t, true, false) }
 
-func newGenEnvWith(t *testing.T, fallback bool) *genEnv {
+func newGenEnvManual(t *testing.T) *genEnv { return newGenEnvWith(t, false, true) }
+
+func newGenEnvWith(t *testing.T, fallback, manual bool) *genEnv {
 	t.Helper()
 	d := openDB(t)
 	e := &genEnv{t: t, q: &fakeQueue{inner: jobs.NewQueue(d)}, clk: &clock{t: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)},
@@ -92,6 +94,9 @@ func newGenEnvWith(t *testing.T, fallback bool) *genEnv {
 		bk.M.Sources = append(bk.M.Sources, plugin.SourceInfo{ID: "books2", Name: "Second Books", RequestsPerMinute: 5,
 			ExternalIDTypes: []string{"isbn"}, SupportsLookup: true})
 		bk.M.Importers[0].ResolveViaFallback = []string{"books2"}
+	}
+	if manual {
+		bk.M.Importers[0].ManualRows = true
 	}
 	bk.Importers = map[string]plugin.Importer{"books-csv": e.bookImp}
 
@@ -895,6 +900,67 @@ func TestImportFallbackAllNotFoundSavesUnmatched(t *testing.T) {
 	}
 	it, _ := e.item("book", "book", "isbn", "9783")
 	if it.Source != "manual" {
+		t.Fatalf("item = %+v", it)
+	}
+	if r := e.report(); r.Unmatched != 1 {
+		t.Fatalf("report = %+v", r)
+	}
+}
+
+func TestManualRowsImportWithoutExternalID(t *testing.T) {
+	e := newGenEnvManual(t)
+	e.bookImp.Result = plugin.ParseResult{Entries: []plugin.ParsedEntry{{
+		Kind: "book", Title: "Manual Only", Status: plugin.Completed,
+		Fields:   map[string]plugin.FieldValue{"author": {Text: "A. Author"}, "pages": {Num: pf(120)}, "isbn": {Text: "978"}},
+		Progress: map[string]float64{"pages": 120},
+	}}}
+	id := e.submit("book", "books-csv")
+	if err := e.run("book", id); err != nil {
+		t.Fatal(err)
+	}
+	pg, err := e.lib.List(context.Background(), library.Query{PluginID: "book", Kind: "book"}, "en")
+	if err != nil || len(pg.Rows) != 1 {
+		t.Fatalf("rows = %+v %v", pg.Rows, err)
+	}
+	row := pg.Rows[0]
+	if row.Item.Source != "manual" || row.Item.Titles[0].Text != "Manual Only" ||
+		row.Item.Fields["author"].Text != "A. Author" || row.Item.Fields["pages"].Num == nil || *row.Item.Fields["pages"].Num != 120 ||
+		row.Entry.Status != library.Completed || row.Entry.Progress["pages"] != 120 {
+		t.Fatalf("item = %+v entry = %+v", row.Item, row.Entry)
+	}
+	if r := e.report(); r.Imported != 1 || r.Unmatched != 0 || r.Skipped != 0 {
+		t.Fatalf("report = %+v", r)
+	}
+}
+
+func TestManualRowsNeedTitle(t *testing.T) {
+	e := newGenEnvManual(t)
+	e.bookImp.Result = plugin.ParseResult{Entries: []plugin.ParsedEntry{
+		{Kind: "book", Title: "Has Title", Status: plugin.Planned, Fields: map[string]plugin.FieldValue{"pages": {Num: pf(120)}}},
+		{Kind: "book", Fields: map[string]plugin.FieldValue{"pages": {Num: pf(120)}}},
+	}}
+	id := e.submit("book", "books-csv")
+	if err := e.run("book", id); err != nil {
+		t.Fatal(err)
+	}
+	if r := e.report(); r.Imported != 1 || r.Skipped != 1 {
+		t.Fatalf("report = %+v", r)
+	}
+}
+
+func TestSourceMissKeepsManualFields(t *testing.T) {
+	e := newGenEnv(t)
+	e.bookSrc.Fn = func(context.Context, string, string, string, int) (plugin.ItemData, error) {
+		return plugin.ItemData{}, plugin.ErrNotFound
+	}
+	e.bookImp.Result = plugin.ParseResult{Entries: []plugin.ParsedEntry{bookEntry("9784", "Missing", plugin.Planned, 0)}}
+	e.bookImp.Result.Entries[0].Fields = map[string]plugin.FieldValue{"author": {Text: "A. Author"}, "pages": {Num: pf(200)}}
+	id := e.submit("book", "books-csv")
+	if err := e.run("book", id); err != nil {
+		t.Fatal(err)
+	}
+	it, _ := e.item("book", "book", "isbn", "9784")
+	if it.Source != "manual" || it.Fields["author"].Text != "A. Author" || it.Fields["pages"].Num == nil || *it.Fields["pages"].Num != 200 {
 		t.Fatalf("item = %+v", it)
 	}
 	if r := e.report(); r.Unmatched != 1 {
