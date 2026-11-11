@@ -1065,3 +1065,29 @@ func TestImportStoresSecondaryExternalIDs(t *testing.T) {
 		t.Fatalf("external ids = %v", it.ExternalIDs)
 	}
 }
+
+func TestImportUpdateNotesInactiveProgress(t *testing.T) {
+	e := newGenEnv(t)
+	d := book("781", 300)
+	d.ExternalIDs = map[string]string{"isbn": "781"}
+	if _, err := e.lib.AddToList(context.Background(), "ebook", "book", d,
+		library.Entry{Status: library.Active, Progress: map[string]float64{"percent": 10}},
+		library.WithProgressKeys([]string{"percent"})); err != nil {
+		t.Fatal(err)
+	}
+	e.pctImp.AccountRows = []plugin.ParsedEntry{bookEntry("781", "Percent Book", plugin.Completed, 50)}
+	id, err := e.im.SubmitAccount(context.Background(), "ebook", "books-csv", "someone", ModeAlways)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := e.run("ebook", id); err != nil {
+		t.Fatal(err)
+	}
+	it, en := e.item("ebook", "book", "isbn", "781")
+	if en.Status != library.Completed || en.Progress["percent"] != 10 {
+		t.Fatalf("entry = %+v item = %+v", en, it)
+	}
+	if msg := e.message(id, 1); !strings.Contains(msg, "progress not active: pages") {
+		t.Fatalf("message = %q", msg)
+	}
+}

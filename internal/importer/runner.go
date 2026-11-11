@@ -795,7 +795,11 @@ func (r *Runner) handleSaved(ctx context.Context, rc *rowCtx, saved *library.Ite
 				return r.record(dctx, rc.importID, rc.seq, outcomeFailed, saved.ID, uerr.Error())
 			}
 			if updated {
-				return r.record(dctx, rc.importID, rc.seq, outcomeUpdated, saved.ID, joinNotes("updated from the source", syncNote))
+				note := "updated from the source"
+				if inactive := inactiveProgress(saved.ProgressKeys, rc.entry.Progress); len(inactive) > 0 {
+					note += "; progress not active: " + strings.Join(inactive, ", ")
+				}
+				return r.record(dctx, rc.importID, rc.seq, outcomeUpdated, saved.ID, joinNotes(note, syncNote))
 			}
 		}
 		return r.record(dctx, rc.importID, rc.seq, outcomeSkipped, saved.ID, joinNotes("already in your list", syncNote))
@@ -812,6 +816,25 @@ func (r *Runner) handleSaved(ctx context.Context, rc *rowCtx, saved *library.Ite
 	label := strings.ToLower(rc.kind.Label)
 	return r.record(dctx, rc.importID, rc.seq, outcomeImported, saved.ID,
 		joinNotes(append([]string{"added to your list (" + label + " was already saved)"}, append(notes, syncNote)...)...))
+}
+
+// inactiveProgress lists the row's progress keys the entry does not track.
+func inactiveProgress(active []string, row map[string]float64) []string {
+	var out []string
+	for key := range row {
+		found := false
+		for _, k := range active {
+			if k == key {
+				found = true
+				break
+			}
+		}
+		if !found {
+			out = append(out, key)
+		}
+	}
+	sort.Strings(out)
+	return out
 }
 
 func joinNotes(notes ...string) string {
