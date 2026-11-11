@@ -165,10 +165,8 @@ func (c *openLibraryClient) search(ctx context.Context, q string) ([]plugin.Item
 			y := float64(d.FirstPublishYear)
 			fields["year"] = plugin.FieldValue{Num: &y}
 		}
-		if len(d.ISBN) > 0 {
-			if isbn := plugin.SingleLine(d.ISBN[0], maxIDRunes); isbn != "" {
-				fields["isbn"] = plugin.FieldValue{Text: isbn}
-			}
+		if isbn := canonicalISBN(firstNonEmpty(d.ISBN...)); isbn != "" {
+			fields["isbn"] = plugin.FieldValue{Text: isbn}
 		}
 		item := plugin.ItemSummary{
 			Source: SourceOpenLibrary, ID: id, Kind: KindBook,
@@ -232,20 +230,25 @@ func (c *openLibraryClient) record(ctx context.Context, id string, w olWork, ed 
 		r.Author = credits[0].Person.Name
 	}
 	if ed != nil {
-		r.AltTitle = ed.Title
-		r.AltLanguage = marcLanguage(ed.Languages)
-		if r.AltLanguage == "en" {
-			r.AltTitle, r.AltLanguage = "", ""
+		if lang := marcLanguage(ed.Languages); lang != "" && lang != "en" {
+			r.AltTitle, r.AltLanguage = ed.Title, lang
 		}
 		if strings.TrimSpace(r.Title) == "" {
-			r.Title, r.Language = ed.Title, r.AltLanguage
-			r.AltTitle, r.AltLanguage = "", ""
-			if r.Language == "" {
+			r.Title = ed.Title
+			if lang := marcLanguage(ed.Languages); lang != "" {
+				r.Language = lang
+			} else {
 				r.Language = "en"
 			}
+			r.AltTitle, r.AltLanguage = "", ""
 		}
 		r.Pages = ed.NumberOfPages
-		r.ISBN = firstNonEmpty(append(ed.ISBN13, ed.ISBN10...)...)
+		for _, raw := range append(append([]string{}, ed.ISBN13...), ed.ISBN10...) {
+			if isbn := canonicalISBN(raw); isbn != "" {
+				r.ISBN = isbn
+				break
+			}
+		}
 		if len(ed.Publishers) > 0 {
 			r.Publisher = ed.Publishers[0]
 		}
@@ -318,7 +321,7 @@ func (c *openLibraryClient) people(ctx context.Context, id string) ([]plugin.Cre
 }
 
 func (c *openLibraryClient) lookupISBN(ctx context.Context, isbn string) (plugin.ItemData, error) {
-	isbn = strings.NewReplacer("-", "", " ", "").Replace(isbn)
+	isbn = canonicalISBN(isbn)
 	if isbn == "" {
 		return plugin.ItemData{}, plugin.ErrNotFound
 	}
@@ -360,7 +363,11 @@ func (s *openLibrarySource) People(ctx context.Context, kind, id string) ([]plug
 	if kind != KindBook {
 		return nil, plugin.ErrNotFound
 	}
-	return s.c.people(ctx, olID(id, "/works/"))
+	credits, err := s.c.people(ctx, olID(id, "/works/"))
+	if err != nil {
+		return nil, err
+	}
+	return bookCredits(bookRecord{Credits: credits}), nil
 }
 
 func (s *openLibrarySource) Recommendations(context.Context, string, string) ([]plugin.ItemSummary, error) {
@@ -397,41 +404,34 @@ func olCover(id int) string {
 }
 
 func chooseEdition(eds []olEdition) *olEdition {
-	var english, englishPages, anyPages, anyCover *olEdition
+	var best *olEdition
+	bestScore := -1
 	for i := range eds {
 		e := &eds[i]
-		if anyPages == nil {
-			anyPages = e
+		score := 0
+		if e.NumberOfPages > 0 {
+			score += 4
 		}
-		if len(e.Covers) > 0 && anyCover == nil {
-			anyCover = e
-		}
-		if e.NumberOfPages <= 0 {
-			continue
-		}
-		if englishPages == nil {
-			englishPages = e
+		if hasRealCover(*e) {
+			score += 2
 		}
 		if marcLanguage(e.Languages) == "en" {
-			if english == nil {
-				english = e
-			}
-			if len(e.Covers) > 0 {
-				englishPages = e
-			}
+			score++
+		}
+		if score > bestScore {
+			best, bestScore = e, score
 		}
 	}
-	switch {
-	case englishPages != nil:
-		return englishPages
-	case english != nil:
-		return english
-	case anyCover != nil:
-		return anyCover
-	case anyPages != nil:
-		return anyPages
+	return best
+}
+
+func hasRealCover(e olEdition) bool {
+	for _, cover := range e.Covers {
+		if cover > 0 {
+			return true
+		}
 	}
-	return nil
+	return false
 }
 
 func marcLanguage(ls []olLanguage) string {

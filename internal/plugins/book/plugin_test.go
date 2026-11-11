@@ -22,6 +22,12 @@ func TestNewProvidesEveryDeclaredSourceImporterAndExporter(t *testing.T) {
 	if p.Exporter(ExporterJSON) == nil || p.Exporter("nope") != nil || p.Source("nope") != nil || p.Importer("nope") != nil {
 		t.Fatal("unknown ids must return nil")
 	}
+	if ol := p.Source(SourceOpenLibrary).(*openLibrarySource); ol.c.hc.Timeout <= 0 {
+		t.Fatal("Open Library client has no default timeout")
+	}
+	if gb := p.Source(SourceGoogleBooks).(*googleBooksSource); gb.c.hc.Timeout <= 0 {
+		t.Fatal("Google Books client has no default timeout")
+	}
 	reg := plugin.NewRegistry(plugintest.NewMemEnabled())
 	if err := reg.Register(p); err != nil {
 		t.Fatalf("register: %v", err)

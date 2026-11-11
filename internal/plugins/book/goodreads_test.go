@@ -50,13 +50,13 @@ func TestGoodreadsCSVBadHeader(t *testing.T) {
 }
 
 func TestISBN13Conversion(t *testing.T) {
-	if got := isbn13("0441013597"); got != "9780441013593" {
+	if got := canonicalISBN("0441013597"); got != "9780441013593" {
 		t.Fatalf("isbn10 = %q", got)
 	}
-	if got := isbn13("978-0-441-01359-3"); got != "9780441013593" {
+	if got := canonicalISBN("978-0-441-01359-3"); got != "9780441013593" {
 		t.Fatalf("isbn13 = %q", got)
 	}
-	if got := isbn13("not-an-isbn"); got != "" {
+	if got := canonicalISBN("not-an-isbn"); got != "" {
 		t.Fatalf("invalid = %q", got)
 	}
 }

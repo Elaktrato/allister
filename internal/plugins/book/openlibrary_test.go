@@ -161,3 +161,38 @@ func TestOpenLibraryErrors(t *testing.T) {
 		})
 	}
 }
+
+func TestOpenLibraryEditionWithoutPages(t *testing.T) {
+	s := olSource(t, map[string]string{
+		"/works/OL1W.json": `{"title":"Dune","authors":[]}`,
+		"/works/OL1W/editions.json": `{"entries":[
+			{"title":"Dune","number_of_pages":0,"isbn_13":["9780000000001"],"covers":[1],"key":"/books/OL1M"},
+			{"title":"Dune","number_of_pages":544,"isbn_13":["9780441013593"],"covers":[123],
+			 "languages":[{"key":"/languages/eng"}],"key":"/books/OL2M"}]}`,
+	})
+	d, err := s.Details(context.Background(), KindBook, "OL1W")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d.Fields["pages"].Num == nil || *d.Fields["pages"].Num != 544 || d.ExternalIDs["isbn"] != "9780441013593" {
+		t.Fatalf("data = %+v", d)
+	}
+}
+
+func TestOpenLibraryPrefersEnglishEdition(t *testing.T) {
+	s := olSource(t, map[string]string{
+		"/works/OL1W.json": `{"title":"Dune","authors":[]}`,
+		"/works/OL1W/editions.json": `{"entries":[
+			{"title":"Der Wüstenplanet","number_of_pages":600,"isbn_13":["9783453317178"],"covers":[2],
+			 "languages":[{"key":"/languages/ger"}],"key":"/books/OL1M"},
+			{"title":"Dune","number_of_pages":544,"isbn_13":["9780441013593"],"covers":[123],
+			 "languages":[{"key":"/languages/eng"}],"key":"/books/OL2M"}]}`,
+	})
+	d, err := s.Details(context.Background(), KindBook, "OL1W")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d.Fields["pages"].Num == nil || *d.Fields["pages"].Num != 544 || d.ExternalIDs["isbn"] != "9780441013593" {
+		t.Fatalf("data = %+v", d)
+	}
+}

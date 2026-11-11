@@ -30,6 +30,9 @@ func (goodreadsImporter) Parse(ctx context.Context, r io.Reader) (plugin.ParseRe
 	if _, ok := cols["title"]; !ok {
 		return plugin.ParseResult{}, fmt.Errorf("%w: the Goodreads export has no Title column", plugin.ErrBadInput)
 	}
+	if _, ok := cols["exclusive shelf"]; !ok {
+		return plugin.ParseResult{}, fmt.Errorf("%w: the Goodreads export has no Exclusive Shelf column", plugin.ErrBadInput)
+	}
 	var out plugin.ParseResult
 	for line := 2; ; line++ {
 		if err := ctx.Err(); err != nil {
@@ -42,7 +45,7 @@ func (goodreadsImporter) Parse(ctx context.Context, r io.Reader) (plugin.ParseRe
 		if err != nil {
 			return plugin.ParseResult{}, fmt.Errorf("%w: row %d: %v", plugin.ErrBadInput, line, err)
 		}
-		title := strings.TrimSpace(field(row, cols, "title"))
+		title := plugin.SingleLine(field(row, cols, "title"), maxTitleRunes)
 		if title == "" {
 			out.Skipped = append(out.Skipped, plugin.SkippedRow{Line: line, Reason: "no title"})
 			continue
@@ -55,9 +58,9 @@ func (goodreadsImporter) Parse(ctx context.Context, r io.Reader) (plugin.ParseRe
 		}
 		entry := plugin.ParsedEntry{Kind: KindBook, Title: title, Status: status}
 		notes := []string{}
-		isbn := isbn13(strings.Trim(field(row, cols, "isbn13"), `="' `))
+		isbn := canonicalISBN(field(row, cols, "isbn13"))
 		if isbn == "" {
-			isbn = isbn13(strings.Trim(field(row, cols, "isbn"), `="' `))
+			isbn = canonicalISBN(field(row, cols, "isbn"))
 		}
 		if isbn != "" {
 			entry.ExternalIDs = map[string]string{"isbn": isbn}
@@ -71,7 +74,7 @@ func (goodreadsImporter) Parse(ctx context.Context, r io.Reader) (plugin.ParseRe
 			entry.ExternalIDs["goodreads"] = id
 		}
 		fields := map[string]plugin.FieldValue{}
-		if v := strings.TrimSpace(field(row, cols, "author")); v != "" {
+		if v := plugin.SingleLine(field(row, cols, "author"), maxNameRunes); v != "" {
 			fields["author"] = plugin.FieldValue{Text: v}
 		}
 		pages := parseInt(field(row, cols, "number of pages"))
@@ -90,7 +93,7 @@ func (goodreadsImporter) Parse(ctx context.Context, r io.Reader) (plugin.ParseRe
 			y := float64(year)
 			fields["year"] = plugin.FieldValue{Num: &y}
 		}
-		if v := strings.TrimSpace(field(row, cols, "publisher")); v != "" {
+		if v := plugin.SingleLine(field(row, cols, "publisher"), maxNameRunes); v != "" {
 			fields["publisher"] = plugin.FieldValue{Text: v}
 		}
 		if isbn != "" {
@@ -110,7 +113,7 @@ func (goodreadsImporter) Parse(ctx context.Context, r io.Reader) (plugin.ParseRe
 		if day := parseGoodreadsDate(field(row, cols, "date read")); day != nil {
 			entry.FinishedOn = day
 		}
-		if review := field(row, cols, "my review"); strings.TrimSpace(review) != "" {
+		if review := plugin.MultiLine(field(row, cols, "my review"), maxTextRunes); review != "" {
 			entry.Comment = review
 		}
 		entry.Notes = notes
@@ -158,15 +161,20 @@ func parseGoodreadsDate(s string) *time.Time {
 	return nil
 }
 
-// isbn13 normalises a Goodreads ISBN and converts an ISBN-10 to ISBN-13.
-func isbn13(raw string) string {
-	s := normaliseISBN(raw)
+// canonicalISBN returns the ISBN-13 form of a Goodreads, Google Books or
+// Open Library identifier. ISBN-10s are converted only when their check digit
+// is valid; invalid identifiers return "".
+func canonicalISBN(raw string) string {
+	s := normaliseISBN(strings.Trim(raw, `="' `))
 	switch len(s) {
 	case 13:
 		if validISBN13(s) {
 			return s
 		}
 	case 10:
+		if !validISBN10(s) {
+			return ""
+		}
 		base := "978" + s[:9]
 		sum := 0
 		for i := 0; i < 12; i++ {
@@ -180,6 +188,23 @@ func isbn13(raw string) string {
 		return base + strconv.Itoa(check)
 	}
 	return ""
+}
+
+func validISBN10(s string) bool {
+	sum := 0
+	for i := 0; i < 10; i++ {
+		n := 0
+		switch {
+		case s[i] >= '0' && s[i] <= '9':
+			n = int(s[i] - '0')
+		case i == 9 && (s[i] == 'X' || s[i] == 'x'):
+			n = 10
+		default:
+			return false
+		}
+		sum += (10 - i) * n
+	}
+	return sum%11 == 0
 }
 
 func validISBN13(s string) bool {

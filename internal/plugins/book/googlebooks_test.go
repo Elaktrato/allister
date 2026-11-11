@@ -65,7 +65,7 @@ func TestGoogleBooksDetailsMapsVolume(t *testing.T) {
 		d.Fields["pages"].Num == nil || *d.Fields["pages"].Num != 544 || d.Fields["publisher"].Text != "Ace" ||
 		d.Fields["year"].Num == nil || *d.Fields["year"].Num != 2005 || d.Fields["author"].Text != "Frank Herbert" ||
 		d.Fields["published_on"].Date == nil || d.Fields["published_on"].Date.Format("2006-01-02") != "2005-08-02" ||
-		d.ExternalIDs["isbn"] != "0441013597" || !strings.Contains(d.Fields["synopsis"].Text, "Set on Arrakis.") ||
+		d.ExternalIDs["isbn"] != "9780441013593" || !strings.Contains(d.Fields["synopsis"].Text, "Set on Arrakis.") ||
 		d.CoverURL != "https://books.google.com/t.jpg" || d.ExternalURL != "https://books.google.com/books?id=gb1" {
 		t.Fatalf("data = %+v", d)
 	}
@@ -141,5 +141,15 @@ func TestGoogleBooksErrors(t *testing.T) {
 				t.Fatalf("err = %v, want %v", err, c.want)
 			}
 		})
+	}
+}
+
+func TestGoogleBooksLookupByISBN10(t *testing.T) {
+	s := gbSource(t, map[string]string{
+		"/volumes": `{"items":[{"id":"gb1","volumeInfo":{"title":"Dune","industryIdentifiers":[{"type":"ISBN_10","identifier":"0441013597"}]}}]}`,
+	}, "")
+	d, err := s.Lookup(context.Background(), KindBook, "isbn", "9780441013593")
+	if err != nil || d.ID != "gb1" || d.ExternalIDs["isbn"] != "9780441013593" {
+		t.Fatalf("%+v %v", d, err)
 	}
 }

@@ -269,7 +269,7 @@ func (s *server) runSearch(r *http.Request, m plugin.Manifest, si plugin.SourceI
 		if text != "" {
 			c.Text = truncateRunes(strings.TrimSpace(it.Fields[text].Text), maxSynopsisRunes)
 		}
-		if len(m.Sources) > 1 {
+		if len(sourcesForKind(m, k.Key)) > 1 {
 			c.Badge = si.Name
 		}
 		v.Results = append(v.Results, c)

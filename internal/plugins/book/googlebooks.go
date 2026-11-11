@@ -167,7 +167,7 @@ func (c *googleBooksClient) details(ctx context.Context, id string) (plugin.Item
 }
 
 func (c *googleBooksClient) lookupISBN(ctx context.Context, isbn string) (plugin.ItemData, error) {
-	isbn = normaliseISBN(isbn)
+	isbn = canonicalISBN(isbn)
 	if isbn == "" {
 		return plugin.ItemData{}, plugin.ErrNotFound
 	}
@@ -177,7 +177,7 @@ func (c *googleBooksClient) lookupISBN(ctx context.Context, isbn string) (plugin
 		return plugin.ItemData{}, err
 	}
 	for _, item := range out.Items {
-		if normaliseISBN(gbISBN(item.VolumeInfo)) == isbn {
+		if gbISBN(item.VolumeInfo) == isbn {
 			return gbData(item)
 		}
 	}
@@ -212,7 +212,11 @@ func (s *googleBooksSource) People(ctx context.Context, kind, id string) ([]plug
 	if kind != KindBook {
 		return nil, plugin.ErrNotFound
 	}
-	return s.c.people(ctx, id)
+	credits, err := s.c.people(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	return bookCredits(bookRecord{Credits: credits}), nil
 }
 
 func (s *googleBooksSource) Recommendations(context.Context, string, string) ([]plugin.ItemSummary, error) {
@@ -241,7 +245,7 @@ func gbData(v gbVolume) (plugin.ItemData, error) {
 		ISBN: isbn, Publisher: info.Publisher, Language: gbLanguage(info.Language),
 		Synopsis: anilist.PlainText(info.Description), CoverURL: gbCover(info),
 		ExternalURL: gbExternalURL(id, info), Pages: info.PageCount,
-		Credits: gbCredits(info.Authors), ExternalIDs: map[string]string{},
+		ExternalIDs: map[string]string{},
 	}
 	r.Year, r.PublishedOn = bookDate(info.PublishedDate)
 	r.Genres = gbGenres(info.Categories)
@@ -279,7 +283,7 @@ func googleBooksPersonID(name string) string {
 func gbISBN(info gbVolumeInfo) string {
 	var fallback string
 	for _, id := range info.IndustryIDs {
-		v := normaliseISBN(id.Identifier)
+		v := canonicalISBN(id.Identifier)
 		if v == "" {
 			continue
 		}
@@ -294,7 +298,7 @@ func gbISBN(info gbVolumeInfo) string {
 }
 
 func normaliseISBN(s string) string {
-	s = strings.ToUpper(strings.TrimSpace(s))
+	s = strings.ToUpper(strings.Trim(strings.TrimSpace(s), `="' `))
 	s = strings.NewReplacer("-", "", " ", "", "\u2010", "", "\u2011", "").Replace(s)
 	if len(s) != 10 && len(s) != 13 {
 		return ""

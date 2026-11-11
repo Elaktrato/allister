@@ -2,6 +2,7 @@ package book
 
 import (
 	"net/http"
+	"time"
 
 	"github.com/allister/allister/internal/plugin"
 	"github.com/allister/allister/internal/plugins/anilist"
@@ -30,7 +31,7 @@ type booksPlugin struct {
 func New(opts Options) plugin.Plugin {
 	hc := opts.HTTP
 	if hc == nil {
-		hc = http.DefaultClient
+		hc = &http.Client{Timeout: 20 * time.Second}
 	}
 	anilistURL := opts.AniListURL
 	if anilistURL == "" {
