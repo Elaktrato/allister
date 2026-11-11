@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"log"
+	"strings"
 )
 
 type Store struct{ db *sql.DB }
@@ -252,4 +253,26 @@ func (s *Store) SetEnabled(ctx context.Context, id string, on bool) error {
 		v = "1"
 	}
 	return s.Set(ctx, enabledKey(id), v)
+}
+
+// sourceKeyKey is the settings key holding the API key of source id.
+func sourceKeyKey(id string) string { return "source." + id + ".key" }
+
+// SourceKey returns the stored API key of source id, "" when none is set. A
+// read failure is returned, so the caller can tell it from an unset key.
+func (s *Store) SourceKey(ctx context.Context, sourceID string) (string, error) {
+	v, _, err := s.Get(ctx, sourceKeyKey(sourceID))
+	return v, err
+}
+
+// SetSourceKey stores the API key of source id, without surrounding white
+// space.
+func (s *Store) SetSourceKey(ctx context.Context, sourceID, key string) error {
+	return s.Set(ctx, sourceKeyKey(sourceID), strings.TrimSpace(key))
+}
+
+// ClearSourceKey removes the API key of source id.
+func (s *Store) ClearSourceKey(ctx context.Context, sourceID string) error {
+	_, err := s.db.ExecContext(ctx, `DELETE FROM settings WHERE key = ?`, sourceKeyKey(sourceID))
+	return err
 }

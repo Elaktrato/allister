@@ -139,6 +139,32 @@ func TestEnabledStoreReportsDBErrors(t *testing.T) {
 	}
 }
 
+func TestSourceKeyRoundTrip(t *testing.T) {
+	s, _ := newStore(t)
+	ctx := context.Background()
+	if got, err := s.SourceKey(ctx, "tmdb"); got != "" || err != nil {
+		t.Fatalf("unset: %q %v", got, err)
+	}
+	if err := s.SetSourceKey(ctx, "tmdb", "  secret-key  "); err != nil {
+		t.Fatal(err)
+	}
+	if v, ok, _ := s.Get(ctx, "source.tmdb.key"); !ok || v != "secret-key" {
+		t.Fatalf("stored %q %v", v, ok)
+	}
+	if got, _ := s.SourceKey(ctx, "tmdb"); got != "secret-key" {
+		t.Fatalf("got %q", got)
+	}
+	if got, _ := s.SourceKey(ctx, "other"); got != "" {
+		t.Fatalf("source ids share a key: %q", got)
+	}
+	if err := s.ClearSourceKey(ctx, "tmdb"); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := s.SourceKey(ctx, "tmdb"); got != "" {
+		t.Fatalf("after clear: %q", got)
+	}
+}
+
 var _ plugin.EnabledStore = (*Store)(nil)
 
 // TestColumnsRoundTrip: the visible columns of a plugin's kind are stored as
