@@ -359,6 +359,38 @@ func TestSearchFiltersSourcesByKind(t *testing.T) {
 	}
 }
 
+// kindPanelSources gives the book kind two sources and the comic kind one,
+// like the real Books plugin (two book sources, AniList only for series).
+func kindPanelSources(book, _ *plugintest.Plugin) {
+	book.M.Sources[0].Kinds = []string{"book"}
+	other := &plugintest.FakeSource{Summaries: []plugin.ItemSummary{{Source: "openlib", ID: "OL1", Kind: "book", Titles: ttl("Open Library Book")}}}
+	book.M.Sources = append(book.M.Sources, plugin.SourceInfo{ID: "openlib", Name: "Open Library", RequestsPerMinute: 60,
+		ExternalIDTypes: []string{"isbn"}, SupportsLookup: true, Kinds: []string{"book"}, URLPatterns: []string{"openlib.example/w/{id}"}})
+	book.Sources["openlib"] = other
+	comic := &plugintest.FakeSource{Summaries: []plugin.ItemSummary{{Source: "comiclib", ID: "C1", Kind: "comic", Titles: ttl("Comic Result")}}}
+	book.M.Sources = append(book.M.Sources, plugin.SourceInfo{ID: "comiclib", Name: "Comic Library", RequestsPerMinute: 60,
+		ExternalIDTypes: []string{"isbn"}, SupportsLookup: true, Kinds: []string{"comic"}, URLPatterns: []string{"comic.example/c/{id}"}})
+	book.Sources["comiclib"] = comic
+}
+
+func TestSearchKindChangeUpdatesThePanel(t *testing.T) {
+	e := newFixtureEnv(t, withComicKind, kindPanelSources)
+	e.book.Summaries = []plugin.ItemSummary{bookSummary("42", "Book Result")}
+	full := e.get("/book/search?q=x&kind=book").Body.String()
+	mustContain(t, full, `id="search-panel"`, `name="source"`, `value="books" selected`, `value="openlib"`)
+	req := httptest.NewRequest(http.MethodGet, "/book/search?q=x&kind=comic&source=books", nil)
+	req.Header.Set("HX-Request", "true")
+	req.Header.Set("HX-Target", "search-panel")
+	rec := httptest.NewRecorder()
+	e.h.ServeHTTP(rec, req)
+	if rec.Code != 200 {
+		t.Fatalf("kind change: %d", rec.Code)
+	}
+	body := rec.Body.String()
+	mustContain(t, body, `id="search-panel"`, "Search comics", "Comic Result")
+	mustNotContain(t, body, `name="source"`, "Open Library Book")
+}
+
 func TestSearchSourceSwitchOnlyWithSeveralSources(t *testing.T) {
 	other := &plugintest.FakeSource{Summaries: []plugin.ItemSummary{{Source: "openlib", ID: "OL1", Kind: "book", Titles: ttl("Other Source Book")}}}
 	e := newFixtureEnv(t, func(book, _ *plugintest.Plugin) {

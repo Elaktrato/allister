@@ -213,6 +213,10 @@ func (s *server) search(w http.ResponseWriter, r *http.Request, pluginID string)
 		s.runSearch(r, m, si, k, q, &v)
 	}
 	if isPartialRequest(r) {
+		if r.Header.Get("HX-Target") == "search-panel" {
+			s.renderPartial(w, "search", "search_panel", v)
+			return
+		}
 		s.renderPartial(w, "search", "search_results", v)
 		return
 	}

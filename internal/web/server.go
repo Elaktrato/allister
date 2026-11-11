@@ -106,7 +106,7 @@ var pageNames = []string{"calendar", "settings", "settings_appearance", "setting
 // pagePartials lists extra template files a page needs (also rendered alone
 // for htmx requests).
 var pagePartials = map[string][]string{
-	"search":                {"templates/search_results.html"},
+	"search":                {"templates/search_panel.html", "templates/search_results.html"},
 	"settings_plugins_page": {"templates/settings_plugins.html"},
 	"item":                  {"templates/sections.html", "templates/add_dialog.html", "templates/progress_inputs.html", "templates/match_dialog.html"},
 	"list":                  {"templates/list_row.html", "templates/list_cards.html", "templates/filter_bar.html", "templates/entry_dialog.html", "templates/progress_inputs.html"},
