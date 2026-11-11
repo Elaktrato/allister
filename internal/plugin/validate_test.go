@@ -103,6 +103,31 @@ func TestValidateRejects(t *testing.T) {
 		{"key label too long", tv, func(m *plugin.Manifest) {
 			m.Sources[0].KeyLabel = strings.Repeat("k", 41)
 		}, `sources[0].key_label: longer than 40 characters`},
+		{"key fields without group label", tv, func(m *plugin.Manifest) {
+			m.Sources[0].KeyLabel = ""
+			m.Sources[0].KeyFields = []plugin.KeyField{{Name: "client_id", Label: "Client ID"}}
+		}, `sources[0].key_fields: key_label is the group label`},
+		{"key field bad name", tv, func(m *plugin.Manifest) {
+			m.Sources[0].KeyFields = []plugin.KeyField{{Name: "Client ID", Label: "Client ID"}}
+		}, `sources[0].key_fields[0].name`},
+		{"key field duplicate", tv, func(m *plugin.Manifest) {
+			m.Sources[0].KeyFields = []plugin.KeyField{{Name: "id", Label: "A"}, {Name: "id", Label: "B"}}
+		}, `sources[0].key_fields[1].name: duplicate`},
+		{"key field label too long", tv, func(m *plugin.Manifest) {
+			m.Sources[0].KeyFields = []plugin.KeyField{{Name: "id", Label: strings.Repeat("L", 41)}}
+		}, `sources[0].key_fields[0].label: longer than 40 characters`},
+		{"too many key fields", tv, func(m *plugin.Manifest) {
+			m.Sources[0].KeyFields = []plugin.KeyField{
+				{Name: "a", Label: "A"}, {Name: "b", Label: "B"}, {Name: "c", Label: "C"},
+				{Name: "d", Label: "D"}, {Name: "e", Label: "E"},
+			}
+		}, `sources[0].key_fields: at most 4 fields`},
+		{"key field without label", tv, func(m *plugin.Manifest) {
+			m.Sources[0].KeyFields = []plugin.KeyField{{Name: "id"}}
+		}, `sources[0].key_fields[0].label: required`},
+		{"key field label with newline", tv, func(m *plugin.Manifest) {
+			m.Sources[0].KeyFields = []plugin.KeyField{{Name: "id", Label: "Client\nID"}}
+		}, `sources[0].key_fields[0].label: must be a single line without control characters`},
 		{"key help too long", tv, func(m *plugin.Manifest) {
 			m.Sources[0].KeyLabel = "API key"
 			m.Sources[0].KeyHelp = strings.Repeat("h", 201)
@@ -159,6 +184,19 @@ func TestValidateRejects(t *testing.T) {
 				t.Fatalf("error %q does not contain %q", err, tc.want)
 			}
 		})
+	}
+}
+
+func TestValidateAcceptsKeyFields(t *testing.T) {
+	m := plugintest.TVPlugin(plugintest.WithSourceKeyFields(
+		plugin.KeyField{Name: "client_id", Label: "Client ID"},
+		plugin.KeyField{Name: "client_secret", Label: "Client Secret", Secret: true},
+	)).Manifest()
+	if got := m.Sources[0].KeyFields; len(got) != 2 || !got[1].Secret {
+		t.Fatalf("option did not set the fields: %+v", got)
+	}
+	if err := plugin.Validate(m); err != nil {
+		t.Fatal(err)
 	}
 }
 

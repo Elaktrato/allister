@@ -54,6 +54,12 @@ func WithID(id string) Option { return func(p *Plugin) { p.M.ID = id } }
 // WithDefaultEnabled sets the manifest's DefaultEnabled flag.
 func WithDefaultEnabled(on bool) Option { return func(p *Plugin) { p.M.DefaultEnabled = on } }
 
+// WithSourceKeyFields sets the named credential fields of the fixture's first
+// source.
+func WithSourceKeyFields(fields ...plugin.KeyField) Option {
+	return func(p *Plugin) { p.M.Sources[0].KeyFields = fields }
+}
+
 func num(f float64) *float64 { return &f }
 
 func apply(p *Plugin, opts []Option) *Plugin {
