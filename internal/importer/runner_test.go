@@ -20,20 +20,21 @@ import (
 // book source answers 5 requests per minute and looks up ISBNs; the tv
 // importer declares no fallback title language.
 type genEnv struct {
-	t       *testing.T
-	lib     *library.Library
-	reg     *plugin.Registry
-	enabled *plugintest.MemEnabled
-	q       *fakeQueue
-	clk     *clock
-	im      *Runner
-	bookSrc *plugintest.LookupSource
-	bookImp *plugintest.FakeImporter
-	tvSrc   *plugintest.LookupSource
-	tvImp   *plugintest.FakeImporter
-	pctImp  *plugintest.FakeImporter
-	pctSrc  *plugintest.LookupSource
-	dbh     *sql.DB
+	t        *testing.T
+	lib      *library.Library
+	reg      *plugin.Registry
+	enabled  *plugintest.MemEnabled
+	q        *fakeQueue
+	clk      *clock
+	im       *Runner
+	bookSrc  *plugintest.LookupSource
+	bookSrc2 *plugintest.LookupSource
+	bookImp  *plugintest.FakeImporter
+	tvSrc    *plugintest.LookupSource
+	tvImp    *plugintest.FakeImporter
+	pctImp   *plugintest.FakeImporter
+	pctSrc   *plugintest.LookupSource
+	dbh      *sql.DB
 	// bookPlugin is the registered book fixture (tests change its sources).
 	bookPlugin *plugintest.Plugin
 }
@@ -65,7 +66,11 @@ func bookEntry(isbn, title string, status plugin.StatusClass, pages float64) plu
 		Status: status, Progress: map[string]float64{"pages": pages}, CoverURL: "https://covers.example/" + isbn + ".jpg"}
 }
 
-func newGenEnv(t *testing.T) *genEnv {
+func newGenEnv(t *testing.T) *genEnv { return newGenEnvWith(t, false) }
+
+func newGenEnvWithFallback(t *testing.T) *genEnv { return newGenEnvWith(t, true) }
+
+func newGenEnvWith(t *testing.T, fallback bool) *genEnv {
 	t.Helper()
 	d := openDB(t)
 	e := &genEnv{t: t, q: &fakeQueue{inner: jobs.NewQueue(d)}, clk: &clock{t: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)},
@@ -77,6 +82,17 @@ func newGenEnv(t *testing.T) *genEnv {
 	}}
 	e.bookImp = &plugintest.FakeImporter{}
 	bk.Sources = map[string]plugin.Source{"books": e.bookSrc}
+	if fallback {
+		e.bookSrc2 = &plugintest.LookupSource{Fn: func(_ context.Context, _, _, v string, _ int) (plugin.ItemData, error) {
+			d := book(v, 300)
+			d.Source, d.ID, d.ExternalURL = "books2", "w2"+v, "https://books2.example/work/w2"+v
+			return d, nil
+		}}
+		bk.Sources["books2"] = e.bookSrc2
+		bk.M.Sources = append(bk.M.Sources, plugin.SourceInfo{ID: "books2", Name: "Second Books", RequestsPerMinute: 5,
+			ExternalIDTypes: []string{"isbn"}, SupportsLookup: true})
+		bk.M.Importers[0].ResolveViaFallback = []string{"books2"}
+	}
 	bk.Importers = map[string]plugin.Importer{"books-csv": e.bookImp}
 
 	tv := plugintest.TVPlugin()
@@ -823,5 +839,65 @@ func TestMalformedJobPayloadDoesNotBlockImports(t *testing.T) {
 	}
 	if r := e.report(); r.State != "done" || r.Imported != 1 {
 		t.Fatalf("report: %+v", r)
+	}
+}
+
+func TestImportFallbackUsesNextSourceOnNotFound(t *testing.T) {
+	e := newGenEnvWithFallback(t)
+	e.bookSrc.Fn = func(context.Context, string, string, string, int) (plugin.ItemData, error) {
+		return plugin.ItemData{}, plugin.ErrNotFound
+	}
+	e.bookImp.AccountRows = []plugin.ParsedEntry{bookEntry("9781", "Fallback Book", plugin.Planned, 0)}
+	id := e.submitAccount("books-csv", "someone", ModeSkip)
+	if err := e.run("book", id); err != nil {
+		t.Fatal(err)
+	}
+	it, _ := e.item("book", "book", "isbn", "9781")
+	if it.Source != "books2" || it.SourceID != "w29781" {
+		t.Fatalf("item = %+v", it)
+	}
+	if e.bookSrc2.Looked() == nil || len(e.bookSrc2.Looked()) != 1 || e.bookSrc2.Looked()[0] != "9781" {
+		t.Fatalf("fallback lookups = %v", e.bookSrc2.Looked())
+	}
+	if r := e.report(); r.Imported != 1 {
+		t.Fatalf("report = %+v", r)
+	}
+}
+
+func TestImportFallbackDoesNotHideRateLimit(t *testing.T) {
+	e := newGenEnvWithFallback(t)
+	e.bookSrc.Fn = func(context.Context, string, string, string, int) (plugin.ItemData, error) {
+		return plugin.ItemData{}, plugin.ErrRateLimited
+	}
+	e.bookImp.AccountRows = []plugin.ParsedEntry{bookEntry("9782", "Rate Limited", plugin.Planned, 0)}
+	id := e.submitAccount("books-csv", "someone", ModeSkip)
+	err := e.run("book", id)
+	if !errors.Is(err, jobs.ErrRetryLater) {
+		t.Fatalf("run err = %v, want ErrRetryLater", err)
+	}
+	if len(e.bookSrc2.Looked()) != 0 {
+		t.Fatalf("fallback was called: %v", e.bookSrc2.Looked())
+	}
+}
+
+func TestImportFallbackAllNotFoundSavesUnmatched(t *testing.T) {
+	e := newGenEnvWithFallback(t)
+	e.bookSrc.Fn = func(context.Context, string, string, string, int) (plugin.ItemData, error) {
+		return plugin.ItemData{}, plugin.ErrNotFound
+	}
+	e.bookSrc2.Fn = func(context.Context, string, string, string, int) (plugin.ItemData, error) {
+		return plugin.ItemData{}, plugin.ErrNotFound
+	}
+	e.bookImp.AccountRows = []plugin.ParsedEntry{bookEntry("9783", "Nowhere", plugin.Planned, 0)}
+	id := e.submitAccount("books-csv", "someone", ModeSkip)
+	if err := e.run("book", id); err != nil {
+		t.Fatal(err)
+	}
+	it, _ := e.item("book", "book", "isbn", "9783")
+	if it.Source != "manual" {
+		t.Fatalf("item = %+v", it)
+	}
+	if r := e.report(); r.Unmatched != 1 {
+		t.Fatalf("report = %+v", r)
 	}
 }

@@ -131,8 +131,22 @@ func Validate(m Manifest) error {
 		case utf8.RuneCountInString(n) > maxUnmatchedNoteRunes:
 			p.add(path+".unmatched_note", "longer than %d characters", maxUnmatchedNoteRunes)
 		}
-		if im.ResolveVia != "" {
-			validateResolveVia(&p, path, im, m.Sources)
+		if im.ResolveVia == "" {
+			if len(im.ResolveViaFallback) > 0 {
+				p.add(path+".resolve_via_fallback", "requires resolve_via")
+			}
+		} else {
+			validateResolveViaSource(&p, path+".resolve_via", path+".external_id_type", im.ResolveVia, im.ExternalIDType, m.Sources)
+			seen := map[string]bool{im.ResolveVia: true}
+			for j, id := range im.ResolveViaFallback {
+				fp := fmt.Sprintf("%s.resolve_via_fallback[%d]", path, j)
+				if seen[id] {
+					p.add(fp, "duplicate source %q", id)
+					continue
+				}
+				seen[id] = true
+				validateResolveViaSource(&p, fp, fp+".external_id_type", id, im.ExternalIDType, m.Sources)
+			}
 		}
 	}
 	exporters := map[string]bool{}
@@ -152,29 +166,30 @@ func Validate(m Manifest) error {
 	return errors.Join(p.list...)
 }
 
-// validateResolveVia checks that the importer's ResolveVia source exists,
-// supports lookup and can look up the importer's ExternalIDType; otherwise
-// every row of every import would fail its lookup.
-func validateResolveVia(p *problems, path string, im ImporterInfo, sources []SourceInfo) {
+// validateResolveViaSource checks that one resolution source exists, supports
+// lookup and can look up the importer's ExternalIDType; otherwise every row
+// of every import would fail its lookup. The source error and the external-id
+// error have separate paths so a fallback names itself in both.
+func validateResolveViaSource(p *problems, path, externalPath, sourceID, idType string, sources []SourceInfo) {
 	var src *SourceInfo
 	for i := range sources {
-		if sources[i].ID == im.ResolveVia {
+		if sources[i].ID == sourceID {
 			src = &sources[i]
 			break
 		}
 	}
 	if src == nil {
-		p.add(path+".resolve_via", "unknown source %q", im.ResolveVia)
+		p.add(path, "unknown source %q", sourceID)
 		return
 	}
 	if !src.SupportsLookup {
-		p.add(path+".resolve_via", "source %q does not support lookup", src.ID)
+		p.add(path, "source %q does not support lookup", src.ID)
 	}
 	switch {
-	case im.ExternalIDType == "":
-		p.add(path+".external_id_type", "required when resolve_via is set")
-	case !slices.Contains(src.ExternalIDTypes, im.ExternalIDType):
-		p.add(path+".external_id_type", "source %q cannot look up %q ids", src.ID, im.ExternalIDType)
+	case idType == "":
+		p.add(externalPath, "required when resolve_via is set")
+	case !slices.Contains(src.ExternalIDTypes, idType):
+		p.add(externalPath, "source %q cannot look up %q ids", src.ID, idType)
 	}
 }
 

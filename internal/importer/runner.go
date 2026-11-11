@@ -202,15 +202,22 @@ func sleepCtx(ctx context.Context, d time.Duration) error {
 	}
 }
 
+// sourceRef is one lookup source of an importer.
+type sourceRef struct {
+	source plugin.Source
+	info   plugin.SourceInfo
+}
+
 // importerRef is a resolved importer of an installed plugin.
 type importerRef struct {
 	plugin   plugin.Plugin
 	manifest plugin.Manifest
 	info     plugin.ImporterInfo
-	// source and srcInfo are the ResolveVia source; source is nil when the
-	// importer resolves through none (or the plugin does not provide it).
-	source  plugin.Source
-	srcInfo plugin.SourceInfo
+	// source and srcInfo are the primary ResolveVia source; source is nil when
+	// the importer resolves through none (or the plugin does not provide it).
+	source   plugin.Source
+	srcInfo  plugin.SourceInfo
+	fallback []sourceRef
 }
 
 // resolve finds the importer of an installed plugin (enabled or not).
@@ -242,7 +249,32 @@ func (r *Runner) resolve(pluginID, importerID string) (*importerRef, bool) {
 			}
 		}
 	}
+	for _, id := range ref.info.ResolveViaFallback {
+		for _, s := range m.Sources {
+			if s.ID == id {
+				ref.fallback = append(ref.fallback, sourceRef{source: p.Source(s.ID), info: s})
+				break
+			}
+		}
+	}
 	return ref, true
+}
+
+// sourceRefs is the primary source followed by its fallbacks.
+func (ref *importerRef) sourceRefs() []sourceRef {
+	out := []sourceRef{{source: ref.source, info: ref.srcInfo}}
+	return append(out, ref.fallback...)
+}
+
+// sourceNames names the resolution sources for an unmatched-row reason.
+func (ref *importerRef) sourceNames() string {
+	var names []string
+	for _, sr := range ref.sourceRefs() {
+		if sr.info.Name != "" {
+			names = append(names, sr.info.Name)
+		}
+	}
+	return strings.Join(names, " or ")
 }
 
 func (ref *importerRef) kind(key string) (plugin.KindDef, bool) {
@@ -258,13 +290,16 @@ func (ref *importerRef) kind(key string) (plugin.KindDef, bool) {
 // ErrSourceMissing (the plugin does not provide the source) or ErrNoLookup
 // (the source cannot look up). nil for a usable or manual-only importer.
 func (ref *importerRef) usable() error {
-	switch {
-	case ref.info.ResolveVia == "":
+	if ref.info.ResolveVia == "" {
 		return nil
-	case ref.source == nil:
-		return ErrSourceMissing
-	case !ref.srcInfo.SupportsLookup:
-		return ErrNoLookup
+	}
+	for _, sr := range ref.sourceRefs() {
+		if sr.source == nil {
+			return ErrSourceMissing
+		}
+		if !sr.info.SupportsLookup {
+			return ErrNoLookup
+		}
 	}
 	return nil
 }
@@ -536,9 +571,9 @@ func (r *Runner) record(ctx context.Context, importID int64, seq int, outcome st
 
 // pace blocks until the next request to the source may be sent. The first
 // request to a source does not wait.
-func (r *Runner) pace(ctx context.Context, ref *importerRef) error {
-	key := ref.manifest.ID + "/" + ref.srcInfo.ID
-	interval := time.Minute / time.Duration(max(ref.srcInfo.RequestsPerMinute, 1))
+func (r *Runner) pace(ctx context.Context, ref *importerRef, si plugin.SourceInfo) error {
+	key := ref.manifest.ID + "/" + si.ID
+	interval := time.Minute / time.Duration(max(si.RequestsPerMinute, 1))
 	r.mu.Lock()
 	last := r.last[key]
 	r.mu.Unlock()
@@ -597,53 +632,57 @@ func (r *Runner) process(ctx context.Context, ref *importerRef, importID int64, 
 	}
 
 	var data plugin.ItemData
-	notFound := false
-	name := ref.srcInfo.Name
-	for attempt := 0; ; attempt++ {
-		if attempt > 0 { // a Cancel during the wait must stop the retries
-			if state, err := r.state(ctx, importID); err != nil {
-				return err
-			} else if state != stateRunning {
-				return errStopped
+	found := false
+	for _, sr := range ref.sourceRefs() {
+		name := sr.info.Name
+		for attempt := 0; ; attempt++ {
+			if attempt > 0 { // a Cancel during the wait must stop the retries
+				if state, err := r.state(ctx, importID); err != nil {
+					return err
+				} else if state != stateRunning {
+					return errStopped
+				}
 			}
-		}
-		if err := r.pace(ctx, ref); err != nil {
-			return fmt.Errorf("import %d: %w", importID, err)
-		}
-		d, err := ref.source.Lookup(ctx, kind.Key, rc.idType, rc.value)
-		if err == nil {
-			data = d
-			break
-		}
-		if ctx.Err() != nil {
-			return fmt.Errorf("import %d: %w", importID, ctx.Err())
-		}
-		if errors.Is(err, plugin.ErrBadResponse) { // a retry would get the same answer
-			return r.record(ctx, importID, pr.seq, outcomeFailed, 0, err.Error())
-		}
-		if errors.Is(err, plugin.ErrNotFound) {
-			notFound = true
-			break
-		}
-		if errors.Is(err, plugin.ErrRateLimited) || errors.Is(err, plugin.ErrUnavailable) {
-			if attempt >= maxRetries {
-				r.setNote(ctx, importID, name+" is not answering, the import will be retried later")
-				return fmt.Errorf("import %d: %s %s: %s is not answering: %w: %w", importID, rc.idType, rc.value, name, jobs.ErrRetryLater, err)
-			}
-			r.setNote(ctx, importID, fmt.Sprintf("Waiting for %s (retry %d/%d)", name, attempt+1, maxRetries))
-			if err := r.sleep(ctx, rateLimitWait); err != nil {
+			if err := r.pace(ctx, ref, sr.info); err != nil {
 				return fmt.Errorf("import %d: %w", importID, err)
 			}
-			continue
+			d, err := sr.source.Lookup(ctx, kind.Key, rc.idType, rc.value)
+			if err == nil {
+				data, found = d, true
+				break
+			}
+			if ctx.Err() != nil {
+				return fmt.Errorf("import %d: %w", importID, ctx.Err())
+			}
+			if errors.Is(err, plugin.ErrBadResponse) { // a retry would get the same answer
+				return r.record(ctx, importID, pr.seq, outcomeFailed, 0, err.Error())
+			}
+			if errors.Is(err, plugin.ErrNotFound) {
+				break // try the next source
+			}
+			if errors.Is(err, plugin.ErrRateLimited) || errors.Is(err, plugin.ErrUnavailable) {
+				if attempt >= maxRetries {
+					r.setNote(ctx, importID, name+" is not answering, the import will be retried later")
+					return fmt.Errorf("import %d: %s %s: %s is not answering: %w: %w", importID, rc.idType, rc.value, name, jobs.ErrRetryLater, err)
+				}
+				r.setNote(ctx, importID, fmt.Sprintf("Waiting for %s (retry %d/%d)", name, attempt+1, maxRetries))
+				if err := r.sleep(ctx, rateLimitWait); err != nil {
+					return fmt.Errorf("import %d: %w", importID, err)
+				}
+				continue
+			}
+			return r.record(ctx, importID, pr.seq, outcomeFailed, 0, err.Error())
 		}
-		return r.record(ctx, importID, pr.seq, outcomeFailed, 0, err.Error())
+		if found {
+			break
+		}
 	}
 
 	// The lookup is paid for: save and record even when shutdown has begun.
 	dctx := context.WithoutCancel(ctx)
 	r.setNote(dctx, importID, "")
-	if notFound {
-		return r.saveUnmatched(dctx, rc, "not found on "+name)
+	if !found {
+		return r.saveUnmatched(dctx, rc, "not found on "+ref.sourceNames())
 	}
 	if data.Kind == "" {
 		data.Kind = kind.Key

@@ -109,6 +109,12 @@ func TestValidateRejects(t *testing.T) {
 		{"unknown source kind", book, func(m *plugin.Manifest) { m.Sources[0].Kinds = []string{"nope"} }, `sources[0].kinds[0]: unknown kind "nope"`},
 		{"duplicate source kind", book, func(m *plugin.Manifest) { m.Sources[0].Kinds = []string{"book", "book"} }, `sources[0].kinds[1]: duplicate "book"`},
 		{"duplicate importer", book, func(m *plugin.Manifest) { m.Importers = append(m.Importers, m.Importers[0]) }, `importers[1].id: duplicate`},
+		{"fallback unknown source", book, func(m *plugin.Manifest) { m.Importers[0].ResolveViaFallback = []string{"ghost"} }, `importers[0].resolve_via_fallback[0]: unknown source "ghost"`},
+		{"fallback duplicates primary", book, func(m *plugin.Manifest) { m.Importers[0].ResolveViaFallback = []string{"books"} }, `importers[0].resolve_via_fallback[0]: duplicate source "books"`},
+		{"fallback without primary", book, func(m *plugin.Manifest) {
+			m.Importers[0].ResolveVia = ""
+			m.Importers[0].ResolveViaFallback = []string{"books"}
+		}, `importers[0].resolve_via_fallback: requires resolve_via`},
 		{"exporter without extension", book, func(m *plugin.Manifest) {
 			m.Exporters = []plugin.ExporterInfo{{ID: "j", Name: "J", MIME: "application/json"}}
 		}, `exporters[0].extension: required`},
