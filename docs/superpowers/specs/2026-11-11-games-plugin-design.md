@@ -343,7 +343,7 @@ keyless. The key is never sent to the store endpoints.
   with the shared plain-text helper), `header_image`, `developers[0]`/
   `publishers[0]` (join up to 3), `genres[].description`, `categories[].description`
   as tags, `release_date.date`, `platforms` (windows/mac/linux),
-  `steam_appid`, `website`.
+  `steam_appid`. The kind has no website field; `ExternalURL` is the Steam store page.
 - Release date layouts: `2 Jan, 2006`, `Jan 2, 2006`, `2006`; `coming_soon`
   true -> no date.
 - No People, no recommendations.
