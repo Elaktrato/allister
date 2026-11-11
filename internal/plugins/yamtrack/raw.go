@@ -18,16 +18,19 @@ import (
 // Parse uses it for the anime filter and the TV importer groups it; the CSV,
 // score, date, progress and status-column handling stays in one place.
 type RawRow struct {
-	Line                  int
-	Source, MediaID       string
-	MediaType, Title      string
-	ImageURL              string
-	SeasonNumber          int
-	EpisodeNumber         int
-	Status                plugin.StatusClass
-	StatusRaw             string
-	Rating                *int
+	Line             int
+	Source, MediaID  string
+	MediaType, Title string
+	ImageURL         string
+	SeasonNumber     int
+	EpisodeNumber    int
+	Status           plugin.StatusClass
+	StatusRaw        string
+	Rating           *int
+	// Progress is the integer progress; ProgressRaw is the cell as written. An
+	// integer fills both, a duration (such as "1h 16min") only ProgressRaw.
 	Progress              int
+	ProgressRaw           string
 	StartedOn, FinishedOn *time.Time
 	Comment               string
 	Notes                 []string
@@ -96,11 +99,15 @@ func ParseRaw(r io.Reader) ([]RawRow, error) {
 		row.SeasonNumber = parseRawInt(get("season_number"), "season_number", &row.Notes)
 		row.EpisodeNumber = parseRawInt(get("episode_number"), "episode_number", &row.Notes)
 		if p := get("progress"); p != "" {
+			row.ProgressRaw = p
 			n, err := strconv.Atoi(p)
-			if err != nil || n < 0 || n > maxProgress {
-				row.Notes = append(row.Notes, fmt.Sprintf("invalid progress %q, using 0", p))
-			} else {
+			switch {
+			case err == nil && n >= 0 && n <= maxProgress:
 				row.Progress = n
+			default:
+				if _, ok := ParsePlaytime(p); !ok {
+					row.Notes = append(row.Notes, fmt.Sprintf("invalid progress %q, using 0", p))
+				}
 			}
 		}
 		row.Rating = parseScore(get("score"), &row.Notes)
@@ -109,6 +116,65 @@ func ParseRaw(r io.Reader) ([]RawRow, error) {
 		out = append(out, row)
 	}
 	return out, nil
+}
+
+// ParsePlaytime reads a playtime cell as seconds. It accepts hours and minutes
+// with or without a space between the parts ("1h 16min", "1h16min", "2h",
+// "16min") and plain minutes ("45"). An empty, negative or over-large cell is
+// not a playtime.
+func ParsePlaytime(s string) (seconds int, ok bool) {
+	s = strings.ToLower(strings.TrimSpace(s))
+	if s == "" {
+		return 0, false
+	}
+	if n, err := strconv.Atoi(s); err == nil {
+		if n < 0 || n > maxProgress {
+			return 0, false
+		}
+		return n * 60, true
+	}
+	minutes := 0
+	rest := s
+	hoursSeen, minutesSeen := false, false
+	for rest != "" {
+		if hoursSeen || minutesSeen {
+			rest = strings.TrimLeft(rest, " ")
+		}
+		i := 0
+		for i < len(rest) && rest[i] >= '0' && rest[i] <= '9' {
+			i++
+		}
+		if i == 0 {
+			return 0, false
+		}
+		n, err := strconv.Atoi(rest[:i])
+		if err != nil || n > maxProgress {
+			return 0, false
+		}
+		rest = rest[i:]
+		switch {
+		case strings.HasPrefix(rest, "h"):
+			if hoursSeen || minutesSeen {
+				return 0, false
+			}
+			hoursSeen = true
+			minutes += n * 60
+			rest = rest[1:]
+		case strings.HasPrefix(rest, "min"):
+			if minutesSeen {
+				return 0, false
+			}
+			minutesSeen = true
+			minutes += n
+			rest = rest[3:]
+		default:
+			return 0, false
+		}
+	}
+	if !hoursSeen && !minutesSeen || minutes > maxProgress {
+		return 0, false
+	}
+	return minutes * 60, true
 }
 
 func parseRawInt(s, name string, notes *[]string) int {
