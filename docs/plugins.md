@@ -17,7 +17,7 @@ if err := registry.Register(anime.New(anime.Options{})); err != nil {
 }
 ```
 
-The reference implementation is `internal/plugins/anime`. The test-only fixtures `plugintest.BookPlugin()` and `plugintest.TVPlugin()` in `internal/plugin/plugintest` show a book-like kind (pages or percent progress, authors as people) and a TV-like kind (season, episode and position tracks). `internal/web/contract_proof_test.go` runs both through the real server next to anime.
+The reference implementations are `internal/plugins/anime` and `internal/plugins/book` (three sources and two kinds). The test-only fixtures `plugintest.BookPlugin()` and `plugintest.TVPlugin()` in `internal/plugin/plugintest` show a book-like kind (pages or percent progress, authors as people) and a TV-like kind (season, episode and position tracks). `internal/web/contract_proof_test.go` runs both through the real server next to anime.
 
 ## The Go interface
 
@@ -186,6 +186,7 @@ type SourceInfo struct {
 	SupportsSchedule  bool     // the source implements ScheduleSource
 	LinkLabel         string   // "View on AniList"
 	URLPatterns       []string // "anilist.co/anime/{id}"
+	Kinds             []string // kinds this source serves; empty = all
 }
 ```
 
@@ -193,6 +194,7 @@ type SourceInfo struct {
 - `Search` returns `ItemSummary` values. `Details` and `Lookup` return `ItemData` (summary plus external URL, external ids, relations, genres and tags). `People` returns credits. `Recommendations` returns summaries. The operations are separate so the core can load them independently. An overview that is not saved makes one `Details` call when it renders and one `Recommendations` call afterwards. Both answers are cached for 10 minutes. Adding an item enqueues one background job that fetches `People` and downloads the cover and the people's images (at most 2 MiB per image).
 - `RequestsPerMinute` paces the import runner's lookups through this source. Background jobs run one at a time, with at least 2 seconds between them. Interactive requests (search, overview, recommendations) are not paced. Overview details and recommendations are cached, searches are not.
 - `SupportsLookup` and `ExternalIDTypes` say which external ids `Lookup` resolves. Importers use them, and the "Match to <source>" dialog offers its search through the first source that supports lookups.
+- `Kinds` restricts a source to some of the plugin's kinds. The search page and match dialog then offer it only for those kinds; empty means every kind. A plugin with several sources can therefore put Open Library and Google Books on books and AniList on light-novel series without dead combinations.
 - `SupportsSchedule` declares the optional `ScheduleSource` capability: `Schedule(ctx, kind, id) ([]Airing, error)`, where an `Airing` is a release number and its air time. The core keeps such schedules of watching entries and lists their upcoming releases in the calendar feed (`/calendar.ics`); it refreshes them through the job queue (at most daily through the feed, and once when an entry is added or synced). Sources without the capability simply have no calendar events. Errors follow the same rules as the other source calls.
 - `URLPatterns` let the core turn a pasted URL into an id, so no plugin code parses URLs. A pattern is `host/segment/.../{id}[/...]` with exactly one `{id}`. A leading `www.` is ignored, and the URL may end with one slug segment, a trailing slash, a query or a fragment. `{id}` (and a bare id typed into the match dialog) is 1 to 12 ASCII digits with leading zeros removed and not zero, or — for sources with non-numeric ids — 1 to 64 bytes of ASCII letters, digits, `_` and `-` that starts and ends with an alphanumeric.
 
@@ -230,6 +232,8 @@ type ImporterInfo struct {
 	ExternalIDType    string   // the id each row is matched and de-duplicated by
 	ExternalIDLabel   string   // human name of that id, <= 40 characters
 	ResolveVia        string   // a declared source id; "" = manual-only
+	ResolveViaFallback []string // further sources tried on ErrNotFound
+	ManualRows        bool     // keep rows without the external id as manual entries
 	FallbackTitleLang string   // title language of an unmatched row's manual item
 	UnmatchedNote     string   // <= 200 characters, "{id}" is replaced by the id
 	AccountLabel      string   // non-empty: the importer takes an account name, not a file
@@ -238,16 +242,16 @@ type ImporterInfo struct {
 
 An importer may also implement the optional `AccountImporter` capability (`ImportAccount(ctx, account string) (ParseResult, error)`) and declare it with `AccountLabel` (for example "Username"): the plugin settings page then offers a name field instead of the file picker, and the generic import page leaves it out. The rows are the same `ParsedEntry` values; a row may carry `UpdatedAt` (the entry's source-side modification time) so the user can choose to update existing entries only when the source is newer.
 
-`Parse` receives the uploaded file (at most 20 MiB) and returns `ParseResult{Entries, Skipped, Ignored}`. Each `ParsedEntry` holds the kind, title, external ids, status class, rating (0 to 10), progress per track key, calendar-day dates (UTC midnight, see `plugin.DateOnly`), comment, optional cover URL and notes. `Skipped` lists rows the user should hear about. `Ignored` only counts rows meant for another media type. Return `ErrBadInput` (wrapped, with a readable reason) when the file is not in your format.
+`Parse` receives the uploaded file (at most 20 MiB) and returns `ParseResult{Entries, Skipped, Ignored}`. Each `ParsedEntry` holds the kind, title, external ids, status class, rating (0 to 10), progress per track key, calendar-day dates (UTC midnight, see `plugin.DateOnly`), comment, optional cover URL, item fields (`Fields`) and notes. `Fields` supplies item data for a manual row and fills only the fields a source left empty. `Skipped` lists rows the user should hear about. `Ignored` only counts rows meant for another media type. Return `ErrBadInput` (wrapped, with a readable reason) when the file is not in your format.
 
 The core then does the rest, as a resumable job on the import page:
 
-- A row without a value for `ExternalIDType`, or with an unknown kind, is stored as skipped with the reason. An importer therefore needs an `ExternalIDType` to import anything. When no row is importable, the upload is refused.
-- A row whose external id is already saved is matched to that item instead of creating a duplicate: it is skipped when the item already has a list entry, and otherwise the entry is created from the row. Re-importing a file is therefore idempotent.
-- With `ResolveVia`, the core looks the id up through that source, paced by its `RequestsPerMinute`. A hit is saved as a normal source item. `ErrNotFound` keeps the row as a **manual item** titled in `FallbackTitleLang` that carries the external id. Such an item counts as "unmatched": it gets a badge, the `unmatched=1` list filter and the `UnmatchedNote`, and the user can match it later. `ErrBadResponse` fails the row. Rate limits and outages are retried, then the import pauses and resumes later.
+- A row without a value for `ExternalIDType`, or with an unknown kind, is stored as skipped with the reason. An importer therefore needs an `ExternalIDType` to import anything, unless it sets `ManualRows`: then a titled row without that id becomes a normal imported manual entry. When no row is importable, the upload is refused.
+- A row whose external id is already saved is matched to that item instead of creating a duplicate: it is skipped when the item already has a list entry, and otherwise the entry is created from the row. All external ids on the row are checked, not only the declared one, so an additional id (for example a Goodreads book id) makes re-importing idempotent. A source match also copies the row's extra ids and fills missing item fields from `Fields`; source values win.
+- With `ResolveVia`, the core looks the id up through that source, paced by its `RequestsPerMinute`, then through each `ResolveViaFallback` source only on `ErrNotFound`. A hit is saved as a normal source item. If every source misses, the row stays a **manual item** titled in `FallbackTitleLang` that carries the external id. Such an item counts as "unmatched": it gets a badge, the `unmatched=1` list filter and the `UnmatchedNote`, and the user can match it later. `ErrBadResponse` fails the row. Rate limits and outages retry/pause the same source and never fall through. Updating an existing entry writes only progress tracks that the entry has active; inactive tracks are skipped with a note.
 - Without `ResolveVia`, every row becomes a manual item.
 
-`Validate` refuses an importer whose `ResolveVia` names an undeclared source, a source without `SupportsLookup`, or a source whose `ExternalIDTypes` does not contain the importer's `ExternalIDType`, which is also required when `ResolveVia` is set. When the upload arrives, the core also refuses an importer whose `ResolveVia` source is missing from the plugin (`Source(id)` returns nil). Imports of a disabled plugin pause, and the import page says so.
+`Validate` refuses an importer whose `ResolveVia` or fallback names an undeclared source, a source without `SupportsLookup`, or a source whose `ExternalIDTypes` does not contain the importer's `ExternalIDType`, which is also required when `ResolveVia` is set. Fallbacks need a primary and may not repeat it. When the upload arrives, the core also refuses an importer whose resolution sources are missing from the plugin (`Source(id)` returns nil). Imports of a disabled plugin pause, and the import page says so.
 
 ## Exporters
 
