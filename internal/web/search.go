@@ -238,6 +238,12 @@ func (s *server) search(w http.ResponseWriter, r *http.Request, pluginID string)
 		status = v.Status
 	}
 	if isPartialRequest(r) {
+		// htmx swaps no 5xx answer outside the dialog slot, so an htmx
+		// search gets the same message as a 200 partial; the full page
+		// keeps the real status.
+		if status == http.StatusServiceUnavailable {
+			status = http.StatusOK
+		}
 		if r.Header.Get("HX-Target") == "search-panel" {
 			s.renderPartialStatus(w, status, "search", "search_panel", v)
 			return

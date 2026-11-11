@@ -33,12 +33,13 @@ func TestSearchNeedsConfiguration(t *testing.T) {
 	mustContain(t, rec.Body.String(), needsKeyMessage, "Try again")
 	mustNotContain(t, rec.Body.String(), "Search is unavailable right now")
 
-	// the htmx results partial carries the same status and message
+	// the htmx results partial answers 200 (htmx swaps no 5xx outside the
+	// dialog slot) with the same message and no page chrome
 	rec = e.do("GET", "/tv/search?q=dark", nil, true)
-	if rec.Code != http.StatusServiceUnavailable {
+	if rec.Code != http.StatusOK {
 		t.Fatalf("htmx: got %d", rec.Code)
 	}
-	mustContain(t, rec.Body.String(), needsKeyMessage)
+	mustContain(t, rec.Body.String(), needsKeyMessage, "Try again")
 	mustNotContain(t, rec.Body.String(), "<html")
 }
 
