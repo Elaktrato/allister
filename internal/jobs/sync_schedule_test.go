@@ -31,13 +31,13 @@ func TestScheduleStoresAiringsForActiveEntries(t *testing.T) {
 	id := e.save(t, "tvdata", "")
 	activeEntry(t, e.lib, id, library.Active)
 	at := time.Date(2026, 11, 12, 18, 30, 0, 0, time.UTC)
-	e.src.Airings = []plugin.Airing{{Number: 3, AirsAt: at}}
+	e.src.Airings = []plugin.Airing{{Season: 2, Number: 3, AirsAt: at}}
 	h := Schedule(ScheduleDeps{Library: e.lib, Registry: e.reg})
 	if err := h(context.Background(), schedulePayload(id)); err != nil {
 		t.Fatal(err)
 	}
 	got, err := e.lib.ScheduleEntries(context.Background())
-	if err != nil || len(got) != 1 || got[0].ItemID != id || got[0].Number != 3 || !got[0].AirsAt.Equal(at) {
+	if err != nil || len(got) != 1 || got[0].ItemID != id || got[0].Season != 2 || got[0].Number != 3 || !got[0].AirsAt.Equal(at) {
 		t.Fatalf("%+v %v", got, err)
 	}
 	// a paused entry is never asked

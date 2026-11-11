@@ -9,7 +9,7 @@ import (
 // latestVersion is the newest migration. 00008 is unused; later migrations
 // continue at 00010 (goose cannot apply a lower number to a database already
 // at a higher version).
-const latestVersion = 15
+const latestVersion = 16
 
 func TestMigrationRewritesLegacySyncJobs(t *testing.T) {
 	path := tempPath(t)

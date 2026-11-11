@@ -46,7 +46,7 @@ func TestManifestJSONRoundTrip(t *testing.T) {
 			Tags:     plugin.TermDef{Enabled: true, Label: "Tags", Editable: true, Filterable: true},
 			Statuses: plugin.StatusLabels{Planned: "P", Active: "A", Paused: "Pa", Completed: "C", Dropped: "D"},
 			Progress: plugin.ProgressSpec{
-				Eligible:     []plugin.ProgressDef{{Key: "x", Type: plugin.Count, Label: "X", TotalField: "n"}, {Key: "y", Type: plugin.Percent, Label: "Y"}},
+				Eligible:     []plugin.ProgressDef{{Key: "x", Type: plugin.Count, Label: "X", TotalField: "n"}, {Key: "y", Type: plugin.Percent, Label: "Y", ResetOnPrimary: true}},
 				Defaults:     []string{"x"},
 				Combinations: [][]string{{"x"}, {"y"}},
 				PrimaryKey:   "x",
@@ -100,6 +100,7 @@ func TestRuntimeDataJSONRoundTrip(t *testing.T) {
 	}
 	roundTrip(t, "parsedentry", entry)
 	roundTrip(t, "skipped", plugin.SkippedRow{Line: 4, Title: "T", Reason: "bad"})
+	roundTrip(t, "airing", plugin.Airing{Season: 2, Number: 5, AirsAt: day})
 	roundTrip(t, "parseresult", plugin.ParseResult{Entries: []plugin.ParsedEntry{entry}, Skipped: []plugin.SkippedRow{{Line: 1, Reason: "r"}}, Ignored: 2})
 	roundTrip(t, "exportentry", plugin.ExportEntry{
 		Kind: "k", Titles: []plugin.Title{{Lang: "en", Text: "T"}}, ExternalIDs: map[string]string{"a": "b"},

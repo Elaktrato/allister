@@ -114,10 +114,11 @@ type StatusLabels struct {
 // than once with different keys and labels. TotalField, when set, names a
 // number field of the kind that supplies the track's total.
 type ProgressDef struct {
-	Key        string       `json:"key"`
-	Type       ProgressType `json:"type"`
-	Label      string       `json:"label"`
-	TotalField string       `json:"total_field,omitempty"`
+	Key            string       `json:"key"`
+	Type           ProgressType `json:"type"`
+	Label          string       `json:"label"`
+	TotalField     string       `json:"total_field,omitempty"`
+	ResetOnPrimary bool         `json:"reset_on_primary,omitempty"`
 }
 
 // ProgressSpec lists the eligible progress tracks of a kind, the default

@@ -10,6 +10,7 @@ import (
 // Airing is one scheduled release of a source item: its number and when it
 // airs (UTC).
 type Airing struct {
+	Season int       `json:"season,omitempty"`
 	Number int       `json:"number"`
 	AirsAt time.Time `json:"airs_at"`
 }

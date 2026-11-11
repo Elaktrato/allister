@@ -24,6 +24,7 @@ import (
 	"github.com/allister/allister/internal/plugins/anime"
 	"github.com/allister/allister/internal/plugins/book"
 	"github.com/allister/allister/internal/plugins/manga"
+	"github.com/allister/allister/internal/plugins/tv"
 	"github.com/allister/allister/internal/settings"
 	"github.com/allister/allister/internal/web"
 )
@@ -60,6 +61,9 @@ func run() error {
 		log.Printf("startup: %v", err)
 	}
 	if err := registry.Register(book.New(book.Options{GoogleBooksKey: cfg.GoogleBooksKey})); err != nil {
+		log.Printf("startup: %v", err)
+	}
+	if err := registry.Register(tv.New(tv.Options{TMDBKey: cfg.TMDBKey})); err != nil {
 		log.Printf("startup: %v", err)
 	}
 	if err := registry.Register(anime.New(anime.Options{})); err != nil {

@@ -116,3 +116,23 @@ func TestScheduleCascadesWithTheItem(t *testing.T) {
 }
 
 var _ = plugin.Title{}
+
+func TestScheduleKeepsSeasonsApart(t *testing.T) {
+	l := newEnv(t).lib
+	id := addShow(t, l, "s1", fp(10), Entry{Status: Active})
+	at := time.Date(2026, 11, 12, 18, 30, 0, 0, time.UTC)
+	airings := []Airing{
+		{Season: 1, Number: 5, AirsAt: at},
+		{Season: 2, Number: 5, AirsAt: at.Add(7 * 24 * time.Hour)},
+	}
+	if err := l.SaveSchedule(bg, id, airings, at); err != nil {
+		t.Fatal(err)
+	}
+	got, err := l.ScheduleEntries(bg)
+	if err != nil || len(got) != 2 {
+		t.Fatalf("%+v %v", got, err)
+	}
+	if got[0].Season != 1 || got[0].Number != 5 || got[1].Season != 2 || got[1].Number != 5 {
+		t.Fatalf("%+v", got)
+	}
+}

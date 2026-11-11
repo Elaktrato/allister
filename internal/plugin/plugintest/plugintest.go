@@ -126,7 +126,7 @@ func TVPlugin(opts ...Option) *Plugin {
 					Eligible: []plugin.ProgressDef{
 						{Key: "season", Type: plugin.Count, Label: "Season"},
 						{Key: "episode", Type: plugin.Count, Label: "Episode", TotalField: "episodes"},
-						{Key: "position", Type: plugin.Duration, Label: "Position"},
+						{Key: "position", Type: plugin.Duration, Label: "Position", ResetOnPrimary: true},
 					},
 					Defaults:     []string{"episode"},
 					Combinations: [][]string{{"episode"}, {"season", "episode"}, {"episode", "position"}},
