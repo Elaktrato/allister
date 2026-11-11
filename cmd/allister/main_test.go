@@ -182,3 +182,66 @@ func TestResolveSourceKey(t *testing.T) {
 		})
 	}
 }
+
+// TestResolveSourceKeyField: the same resolution rules apply per named
+// credential field: a stored field beats the environment, an empty one falls
+// back, an unknown one is empty, and a lookup failure is reported.
+func TestResolveSourceKeyField(t *testing.T) {
+	ctx := context.Background()
+	boom := errors.New("settings store unavailable")
+	fallback := map[string]map[string]string{
+		"igdb": {"client_id": "env-id", "client_secret": "env-secret"},
+	}
+	cases := []struct {
+		name     string
+		stored   func(context.Context, string, string) (string, error)
+		sourceID string
+		field    string
+		want     string
+		wantErr  error
+	}{
+		{
+			name:     "stored field wins",
+			stored:   func(context.Context, string, string) (string, error) { return "stored-id", nil },
+			sourceID: "igdb",
+			field:    "client_id",
+			want:     "stored-id",
+		},
+		{
+			name:     "empty stored field falls back to the environment",
+			stored:   func(context.Context, string, string) (string, error) { return "", nil },
+			sourceID: "igdb",
+			field:    "client_secret",
+			want:     "env-secret",
+		},
+		{
+			name:     "unknown field falls back to empty",
+			stored:   func(context.Context, string, string) (string, error) { return "", nil },
+			sourceID: "igdb",
+			field:    "nope",
+			want:     "",
+		},
+		{
+			name:     "unknown source falls back to empty",
+			stored:   func(context.Context, string, string) (string, error) { return "", nil },
+			sourceID: "nope",
+			field:    "key",
+			want:     "",
+		},
+		{
+			name:     "lookup error is returned instead of falling back",
+			stored:   func(context.Context, string, string) (string, error) { return "", boom },
+			sourceID: "igdb",
+			field:    "client_id",
+			wantErr:  boom,
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got, err := resolveSourceKeyField(ctx, c.stored, fallback, c.sourceID, c.field)
+			if got != c.want || !errors.Is(err, c.wantErr) {
+				t.Fatalf("resolveSourceKeyField = %q, %v; want %q, %v", got, err, c.want, c.wantErr)
+			}
+		})
+	}
+}

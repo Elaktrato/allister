@@ -31,3 +31,23 @@ func TestLoadTMDBKey(t *testing.T) {
 		t.Fatalf("got %+v", c)
 	}
 }
+
+func TestLoadGameSourceKeys(t *testing.T) {
+	t.Setenv("IGDB_CLIENT_ID", "igdb-id")
+	t.Setenv("IGDB_CLIENT_SECRET", "igdb-secret")
+	t.Setenv("STEAM_API_KEY", "steam-key")
+	c := Load()
+	if c.IGDBClientID != "igdb-id" || c.IGDBClientSecret != "igdb-secret" || c.SteamAPIKey != "steam-key" {
+		t.Fatalf("got %+v", c)
+	}
+}
+
+func TestLoadGameSourceKeysDefaultToEmpty(t *testing.T) {
+	t.Setenv("IGDB_CLIENT_ID", "")
+	t.Setenv("IGDB_CLIENT_SECRET", "")
+	t.Setenv("STEAM_API_KEY", "")
+	c := Load()
+	if c.IGDBClientID != "" || c.IGDBClientSecret != "" || c.SteamAPIKey != "" {
+		t.Fatalf("got %+v", c)
+	}
+}

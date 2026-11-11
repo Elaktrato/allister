@@ -10,6 +10,9 @@ services:
       DATA_DIR: /data
       GOOGLE_BOOKS_API_KEY: "${GOOGLE_BOOKS_API_KEY:-}"
       TMDB_API_KEY: "${TMDB_API_KEY:-}"
+      IGDB_CLIENT_ID: "${IGDB_CLIENT_ID:-}"
+      IGDB_CLIENT_SECRET: "${IGDB_CLIENT_SECRET:-}"
+      STEAM_API_KEY: "${STEAM_API_KEY:-}"
     volumes:
       # SQLite database (allister.db) and covers/ live here.
       - allister-data:/data
