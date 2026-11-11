@@ -63,7 +63,7 @@ func run() error {
 	if err := registry.Register(book.New(book.Options{GoogleBooksKey: cfg.GoogleBooksKey})); err != nil {
 		log.Printf("startup: %v", err)
 	}
-	if err := registry.Register(tv.New(tv.Options{TMDBKey: cfg.TMDBKey})); err != nil {
+	if err := registry.Register(tv.New(tv.Options{TMDBKey: func(context.Context) (string, error) { return cfg.TMDBKey, nil }})); err != nil {
 		log.Printf("startup: %v", err)
 	}
 	if err := registry.Register(anime.New(anime.Options{})); err != nil {

@@ -2,19 +2,12 @@ package tv
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"io"
-	"net/http"
 	"net/url"
 	"strings"
 
 	"github.com/allister/allister/internal/plugin"
-)
-
-const (
-	tmdbDefaultURL = "https://api.themoviedb.org/3"
-	tmdbMaxBody    = 8 << 20
+	"github.com/allister/allister/internal/plugins/tmdb"
 )
 
 type tmdbShow struct {
@@ -58,65 +51,11 @@ type tmdbCast struct {
 	Order     int    `json:"order"`
 }
 
-type tmdbClient struct {
-	base, key string
-	hc        *http.Client
-}
+// tmdbSource is the TV plugin's TMDB source. The HTTP plumbing lives in the
+// shared tmdb package; the structs and mapping stay here.
+type tmdbSource struct{ c *tmdb.Client }
 
-func newTMDBClient(base, key string, hc *http.Client) *tmdbClient {
-	if base == "" {
-		base = tmdbDefaultURL
-	}
-	if hc == nil {
-		hc = http.DefaultClient
-	}
-	return &tmdbClient{base: strings.TrimRight(base, "/"), key: key, hc: hc}
-}
-
-func (c *tmdbClient) get(ctx context.Context, path string, values url.Values, out any) error {
-	if values == nil {
-		values = url.Values{}
-	}
-	values.Set("api_key", c.key)
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.base+path+"?"+values.Encode(), nil)
-	if err != nil {
-		return fmt.Errorf("tmdb: %w", plugin.ErrUnavailable)
-	}
-	resp, err := c.hc.Do(req)
-	if err != nil {
-		if ctx.Err() != nil {
-			return ctx.Err()
-		}
-		return fmt.Errorf("tmdb: %w", plugin.ErrUnavailable)
-	}
-	defer resp.Body.Close()
-	switch {
-	case resp.StatusCode == http.StatusOK:
-	case resp.StatusCode == http.StatusNotFound:
-		return plugin.ErrNotFound
-	case resp.StatusCode == http.StatusTooManyRequests:
-		return plugin.ErrRateLimited
-	case resp.StatusCode == http.StatusUnauthorized, resp.StatusCode == http.StatusForbidden:
-		return fmt.Errorf("%w: tmdb key refused", plugin.ErrBadResponse)
-	case resp.StatusCode >= 500, resp.StatusCode == http.StatusRequestTimeout:
-		return fmt.Errorf("tmdb: %w", plugin.ErrUnavailable)
-	default:
-		return fmt.Errorf("%w: tmdb status %d", plugin.ErrBadResponse, resp.StatusCode)
-	}
-	body, err := io.ReadAll(io.LimitReader(resp.Body, tmdbMaxBody+1))
-	if err != nil {
-		return fmt.Errorf("tmdb: %w", plugin.ErrUnavailable)
-	}
-	if len(body) > tmdbMaxBody {
-		return fmt.Errorf("%w: tmdb response too large", plugin.ErrBadResponse)
-	}
-	if err := json.Unmarshal(body, out); err != nil {
-		return fmt.Errorf("%w: tmdb: %v", plugin.ErrBadResponse, err)
-	}
-	return nil
-}
-
-func (c *tmdbClient) search(ctx context.Context, q string) ([]plugin.ItemSummary, error) {
+func (s *tmdbSource) search(ctx context.Context, q string) ([]plugin.ItemSummary, error) {
 	q = strings.TrimSpace(q)
 	if q == "" {
 		return []plugin.ItemSummary{}, nil
@@ -124,80 +63,78 @@ func (c *tmdbClient) search(ctx context.Context, q string) ([]plugin.ItemSummary
 	var out struct {
 		Results []tmdbShow `json:"results"`
 	}
-	if err := c.get(ctx, "/search/tv", url.Values{"query": {q}}, &out); err != nil {
+	if err := s.c.Get(ctx, "/search/tv", url.Values{"query": {q}}, &out); err != nil {
 		return nil, err
 	}
 	res := make([]plugin.ItemSummary, 0, len(out.Results))
-	for _, s := range out.Results {
+	for _, show := range out.Results {
 		fields := map[string]plugin.FieldValue{}
-		if s.Type != "" {
-			fields["type"] = plugin.FieldValue{Text: showType(s.Type)}
+		if show.Type != "" {
+			fields["type"] = plugin.FieldValue{Text: showType(show.Type)}
 		}
-		if y := yearOf(s.FirstAirDate); y > 0 {
+		if y := yearOf(show.FirstAirDate); y > 0 {
 			n := float64(y)
 			fields["year"] = plugin.FieldValue{Num: &n}
 		}
-		if s.Status != "" {
-			fields["air_status"] = plugin.FieldValue{Text: tmdbAirStatus(s.Status)}
+		if show.Status != "" {
+			fields["air_status"] = plugin.FieldValue{Text: tmdbAirStatus(show.Status)}
 		}
-		res = append(res, tmdbSummary(s, fields))
+		res = append(res, tmdbSummary(show, fields))
 	}
 	return res, nil
 }
 
-func (c *tmdbClient) details(ctx context.Context, id string) (tmdbShow, error) {
-	var s tmdbShow
-	err := c.get(ctx, "/tv/"+url.PathEscape(id), url.Values{"append_to_response": {"credits,recommendations,external_ids,keywords"}}, &s)
-	return s, err
+func (s *tmdbSource) details(ctx context.Context, id string) (tmdbShow, error) {
+	var show tmdbShow
+	err := s.c.Get(ctx, "/tv/"+url.PathEscape(id), url.Values{"append_to_response": {"credits,recommendations,external_ids,keywords"}}, &show)
+	return show, err
 }
 
-func (c *tmdbClient) data(ctx context.Context, id string) (plugin.ItemData, error) {
-	s, err := c.details(ctx, id)
+func (s *tmdbSource) data(ctx context.Context, id string) (plugin.ItemData, error) {
+	show, err := s.details(ctx, id)
 	if err != nil {
 		return plugin.ItemData{}, err
 	}
-	return tmdbData(s), nil
+	return tmdbData(show), nil
 }
 
-func (c *tmdbClient) people(ctx context.Context, id string) ([]plugin.Credit, error) {
-	s, err := c.details(ctx, id)
+func (s *tmdbSource) people(ctx context.Context, id string) ([]plugin.Credit, error) {
+	show, err := s.details(ctx, id)
 	if err != nil {
 		return nil, err
 	}
-	return tmdbCredits(s.Credits.Cast), nil
+	return tmdbCredits(show.Credits.Cast), nil
 }
 
-func (c *tmdbClient) recommendations(ctx context.Context, id string) ([]plugin.ItemSummary, error) {
-	s, err := c.details(ctx, id)
+func (s *tmdbSource) recommendations(ctx context.Context, id string) ([]plugin.ItemSummary, error) {
+	show, err := s.details(ctx, id)
 	if err != nil {
 		return nil, err
 	}
-	out := make([]plugin.ItemSummary, 0, len(s.Recommendations.Results))
-	for _, rec := range s.Recommendations.Results {
+	out := make([]plugin.ItemSummary, 0, len(show.Recommendations.Results))
+	for _, rec := range show.Recommendations.Results {
 		out = append(out, tmdbSummary(rec, nil))
 	}
 	return showRecommendations(out), nil
 }
 
-func (c *tmdbClient) lookup(ctx context.Context, idType, value string) (plugin.ItemData, error) {
+func (s *tmdbSource) lookup(ctx context.Context, idType, value string) (plugin.ItemData, error) {
 	switch idType {
 	case "tmdb":
-		return c.data(ctx, value)
+		return s.data(ctx, value)
 	case "imdb", "tvdb":
 		source := "imdb_id"
 		if idType == "tvdb" {
 			source = "tvdb_id"
 		}
-		var out struct {
-			TV []tmdbShow `json:"tv_results"`
-		}
-		if err := c.get(ctx, "/find/"+url.PathEscape(value), url.Values{"external_source": {source}}, &out); err != nil {
+		res, err := s.c.Find(ctx, value, source)
+		if err != nil {
 			return plugin.ItemData{}, err
 		}
-		if len(out.TV) == 0 {
+		if len(res.TVResults) == 0 {
 			return plugin.ItemData{}, plugin.ErrNotFound
 		}
-		return c.data(ctx, fmt.Sprint(out.TV[0].ID))
+		return s.data(ctx, fmt.Sprint(res.TVResults[0].ID))
 	}
 	return plugin.ItemData{}, fmt.Errorf("tmdb: cannot look up %q ids", idType)
 }
@@ -313,43 +250,31 @@ func tmdbAirStatus(raw string) string {
 	return "other"
 }
 
-func tmdbCover(path string) string {
-	if path == "" {
-		return ""
-	}
-	return "https://image.tmdb.org/t/p/w500" + path
-}
+func tmdbCover(path string) string { return tmdb.Image(path, "") }
 
-func tmdbProfile(path string) string {
-	if path == "" {
-		return ""
-	}
-	return "https://image.tmdb.org/t/p/w185" + path
-}
+func tmdbProfile(path string) string { return tmdb.Image(path, "w185") }
 
 func tmdbURL(id int) string { return fmt.Sprintf("https://www.themoviedb.org/tv/%d", id) }
-
-type tmdbSource struct{ c *tmdbClient }
 
 func (s *tmdbSource) Search(ctx context.Context, kind, q string) ([]plugin.ItemSummary, error) {
 	if kind != KindShow {
 		return nil, plugin.ErrNotFound
 	}
-	return s.c.search(ctx, q)
+	return s.search(ctx, q)
 }
 
 func (s *tmdbSource) Details(ctx context.Context, kind, id string) (plugin.ItemData, error) {
 	if kind != KindShow {
 		return plugin.ItemData{}, plugin.ErrNotFound
 	}
-	return s.c.data(ctx, id)
+	return s.data(ctx, id)
 }
 
 func (s *tmdbSource) People(ctx context.Context, kind, id string) ([]plugin.Credit, error) {
 	if kind != KindShow {
 		return nil, plugin.ErrNotFound
 	}
-	cs, err := s.c.people(ctx, id)
+	cs, err := s.people(ctx, id)
 	if err != nil {
 		return nil, err
 	}
@@ -360,12 +285,12 @@ func (s *tmdbSource) Recommendations(ctx context.Context, kind, id string) ([]pl
 	if kind != KindShow {
 		return nil, plugin.ErrNotFound
 	}
-	return s.c.recommendations(ctx, id)
+	return s.recommendations(ctx, id)
 }
 
 func (s *tmdbSource) Lookup(ctx context.Context, kind, idType, value string) (plugin.ItemData, error) {
 	if kind != KindShow {
 		return plugin.ItemData{}, plugin.ErrNotFound
 	}
-	return s.c.lookup(ctx, idType, value)
+	return s.lookup(ctx, idType, value)
 }
