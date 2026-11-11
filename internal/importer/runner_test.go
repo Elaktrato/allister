@@ -968,6 +968,28 @@ func TestSourceMissKeepsManualFields(t *testing.T) {
 	}
 }
 
+// A source that cannot answer because its credential is missing does not fail
+// the row: the row is kept as a manual item, like one the source does not know,
+// and the reason says that the source needs to be configured.
+func TestRunnerUnmatchedWhenSourceNeedsConfiguration(t *testing.T) {
+	e := newGenEnv(t)
+	e.bookSrc.Fn = func(context.Context, string, string, string, int) (plugin.ItemData, error) {
+		return plugin.ItemData{}, plugin.ErrNotConfigured
+	}
+	e.bookImp.Result = plugin.ParseResult{Entries: []plugin.ParsedEntry{bookEntry("1", "One", plugin.Planned, 0)}}
+	id := e.submit("book", "books-csv")
+	if err := e.run("book", id); err != nil {
+		t.Fatal(err)
+	}
+	r := e.report()
+	if r.Unmatched != 1 || r.UnmatchedRows[0].Message != "not configured: Fake Books" {
+		t.Fatalf("report = %+v", r)
+	}
+	if it, _ := e.item("book", "book", "isbn", "1"); it.Source != "manual" {
+		t.Fatalf("item = %+v", it)
+	}
+}
+
 func TestImportDedupesBySecondaryExternalID(t *testing.T) {
 	e := newGenEnvManual(t)
 	row := plugin.ParsedEntry{Kind: "book", Title: "Goodreads Only", Status: plugin.Planned,

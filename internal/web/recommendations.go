@@ -131,11 +131,15 @@ func recommendationsURL(m plugin.Manifest, source, id, kind string) string {
 }
 
 // recsView feeds recommendations.html: the cards, or Failed with a retry
-// of URL. Nothing to show (no cards, not failed) renders an empty fragment.
+// of URL and Message explaining why ("" for the generic notice). Nothing to
+// show (no cards, not failed) renders an empty fragment.
 type recsView struct {
 	Heading string
 	Cards   []linkCard
 	Failed  bool
+	// Message is the user-facing reason of Failed when known (a missing
+	// credential), else "" for the generic "unavailable" text.
+	Message string
 	// URL is the endpoint itself (retry); ItemURL the item's overview (the
 	// full page links back to it).
 	URL, ItemURL string
@@ -182,6 +186,9 @@ func (s *server) getRecommendations(w http.ResponseWriter, r *http.Request, plug
 		default:
 			log.Printf("recommendations %s: %v", key, err)
 			v.Failed = true
+			if errors.Is(err, plugin.ErrNotConfigured) {
+				v.Message = sourceMessage(m, ref.Source, err)
+			}
 		}
 	}
 	if !v.Failed {

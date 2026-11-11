@@ -15,7 +15,7 @@
 {{- if .Failed}}
 <section>
   <h2 class="mb-1 text-lg font-semibold">{{.Heading}}</h2>
-  <p class="text-sm text-amber-300">Recommendations are unavailable right now.</p>
+  <p class="text-sm text-amber-300">{{if .Message}}{{.Message}}{{else}}Recommendations are unavailable right now.{{end}}</p>
   <a href="{{.URL}}" hx-get="{{.URL}}" hx-target="closest section" hx-swap="outerHTML" class="mt-1 inline-block text-sm text-indigo-300 hover:underline">Try again</a>
 </section>
 {{- else if .Cards}}

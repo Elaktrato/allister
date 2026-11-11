@@ -248,6 +248,11 @@ type SourceInfo struct {
 	URLPatterns      []string `json:"url_patterns,omitempty"`
 	// Kinds lists the kinds this source serves. Empty means every kind.
 	Kinds []string `json:"kinds,omitempty"`
+	// KeyLabel, when set, means the source needs a credential the user stores
+	// in Settings; the core shows this label ("API key", "Access token").
+	KeyLabel string `json:"key_label,omitempty"`
+	// KeyHelp is one optional sentence telling the user where to get it.
+	KeyHelp string `json:"key_help,omitempty"`
 }
 
 // ImporterInfo describes an import format. ResolveVia names the declared

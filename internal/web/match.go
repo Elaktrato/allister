@@ -143,7 +143,7 @@ func (s *server) newMatchView(r *http.Request, t *matchTarget, si plugin.SourceI
 	if len(validSources) > 1 {
 		for _, x := range validSources {
 			v.Sources = append(v.Sources, choice{Value: itemAction(m, t.ref.Source, t.ref.ID, t.ref.Kind, "match", url.Values{"source": {x.ID}}),
-				Label: x.Name, Selected: x.ID == si.ID})
+				Label: s.sourceChoiceLabel(r.Context(), x), Selected: x.ID == si.ID})
 		}
 	}
 	return v
@@ -188,11 +188,15 @@ func (s *server) getMatchSearch(w http.ResponseWriter, r *http.Request, pluginID
 	if q != "" { // an empty query makes no source call
 		s.runSearch(r, t.man, si, t.kind, q, &v.Search)
 	}
+	status := http.StatusOK
+	if v.Search.Status != 0 {
+		status = v.Search.Status
+	}
 	if isPartialRequest(r) {
-		s.renderPartial(w, "item", "match_results", v)
+		s.renderPartialStatus(w, status, "item", "match_results", v)
 		return
 	}
-	s.matchResponse(w, r, t, v, http.StatusOK)
+	s.matchResponse(w, r, t, v, status)
 }
 
 // postMatch: reduce the input to a source id (no source call for invalid
@@ -266,7 +270,7 @@ func (s *server) postMatch(w http.ResponseWriter, r *http.Request, pluginID stri
 		log.Printf("match %s/%s: fetch %s/%s: %v", t.man.ID, t.ref.ID, si.ID, id, err)
 		fail(http.StatusBadGateway, sourceMessage(t.man, si.ID, err)+" Nothing was changed.")
 		return
-	case errors.Is(err, plugin.ErrRateLimited), errors.Is(err, plugin.ErrUnavailable):
+	case errors.Is(err, plugin.ErrRateLimited), errors.Is(err, plugin.ErrUnavailable), errors.Is(err, plugin.ErrNotConfigured):
 		log.Printf("match %s/%s: fetch %s/%s: %v", t.man.ID, t.ref.ID, si.ID, id, err)
 		fail(http.StatusServiceUnavailable, sourceMessage(t.man, si.ID, err)+" Nothing was changed.")
 		return

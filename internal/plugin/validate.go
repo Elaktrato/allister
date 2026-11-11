@@ -18,6 +18,8 @@ const (
 	maxIDLabelRunes       = 40
 	maxUnmatchedNoteRunes = 200
 	maxColumnLabelRunes   = 40
+	maxKeyLabelRunes      = 40
+	maxKeyHelpRunes       = 200
 )
 
 var (
@@ -110,6 +112,20 @@ func Validate(m Manifest) error {
 				p.add(kp, "duplicate %q", kind)
 			}
 			sourceKinds[kind] = true
+		}
+		switch l := s.KeyLabel; {
+		case !utf8.ValidString(l) || strings.IndexFunc(l, isControl) >= 0:
+			p.add(path+".key_label", "must be a single line without control characters")
+		case utf8.RuneCountInString(l) > maxKeyLabelRunes:
+			p.add(path+".key_label", "longer than %d characters", maxKeyLabelRunes)
+		}
+		switch h := s.KeyHelp; {
+		case !utf8.ValidString(h) || strings.IndexFunc(h, isControl) >= 0:
+			p.add(path+".key_help", "must be a single line without control characters")
+		case utf8.RuneCountInString(h) > maxKeyHelpRunes:
+			p.add(path+".key_help", "longer than %d characters", maxKeyHelpRunes)
+		case h != "" && s.KeyLabel == "":
+			p.add(path+".key_help", "requires key_label")
 		}
 	}
 	importers := map[string]bool{}

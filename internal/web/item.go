@@ -176,6 +176,9 @@ func (s *server) itemFail(w http.ResponseWriter, r *http.Request, m plugin.Manif
 		s.errorPage(w, r, http.StatusNotFound, "Not found", "Several kinds share this id: add ?kind=…", "")
 	case errors.Is(err, errNoSuchItem), errors.Is(err, plugin.ErrNotFound):
 		s.errorPage(w, r, http.StatusNotFound, "Not found", "There is no such item.", "")
+	case errors.Is(err, plugin.ErrNotConfigured):
+		log.Printf("%s %s: %v", r.Method, r.URL.Path, err)
+		s.errorPage(w, r, http.StatusServiceUnavailable, "Not configured", sourceMessage(m, source, err), retry)
 	case errors.Is(err, plugin.ErrBadResponse):
 		log.Printf("%s %s: %v", r.Method, r.URL.Path, err)
 		s.errorPage(w, r, http.StatusBadGateway, "Unusable answer", sourceMessage(m, source, err), retry)
@@ -189,11 +192,19 @@ func (s *server) itemFail(w http.ResponseWriter, r *http.Request, m plugin.Manif
 }
 
 // sourceMessage is the readable message of a source failure naming the
-// source: a bad answer (plugin.ErrBadResponse), rate limiting or an outage.
+// source: a missing or refused credential (plugin.ErrNotConfigured), a bad
+// answer (plugin.ErrBadResponse), rate limiting or an outage.
 func sourceMessage(m plugin.Manifest, source string, err error) string {
 	name := "The source"
-	if si, ok := sourceInfo(m, source); ok && si.Name != "" {
+	si, known := sourceInfo(m, source)
+	if known && si.Name != "" {
 		name = si.Name
+	}
+	if errors.Is(err, plugin.ErrNotConfigured) {
+		if si.KeyLabel != "" {
+			return name + " needs a valid " + lowerFirst(si.KeyLabel) + ". Add or replace it in Settings > Plugins."
+		}
+		return name + " needs a valid credential. Add or replace it in Settings > Plugins."
 	}
 	if errors.Is(err, plugin.ErrBadResponse) {
 		return name + " returned an answer we could not use. Please try again later."

@@ -5,6 +5,13 @@
   <div class="min-w-0 flex-1">
     <p class="mb-1 text-sm"><a href="/settings/plugins" class="text-slate-400 hover:text-slate-200 hover:underline">Plugins</a></p>
     <h1 class="mb-6 text-2xl font-semibold">{{.Name}} <span class="text-base font-normal {{if .Enabled}}text-emerald-400{{else}}text-slate-500{{end}}">{{if .Enabled}}enabled{{else}}disabled{{end}}</span></h1>
+    {{if .MissingKeys}}
+    <section aria-labelledby="missing-keys-heading" class="mb-8 max-w-md rounded-lg border border-amber-700 bg-amber-950 p-4">
+      <h2 id="missing-keys-heading" class="mb-1 font-semibold text-amber-200">API key needed</h2>
+      <p class="text-sm text-amber-200">Missing key for {{range $i, $k := .MissingKeys}}{{if $i}}, {{end}}{{$k}}{{end}}. <a href="/settings/plugins#source-keys" class="underline hover:no-underline">Set the key in Settings &gt; Plugins</a>.</p>
+      {{if .OtherSources}}<p class="mt-1 text-sm text-amber-200">The other sources of this plugin work without a key.</p>{{end}}
+    </section>
+    {{end}}
     <section aria-labelledby="title-language-heading" class="mb-8 max-w-md rounded-lg border border-slate-800 bg-slate-900/40 p-4">
       <h2 id="title-language-heading" class="mb-1 font-semibold">Title language</h2>
       <p class="mb-3 text-sm text-slate-400">Titles of this plugin's entries are shown in this language when an entry has it.</p>

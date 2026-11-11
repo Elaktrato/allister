@@ -80,8 +80,8 @@ func showKind() plugin.KindDef {
 	}
 }
 
-func manifest(opts Options) plugin.Manifest {
-	m := plugin.Manifest{
+func manifest() plugin.Manifest {
+	return plugin.Manifest{
 		ID: PluginID, Name: "TV", Version: "1.0.0", ContractVersion: plugin.ContractVersion,
 		DefaultEnabled: false, Icon: "live_tv",
 		Kinds: []plugin.KindDef{showKind()},
@@ -89,27 +89,21 @@ func manifest(opts Options) plugin.Manifest {
 			ID: SourceTVmaze, Name: "TVmaze", RequestsPerMinute: 30,
 			ExternalIDTypes: []string{"tvmaze", "tvdb", "imdb"}, SupportsLookup: true, SupportsSchedule: true,
 			Kinds: []string{KindShow}, LinkLabel: "View on TVmaze", URLPatterns: []string{"tvmaze.com/shows/{id}"},
+		}, {
+			ID: SourceTMDB, Name: "TMDB", RequestsPerMinute: 30,
+			ExternalIDTypes: []string{"tmdb", "imdb", "tvdb"}, SupportsLookup: true,
+			Kinds: []string{KindShow}, LinkLabel: "View on TMDB", URLPatterns: []string{"themoviedb.org/tv/{id}"},
+			KeyLabel: "API key",
+			KeyHelp:  "Create a free key at themoviedb.org under Settings → API (v3 key or v4 read token).",
 		}},
 		Importers: []plugin.ImporterInfo{{
 			ID: ImporterYamtrack, Name: "Yamtrack TV CSV",
 			FileHint: "Export your TV data from Yamtrack as CSV and upload it here.",
 			Accept:   []string{".csv"}, ManualRows: true, FallbackTitleLang: "en",
+			ExternalIDType: "tmdb", ExternalIDLabel: "TMDB",
+			ResolveVia:    SourceTMDB,
+			UnmatchedNote: "Imported from Yamtrack; TMDB had no match for #{id}.",
 		}},
 		Exporters: []plugin.ExporterInfo{{ID: ExporterJSON, Name: "JSON", Extension: ".json", MIME: "application/json"}},
 	}
-	if opts.TMDBKey != "" {
-		m.Sources = append(m.Sources, plugin.SourceInfo{
-			ID: SourceTMDB, Name: "TMDB", RequestsPerMinute: 30,
-			ExternalIDTypes: []string{"tmdb", "imdb", "tvdb"}, SupportsLookup: true,
-			Kinds: []string{KindShow}, LinkLabel: "View on TMDB", URLPatterns: []string{"themoviedb.org/tv/{id}"},
-		})
-		m.Importers[0].ExternalIDType = "tmdb"
-		m.Importers[0].ExternalIDLabel = "TMDB"
-		m.Importers[0].ExternalIDType = "tmdb"
-		m.Importers[0].ExternalIDLabel = "TMDB"
-		m.Importers[0].ResolveVia = SourceTMDB
-		m.Importers[0].UnmatchedNote = "Imported from Yamtrack; TMDB had no match for #{id}."
-		m.Importers[0].UnmatchedNote = "Imported from Yamtrack; TMDB had no match for #{id}."
-	}
-	return m
 }

@@ -1,6 +1,8 @@
 package tv
 
 import (
+	"context"
+	"reflect"
 	"slices"
 	"testing"
 
@@ -27,16 +29,23 @@ func TestManifest(t *testing.T) {
 			t.Fatalf("position must reset on +1")
 		}
 	}
-	if len(m.Sources) != 1 || m.Sources[0].ID != SourceTVmaze || !m.Sources[0].SupportsSchedule ||
-		m.Importers[0].ResolveVia != "" || m.Importers[0].ExternalIDType != "" || m.Importers[0].UnmatchedNote != "" {
-		t.Fatalf("default sources/importers = %+v %+v", m.Sources, m.Importers)
+	if len(m.Sources) != 2 || m.Sources[0].ID != SourceTVmaze || len(m.Importers) != 1 || len(m.Exporters) != 1 {
+		t.Fatalf("sources/importers/exporters = %+v %+v %+v", m.Sources, m.Importers, m.Exporters)
 	}
-	withKey := New(Options{TMDBKey: "k"}).Manifest()
-	if len(withKey.Sources) != 2 || withKey.Sources[1].ID != SourceTMDB || withKey.Sources[1].SupportsSchedule ||
-		withKey.Importers[0].ResolveVia != SourceTMDB || withKey.Importers[0].ExternalIDType != "tmdb" || withKey.Importers[0].UnmatchedNote == "" {
-		t.Fatalf("tmdb manifest = %+v %+v", withKey.Sources, withKey.Importers)
+}
+
+func TestManifestAlwaysDeclaresTMDB(t *testing.T) {
+	m := New(Options{}).Manifest()
+	if err := plugin.Validate(m); err != nil {
+		t.Fatal(err)
 	}
-	if err := plugin.Validate(withKey); err != nil {
-		t.Fatalf("tmdb validate: %v", err)
+	if len(m.Sources) != 2 || m.Sources[1].ID != SourceTMDB || m.Sources[1].KeyLabel != "API key" || m.Sources[1].SupportsSchedule {
+		t.Fatalf("sources = %+v", m.Sources)
+	}
+	if m.Importers[0].ResolveVia != SourceTMDB || m.Importers[0].ExternalIDType != "tmdb" || m.Importers[0].UnmatchedNote == "" {
+		t.Fatalf("importer = %+v", m.Importers[0])
+	}
+	if got := New(Options{TMDBKey: func(context.Context) (string, error) { return "k", nil }}).Manifest(); !reflect.DeepEqual(got, m) {
+		t.Fatalf("the key must not change the manifest")
 	}
 }
