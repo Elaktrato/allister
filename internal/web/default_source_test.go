@@ -64,6 +64,12 @@ func TestDefaultSourcePrefersAConfiguredOne(t *testing.T) {
 				e.tv.Calls(plugintest.OpSearch), meta.Calls(plugintest.OpSearch))
 		}
 
+		// the overview's "Match to" label names the same source the dialog
+		// opens
+		b = e.get("/tv/manual/m1").Body.String()
+		mustContain(t, b, "Match to Fake TV")
+		mustNotContain(t, b, "Match to TV Meta")
+
 		// the match dialog, its search and the match POST pick the same source
 		b = e.do("GET", "/tv/manual/m1/match", nil, true).Body.String()
 		mustContain(t, b, "Match to Fake TV", `name="source" value="tvdata"`,
@@ -93,6 +99,7 @@ func TestDefaultSourcePrefersAConfiguredOne(t *testing.T) {
 		b := e.get("/tv/search?q=x").Body.String()
 		mustContain(t, b, "Search TV Meta…", `value="tvmeta" selected`, "Meta Show", `href="/tv/tvmeta/9"`)
 		mustNotContain(t, b, "TV Show", `href="/tv/tvdata/77"`, `value="tvdata" selected`, "(needs key)")
+		mustContain(t, e.get("/tv/manual/m1").Body.String(), "Match to TV Meta")
 	})
 
 	t.Run("neither configured", func(t *testing.T) {
@@ -100,5 +107,6 @@ func TestDefaultSourcePrefersAConfiguredOne(t *testing.T) {
 		b := e.get("/tv/search?q=x").Body.String()
 		mustContain(t, b, "Search TV Meta…", `value="tvmeta" selected`, "TV Meta (needs key)", "Meta Show")
 		mustNotContain(t, b, `value="tvdata" selected`, `href="/tv/tvdata/77"`)
+		mustContain(t, e.get("/tv/manual/m1").Body.String(), "Match to TV Meta")
 	})
 }
