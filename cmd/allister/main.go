@@ -24,6 +24,7 @@ import (
 	"github.com/allister/allister/internal/plugins/anime"
 	"github.com/allister/allister/internal/plugins/book"
 	"github.com/allister/allister/internal/plugins/manga"
+	"github.com/allister/allister/internal/plugins/movie"
 	"github.com/allister/allister/internal/plugins/tv"
 	"github.com/allister/allister/internal/settings"
 	"github.com/allister/allister/internal/web"
@@ -56,6 +57,18 @@ func run() error {
 	defer stopWorker()
 
 	settingsStore := settings.New(database)
+	// The stored key wins; when none is saved the environment still supplies
+	// one. Resolved per request, so a key saved in the settings takes effect
+	// without a restart.
+	fallback := map[string]string{"tmdb": cfg.TMDBKey}
+	sourceKey := func(ctx context.Context, sourceID string) (string, error) {
+		stored, err := settingsStore.SourceKey(ctx, sourceID)
+		if err != nil || stored != "" {
+			return stored, err
+		}
+		return fallback[sourceID], nil
+	}
+	tmdbKey := func(ctx context.Context) (string, error) { return sourceKey(ctx, "tmdb") }
 	registry := plugin.NewRegistry(settingsStore)
 	if err := registry.Register(manga.New(manga.Options{})); err != nil {
 		log.Printf("startup: %v", err)
@@ -63,7 +76,10 @@ func run() error {
 	if err := registry.Register(book.New(book.Options{GoogleBooksKey: cfg.GoogleBooksKey})); err != nil {
 		log.Printf("startup: %v", err)
 	}
-	if err := registry.Register(tv.New(tv.Options{TMDBKey: func(context.Context) (string, error) { return cfg.TMDBKey, nil }})); err != nil {
+	if err := registry.Register(tv.New(tv.Options{TMDBKey: tmdbKey})); err != nil {
+		log.Printf("startup: %v", err)
+	}
+	if err := registry.Register(movie.New(movie.Options{TMDBKey: tmdbKey})); err != nil {
 		log.Printf("startup: %v", err)
 	}
 	if err := registry.Register(anime.New(anime.Options{})); err != nil {
@@ -123,6 +139,8 @@ func run() error {
 			DataDir:   cfg.DataDir,
 			Imports:   imports,
 			Library:   lib,
+			// the same resolver the plugins use: stored key, else the environment
+			SourceKey: sourceKey,
 			// uploaded fonts live in DATA_DIR/fonts next to the covers
 			Appearance: appearance.NewService(settingsStore, appearance.NewFontStore(database, filepath.Join(cfg.DataDir, "fonts"))),
 		}),
