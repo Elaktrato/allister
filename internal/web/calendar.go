@@ -63,11 +63,15 @@ func (s *server) getCalendar(w http.ResponseWriter, r *http.Request) {
 			title = "(untitled)"
 		}
 		icsLine(&b, "BEGIN:VEVENT")
-		icsLine(&b, fmt.Sprintf("UID:%d-%d@allister", row.ItemID, row.Number))
+		if row.Season > 0 {
+			icsLine(&b, fmt.Sprintf("UID:%d-s%d-%d@allister", row.ItemID, row.Season, row.Number))
+		} else {
+			icsLine(&b, fmt.Sprintf("UID:%d-%d@allister", row.ItemID, row.Number))
+		}
 		icsLine(&b, "DTSTAMP:"+now.UTC().Format(icsLayout))
 		icsLine(&b, "DTSTART:"+row.AirsAt.UTC().Format(icsLayout))
 		icsLine(&b, "DTEND:"+row.AirsAt.Add(30*time.Minute).UTC().Format(icsLayout))
-		icsLine(&b, "SUMMARY:"+icsText(title+" — "+progressLabel(k)+" "+fmt.Sprint(row.Number)))
+		icsLine(&b, "SUMMARY:"+icsText(title+" — "+releaseLabel(k, row.Season, row.Number)))
 		link := m.Sources[0].LinkLabel
 		for _, si := range m.Sources {
 			if si.ID == row.Source {
@@ -98,6 +102,16 @@ func sourceSchedules(m plugin.Manifest, source string) bool {
 		}
 	}
 	return false
+}
+
+// releaseLabel names one release. A season-aware source gets "Season 2,
+// <label> 5" using the kind's own progress label; season 0 keeps the old
+// "<progress label> <number>" form.
+func releaseLabel(k plugin.KindDef, season, number int) string {
+	if season > 0 {
+		return fmt.Sprintf("Season %d, %s %d", season, progressLabel(k), number)
+	}
+	return progressLabel(k) + " " + fmt.Sprint(number)
 }
 
 // progressLabel is the kind's primary progress label (the feed's word for a

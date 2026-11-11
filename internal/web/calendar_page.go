@@ -31,7 +31,7 @@ type calendarDay struct {
 // calendarRelease is one airing chip.
 type calendarRelease struct {
 	Title, Label, Href string
-	Number             int
+	Season, Number     int
 	At                 time.Time
 }
 
@@ -106,7 +106,7 @@ func (s *server) fillCalendar(ctx context.Context, v *calendarView, month, now t
 			title = "(untitled)"
 		}
 		byDay[at.Day()] = append(byDay[at.Day()], calendarRelease{
-			Title: title, Label: progressLabel(k), Number: row.Number,
+			Title: title, Label: progressLabel(k), Season: row.Season, Number: row.Number,
 			Href: itemURL(m, row.Source, row.SourceID, row.Kind), At: at,
 		})
 	}

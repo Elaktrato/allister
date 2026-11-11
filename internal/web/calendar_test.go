@@ -172,3 +172,17 @@ func TestCalendarPage(t *testing.T) {
 }
 
 var _ = plugin.Airing{}
+
+func TestCalendarSeasonLabels(t *testing.T) {
+	e := newFixtureEnv(t)
+	now := time.Date(2026, 11, 10, 12, 0, 0, 0, time.UTC)
+	e.env.now = &now
+	id := e.addFixture(t, "tv", "show", tvShow("1", "Dark"), library.Entry{Status: library.Active})
+	if err := e.lib.SaveSchedule(context.Background(), id, []library.Airing{{Season: 2, Number: 5, AirsAt: now.Add(time.Hour)}}, now); err != nil {
+		t.Fatal(err)
+	}
+	b := e.get("/calendar.ics").Body.String()
+	mustContain(t, b, "UID:"+idStr(id)+"-s2-5@allister\r\n", "SUMMARY:Dark — Season 2\\, Episode 5\r\n")
+	page := e.get("/calendar").Body.String()
+	mustContain(t, page, "S2E5")
+}

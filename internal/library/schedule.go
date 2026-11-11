@@ -14,6 +14,7 @@ const scheduleLayout = "2006-01-02T15:04:05Z"
 
 // Airing is one stored release air date of an item.
 type Airing struct {
+	Season int
 	Number int
 	AirsAt time.Time
 }
@@ -25,6 +26,7 @@ type ScheduledEntry struct {
 	PluginID, Kind   string
 	Source, SourceID string
 	Titles           []plugin.Title
+	Season           int
 	Number           int
 	AirsAt           time.Time
 }
@@ -51,8 +53,8 @@ func (l *Library) SaveSchedule(ctx context.Context, itemID int64, airings []Airi
 		return fmt.Errorf("save schedule: %w", err)
 	}
 	for _, a := range airings {
-		if _, err := tx.ExecContext(ctx, `INSERT INTO airings(item_id, number, airs_at) VALUES (?, ?, ?)`,
-			itemID, a.Number, a.AirsAt.UTC().Format(scheduleLayout)); err != nil {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO airings(item_id, season, number, airs_at) VALUES (?, ?, ?, ?)`,
+			itemID, a.Season, a.Number, a.AirsAt.UTC().Format(scheduleLayout)); err != nil {
 			return fmt.Errorf("save schedule: %w", err)
 		}
 	}
@@ -71,12 +73,12 @@ func (l *Library) SaveSchedule(ctx context.Context, itemID int64, airings []Airi
 // included (rowid order), ordered by air time. The caller filters by source
 // capability: the library does not know the manifests.
 func (l *Library) ScheduleEntries(ctx context.Context) ([]ScheduledEntry, error) {
-	rows, err := l.db.QueryContext(ctx, `SELECT a.item_id, i.plugin_id, i.kind, i.source, i.source_id, a.number, a.airs_at
+	rows, err := l.db.QueryContext(ctx, `SELECT a.item_id, i.plugin_id, i.kind, i.source, i.source_id, a.season, a.number, a.airs_at
 		FROM airings a
 		JOIN items i ON i.id = a.item_id
 		JOIN entries e ON e.item_id = a.item_id
 		WHERE e.status = ?
-		ORDER BY a.airs_at, a.item_id, a.number`, string(Active))
+		ORDER BY a.airs_at, a.item_id, a.season, a.number`, string(Active))
 	if err != nil {
 		return nil, fmt.Errorf("schedule entries: %w", err)
 	}
@@ -85,7 +87,7 @@ func (l *Library) ScheduleEntries(ctx context.Context) ([]ScheduledEntry, error)
 	for rows.Next() {
 		var e ScheduledEntry
 		var airs string
-		if err := rows.Scan(&e.ItemID, &e.PluginID, &e.Kind, &e.Source, &e.SourceID, &e.Number, &airs); err != nil {
+		if err := rows.Scan(&e.ItemID, &e.PluginID, &e.Kind, &e.Source, &e.SourceID, &e.Season, &e.Number, &airs); err != nil {
 			rows.Close()
 			return nil, fmt.Errorf("schedule entries: %w", err)
 		}

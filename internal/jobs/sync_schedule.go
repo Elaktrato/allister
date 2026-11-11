@@ -98,7 +98,7 @@ func refreshSchedule(ctx context.Context, lib *library.Library, reg *plugin.Regi
 	}
 	converted := make([]library.Airing, 0, len(airings))
 	for _, a := range airings {
-		converted = append(converted, library.Airing{Number: a.Number, AirsAt: a.AirsAt})
+		converted = append(converted, library.Airing{Season: a.Season, Number: a.Number, AirsAt: a.AirsAt})
 	}
 	return lib.SaveSchedule(ctx, it.ID, converted, time.Now())
 }

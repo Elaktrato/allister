@@ -29,7 +29,7 @@
           <div class="mb-1 text-xs {{if .Today}}inline-flex h-5 w-5 items-center justify-center rounded-full bg-indigo-600 font-semibold{{else}}text-slate-400{{end}}">{{.Day}}</div>
           <div class="flex flex-col gap-1">
             {{range .Releases}}
-            <a href="{{.Href}}" class="truncate rounded bg-slate-800 px-1.5 py-0.5 text-xs text-indigo-300 hover:bg-slate-700" title="{{.Title}} — {{.Label}} {{.Number}}"><time datetime="{{.At.Format "2006-01-02T15:04:05Z07:00"}}" data-local>{{.At.Format "15:04"}} UTC</time> {{.Title}}</a>
+            <a href="{{.Href}}" class="truncate rounded bg-slate-800 px-1.5 py-0.5 text-xs text-indigo-300 hover:bg-slate-700" title="{{.Title}} — {{if .Season}}S{{.Season}}E{{.Number}}{{else}}{{.Label}} {{.Number}}{{end}}"><time datetime="{{.At.Format "2006-01-02T15:04:05Z07:00"}}" data-local>{{.At.Format "15:04"}} UTC</time> {{.Title}}</a>
             {{end}}
           </div>
         </td>
