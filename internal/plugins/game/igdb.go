@@ -31,7 +31,9 @@ const (
 	// igdbSteamSource is the external_game_source value of Steam.
 	igdbSteamSource = 1
 	// igdbGameFields is the details query without its where clause.
-	igdbGameFields = "fields name,slug,summary,first_release_date,platforms.name,genres.name,themes.name,keywords.name,involved_companies.company.name,involved_companies.developer,involved_companies.publisher,cover.url,similar_games.id,similar_games.name,similar_games.cover.url,external_games.uid,external_games.external_game_source;"
+	igdbGameFields = "fields name,slug,summary,first_release_date,platforms.name,genres.name,themes.name,keywords.name,involved_companies.company.name,involved_companies.developer,involved_companies.publisher,cover.url,similar_games.id,similar_games.name,similar_games.first_release_date,similar_games.cover.url,external_games.uid,external_games.external_game_source;"
+	// defaultIGDBTokenTTL is used when Twitch omits expires_in.
+	defaultIGDBTokenTTL = time.Hour
 )
 
 // igdbKeyFunc resolves one Twitch app credential for a request. It is called
@@ -200,7 +202,9 @@ func igdbStatusError(status int) error {
 }
 
 // tokenFor returns a cached token for clientID or fetches a new one. The
-// mutex is held for the token request so concurrent calls share one fetch.
+// mutex is held across the token HTTP call, so concurrent callers share one
+// fetch; the injected http.Client (with its timeout, set by the plugin) bounds
+// how long that wait can be.
 func (c *igdbClient) tokenFor(ctx context.Context, clientID, secret string) (string, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -270,11 +274,11 @@ func (c *igdbClient) fetchToken(ctx context.Context, clientID, secret string) (s
 
 	c.token = out.AccessToken
 	c.tokenClientID = clientID
+	ttl := defaultIGDBTokenTTL
 	if out.ExpiresIn > 0 {
-		c.expires = time.Now().Add(time.Duration(out.ExpiresIn) * time.Second)
-	} else {
-		c.expires = time.Time{}
+		ttl = time.Duration(out.ExpiresIn) * time.Second
 	}
+	c.expires = time.Now().Add(ttl)
 	return c.token, nil
 }
 
@@ -293,6 +297,8 @@ func (c *igdbClient) dropToken(token string) {
 // igdbSource is the game plugin's IGDB source. The HTTP and OAuth plumbing
 // lives in igdbClient; the queries and mapping stay here.
 type igdbSource struct{ c *igdbClient }
+
+var _ plugin.Source = (*igdbSource)(nil)
 
 func (s *igdbSource) Search(ctx context.Context, kind, q string) ([]plugin.ItemSummary, error) {
 	if kind != KindGame {
@@ -368,7 +374,10 @@ func (s *igdbSource) Lookup(ctx context.Context, kind, idType, value string) (pl
 	value = strings.TrimSpace(value)
 	switch idType {
 	case "igdb":
-		if n, err := strconv.Atoi(value); err == nil && n > 0 {
+		if n, err := strconv.Atoi(value); err == nil {
+			if n <= 0 {
+				return plugin.ItemData{}, plugin.ErrNotFound
+			}
 			return s.details(ctx, "where id = "+strconv.Itoa(n)+"; limit 1;")
 		}
 		slug := plugin.SingleLine(value, maxIDRunes)
@@ -409,7 +418,13 @@ func (s *igdbSource) details(ctx context.Context, where string) (plugin.ItemData
 	if err != nil {
 		return plugin.ItemData{}, err
 	}
-	return gameData(igdbGameRecord(g, s.timeToBeat(ctx, g.ID))), nil
+	tb := s.timeToBeat(ctx, g.ID)
+	// A cancelled request is not a source failure; time-to-beat only ignores
+	// real source errors.
+	if err := ctx.Err(); err != nil {
+		return plugin.ItemData{}, err
+	}
+	return gameData(igdbGameRecord(g, tb)), nil
 }
 
 func (s *igdbSource) game(ctx context.Context, where string) (igdbGame, error) {
@@ -582,12 +597,6 @@ func igdbGameRecord(g igdbGame, tb igdbTimeToBeat) gameRecord {
 		}
 		rec.ExternalIDs["steam"] = string(external.UID)
 		break
-	}
-	for _, sim := range g.SimilarGames {
-		if sim.ID <= 0 {
-			continue
-		}
-		rec.Recommendations = append(rec.Recommendations, igdbSummary(sim.ID, sim.Name, sim.Cover.URL, sim.FirstReleaseDate))
 	}
 	return rec
 }

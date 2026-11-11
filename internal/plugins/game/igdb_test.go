@@ -232,11 +232,49 @@ func TestIGDBTokenCacheKeyedByClientID(t *testing.T) {
 }
 
 func TestIGDBTokenRefreshedBeforeExpiry(t *testing.T) {
-	rec := &igdbTestRecorder{}
-	token := func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprintf(w, `{"access_token":"token-%d","expires_in":30}`, rec.tokenRequests())
+	cases := []struct {
+		name    string
+		expires int
+		want    int
+	}{
+		{"59 seconds is refreshed", 59, 2},
+		{"61 seconds is cached", 61, 1},
 	}
-	c := newIGDBTestClient(t, rec, token, func(w http.ResponseWriter, r *http.Request) {
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := &igdbTestRecorder{}
+			token := func(w http.ResponseWriter, r *http.Request) {
+				fmt.Fprintf(w, `{"access_token":"token-%d","expires_in":%d}`, rec.tokenRequests(), tc.expires)
+			}
+			c := newIGDBTestClient(t, rec, token, func(w http.ResponseWriter, r *http.Request) {
+				io.WriteString(w, `[]`)
+			})
+
+			for i := 0; i < 2; i++ {
+				var out []json.RawMessage
+				if err := c.Post(context.Background(), "games", "fields name;", &out); err != nil {
+					t.Fatalf("Post %d: %v", i, err)
+				}
+			}
+			if got := rec.tokenRequests(); got != tc.want {
+				t.Errorf("token requests = %d, want %d", got, tc.want)
+			}
+			if tc.want == 2 {
+				reqs := rec.requests()
+				if reqs[1].auth != "Bearer token-2" {
+					t.Errorf("second Authorization = %q", reqs[1].auth)
+				}
+			}
+		})
+	}
+}
+
+func TestIGDBTokenDefaultTTL(t *testing.T) {
+	rec := &igdbTestRecorder{}
+	c := newIGDBTestClient(t, rec, func(w http.ResponseWriter, r *http.Request) {
+		// Twitch omitted expires_in, so the client uses its one-hour default.
+		io.WriteString(w, `{"access_token":"token-1"}`)
+	}, func(w http.ResponseWriter, r *http.Request) {
 		io.WriteString(w, `[]`)
 	})
 
@@ -246,12 +284,8 @@ func TestIGDBTokenRefreshedBeforeExpiry(t *testing.T) {
 			t.Fatalf("Post %d: %v", i, err)
 		}
 	}
-	if got := rec.tokenRequests(); got != 2 {
-		t.Errorf("token requests = %d, want 2: a token expiring inside 60s is refreshed", got)
-	}
-	reqs := rec.requests()
-	if reqs[1].auth != "Bearer token-2" {
-		t.Errorf("second Authorization = %q", reqs[1].auth)
+	if got := rec.tokenRequests(); got != 1 {
+		t.Errorf("token requests = %d, want 1 with the default TTL", got)
 	}
 }
 
@@ -570,7 +604,7 @@ func TestIGDBSearch(t *testing.T) {
 	})
 }
 
-const igdbTestGameFields = "fields name,slug,summary,first_release_date,platforms.name,genres.name,themes.name,keywords.name,involved_companies.company.name,involved_companies.developer,involved_companies.publisher,cover.url,similar_games.id,similar_games.name,similar_games.cover.url,external_games.uid,external_games.external_game_source;"
+const igdbTestGameFields = "fields name,slug,summary,first_release_date,platforms.name,genres.name,themes.name,keywords.name,involved_companies.company.name,involved_companies.developer,involved_companies.publisher,cover.url,similar_games.id,similar_games.name,similar_games.first_release_date,similar_games.cover.url,external_games.uid,external_games.external_game_source;"
 
 const igdbSkyrimJSON = `[{
 	"id": 9606,
@@ -683,6 +717,36 @@ func TestIGDBDetailsNotFound(t *testing.T) {
 	}
 	if got := rec.dataCount(); got != 1 {
 		t.Errorf("%d data requests, want 1 (no time-to-beat call without a game)", got)
+	}
+}
+
+func TestIGDBTimeToBeatCancellationIsReported(t *testing.T) {
+	for name, call := range map[string]func(context.Context, *igdbSource) error{
+		"details": func(ctx context.Context, s *igdbSource) error {
+			_, err := s.Details(ctx, KindGame, "9606")
+			return err
+		},
+		"lookup": func(ctx context.Context, s *igdbSource) error {
+			_, err := s.Lookup(ctx, KindGame, "igdb", "9606")
+			return err
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			rec := &igdbTestRecorder{}
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			c := newIGDBTestClient(t, rec, igdbOKToken("token-1", 3600), func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/game_time_to_beats" {
+					cancel()
+					w.WriteHeader(http.StatusInternalServerError)
+					return
+				}
+				io.WriteString(w, igdbSkyrimJSON)
+			})
+			if err := call(ctx, &igdbSource{c: c}); !errors.Is(err, context.Canceled) {
+				t.Fatalf("err = %v, want context.Canceled", err)
+			}
+		})
 	}
 }
 
@@ -817,6 +881,14 @@ func TestIGDBLookupIGDBIDAndSlug(t *testing.T) {
 		}
 	})
 
+	t.Run("non-positive numeric id makes no slug query", func(t *testing.T) {
+		for _, value := range []string{"0", "-5"} {
+			if _, err := (&igdbSource{}).Lookup(context.Background(), KindGame, "igdb", value); !errors.Is(err, plugin.ErrNotFound) {
+				t.Errorf("Lookup(%q) err = %v, want ErrNotFound", value, err)
+			}
+		}
+	})
+
 	t.Run("unknown id type", func(t *testing.T) {
 		rec := &igdbTestRecorder{}
 		c := newIGDBTestClient(t, rec, igdbOKToken("token-1", 3600), func(w http.ResponseWriter, r *http.Request) {
@@ -865,6 +937,10 @@ func TestIGDBRecommendations(t *testing.T) {
 
 	rec := &igdbTestRecorder{}
 	c := newIGDBTestClient(t, rec, igdbOKToken("token-1", 3600), func(w http.ResponseWriter, r *http.Request) {
+		request, _ := io.ReadAll(r.Body)
+		if !strings.Contains(string(request), "similar_games.first_release_date") {
+			t.Errorf("recommendations query lacks similar_games.first_release_date: %q", request)
+		}
 		io.WriteString(w, body)
 	})
 	recs, err := (&igdbSource{c: c}).Recommendations(context.Background(), KindGame, "9606")
