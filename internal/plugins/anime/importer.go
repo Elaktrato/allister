@@ -8,7 +8,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/allister/allister/internal/plugin"
-	"github.com/allister/allister/internal/plugins/anime/yamtrack"
+	"github.com/allister/allister/internal/plugins/yamtrack"
 )
 
 // yamtrackImporter adapts yamtrack.Parse to plugin.Importer. Text taken from

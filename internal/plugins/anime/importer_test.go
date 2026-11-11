@@ -37,7 +37,7 @@ func day(y int, m time.Month, d int) *time.Time {
 }
 
 func TestImporterMapsRows(t *testing.T) {
-	b, err := os.ReadFile(filepath.Join("yamtrack", "testdata", "sample.csv"))
+	b, err := os.ReadFile(filepath.Join("..", "yamtrack", "testdata", "sample.csv"))
 	if err != nil {
 		t.Fatal(err)
 	}

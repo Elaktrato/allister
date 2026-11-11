@@ -25,7 +25,7 @@ import (
 	"github.com/allister/allister/internal/plugin/plugintest"
 	"github.com/allister/allister/internal/plugins/anilist"
 	"github.com/allister/allister/internal/plugins/anime"
-	"github.com/allister/allister/internal/plugins/anime/yamtrack"
+	"github.com/allister/allister/internal/plugins/yamtrack"
 )
 
 // ---- fakes ----
