@@ -19,6 +19,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -619,16 +620,27 @@ func (r *Runner) process(ctx context.Context, ref *importerRef, importID int64, 
 	if rc.idType != "" {
 		rc.value = plugin.SingleLine(rc.entry.ExternalIDs[rc.idType], maxTitleRunes)
 	}
+	ids := make([]string, 0, len(rc.entry.ExternalIDs))
+	for typ := range rc.entry.ExternalIDs {
+		ids = append(ids, typ)
+	}
+	sort.Strings(ids)
+	for _, typ := range ids {
+		value := plugin.SingleLine(rc.entry.ExternalIDs[typ], maxTitleRunes)
+		if value == "" {
+			continue
+		}
+		if saved, err := r.d.Library.ItemByExternalID(ctx, rc.pluginID(), kind.Key, typ, value); err != nil {
+			return fmt.Errorf("import %d: %w", importID, err)
+		} else if saved != nil {
+			return r.handleSaved(ctx, rc, saved)
+		}
+	}
 	if rc.value == "" { // no declared id: a manual-only row, or an older stored row
 		if ref.info.ManualRows && rc.entry.Title != "" {
 			return r.saveManualRow(context.WithoutCancel(ctx), rc, "saved as a manual entry (no "+ref.idLabel()+")")
 		}
 		return r.record(ctx, importID, pr.seq, outcomeSkipped, 0, noIDMessage(ref))
-	}
-	if saved, err := r.d.Library.ItemByExternalID(ctx, rc.pluginID(), kind.Key, rc.idType, rc.value); err != nil {
-		return fmt.Errorf("import %d: %w", importID, err)
-	} else if saved != nil {
-		return r.handleSaved(ctx, rc, saved)
 	}
 	if ref.source == nil {
 		return r.saveUnmatched(context.WithoutCancel(ctx), rc, "saved as a manual entry")
@@ -690,13 +702,26 @@ func (r *Runner) process(ctx context.Context, ref *importerRef, importID int64, 
 	if data.Kind == "" {
 		data.Kind = kind.Key
 	}
-	if data.ExternalIDs[rc.idType] == "" {
-		ext := make(map[string]string, len(data.ExternalIDs)+1)
-		for k, v := range data.ExternalIDs {
-			ext[k] = v
+	if data.ExternalIDs == nil {
+		data.ExternalIDs = map[string]string{}
+	}
+	for typ, value := range rc.entry.ExternalIDs {
+		if data.ExternalIDs[typ] == "" {
+			data.ExternalIDs[typ] = value
 		}
-		ext[rc.idType] = rc.value
-		data.ExternalIDs = ext
+	}
+	if data.ExternalIDs[rc.idType] == "" {
+		data.ExternalIDs[rc.idType] = rc.value
+	}
+	if len(rc.entry.Fields) > 0 {
+		if data.Fields == nil {
+			data.Fields = map[string]plugin.FieldValue{}
+		}
+		for key, value := range rc.entry.Fields {
+			if _, ok := data.Fields[key]; !ok {
+				data.Fields[key] = value
+			}
+		}
 	}
 	entry, notes := buildEntry(kind, &library.Item{ProgressKeys: kind.Progress.Defaults, Fields: data.Fields}, rc.entry)
 	id, err := r.d.Library.AddToList(dctx, rc.pluginID(), kind.Key, data, entry)

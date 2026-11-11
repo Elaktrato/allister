@@ -967,3 +967,101 @@ func TestSourceMissKeepsManualFields(t *testing.T) {
 		t.Fatalf("report = %+v", r)
 	}
 }
+
+func TestImportDedupesBySecondaryExternalID(t *testing.T) {
+	e := newGenEnvManual(t)
+	row := plugin.ParsedEntry{Kind: "book", Title: "Goodreads Only", Status: plugin.Planned,
+		ExternalIDs: map[string]string{"goodreads": "g1"}, Fields: map[string]plugin.FieldValue{"pages": {Num: pf(100)}}}
+	e.bookImp.AccountRows = []plugin.ParsedEntry{row}
+	id := e.submitAccount("books-csv", "someone", ModeSkip)
+	if err := e.run("book", id); err != nil {
+		t.Fatal(err)
+	}
+	if it, _ := e.item("book", "book", "goodreads", "g1"); it.Source != "manual" {
+		t.Fatalf("first item = %+v", it)
+	}
+	e.bookImp.AccountRows = []plugin.ParsedEntry{row}
+	id = e.submitAccount("books-csv", "someone", ModeSkip)
+	if err := e.run("book", id); err != nil {
+		t.Fatal(err)
+	}
+	if r := e.report(); r.Skipped != 1 || r.Imported != 0 {
+		t.Fatalf("report = %+v", r)
+	}
+	pg, err := e.lib.List(context.Background(), library.Query{PluginID: "book", Kind: "book"}, "en")
+	if err != nil || pg.Total != 1 {
+		t.Fatalf("items = %d %v", pg.Total, err)
+	}
+}
+
+func TestImportDedupesByPrimaryISBNAcrossSources(t *testing.T) {
+	e := newGenEnvWithFallback(t)
+	d := book("777", 300)
+	d.Source, d.ID, d.ExternalIDs = "books2", "w2777", map[string]string{"isbn": "777"}
+	if _, err := e.lib.AddToList(context.Background(), "book", "book", d, library.Entry{Status: library.Completed}); err != nil {
+		t.Fatal(err)
+	}
+	e.bookImp.AccountRows = []plugin.ParsedEntry{bookEntry("777", "Cross Source", plugin.Planned, 0)}
+	id := e.submitAccount("books-csv", "someone", ModeSkip)
+	if err := e.run("book", id); err != nil {
+		t.Fatal(err)
+	}
+	if r := e.report(); r.Skipped != 1 || r.Imported != 0 {
+		t.Fatalf("report = %+v", r)
+	}
+	pg, err := e.lib.List(context.Background(), library.Query{PluginID: "book", Kind: "book"}, "en")
+	if err != nil || pg.Total != 1 {
+		t.Fatalf("items = %d %v", pg.Total, err)
+	}
+}
+
+func TestImportMergesMissingSourceFields(t *testing.T) {
+	e := newGenEnv(t)
+	e.bookSrc.Fn = func(_ context.Context, _, _, v string, _ int) (plugin.ItemData, error) {
+		return book(v, 0), nil
+	}
+	row := bookEntry("778", "Merge Pages", plugin.Completed, 300)
+	row.Fields = map[string]plugin.FieldValue{"pages": {Num: pf(300)}}
+	e.bookImp.AccountRows = []plugin.ParsedEntry{row}
+	id := e.submitAccount("books-csv", "someone", ModeSkip)
+	if err := e.run("book", id); err != nil {
+		t.Fatal(err)
+	}
+	it, en := e.item("book", "book", "isbn", "778")
+	if it.Fields["pages"].Num == nil || *it.Fields["pages"].Num != 300 || en.Progress["pages"] != 300 {
+		t.Fatalf("item = %+v entry = %+v", it, en)
+	}
+}
+
+func TestImportSourceFieldsWin(t *testing.T) {
+	e := newGenEnv(t)
+	e.bookSrc.Fn = func(_ context.Context, _, _, v string, _ int) (plugin.ItemData, error) {
+		return book(v, 250), nil
+	}
+	row := bookEntry("779", "Source Wins", plugin.Completed, 999)
+	row.Fields = map[string]plugin.FieldValue{"pages": {Num: pf(999)}}
+	e.bookImp.AccountRows = []plugin.ParsedEntry{row}
+	id := e.submitAccount("books-csv", "someone", ModeSkip)
+	if err := e.run("book", id); err != nil {
+		t.Fatal(err)
+	}
+	it, en := e.item("book", "book", "isbn", "779")
+	if it.Fields["pages"].Num == nil || *it.Fields["pages"].Num != 250 || en.Progress["pages"] != 250 {
+		t.Fatalf("item = %+v entry = %+v", it, en)
+	}
+}
+
+func TestImportStoresSecondaryExternalIDs(t *testing.T) {
+	e := newGenEnv(t)
+	row := bookEntry("780", "Secondary ID", plugin.Planned, 0)
+	row.ExternalIDs["goodreads"] = "g780"
+	e.bookImp.AccountRows = []plugin.ParsedEntry{row}
+	id := e.submitAccount("books-csv", "someone", ModeSkip)
+	if err := e.run("book", id); err != nil {
+		t.Fatal(err)
+	}
+	it, _ := e.item("book", "book", "isbn", "780")
+	if it.ExternalIDs["goodreads"] != "g780" || it.ExternalIDs["isbn"] != "780" {
+		t.Fatalf("external ids = %v", it.ExternalIDs)
+	}
+}
