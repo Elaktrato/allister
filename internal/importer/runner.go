@@ -648,6 +648,9 @@ func (r *Runner) process(ctx context.Context, ref *importerRef, importID int64, 
 
 	var data plugin.ItemData
 	found := false
+	// lastMiss is the answer that ended the lookup of the last source: a miss
+	// (ErrNotFound) or a source that needs its credential configured.
+	var lastMiss error
 	for _, sr := range ref.sourceRefs() {
 		name := sr.info.Name
 		for attempt := 0; ; attempt++ {
@@ -672,7 +675,8 @@ func (r *Runner) process(ctx context.Context, ref *importerRef, importID int64, 
 			if errors.Is(err, plugin.ErrBadResponse) { // a retry would get the same answer
 				return r.record(ctx, importID, pr.seq, outcomeFailed, 0, err.Error())
 			}
-			if errors.Is(err, plugin.ErrNotFound) {
+			if errors.Is(err, plugin.ErrNotFound) || errors.Is(err, plugin.ErrNotConfigured) {
+				lastMiss = err
 				break // try the next source
 			}
 			if errors.Is(err, plugin.ErrRateLimited) || errors.Is(err, plugin.ErrUnavailable) {
@@ -697,7 +701,11 @@ func (r *Runner) process(ctx context.Context, ref *importerRef, importID int64, 
 	dctx := context.WithoutCancel(ctx)
 	r.setNote(dctx, importID, "")
 	if !found {
-		return r.saveUnmatched(dctx, rc, "not found on "+ref.sourceNames())
+		reason := "not found on " + ref.sourceNames()
+		if errors.Is(lastMiss, plugin.ErrNotConfigured) {
+			reason = "not configured: " + ref.sourceNames()
+		}
+		return r.saveUnmatched(dctx, rc, reason)
 	}
 	if data.Kind == "" {
 		data.Kind = kind.Key
