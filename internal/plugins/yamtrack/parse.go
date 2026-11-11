@@ -4,9 +4,6 @@
 package yamtrack
 
 import (
-	"bufio"
-	"bytes"
-	"encoding/csv"
 	"errors"
 	"fmt"
 	"io"
@@ -70,102 +67,46 @@ var statusMap = map[string]plugin.StatusClass{
 // BOM, CRLF line ends, quoted newlines and extra columns. Of rows sharing a
 // media_id the first is kept. A missing required column is ErrBadFormat.
 func Parse(r io.Reader) (rows []Row, skipped []SkippedRow, err error) {
-	br := bufio.NewReader(r)
-	if b, _ := br.Peek(3); bytes.Equal(b, []byte{0xEF, 0xBB, 0xBF}) {
-		br.Discard(3)
-	}
-	cr := csv.NewReader(br)
-	cr.FieldsPerRecord = -1
-	cr.LazyQuotes = true
-	hdr, err := cr.Read()
-	if errors.Is(err, io.EOF) {
-		return nil, nil, fmt.Errorf("%w: the file is empty", ErrBadFormat)
-	}
+	raw, err := ParseRaw(r)
 	if err != nil {
-		return nil, nil, fmt.Errorf("%w: %v", ErrBadFormat, err)
+		return nil, nil, err
 	}
-	col := map[string]int{}
-	for i, h := range hdr {
-		h = strings.ToLower(strings.TrimSpace(strings.TrimPrefix(h, "\xEF\xBB\xBF")))
-		if _, dup := col[h]; !dup {
-			col[h] = i
-		}
-	}
-	var missing []string
-	for _, c := range requiredColumns {
-		if _, ok := col[c]; !ok {
-			missing = append(missing, c)
-		}
-	}
-	if len(missing) > 0 {
-		return nil, nil, fmt.Errorf("%w: missing column(s) %s", ErrBadFormat, strings.Join(missing, ", "))
-	}
-
 	seen := map[string]bool{}
-	for {
-		rec, err := cr.Read()
-		if errors.Is(err, io.EOF) {
-			break
-		}
-		if err != nil {
-			return nil, nil, fmt.Errorf("%w: %v", ErrBadFormat, err)
-		}
-		line, _ := cr.FieldPos(0)
-		get := func(name string) string {
-			i, ok := col[name]
-			if !ok || i >= len(rec) {
-				return ""
-			}
-			return strings.TrimSpace(rec[i])
-		}
-		title := truncate(get("title"), maxTitleRunes)
+	for _, rr := range raw {
+		title := rr.Title
 		skip := func(reason string, ignored bool) {
-			skipped = append(skipped, SkippedRow{Line: line, Reason: reason, Title: title, Ignored: ignored})
+			skipped = append(skipped, SkippedRow{Line: rr.Line, Reason: reason, Title: title, Ignored: ignored})
 		}
-
-		if mt := get("media_type"); !strings.EqualFold(mt, "anime") {
-			skip(fmt.Sprintf("not an anime row (media_type %q)", mt), true)
+		if !strings.EqualFold(rr.MediaType, "anime") {
+			skip(fmt.Sprintf("not an anime row (media_type %q)", rr.MediaType), true)
 			continue
 		}
-		if src := get("source"); src != "" && !strings.EqualFold(src, "mal") {
+		if src := strings.TrimSpace(rr.Source); src != "" && !strings.EqualFold(src, "mal") {
 			skip(fmt.Sprintf("source is %q, only mal ids can be matched", src), false)
 			continue
 		}
-		malID := get("media_id")
+		malID := strings.TrimSpace(rr.MediaID)
 		n, err := strconv.ParseUint(malID, 10, 31)
 		if err != nil || n == 0 {
 			skip(fmt.Sprintf("invalid media_id %q", malID), false)
 			continue
 		}
-		// AniList reports MAL ids in canonical decimal form: "0123" is 123
 		malID = strconv.FormatUint(n, 10)
-		status, ok := statusMap[strings.ToLower(get("status"))]
-		if !ok {
-			skip(fmt.Sprintf("unknown status %q", get("status")), false)
+		if rr.Status == "" {
+			skip(fmt.Sprintf("unknown status %q", rr.StatusRaw), false)
 			continue
 		}
 		if seen[malID] {
 			skip("duplicate media_id "+malID, false)
 			continue
 		}
-		row := Row{MALID: malID, Title: title, ImageURL: get("image"), Status: status,
-			Comment: truncate(get("notes"), maxCommentRunes)}
+		row := Row{MALID: malID, Title: title, ImageURL: rr.ImageURL, Status: rr.Status,
+			Rating: rr.Rating, Progress: rr.Progress, StartedOn: rr.StartedOn, FinishedOn: rr.FinishedOn,
+			Comment: rr.Comment, Notes: append([]string(nil), rr.Notes...)}
 		if row.Title == "" {
 			row.Title = "MAL #" + malID
 			row.Notes = append(row.Notes, "no title in the export, using "+row.Title)
 		}
-		// Bad optional fields never drop the row: they are neutralised and noted.
-		if p := get("progress"); p != "" {
-			n, err := strconv.Atoi(p)
-			if err != nil || n < 0 || n > maxProgress {
-				row.Notes = append(row.Notes, fmt.Sprintf("invalid progress %q, using 0", p))
-			} else {
-				row.Progress = n
-			}
-		}
-		row.Rating = parseScore(get("score"), &row.Notes)
-		row.StartedOn = parseDay(get("start_date"), "start date", &row.Notes)
-		row.FinishedOn = parseDay(get("end_date"), "end date", &row.Notes)
 		seen[malID] = true
 		rows = append(rows, row)
 	}

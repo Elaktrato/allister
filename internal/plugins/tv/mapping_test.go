@@ -15,6 +15,7 @@ func TestShowDataAndCredits(t *testing.T) {
 		Titles: []plugin.Title{{Lang: "en", Text: "Dark"}, {Lang: "original", Text: "Dark"}},
 		Fields: map[string]plugin.FieldValue{
 			"type": {Text: "series"}, "year": {Num: num(2017)}, "started_on": {Date: &day},
+			"synopsis": {Text: "line one\n\nline two"},
 		},
 		CoverURL: "https://img.example/d.jpg", ExternalURL: "https://tvmaze.com/shows/1",
 		ExternalIDs: map[string]string{"tvmaze": "1", "tvdb": "2"},
@@ -25,7 +26,8 @@ func TestShowDataAndCredits(t *testing.T) {
 	d := showData(rec)
 	if d.Kind != KindShow || d.ID != "1" || len(d.Titles) != 2 || d.Fields["type"].Text != "series" ||
 		d.Fields["year"].Num == nil || *d.Fields["year"].Num != 2017 || d.Fields["started_on"].Date == nil ||
-		len(d.Genres) != 2 || len(d.Tags) != 1 || d.ExternalIDs["tvdb"] != "2" || d.CoverURL != rec.CoverURL {
+		len(d.Genres) != 2 || len(d.Tags) != 1 || d.ExternalIDs["tvdb"] != "2" || d.CoverURL != rec.CoverURL ||
+		!strings.Contains(d.Fields["synopsis"].Text, "\n\n") {
 		t.Fatalf("data = %+v", d)
 	}
 	c := showCredits(rec.Credits)

@@ -245,11 +245,13 @@ func tvmazeData(s tvShow, eps []tvEpisode) plugin.ItemData {
 		fields["year"] = plugin.FieldValue{Num: &n}
 	}
 	seasons, episodes := 0, 0
+	seenSeasons := map[int]bool{}
 	for _, e := range eps {
 		if e.Season >= 1 {
 			episodes++
-			if e.Season > seasons {
-				seasons = e.Season
+			if !seenSeasons[e.Season] {
+				seenSeasons[e.Season] = true
+				seasons++
 			}
 		}
 	}
@@ -304,7 +306,7 @@ func tvmazeCredits(cs []tvCast) []plugin.Credit {
 	out := make([]plugin.Credit, 0, len(cs))
 	for _, c := range cs {
 		name, cname := plugin.SingleLine(c.Person.Name, maxNameRunes), plugin.SingleLine(c.Character.Name, maxNameRunes)
-		if name == "" || cname == "" {
+		if c.Person.ID <= 0 || c.Character.ID <= 0 || name == "" || cname == "" {
 			continue
 		}
 		out = append(out, plugin.Credit{Role: "actor",

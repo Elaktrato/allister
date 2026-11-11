@@ -41,7 +41,7 @@ type tmdbShow struct {
 		Results []tmdbShow `json:"results"`
 	} `json:"recommendations"`
 	Keywords struct {
-		Keywords []struct{ Name string } `json:"keywords"`
+		Results []struct{ Name string } `json:"results"`
 	} `json:"keywords"`
 	ExternalIDs struct {
 		TVDBID *int   `json:"tvdb_id"`
@@ -130,8 +130,8 @@ func (c *tmdbClient) search(ctx context.Context, q string) ([]plugin.ItemSummary
 	res := make([]plugin.ItemSummary, 0, len(out.Results))
 	for _, s := range out.Results {
 		fields := map[string]plugin.FieldValue{}
-		if ty := showType(s.Type); ty != "" {
-			fields["type"] = plugin.FieldValue{Text: ty}
+		if s.Type != "" {
+			fields["type"] = plugin.FieldValue{Text: showType(s.Type)}
 		}
 		if y := yearOf(s.FirstAirDate); y > 0 {
 			n := float64(y)
@@ -207,7 +207,7 @@ func tmdbSummary(s tmdbShow, fields map[string]plugin.FieldValue) plugin.ItemSum
 		fields = map[string]plugin.FieldValue{}
 	}
 	return plugin.ItemSummary{Source: SourceTMDB, ID: fmt.Sprint(s.ID), Kind: KindShow,
-		Titles:   []plugin.Title{{Lang: "en", Text: s.Name}},
+		Titles:   []plugin.Title{{Lang: "en", Text: plugin.SingleLine(s.Name, maxTitleRunes)}},
 		Fields:   fields,
 		CoverURL: tmdbCover(s.PosterPath),
 		URL:      tmdbURL(s.ID),
@@ -258,7 +258,7 @@ func tmdbData(s tmdbShow) plugin.ItemData {
 		genres = append(genres, g.Name)
 	}
 	var tags []plugin.Tag
-	for _, k := range s.Keywords.Keywords {
+	for _, k := range s.Keywords.Results {
 		tags = append(tags, plugin.Tag{Name: k.Name})
 	}
 	ext := map[string]string{"tmdb": fmt.Sprint(s.ID)}
@@ -280,7 +280,7 @@ func tmdbCredits(cs []tmdbCast) []plugin.Credit {
 	out := make([]plugin.Credit, 0, len(cs))
 	for _, c := range cs {
 		name, cname := plugin.SingleLine(c.Name, maxNameRunes), plugin.SingleLine(c.Character, maxNameRunes)
-		if name == "" || cname == "" {
+		if c.ID <= 0 || name == "" || cname == "" {
 			continue
 		}
 		id := c.CreditID

@@ -93,9 +93,7 @@ func manifest(opts Options) plugin.Manifest {
 		Importers: []plugin.ImporterInfo{{
 			ID: ImporterYamtrack, Name: "Yamtrack TV CSV",
 			FileHint: "Export your TV data from Yamtrack as CSV and upload it here.",
-			Accept:   []string{".csv"}, ExternalIDType: "tmdb", ExternalIDLabel: "TMDB",
-			ManualRows: true, FallbackTitleLang: "en",
-			UnmatchedNote: "Imported from Yamtrack; TMDB had no match for #{id}.",
+			Accept:   []string{".csv"}, ManualRows: true, FallbackTitleLang: "en",
 		}},
 		Exporters: []plugin.ExporterInfo{{ID: ExporterJSON, Name: "JSON", Extension: ".json", MIME: "application/json"}},
 	}
@@ -105,7 +103,13 @@ func manifest(opts Options) plugin.Manifest {
 			ExternalIDTypes: []string{"tmdb", "imdb", "tvdb"}, SupportsLookup: true,
 			Kinds: []string{KindShow}, LinkLabel: "View on TMDB", URLPatterns: []string{"themoviedb.org/tv/{id}"},
 		})
+		m.Importers[0].ExternalIDType = "tmdb"
+		m.Importers[0].ExternalIDLabel = "TMDB"
+		m.Importers[0].ExternalIDType = "tmdb"
+		m.Importers[0].ExternalIDLabel = "TMDB"
 		m.Importers[0].ResolveVia = SourceTMDB
+		m.Importers[0].UnmatchedNote = "Imported from Yamtrack; TMDB had no match for #{id}."
+		m.Importers[0].UnmatchedNote = "Imported from Yamtrack; TMDB had no match for #{id}."
 	}
 	return m
 }

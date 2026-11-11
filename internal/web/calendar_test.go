@@ -184,5 +184,5 @@ func TestCalendarSeasonLabels(t *testing.T) {
 	b := e.get("/calendar.ics").Body.String()
 	mustContain(t, b, "UID:"+idStr(id)+"-s2-5@allister\r\n", "SUMMARY:Dark — Season 2\\, Episode 5\r\n")
 	page := e.get("/calendar").Body.String()
-	mustContain(t, page, "S2E5")
+	mustContain(t, page, "S2E5", ">S2E5</span>")
 }

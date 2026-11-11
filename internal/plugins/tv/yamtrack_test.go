@@ -12,6 +12,8 @@ const yamtrackTVCSV = `media_id,source,media_type,title,image,season_number,epis
 101,tmdb,tv,The Show,https://img/show.jpg,,,8.0,In progress,,2026-01-01 00:00:00+00:00,2026-02-01 00:00:00+00:00,15
 101,tmdb,season,The Show,,1,,,Completed,,,2026-01-01 00:00:00+00:00,12
 101,tmdb,season,The Show,,2,,,In progress,,,2026-02-01 00:00:00+00:00,3
+101,tmdb,season,The Show,,3,,,Planning,,,,
+101,tmdb,season,The Show,,0,,,Completed,,,2026-01-01 00:00:00+00:00,1
 101,tmdb,episode,The Show,,1,1,,,,,2026-01-01 00:00:00+00:00,
 101,tmdb,episode,The Show,,1,2,,,,,2026-01-01 00:00:00+00:00,
 101,tmdb,episode,The Show,,2,1,,,,,2026-02-01 00:00:00+00:00,

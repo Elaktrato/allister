@@ -52,7 +52,11 @@ func showData(r showRecord) plugin.ItemData {
 		}
 		switch {
 		case value.Text != "":
-			d.Fields[key] = plugin.FieldValue{Text: plugin.SingleLine(value.Text, maxTextRunes)}
+			if key == "synopsis" {
+				d.Fields[key] = plugin.FieldValue{Text: plugin.MultiLine(value.Text, maxTextRunes)}
+			} else {
+				d.Fields[key] = plugin.FieldValue{Text: plugin.SingleLine(value.Text, maxTextRunes)}
+			}
 		case value.Num != nil:
 			n := *value.Num
 			d.Fields[key] = plugin.FieldValue{Num: &n}

@@ -27,11 +27,13 @@ func TestManifest(t *testing.T) {
 			t.Fatalf("position must reset on +1")
 		}
 	}
-	if len(m.Sources) != 1 || m.Sources[0].ID != SourceTVmaze || !m.Sources[0].SupportsSchedule || m.Importers[0].ResolveVia != "" {
+	if len(m.Sources) != 1 || m.Sources[0].ID != SourceTVmaze || !m.Sources[0].SupportsSchedule ||
+		m.Importers[0].ResolveVia != "" || m.Importers[0].ExternalIDType != "" || m.Importers[0].UnmatchedNote != "" {
 		t.Fatalf("default sources/importers = %+v %+v", m.Sources, m.Importers)
 	}
 	withKey := New(Options{TMDBKey: "k"}).Manifest()
-	if len(withKey.Sources) != 2 || withKey.Sources[1].ID != SourceTMDB || withKey.Sources[1].SupportsSchedule || withKey.Importers[0].ResolveVia != SourceTMDB {
+	if len(withKey.Sources) != 2 || withKey.Sources[1].ID != SourceTMDB || withKey.Sources[1].SupportsSchedule ||
+		withKey.Importers[0].ResolveVia != SourceTMDB || withKey.Importers[0].ExternalIDType != "tmdb" || withKey.Importers[0].UnmatchedNote == "" {
 		t.Fatalf("tmdb manifest = %+v %+v", withKey.Sources, withKey.Importers)
 	}
 	if err := plugin.Validate(withKey); err != nil {

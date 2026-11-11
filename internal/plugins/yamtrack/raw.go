@@ -15,8 +15,8 @@ import (
 )
 
 // RawRow is one CSV row before a plugin decides what its media type means.
-// The anime and TV importers filter/aggregate these rows; the CSV, score,
-// date, progress and status-column handling stays in one place.
+// Parse uses it for the anime filter and the TV importer groups it; the CSV,
+// score, date, progress and status-column handling stays in one place.
 type RawRow struct {
 	Line                  int
 	Source, MediaID       string
@@ -33,7 +33,7 @@ type RawRow struct {
 	Notes                 []string
 }
 
-var rawRequiredColumns = []string{"media_type", "status", "title"}
+var rawRequiredColumns = []string{"media_id", "media_type", "status", "title"}
 
 // ParseRaw reads every row of a Yamtrack export without filtering a media
 // type. It accepts blank statuses (episode rows use no status), blank ids and

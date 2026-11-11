@@ -17,6 +17,7 @@ type tvAggregate struct {
 	show     yamtrack.RawRow
 	seasons  map[int]*yamtrack.RawRow
 	episodes map[int]map[int]bool
+	notes    []string
 }
 
 func (yamtrackTVImporter) Parse(ctx context.Context, r io.Reader) (plugin.ParseResult, error) {
@@ -51,8 +52,19 @@ func (yamtrackTVImporter) Parse(ctx context.Context, r io.Reader) (plugin.ParseR
 				res.Skipped = append(res.Skipped, plugin.SkippedRow{Line: row.Line, Title: row.Title, Reason: "season without a TV row"})
 				continue
 			}
+			if row.SeasonNumber < 1 {
+				g.notes = append(g.notes, fmt.Sprintf("season row %d ignored (specials are not progress)", row.SeasonNumber))
+				continue
+			}
+			if _, exists := g.seasons[row.SeasonNumber]; exists {
+				g.notes = append(g.notes, fmt.Sprintf("duplicate season %d ignored", row.SeasonNumber))
+				continue
+			}
 			s := row
 			g.seasons[row.SeasonNumber] = &s
+			for _, n := range row.Notes {
+				g.notes = append(g.notes, fmt.Sprintf("season %d: %s", row.SeasonNumber, n))
+			}
 		case "episode":
 			key := tvKey(row)
 			g := groups[key]
@@ -66,18 +78,20 @@ func (yamtrackTVImporter) Parse(ctx context.Context, r io.Reader) (plugin.ParseR
 				}
 				g.episodes[row.SeasonNumber][row.EpisodeNumber] = true
 			}
+			for _, n := range row.Notes {
+				g.notes = append(g.notes, fmt.Sprintf("season %d episode %d: %s", row.SeasonNumber, row.EpisodeNumber, n))
+			}
 		default:
 			res.Ignored++
 		}
 	}
 	for _, key := range order {
 		g := groups[key]
-		entry, notes, ok := tvEntry(*g)
-		if !ok {
-			res.Skipped = append(res.Skipped, plugin.SkippedRow{Line: g.show.Line, Title: g.show.Title, Reason: "TV row has an unknown status"})
+		entry, _, reason := tvEntry(*g)
+		if reason != "" {
+			res.Skipped = append(res.Skipped, plugin.SkippedRow{Line: g.show.Line, Title: g.show.Title, Reason: reason})
 			continue
 		}
-		entry.Notes = notes
 		res.Entries = append(res.Entries, entry)
 	}
 	return res, nil
@@ -94,53 +108,58 @@ func tvKey(row yamtrack.RawRow) string {
 	return ""
 }
 
-func tvEntry(g tvAggregate) (plugin.ParsedEntry, []string, bool) {
+func tvEntry(g tvAggregate) (plugin.ParsedEntry, []string, string) {
 	show := g.show
-	if show.Status == "" {
-		return plugin.ParsedEntry{}, nil, false
-	}
 	title := plugin.SingleLine(show.Title, maxTitleRunes)
 	if title == "" {
-		return plugin.ParsedEntry{}, nil, false
+		return plugin.ParsedEntry{}, nil, "TV row has no title"
 	}
-	startSeason, episodes := 0, 0
-	for season := range g.seasons {
-		if season > startSeason {
-			startSeason = season
-		}
+	if show.Status == "" {
+		return plugin.ParsedEntry{}, nil, "TV row has an unknown status"
 	}
 	perSeason := map[int]int{}
 	for season, set := range g.episodes {
-		perSeason[season] = len(set)
+		if season >= 1 {
+			perSeason[season] = len(set)
+		}
 	}
 	for season, s := range g.seasons {
-		if s.Progress > perSeason[season] {
+		if season >= 1 && s.Progress > perSeason[season] {
 			perSeason[season] = s.Progress
 		}
-		if season > startSeason || perSeason[season] > 0 {
-			if season > startSeason {
-				startSeason = season
+	}
+	current := 0
+	for season, s := range g.seasons {
+		if season < 1 {
+			continue
+		}
+		if perSeason[season] > 0 || s.Status == plugin.Completed {
+			if season > current {
+				current = season
 			}
 		}
 	}
-	// current season is the highest season with progress (or a season row)
 	for season, watched := range perSeason {
-		if watched > 0 && season > startSeason {
-			startSeason = season
+		if watched > 0 && season > current {
+			current = season
 		}
 	}
-	if show.Progress > 0 {
-		episodes = show.Progress
-	} else {
-		for _, watched := range perSeason {
-			episodes += watched
+	episodes := show.Progress
+	if episodes <= 0 {
+		for season, watched := range perSeason {
+			if season >= 1 {
+				episodes += watched
+			}
 		}
 	}
-	notes := []string{}
+	notes := append([]string(nil), show.Notes...)
+	notes = append(notes, g.notes...)
 	if show.Progress > 0 {
 		sum := 0
-		for _, watched := range perSeason {
-			sum += watched
+		for season, watched := range perSeason {
+			if season >= 1 {
+				sum += watched
+			}
 		}
 		if sum > 0 && sum != show.Progress {
 			notes = append(notes, fmt.Sprintf("TV progress %d differs from season rows (%d); kept the TV progress", show.Progress, sum))
@@ -148,12 +167,13 @@ func tvEntry(g tvAggregate) (plugin.ParsedEntry, []string, bool) {
 	}
 	entry := plugin.ParsedEntry{
 		Kind: KindShow, Title: title, Status: show.Status,
-		Progress: map[string]float64{"season": float64(startSeason), "episode": float64(episodes)},
+		Progress: map[string]float64{"season": float64(current), "episode": float64(episodes)},
 		Rating:   show.Rating, StartedOn: show.StartedOn, FinishedOn: show.FinishedOn,
 		Comment:  plugin.MultiLine(show.Comment, maxTextRunes),
 		CoverURL: plugin.HTTPSURL(show.ImageURL),
+		Notes:    notes,
 	}
-	if show.Source == SourceTMDB || show.Source == "tmdb" {
+	if show.Source == SourceTMDB {
 		if id := numericID(show.MediaID); id != "" {
 			entry.ExternalIDs = map[string]string{"tmdb": id}
 		}
@@ -162,7 +182,7 @@ func tvEntry(g tvAggregate) (plugin.ParsedEntry, []string, bool) {
 			entry.ExternalIDs = map[string]string{"tvdb": id}
 		}
 	}
-	return entry, notes, true
+	return entry, notes, ""
 }
 
 func numericID(s string) string {

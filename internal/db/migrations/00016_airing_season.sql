@@ -21,6 +21,6 @@ CREATE TABLE airings_old (
     PRIMARY KEY (item_id, number)
 );
 INSERT INTO airings_old(item_id, number, airs_at)
-    SELECT item_id, number, airs_at FROM airings GROUP BY item_id, number;
+    SELECT item_id, number, MIN(airs_at) FROM airings GROUP BY item_id, number;
 DROP TABLE airings;
 ALTER TABLE airings_old RENAME TO airings;
