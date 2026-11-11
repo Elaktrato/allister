@@ -278,9 +278,12 @@ func (s *server) postMatch(w http.ResponseWriter, r *http.Request, pluginID stri
 		s.internalError(w, r, err)
 		return
 	}
-	// the identity is the user's choice (matched against the manifest), not
-	// what the source returned
-	d.Source, d.ID, d.Kind = si.ID, id, t.kind.Key
+	// the source is the user's choice (matched against the manifest); the id
+	// is the source's canonical one, the matched input only when it sent none
+	d.Source, d.Kind = si.ID, t.kind.Key
+	if d.ID == "" {
+		d.ID = id
+	}
 
 	// 3. Convert in one transaction (entry untouched, progress clamped).
 	err = s.deps.Library.ConvertToSource(ctx, t.item.ID, d)
@@ -305,5 +308,5 @@ func (s *server) postMatch(w http.ResponseWriter, r *http.Request, pluginID stri
 	}
 
 	s.enqueueSync(ctx, t.man.ID, t.item.ID)
-	s.done(w, r, itemURL(t.man, si.ID, id, t.kind.Key))
+	s.done(w, r, itemURL(t.man, si.ID, d.ID, t.kind.Key))
 }

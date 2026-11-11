@@ -599,13 +599,43 @@ func TestMatchWithSeveralSources(t *testing.T) {
 	}
 }
 
+// The source's canonical id wins over the matched input (a pasted slug
+// stores the numeric or canonical id, so a later add of the same game
+// converges).
+func TestMatchStoresCanonicalSourceID(t *testing.T) {
+	e := newFixtureEnv(t)
+	id := tvManual(t, e.env)
+	e.tv.Data = tvShow("canonical-slug", "Found")
+	rec := e.do("POST", "/tv/manual/m1/match", url.Values{"pick": {"input-id"}}, false)
+	if rec.Code != 303 || rec.Header().Get("Location") != "/tv/tvdata/canonical-slug" {
+		t.Fatalf("%d %q %s", rec.Code, rec.Header().Get("Location"), rec.Body.String())
+	}
+	if it, _ := e.snapshot(t, id); it.Source != "tvdata" || it.SourceID != "canonical-slug" {
+		t.Fatalf("%+v", it)
+	}
+}
+
+// Without a canonical id from the source the matched input is kept.
+func TestMatchCanonicalIDFallsBackToInput(t *testing.T) {
+	e := newFixtureEnv(t)
+	id := tvManual(t, e.env)
+	e.tv.Data = tvShow("", "Found")
+	rec := e.do("POST", "/tv/manual/m1/match", url.Values{"pick": {"input-id"}}, false)
+	if rec.Code != 303 || rec.Header().Get("Location") != "/tv/tvdata/input-id" {
+		t.Fatalf("%d %q %s", rec.Code, rec.Header().Get("Location"), rec.Body.String())
+	}
+	if it, _ := e.snapshot(t, id); it.SourceID != "input-id" {
+		t.Fatalf("%+v", it)
+	}
+}
+
 // A pick and a pasted reference are both any valid source id (a bare id of
 // letters, digits, '_' and '-', or a URL matching the source's patterns);
 // the source's Details verifies it either way.
 func TestMatchPickAcceptsNonDigitIDs(t *testing.T) {
 	e := newFixtureEnv(t)
 	id := tvManual(t, e.env)
-	e.tv.Data = tvShow("x", "Found")
+	e.tv.Data = tvShow("tt-77", "Found")
 	rec := e.do("POST", "/tv/manual/m1/match", url.Values{"pick": {"tt-77"}}, true)
 	if rec.Code != 204 || rec.Header().Get("HX-Redirect") != "/tv/tvdata/tt-77" {
 		t.Fatalf("%d %q %s", rec.Code, rec.Header().Get("HX-Redirect"), rec.Body.String())
@@ -615,7 +645,7 @@ func TestMatchPickAcceptsNonDigitIDs(t *testing.T) {
 	}
 	e2 := newFixtureEnv(t)
 	id2 := tvManual(t, e2.env)
-	e2.tv.Data = tvShow("x", "Found")
+	e2.tv.Data = tvShow("tt-77", "Found")
 	if rec := e2.do("POST", "/tv/manual/m1/match", url.Values{"source_ref": {"tt-77"}}, true); rec.Code != 204 ||
 		rec.Header().Get("HX-Redirect") != "/tv/tvdata/tt-77" {
 		t.Fatalf("reference: %d %q %s", rec.Code, rec.Header().Get("HX-Redirect"), rec.Body.String())
