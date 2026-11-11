@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net"
 	"net/http"
@@ -136,5 +137,48 @@ func TestRemoveRestoreTempsWithGlobCharactersInDataDir(t *testing.T) {
 	}
 	if len(left) != 3 || left[0] != "other.zip" || left[1] != "restore-2.zip.part" || left[2] != "restore-dir.zip" {
 		t.Fatalf("left = %v", left)
+	}
+}
+
+// TestResolveSourceKey: a saved key wins over the environment, an unset one
+// falls back to it, and a lookup failure is reported instead of silently
+// falling back (the cause must not be hidden).
+func TestResolveSourceKey(t *testing.T) {
+	ctx := context.Background()
+	boom := errors.New("settings store unavailable")
+	fallback := map[string]string{"tmdb": "env-key"}
+	cases := []struct {
+		name     string
+		stored   func(context.Context, string) (string, error)
+		sourceID string
+		want     string
+		wantErr  error
+	}{
+		{
+			name:     "stored key wins",
+			stored:   func(context.Context, string) (string, error) { return "stored-key", nil },
+			sourceID: "tmdb",
+			want:     "stored-key",
+		},
+		{
+			name:     "empty stored key falls back to the environment",
+			stored:   func(context.Context, string) (string, error) { return "", nil },
+			sourceID: "tmdb",
+			want:     "env-key",
+		},
+		{
+			name:     "lookup error is returned instead of falling back",
+			stored:   func(context.Context, string) (string, error) { return "", boom },
+			sourceID: "tmdb",
+			wantErr:  boom,
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got, err := resolveSourceKey(ctx, c.stored, fallback, c.sourceID)
+			if got != c.want || !errors.Is(err, c.wantErr) {
+				t.Fatalf("resolveSourceKey = %q, %v; want %q, %v", got, err, c.want, c.wantErr)
+			}
+		})
 	}
 }

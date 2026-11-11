@@ -62,11 +62,7 @@ func run() error {
 	// without a restart.
 	fallback := map[string]string{"tmdb": cfg.TMDBKey}
 	sourceKey := func(ctx context.Context, sourceID string) (string, error) {
-		stored, err := settingsStore.SourceKey(ctx, sourceID)
-		if err != nil || stored != "" {
-			return stored, err
-		}
-		return fallback[sourceID], nil
+		return resolveSourceKey(ctx, settingsStore.SourceKey, fallback, sourceID)
 	}
 	tmdbKey := func(ctx context.Context) (string, error) { return sourceKey(ctx, "tmdb") }
 	registry := plugin.NewRegistry(settingsStore)
@@ -153,6 +149,17 @@ func run() error {
 	stopWorker()
 	wg.Wait()
 	return err
+}
+
+// resolveSourceKey returns the stored key of sourceID, or fallback[sourceID]
+// when none is saved. A lookup failure is returned (never replaced by the
+// fallback), so a broken settings store stays visible.
+func resolveSourceKey(ctx context.Context, stored func(context.Context, string) (string, error), fallback map[string]string, sourceID string) (string, error) {
+	key, err := stored(ctx, sourceID)
+	if err != nil || key != "" {
+		return key, err
+	}
+	return fallback[sourceID], nil
 }
 
 // serve listens on srv.Addr and runs srv until ctx is cancelled, then shuts it

@@ -78,6 +78,29 @@ func TestScheduleErrors(t *testing.T) {
 	}
 }
 
+// TestScheduleNotConfiguredKeepsStoredSchedule: a source without a usable
+// credential cannot answer until the user configures it, so the job keeps the
+// stored air dates and finishes instead of asking for a retry.
+func TestScheduleNotConfiguredKeepsStoredSchedule(t *testing.T) {
+	e := newSyncEnv(t)
+	id := e.save(t, "tvdata", "")
+	activeEntry(t, e.lib, id, library.Active)
+	at := time.Date(2026, 11, 19, 20, 0, 0, 0, time.UTC)
+	e.src.Airings = []plugin.Airing{{Season: 1, Number: 4, AirsAt: at}}
+	h := Schedule(ScheduleDeps{Library: e.lib, Registry: e.reg})
+	if err := h(context.Background(), schedulePayload(id)); err != nil {
+		t.Fatal(err)
+	}
+	e.src.Errs = map[string]error{plugintest.OpSchedule: plugin.ErrNotConfigured}
+	if err := h(context.Background(), schedulePayload(id)); err != nil {
+		t.Fatalf("not configured: %v", err)
+	}
+	got, err := e.lib.ScheduleEntries(context.Background())
+	if err != nil || len(got) != 1 || got[0].ItemID != id || !got[0].AirsAt.Equal(at) {
+		t.Fatalf("stored schedule = %+v, %v", got, err)
+	}
+}
+
 // TestSyncItemRefreshesTheSchedule: the item sync stores the schedule of an
 // active entry (so adding to the watching list fills the calendar at once)
 // and skips other statuses.

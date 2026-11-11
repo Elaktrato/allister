@@ -98,6 +98,16 @@ func TestMatchNeedsConfiguration(t *testing.T) {
 	if it, _ := e.snapshot(t, id); it.Source != "manual" {
 		t.Fatalf("item converted despite the missing key: %+v", it)
 	}
+
+	// the results partial cannot search without the key either: 503 with the
+	// message and no page chrome
+	e.tv.Errs = map[string]error{plugintest.OpSearch: plugin.ErrNotConfigured}
+	rec = e.do("GET", "/tv/manual/m1/match/search?q=dark", nil, true)
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("search: got %d", rec.Code)
+	}
+	mustContain(t, rec.Body.String(), needsKeyMessage)
+	mustNotContain(t, rec.Body.String(), "<html")
 }
 
 // TestRecommendationsNeedConfiguration: the late-loaded block stays a 200

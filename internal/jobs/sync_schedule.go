@@ -42,7 +42,8 @@ type ScheduleDeps struct {
 // source's air dates for active entries; a source that answers "not found"
 // stores an empty schedule (the marker keeps it from being asked again), rate
 // limits and outages ask for a later retry, an unusable answer fails the job
-// permanently.
+// permanently; a source without a usable credential keeps the stored schedule
+// and finishes done.
 func Schedule(deps ScheduleDeps) Handler {
 	return func(ctx context.Context, raw json.RawMessage) error {
 		var p SchedulePayload
@@ -69,7 +70,9 @@ func Schedule(deps ScheduleDeps) Handler {
 
 // refreshSchedule stores the item's airing schedule; it is the shared path of
 // the sync_schedule job and the item sync. Inactive entries keep whatever is
-// stored (the feed ignores it), sources without the capability are skipped.
+// stored (the feed ignores it), sources without the capability are skipped. A
+// source that still needs its credential keeps the stored schedule and counts
+// as done (asked again only after a key is saved).
 func refreshSchedule(ctx context.Context, lib *library.Library, reg *plugin.Registry, it *library.Item) error {
 	en, err := lib.Entry(ctx, it.ID)
 	if err != nil {
@@ -89,6 +92,11 @@ func refreshSchedule(ctx context.Context, lib *library.Library, reg *plugin.Regi
 	switch {
 	case errors.Is(err, plugin.ErrNotFound):
 		airings = nil // the source does not know the item: record "asked"
+	case errors.Is(err, plugin.ErrNotConfigured):
+		// The source has no usable credential: it cannot answer until the
+		// user configures it, so retrying is pointless. Keep the stored
+		// schedule and finish; the key itself is never logged.
+		return nil
 	case errors.Is(err, plugin.ErrRateLimited), errors.Is(err, plugin.ErrUnavailable):
 		return fmt.Errorf("fetch schedule: %w: %w", err, ErrRetryLater)
 	case errors.Is(err, plugin.ErrBadResponse):
