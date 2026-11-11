@@ -424,16 +424,16 @@ func (s *server) fetchLive(ctx context.Context, t *addTarget) error {
 	return nil
 }
 
-// addFailure handles a resolveAdd or fetchLive error: source outages (503)
-// and unusable source answers (502) re-render the dialog (keeping the form)
-// with a readable message, the rest use error pages.
+// addFailure handles a resolveAdd or fetchLive error: source outages (503),
+// missing credentials (503) and unusable source answers (502) re-render the
+// dialog (keeping the form) with a readable message, the rest use error pages.
 func (s *server) addFailure(w http.ResponseWriter, r *http.Request, m plugin.Manifest, ref itemRef, v entryValues, err error) {
 	retry := itemURL(m, ref.Source, ref.ID, ref.Kind)
 	status := http.StatusServiceUnavailable
 	switch {
 	case errors.Is(err, plugin.ErrBadResponse):
 		status = http.StatusBadGateway
-	case errors.Is(err, plugin.ErrRateLimited), errors.Is(err, plugin.ErrUnavailable):
+	case errors.Is(err, plugin.ErrRateLimited), errors.Is(err, plugin.ErrUnavailable), errors.Is(err, plugin.ErrNotConfigured):
 	default:
 		s.itemFail(w, r, m, ref.Source, err, retry)
 		return

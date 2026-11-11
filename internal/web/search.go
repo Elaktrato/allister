@@ -5,6 +5,7 @@ package web
 // (the first by default) and renders result cards from the kind's schema.
 
 import (
+	"context"
 	"errors"
 	"log"
 	"net/http"
@@ -47,10 +48,13 @@ type searchView struct {
 	Searched                                           bool
 	Results                                            []searchCard
 	// Message is a user-facing error; Retry says whether to offer a retry
-	// button requesting RetryURL.
+	// button requesting RetryURL. Status is the answer's status when the
+	// search fails for a reason the page itself should carry (a missing
+	// credential: 503), else 0 for 200.
 	Message  string
 	Retry    bool
 	RetryURL string
+	Status   int
 	// Sources and Kinds are the switches, set only when there are several.
 	Sources, Kinds []choice
 }
@@ -131,6 +135,23 @@ func sourcesForKind(m plugin.Manifest, kind string) []plugin.SourceInfo {
 	return out
 }
 
+// sourceChoiceLabel is a source's name in a source switch, marked with
+// " (needs key)" while the source declares a key label and no effective key is
+// configured. It never changes the heading or the result badges.
+func (s *server) sourceChoiceLabel(ctx context.Context, si plugin.SourceInfo) string {
+	if si.KeyLabel == "" {
+		return si.Name
+	}
+	key, err := s.sourceKey(ctx, si.ID)
+	if err != nil {
+		log.Printf("source choice %s: read key: %v", si.ID, err)
+	}
+	if key != "" {
+		return si.Name
+	}
+	return si.Name + " (needs key)"
+}
+
 // defaultSourceForKind is the first source serving kind that supports lookup,
 // else the first one serving it. A plugin whose sources have no Kinds keeps
 // the old default.
@@ -195,7 +216,7 @@ func (s *server) search(w http.ResponseWriter, r *http.Request, pluginID string)
 	validSources := sourcesForKind(m, k.Key)
 	if len(validSources) > 1 {
 		for _, x := range validSources {
-			v.Sources = append(v.Sources, choice{Value: x.ID, Label: x.Name, Selected: x.ID == si.ID})
+			v.Sources = append(v.Sources, choice{Value: x.ID, Label: s.sourceChoiceLabel(r.Context(), x), Selected: x.ID == si.ID})
 		}
 		if si.ID != validSources[0].ID {
 			v.RetryURL += "&source=" + url.QueryEscape(si.ID)
@@ -212,15 +233,19 @@ func (s *server) search(w http.ResponseWriter, r *http.Request, pluginID string)
 	if q != "" {
 		s.runSearch(r, m, si, k, q, &v)
 	}
+	status := http.StatusOK
+	if v.Status != 0 {
+		status = v.Status
+	}
 	if isPartialRequest(r) {
 		if r.Header.Get("HX-Target") == "search-panel" {
-			s.renderPartial(w, "search", "search_panel", v)
+			s.renderPartialStatus(w, status, "search", "search_panel", v)
 			return
 		}
-		s.renderPartial(w, "search", "search_results", v)
+		s.renderPartialStatus(w, status, "search", "search_results", v)
 		return
 	}
-	s.render(w, r, "search", v)
+	s.renderStatus(w, r, status, "search", v)
 }
 
 func (s *server) runSearch(r *http.Request, m plugin.Manifest, si plugin.SourceInfo, k plugin.KindDef, q string, v *searchView) {
@@ -234,6 +259,11 @@ func (s *server) runSearch(r *http.Request, m plugin.Manifest, si plugin.SourceI
 	res, err := src.Search(r.Context(), k.Key, q)
 	switch {
 	case err == nil, errors.Is(err, plugin.ErrNotFound):
+	case errors.Is(err, plugin.ErrNotConfigured):
+		// the page itself carries the status: the user must set a key
+		log.Printf("search %q: %v", q, err)
+		v.Message, v.Retry, v.Status = sourceMessage(m, si.ID, err), true, http.StatusServiceUnavailable
+		return
 	case errors.Is(err, plugin.ErrRateLimited):
 		log.Printf("search %q: %v", q, err)
 		v.Message, v.Retry = sourceMessage(m, si.ID, err), true
