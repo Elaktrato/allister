@@ -206,7 +206,7 @@ name, `KeyLabel`, `KeyHelp`, and a form:
 - The stored value is never placed in HTML, not even masked. The input has
   `type="password"`, `autocomplete="new-password"`, `spellcheck="false"`, and
   no value.
-- `POST /settings/plugins/keys/{source}`:
+- `POST /settings/plugins/{source}/key`:
   - `remove=1` clears the stored key and redirects.
   - Otherwise the `key` field is trimmed and validated: 1-500 printable ASCII
     characters (0x21-0x7E), so no spaces or control characters. Empty is an
@@ -390,7 +390,7 @@ TMDB items. A re-import under the skip rule keeps the existing items.
 | `/movie/tmdb/{id}` | Movie overview; `/edit`, `/match`, `/add` as usual |
 | `/movie/manual/new`, `/movie/manual/{id}` | Manual movies |
 | `/movie/export/json` | JSON export |
-| `POST /settings/plugins/keys/{source}` | Save/remove a source key |
+| `POST /settings/plugins/{source}/key` | Save/remove a source key |
 | `/settings/plugins` | API keys card + plugin list |
 
 No calendar routes or schedule capability.

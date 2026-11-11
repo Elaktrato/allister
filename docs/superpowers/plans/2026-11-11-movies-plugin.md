@@ -447,7 +447,7 @@ git commit -m "fix: import unmatched rows when a source needs configuration"
 
 **Interfaces:**
 - Consumes: `settings.SourceKey/SetSourceKey/ClearSourceKey` (Task 2); `plugin.SourceInfo.KeyLabel/KeyHelp` (Task 1).
-- Produces: `web.Deps.SourceKey func(ctx context.Context, sourceID string) (string, error)`; route `POST /settings/plugins/keys/{source}`; `pluginSettingsView.MissingKeys []string`; source key view data on the plugins page.
+- Produces: `web.Deps.SourceKey func(ctx context.Context, sourceID string) (string, error)`; route `POST /settings/plugins/{source}/key`; `pluginSettingsView.MissingKeys []string`; source key view data on the plugins page.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -456,7 +456,7 @@ git commit -m "fix: import unmatched rows when a source needs configuration"
 ```go
 func TestSourceKeysCardSavesAndClearsWithoutEchoing(t *testing.T) {
     // GET /settings/plugins contains the source name, "API key", the help,
-    // and action="/settings/plugins/keys/tvdata"; it has name="key".
+    // and action="/settings/plugins/tvdata/key"; it has name="key".
     // POST key=secret -> 303 /settings/plugins#source-keys; store is "secret".
     // GET no longer contains "secret"; contains "A key is configured." and name="remove".
     // POST remove=1 -> 303; store is empty; GET has no "remove".
@@ -483,7 +483,7 @@ Build `sourceKeyView{ID, Name, Label, Help, Action, Configured, Stored}` by walk
 
 Template: a `source-keys` section before the plugins list, rendered only when `SourceKeys` is non-empty. Each block shows Name, Label, Help; when configured, “A key is configured.”; a password input (`name="key"`, no value, `autocomplete="new-password"`, `spellcheck="false"`); Save; and Remove (`name="remove" value="1"`) only when `Stored`.
 
-The card adds forms whose action starts with `/settings/plugins/keys/`. If an existing test helper matches forms by the `/settings/plugins/` prefix (for example `columns_test.go`), tighten it to the plugin id so it cannot pick a key form.
+The card adds forms whose action ends with `/key`. If an existing test helper matches forms by the `/settings/plugins/` prefix (for example `columns_test.go`), tighten it to the plugin id so it cannot pick a key form.
 
 `pluginSettingsData` adds `MissingKeys` (names of the plugin's sources with `KeyLabel` and no effective key). The plugin template shows a notice with `href="/settings/plugins#source-keys"`; when the plugin also has a source without `KeyLabel`, the notice adds that the other sources work without a key (TV's TVmaze).
 
