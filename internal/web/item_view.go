@@ -118,7 +118,7 @@ func (s *server) itemView(ctx context.Context, li *loadedItem) itemView {
 		v.PartialSync = it.SyncState != "done"
 		v.DetailsURL = itemAction(m, d.Source, d.ID, d.Kind, "edit", url.Values{"return": {overview}})
 		if it.Source == manualSource && len(m.Sources) > 0 {
-			v.MatchURL, v.MatchLabel = itemAction(m, d.Source, d.ID, d.Kind, "match", nil), "Match to "+defaultSource(m).Name
+			v.MatchURL, v.MatchLabel = itemAction(m, d.Source, d.ID, d.Kind, "match", nil), "Match to "+defaultSourceForKind(m, d.Kind).Name
 			v.UnmatchedHint = unmatchedHint(m, it)
 		}
 		if li.entry != nil {

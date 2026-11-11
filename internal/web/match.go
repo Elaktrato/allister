@@ -108,7 +108,8 @@ func chooseSource(m plugin.Manifest, id string) (plugin.SourceInfo, bool) {
 func (s *server) newMatchView(r *http.Request, t *matchTarget, si plugin.SourceInfo) matchView {
 	m := t.man
 	var extra url.Values
-	if len(m.Sources) > 1 {
+	validSources := sourcesForKind(m, t.ref.Kind)
+	if len(validSources) > 1 {
 		extra = url.Values{"source": {si.ID}}
 	}
 	v := matchView{
@@ -139,8 +140,8 @@ func (s *server) newMatchView(r *http.Request, t *matchTarget, si plugin.SourceI
 		v.ExternalIDs = append(v.ExternalIDs, label+" #"+val)
 	}
 	sort.Strings(v.ExternalIDs)
-	if len(m.Sources) > 1 {
-		for _, x := range m.Sources {
+	if len(validSources) > 1 {
+		for _, x := range validSources {
 			v.Sources = append(v.Sources, choice{Value: itemAction(m, t.ref.Source, t.ref.ID, t.ref.Kind, "match", url.Values{"source": {x.ID}}),
 				Label: x.Name, Selected: x.ID == si.ID})
 		}
@@ -163,7 +164,7 @@ func (s *server) getMatch(w http.ResponseWriter, r *http.Request, pluginID strin
 	if !ok {
 		return
 	}
-	si, ok := chooseSource(t.man, r.URL.Query().Get("source"))
+	si, ok := chooseSourceForKind(t.man, t.ref.Kind, r.URL.Query().Get("source"))
 	if !ok {
 		s.matchNotFound(w, r)
 		return
@@ -176,7 +177,7 @@ func (s *server) getMatchSearch(w http.ResponseWriter, r *http.Request, pluginID
 	if !ok {
 		return
 	}
-	si, ok := chooseSource(t.man, r.URL.Query().Get("source"))
+	si, ok := chooseSourceForKind(t.man, t.ref.Kind, r.URL.Query().Get("source"))
 	if !ok {
 		s.matchNotFound(w, r)
 		return
@@ -205,11 +206,15 @@ func (s *server) postMatch(w http.ResponseWriter, r *http.Request, pluginID stri
 		return
 	}
 	ctx := r.Context()
-	si, ok := chooseSource(t.man, strings.TrimSpace(r.PostFormValue("source")))
+	si, ok := chooseSourceForKind(t.man, t.ref.Kind, strings.TrimSpace(r.PostFormValue("source")))
 	pick := strings.TrimSpace(r.PostFormValue("pick"))
 	raw := strings.TrimSpace(r.PostFormValue("source_ref"))
 	if !ok {
-		v := s.newMatchView(r, t, defaultSource(t.man))
+		fallback := defaultSourceForKind(t.man, t.ref.Kind)
+		if fallback.ID == "" {
+			fallback = defaultSource(t.man)
+		}
+		v := s.newMatchView(r, t, fallback)
 		v.SourceRef, v.Error = raw, "Please choose a source from the list."
 		s.matchResponse(w, r, t, v, http.StatusUnprocessableEntity)
 		return

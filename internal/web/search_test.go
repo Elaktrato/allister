@@ -330,6 +330,35 @@ func TestSearchResultsCappedAt20(t *testing.T) {
 	}
 }
 
+// kindSources gives the book fixture a book-only "books" source and a
+// comic-only "openlib" source, to exercise SourceInfo.Kinds filtering.
+func kindSources(book, _ *plugintest.Plugin) {
+	book.M.Sources[0].Kinds = []string{"book"}
+	other := &plugintest.FakeSource{Summaries: []plugin.ItemSummary{{Source: "openlib", ID: "OL1", Kind: "comic", Titles: ttl("Comic Book")}}}
+	book.M.Sources = append(book.M.Sources, plugin.SourceInfo{ID: "openlib", Name: "Open Library", RequestsPerMinute: 60,
+		ExternalIDTypes: []string{"isbn"}, SupportsLookup: true, Kinds: []string{"comic"}, URLPatterns: []string{"openlib.example/w/{id}"}})
+	book.Sources["openlib"] = other
+}
+
+func TestSearchFiltersSourcesByKind(t *testing.T) {
+	e := newFixtureEnv(t, withComicKind, kindSources)
+	e.book.Summaries = []plugin.ItemSummary{bookSummary("42", "Some Book")}
+	b := e.get("/book/search?q=x").Body.String()
+	mustContain(t, b, "Some Book", `href="/book/books/42`)
+	mustNotContain(t, b, "Comic Book", `name="source"`)
+	b = e.get("/book/search?q=x&kind=comic").Body.String()
+	mustContain(t, b, "Comic Book", `href="/book/openlib/OL1`)
+	mustNotContain(t, b, "Some Book", `name="source"`)
+	// a source that exists but does not serve the kind falls back to the first
+	// source that does
+	b = e.get("/book/search?q=x&kind=comic&source=books").Body.String()
+	mustContain(t, b, "Comic Book", `href="/book/openlib/OL1`)
+	// an unknown source is still a 404
+	if c := e.get("/book/search?q=x&kind=comic&source=nope").Code; c != 404 {
+		t.Fatalf("unknown source: %d", c)
+	}
+}
+
 func TestSearchSourceSwitchOnlyWithSeveralSources(t *testing.T) {
 	other := &plugintest.FakeSource{Summaries: []plugin.ItemSummary{{Source: "openlib", ID: "OL1", Kind: "book", Titles: ttl("Other Source Book")}}}
 	e := newFixtureEnv(t, func(book, _ *plugintest.Plugin) {

@@ -2,7 +2,7 @@
 
 > I'm vibe-coding this mainly for myself and to keep track of my stuff without having to go to x amount of sites. If there's a new thing I can and want to list, I want to be able to add and enable/disable it on the go. Hence the plug-in idea for every type of media. But in case anyone else has similar ideas and tastes to what I built here, please enjoy. All + List + Alistor... I swear I can be creative when I want to be!
 
-Allister is a self-hosted personal tracker for the things you watch, read and play. A generic core stores your library and draws every page. Each media type is a plugin that you can switch on and off. Anime is the first and, for now, the only plugin. Manga, movies, TV, games and books are planned as further plugins.
+Allister is a self-hosted personal tracker for the things you watch, read and play. A generic core stores your library and draws every page. Each media type is a plugin that you can switch on and off. Anime, manga and books are the first plugins; movies, TV and games are planned.
 
 It is a single Go binary with a SQLite database, server-rendered pages, htmx and Tailwind. Anime metadata comes from AniList.
 
@@ -12,7 +12,7 @@ It is a single Go binary with a SQLite database, server-rendered pages, htmx and
 - Your list: status, rating, progress, dates and comment; 100 per page with status tabs, +1, and search and filters in the URL.
 - Edit details of any saved entry (titles, fields, genres, tags, cover); AniList never overwrites your edits.
 - Character and voice-actor pages, manual entries with cover upload, and "Match to AniList".
-- Yamtrack CSV import, JSON export, and a universal backup with restore.
+- Yamtrack and Goodreads CSV imports, AniList light-novel import, JSON export, and a universal backup with restore.
 - Plugins you can switch off and on in Settings without losing data; per-plugin title language and list columns; covers and photos stored locally.
 - Appearance: colour presets (light, dark, high contrast or following your system) or every colour by hand, system, bundled or your own fonts, and a text size.
 
@@ -24,7 +24,7 @@ docker compose up -d
 
 Open http://localhost:8080. To use another port: `PORT=9000 docker compose up -d`.
 
-All data lives in the named volume `allister-data`, mounted at `/data`. It holds the SQLite database (`allister.db`) and the `covers/` and `fonts/` (uploaded fonts) directories. Configuration: `PORT` (default `8080`, the HTTP port) and `DATA_DIR` (default `/data`, the directory for the database, `covers/` and `fonts/`).
+All data lives in the named volume `allister-data`, mounted at `/data`. It holds the SQLite database (`allister.db`) and the `covers/` and `fonts/` (uploaded fonts) directories. Configuration: `PORT` (default `8080`, the HTTP port), `DATA_DIR` (default `/data`, the database, `covers/` and `fonts/`) and the optional `GOOGLE_BOOKS_API_KEY` for the books plugin.
 
 ## Plugins
 
@@ -32,7 +32,7 @@ A plugin adds one media type: what its entries look like (fields, statuses, prog
 
 The sidebar on the left (a top bar on phones) has one entry per enabled plugin, with the plugin's icon, and Settings at the bottom. Settings has its own column of sections: General, Appearance, Plugins, Import and Backup. Settings > Appearance (`/settings/appearance`) sets the colours (a preset, or every colour in Advanced with contrast warnings), the app font (system stacks, the bundled Inter, Source Serif 4 and JetBrains Mono, or up to 8 fonts you upload: woff2, woff, ttf or otf, 2 MiB each) and the text size, for the whole app; details in [docs/usage.md](docs/usage.md#appearance). Settings > Plugins lists the installed plugins with their version, kinds, sources, importers and exporters, a Settings link (the plugin's title language and list columns) and a Disable or Enable button. Disabling a plugin hides its sidebar entry, pages, person pages, import choices and export links (they answer 404), and pauses its background jobs and imports. All its data stays, and enabling it brings everything back. The home page opens the first enabled plugin's list, or Settings > Plugins when none is enabled.
 
-The **anime plugin** is on by default. It provides the anime kind (type, episodes, year, studio, synopsis, source, start and end dates, genres and tags), the AniList source (30 requests per minute), the Yamtrack CSV importer and the JSON exporter. Its pages live under `/anime`. The **manga plugin** is off until you enable it in Settings > Plugins: it provides the manga kind (type, chapters, volumes, year, author, synopsis, dates, genres and tags), the same AniList source, AniList-account and MyAnimeList-XML imports, and its JSON export; its pages live under `/manga`, and it has no calendar because AniList has no chapter release dates. To write a plugin, see [docs/plugins.md](docs/plugins.md).
+The **anime plugin** is on by default. It provides the anime kind (type, episodes, year, studio, synopsis, source, start and end dates, genres and tags), the AniList source (30 requests per minute), the Yamtrack CSV importer and the JSON exporter. Its pages live under `/anime`. The **manga plugin** is off until you enable it in Settings > Plugins: it provides the manga kind (type, chapters, volumes, year, author, synopsis, dates, genres and tags), the same AniList source, AniList-account and MyAnimeList-XML imports, and its JSON export; its pages live under `/manga`, and it has no calendar because AniList has no chapter release dates. The **books plugin** is off until you enable it: it provides the book kind (author, pages, year, publisher, ISBN, series, synopsis, dates, genres and tags) and the light-novel series kind (volume and chapter progress), with Open Library, Google Books and AniList sources, Goodreads CSV and AniList-account imports and JSON export; its pages live under `/book`. To write a plugin, see [docs/plugins.md](docs/plugins.md).
 
 ## Title language and columns
 
@@ -63,7 +63,7 @@ Open an unmatched entry (or any manual entry) and press "Match to AniList". Past
 
 ## URLs
 
-Anime pages live under `/anime` (list, `/anime/search`, overviews at `/anime/anilist/{id}`, manual entries at `/anime/manual/{id}`, each with `/edit` for Edit details); manga pages use `/manga` the same way. List entries are edited at `/list/{id}/edit`, people at `/people/{id}`, and Settings under `/settings` (sections `/settings/plugins`, each plugin's `/settings/plugins/{id}`, `/settings/import`, `/settings/backup`). A bookmark like `/anime?status=watching` from the first version now opens the All tab with a notice: statuses are the core's classes (`status=active`). The full table is in [docs/usage.md](docs/usage.md#urls).
+Anime pages live under `/anime` (list, `/anime/search`, overviews at `/anime/anilist/{id}`, manual entries at `/anime/manual/{id}`, each with `/edit` for Edit details); manga pages use `/manga` the same way, and books pages use `/book`. List entries are edited at `/list/{id}/edit`, people at `/people/{id}`, and Settings under `/settings` (sections `/settings/plugins`, each plugin's `/settings/plugins/{id}`, `/settings/import`, `/settings/backup`). A bookmark like `/anime?status=watching` from the first version now opens the All tab with a notice: statuses are the core's classes (`status=active`). The full table is in [docs/usage.md](docs/usage.md#urls).
 
 ## Updating and stopping
 
@@ -117,7 +117,7 @@ Covers and person images are stored locally in `covers/` inside the data volume.
 
 ## Known limitations
 
-- Only the anime and manga plugins exist; plugins are compiled in (no marketplace or runtime installation).
+- Only the anime, manga and books plugins exist; plugins are compiled in (no marketplace or runtime installation).
 - Files of removed or re-matched entries are not deleted from `covers/`.
 - More in [docs/usage.md](docs/usage.md#known-limitations).
 
@@ -146,5 +146,5 @@ The plugin contract is documented in [docs/plugins.md](docs/plugins.md), the cod
 
 ## Roadmap
 
-- Other media types as plugins: movies, TV, games, books.
+- Other media types as plugins: movies, TV, games.
 - Upgrade to a supported Go version.

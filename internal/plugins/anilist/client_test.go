@@ -161,7 +161,7 @@ func TestAnimeMapsTitlesRelationsRecsMALID(t *testing.T) {
 	if a.ID != "154587" || a.Source != AniList || a.MALID != "52991" {
 		t.Errorf("identity: %+v", a.SearchResult)
 	}
-	if a.ExternalURL != "https://anilist.co/anime/154587" || a.SourceMaterial != "MANGA" {
+	if a.ExternalURL != "https://anilist.co/anime/154587" || a.SourceMaterial != "MANGA" || a.Format != "TV" {
 		t.Errorf("url/source = %q/%q", a.ExternalURL, a.SourceMaterial)
 	}
 	if tm := titleMap(a.Titles); len(tm) != 3 || tm["ja-latn"] != "Sousou no Frieren" {
@@ -515,5 +515,48 @@ func TestSentinelsNameAniList(t *testing.T) {
 		if !strings.HasPrefix(err.Error(), "anilist: ") {
 			t.Errorf("%q must start with \"anilist: \"", err)
 		}
+	}
+}
+
+func TestMediaListMapsFormatAndProgressVolumes(t *testing.T) {
+	body := []byte(`{"data":{"MediaListCollection":{"lists":[{"entries":[{"status":"CURRENT","score":8,"progress":42,"progressVolumes":5,"updatedAt":1700000000,"media":{"id":30013,"idMal":13,"format":"NOVEL","title":{"romaji":"SAO"},"coverImage":{"large":"https://img.example/c.jpg"}}}]}]}}}`)
+	var got string
+	c := serve(t, 200, body, &got)
+	entries, err := c.MediaList(context.Background(), TypeManga, "user")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 || entries[0].ProgressVolumes != 5 || entries[0].Media.Format != "NOVEL" || entries[0].Media.ID != 30013 {
+		t.Fatalf("%+v", entries)
+	}
+	if !strings.Contains(got, "progressVolumes") || !strings.Contains(got, "format") {
+		t.Fatalf("query missing new fields: %s", got)
+	}
+}
+
+func TestSearchFormatSendsTheFormat(t *testing.T) {
+	body := []byte(`{"data":{"Page":{"media":[{"id":1,"title":{"romaji":"Novel"},"format":"NOVEL","chapters":10,"volumes":2}]}}}`)
+	var got string
+	c := serve(t, 200, body, &got)
+	res, err := c.SearchFormat(context.Background(), TypeManga, "NOVEL", "novel")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res) != 1 || res[0].ID != "1" || res[0].Type != "NOVEL" {
+		t.Fatalf("%+v", res)
+	}
+	if !strings.Contains(got, "format: $format") || !strings.Contains(got, `"format":"NOVEL"`) {
+		t.Fatalf("request = %s", got)
+	}
+}
+
+func TestSearchStillHasNoFormatFilter(t *testing.T) {
+	var got string
+	c := serve(t, 200, []byte(`{"data":{"Page":{"media":[]}}}`), &got)
+	if _, err := c.Search(context.Background(), TypeAnime, "x"); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(got, "format: $format") {
+		t.Fatalf("Search gained a format filter: %s", got)
 	}
 }

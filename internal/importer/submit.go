@@ -180,8 +180,13 @@ func (r *Runner) storedRows(ref *importerRef, res plugin.ParseResult) (rows []st
 			rows = append(rows, row)
 			continue
 		}
-		if value == "" {
+		if value == "" && !ref.info.ManualRows {
 			row.outcome, row.message = outcomeSkipped, noIDMessage(ref)
+			rows = append(rows, row)
+			continue
+		}
+		if value == "" && e.Title == "" {
+			row.outcome, row.message = outcomeSkipped, "row has no title"
 			rows = append(rows, row)
 			continue
 		}

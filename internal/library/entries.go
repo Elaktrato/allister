@@ -383,10 +383,6 @@ func (l *Library) ApplyImport(ctx context.Context, itemID int64, in Entry, newer
 	if it == nil {
 		return false, nil
 	}
-	def, err := l.kindDef(it.PluginID, it.Kind)
-	if err != nil {
-		return false, err
-	}
 	upd := Entry{ItemID: itemID, Status: cur.Status, Rating: cur.Rating,
 		Comment: cur.Comment, StartedOn: cur.StartedOn, FinishedOn: cur.FinishedOn,
 		Progress: map[string]float64{}}
@@ -399,9 +395,9 @@ func (l *Library) ApplyImport(ctx context.Context, itemID int64, in Entry, newer
 	if in.Rating != nil {
 		upd.Rating = in.Rating
 	}
-	if key := def.Progress.PrimaryKey; key != "" {
-		if v, ok := in.Progress[key]; ok {
-			upd.Progress[key] = v
+	for key, value := range in.Progress {
+		if slices.Contains(it.ProgressKeys, key) {
+			upd.Progress[key] = value
 		}
 	}
 	if err := l.UpsertEntry(ctx, upd); err != nil {

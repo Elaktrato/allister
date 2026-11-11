@@ -19,6 +19,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -202,15 +203,22 @@ func sleepCtx(ctx context.Context, d time.Duration) error {
 	}
 }
 
+// sourceRef is one lookup source of an importer.
+type sourceRef struct {
+	source plugin.Source
+	info   plugin.SourceInfo
+}
+
 // importerRef is a resolved importer of an installed plugin.
 type importerRef struct {
 	plugin   plugin.Plugin
 	manifest plugin.Manifest
 	info     plugin.ImporterInfo
-	// source and srcInfo are the ResolveVia source; source is nil when the
-	// importer resolves through none (or the plugin does not provide it).
-	source  plugin.Source
-	srcInfo plugin.SourceInfo
+	// source and srcInfo are the primary ResolveVia source; source is nil when
+	// the importer resolves through none (or the plugin does not provide it).
+	source   plugin.Source
+	srcInfo  plugin.SourceInfo
+	fallback []sourceRef
 }
 
 // resolve finds the importer of an installed plugin (enabled or not).
@@ -242,7 +250,32 @@ func (r *Runner) resolve(pluginID, importerID string) (*importerRef, bool) {
 			}
 		}
 	}
+	for _, id := range ref.info.ResolveViaFallback {
+		for _, s := range m.Sources {
+			if s.ID == id {
+				ref.fallback = append(ref.fallback, sourceRef{source: p.Source(s.ID), info: s})
+				break
+			}
+		}
+	}
 	return ref, true
+}
+
+// sourceRefs is the primary source followed by its fallbacks.
+func (ref *importerRef) sourceRefs() []sourceRef {
+	out := []sourceRef{{source: ref.source, info: ref.srcInfo}}
+	return append(out, ref.fallback...)
+}
+
+// sourceNames names the resolution sources for an unmatched-row reason.
+func (ref *importerRef) sourceNames() string {
+	var names []string
+	for _, sr := range ref.sourceRefs() {
+		if sr.info.Name != "" {
+			names = append(names, sr.info.Name)
+		}
+	}
+	return strings.Join(names, " or ")
 }
 
 func (ref *importerRef) kind(key string) (plugin.KindDef, bool) {
@@ -258,13 +291,16 @@ func (ref *importerRef) kind(key string) (plugin.KindDef, bool) {
 // ErrSourceMissing (the plugin does not provide the source) or ErrNoLookup
 // (the source cannot look up). nil for a usable or manual-only importer.
 func (ref *importerRef) usable() error {
-	switch {
-	case ref.info.ResolveVia == "":
+	if ref.info.ResolveVia == "" {
 		return nil
-	case ref.source == nil:
-		return ErrSourceMissing
-	case !ref.srcInfo.SupportsLookup:
-		return ErrNoLookup
+	}
+	for _, sr := range ref.sourceRefs() {
+		if sr.source == nil {
+			return ErrSourceMissing
+		}
+		if !sr.info.SupportsLookup {
+			return ErrNoLookup
+		}
 	}
 	return nil
 }
@@ -536,9 +572,9 @@ func (r *Runner) record(ctx context.Context, importID int64, seq int, outcome st
 
 // pace blocks until the next request to the source may be sent. The first
 // request to a source does not wait.
-func (r *Runner) pace(ctx context.Context, ref *importerRef) error {
-	key := ref.manifest.ID + "/" + ref.srcInfo.ID
-	interval := time.Minute / time.Duration(max(ref.srcInfo.RequestsPerMinute, 1))
+func (r *Runner) pace(ctx context.Context, ref *importerRef, si plugin.SourceInfo) error {
+	key := ref.manifest.ID + "/" + si.ID
+	interval := time.Minute / time.Duration(max(si.RequestsPerMinute, 1))
 	r.mu.Lock()
 	last := r.last[key]
 	r.mu.Unlock()
@@ -584,77 +620,108 @@ func (r *Runner) process(ctx context.Context, ref *importerRef, importID int64, 
 	if rc.idType != "" {
 		rc.value = plugin.SingleLine(rc.entry.ExternalIDs[rc.idType], maxTitleRunes)
 	}
-	if rc.value == "" { // rows stored by an older version; Submit skips these now
-		return r.record(ctx, importID, pr.seq, outcomeSkipped, 0, noIDMessage(ref))
+	ids := make([]string, 0, len(rc.entry.ExternalIDs))
+	for typ := range rc.entry.ExternalIDs {
+		ids = append(ids, typ)
 	}
-	if saved, err := r.d.Library.ItemByExternalID(ctx, rc.pluginID(), kind.Key, rc.idType, rc.value); err != nil {
-		return fmt.Errorf("import %d: %w", importID, err)
-	} else if saved != nil {
-		return r.handleSaved(ctx, rc, saved)
+	sort.Strings(ids)
+	for _, typ := range ids {
+		value := plugin.SingleLine(rc.entry.ExternalIDs[typ], maxTitleRunes)
+		if value == "" {
+			continue
+		}
+		if saved, err := r.d.Library.ItemByExternalID(ctx, rc.pluginID(), kind.Key, typ, value); err != nil {
+			return fmt.Errorf("import %d: %w", importID, err)
+		} else if saved != nil {
+			return r.handleSaved(ctx, rc, saved)
+		}
+	}
+	if rc.value == "" { // no declared id: a manual-only row, or an older stored row
+		if ref.info.ManualRows && rc.entry.Title != "" {
+			return r.saveManualRow(context.WithoutCancel(ctx), rc, "saved as a manual entry (no "+ref.idLabel()+")")
+		}
+		return r.record(ctx, importID, pr.seq, outcomeSkipped, 0, noIDMessage(ref))
 	}
 	if ref.source == nil {
 		return r.saveUnmatched(context.WithoutCancel(ctx), rc, "saved as a manual entry")
 	}
 
 	var data plugin.ItemData
-	notFound := false
-	name := ref.srcInfo.Name
-	for attempt := 0; ; attempt++ {
-		if attempt > 0 { // a Cancel during the wait must stop the retries
-			if state, err := r.state(ctx, importID); err != nil {
-				return err
-			} else if state != stateRunning {
-				return errStopped
+	found := false
+	for _, sr := range ref.sourceRefs() {
+		name := sr.info.Name
+		for attempt := 0; ; attempt++ {
+			if attempt > 0 { // a Cancel during the wait must stop the retries
+				if state, err := r.state(ctx, importID); err != nil {
+					return err
+				} else if state != stateRunning {
+					return errStopped
+				}
 			}
-		}
-		if err := r.pace(ctx, ref); err != nil {
-			return fmt.Errorf("import %d: %w", importID, err)
-		}
-		d, err := ref.source.Lookup(ctx, kind.Key, rc.idType, rc.value)
-		if err == nil {
-			data = d
-			break
-		}
-		if ctx.Err() != nil {
-			return fmt.Errorf("import %d: %w", importID, ctx.Err())
-		}
-		if errors.Is(err, plugin.ErrBadResponse) { // a retry would get the same answer
-			return r.record(ctx, importID, pr.seq, outcomeFailed, 0, err.Error())
-		}
-		if errors.Is(err, plugin.ErrNotFound) {
-			notFound = true
-			break
-		}
-		if errors.Is(err, plugin.ErrRateLimited) || errors.Is(err, plugin.ErrUnavailable) {
-			if attempt >= maxRetries {
-				r.setNote(ctx, importID, name+" is not answering, the import will be retried later")
-				return fmt.Errorf("import %d: %s %s: %s is not answering: %w: %w", importID, rc.idType, rc.value, name, jobs.ErrRetryLater, err)
-			}
-			r.setNote(ctx, importID, fmt.Sprintf("Waiting for %s (retry %d/%d)", name, attempt+1, maxRetries))
-			if err := r.sleep(ctx, rateLimitWait); err != nil {
+			if err := r.pace(ctx, ref, sr.info); err != nil {
 				return fmt.Errorf("import %d: %w", importID, err)
 			}
-			continue
+			d, err := sr.source.Lookup(ctx, kind.Key, rc.idType, rc.value)
+			if err == nil {
+				data, found = d, true
+				break
+			}
+			if ctx.Err() != nil {
+				return fmt.Errorf("import %d: %w", importID, ctx.Err())
+			}
+			if errors.Is(err, plugin.ErrBadResponse) { // a retry would get the same answer
+				return r.record(ctx, importID, pr.seq, outcomeFailed, 0, err.Error())
+			}
+			if errors.Is(err, plugin.ErrNotFound) {
+				break // try the next source
+			}
+			if errors.Is(err, plugin.ErrRateLimited) || errors.Is(err, plugin.ErrUnavailable) {
+				if attempt >= maxRetries {
+					r.setNote(ctx, importID, name+" is not answering, the import will be retried later")
+					return fmt.Errorf("import %d: %s %s: %s is not answering: %w: %w", importID, rc.idType, rc.value, name, jobs.ErrRetryLater, err)
+				}
+				r.setNote(ctx, importID, fmt.Sprintf("Waiting for %s (retry %d/%d)", name, attempt+1, maxRetries))
+				if err := r.sleep(ctx, rateLimitWait); err != nil {
+					return fmt.Errorf("import %d: %w", importID, err)
+				}
+				continue
+			}
+			return r.record(ctx, importID, pr.seq, outcomeFailed, 0, err.Error())
 		}
-		return r.record(ctx, importID, pr.seq, outcomeFailed, 0, err.Error())
+		if found {
+			break
+		}
 	}
 
 	// The lookup is paid for: save and record even when shutdown has begun.
 	dctx := context.WithoutCancel(ctx)
 	r.setNote(dctx, importID, "")
-	if notFound {
-		return r.saveUnmatched(dctx, rc, "not found on "+name)
+	if !found {
+		return r.saveUnmatched(dctx, rc, "not found on "+ref.sourceNames())
 	}
 	if data.Kind == "" {
 		data.Kind = kind.Key
 	}
-	if data.ExternalIDs[rc.idType] == "" {
-		ext := make(map[string]string, len(data.ExternalIDs)+1)
-		for k, v := range data.ExternalIDs {
-			ext[k] = v
+	if data.ExternalIDs == nil {
+		data.ExternalIDs = map[string]string{}
+	}
+	for typ, value := range rc.entry.ExternalIDs {
+		if data.ExternalIDs[typ] == "" {
+			data.ExternalIDs[typ] = value
 		}
-		ext[rc.idType] = rc.value
-		data.ExternalIDs = ext
+	}
+	if data.ExternalIDs[rc.idType] == "" {
+		data.ExternalIDs[rc.idType] = rc.value
+	}
+	if len(rc.entry.Fields) > 0 {
+		if data.Fields == nil {
+			data.Fields = map[string]plugin.FieldValue{}
+		}
+		for key, value := range rc.entry.Fields {
+			if _, ok := data.Fields[key]; !ok {
+				data.Fields[key] = value
+			}
+		}
 	}
 	entry, notes := buildEntry(kind, &library.Item{ProgressKeys: kind.Progress.Defaults, Fields: data.Fields}, rc.entry)
 	id, err := r.d.Library.AddToList(dctx, rc.pluginID(), kind.Key, data, entry)
@@ -728,7 +795,11 @@ func (r *Runner) handleSaved(ctx context.Context, rc *rowCtx, saved *library.Ite
 				return r.record(dctx, rc.importID, rc.seq, outcomeFailed, saved.ID, uerr.Error())
 			}
 			if updated {
-				return r.record(dctx, rc.importID, rc.seq, outcomeUpdated, saved.ID, joinNotes("updated from the source", syncNote))
+				note := "updated from the source"
+				if inactive := inactiveProgress(saved.ProgressKeys, rc.entry.Progress); len(inactive) > 0 {
+					note += "; progress not active: " + strings.Join(inactive, ", ")
+				}
+				return r.record(dctx, rc.importID, rc.seq, outcomeUpdated, saved.ID, joinNotes(note, syncNote))
 			}
 		}
 		return r.record(dctx, rc.importID, rc.seq, outcomeSkipped, saved.ID, joinNotes("already in your list", syncNote))
@@ -747,6 +818,25 @@ func (r *Runner) handleSaved(ctx context.Context, rc *rowCtx, saved *library.Ite
 		joinNotes(append([]string{"added to your list (" + label + " was already saved)"}, append(notes, syncNote)...)...))
 }
 
+// inactiveProgress lists the row's progress keys the entry does not track.
+func inactiveProgress(active []string, row map[string]float64) []string {
+	var out []string
+	for key := range row {
+		found := false
+		for _, k := range active {
+			if k == key {
+				found = true
+				break
+			}
+		}
+		if !found {
+			out = append(out, key)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
 func joinNotes(notes ...string) string {
 	var out []string
 	for _, n := range notes {
@@ -757,11 +847,27 @@ func joinNotes(notes ...string) string {
 	return strings.Join(out, "; ")
 }
 
-// saveUnmatched keeps a row the source does not know as a manual item: the
-// row's title in the importer's fallback language (default the kind's first
-// title language), its external id and its remote cover (downloaded by the
-// sync job).
+// saveUnmatched keeps a row the source does not know as a manual item.
 func (r *Runner) saveUnmatched(ctx context.Context, rc *rowCtx, reason string) error {
+	return r.saveManual(ctx, rc, reason, outcomeUnmatched)
+}
+
+// saveManualRow keeps a row that has no source id as a normal imported
+// manual item.
+func (r *Runner) saveManualRow(ctx context.Context, rc *rowCtx, reason string) error {
+	return r.saveManual(ctx, rc, reason, outcomeImported)
+}
+
+// saveManual stores a manual item with the row's title, all external ids and
+// the row fields (which also supply progress totals), then records the row.
+func (r *Runner) saveManual(ctx context.Context, rc *rowCtx, reason, outcome string) error {
+	title := rc.entry.Title
+	if title == "" && rc.value != "" {
+		title = rc.ref.idLabel() + " #" + rc.value
+	}
+	if title == "" {
+		return r.record(ctx, rc.importID, rc.seq, outcomeSkipped, 0, "row has no title")
+	}
 	manualID, err := ids.NewManualID()
 	if err != nil {
 		return r.record(ctx, rc.importID, rc.seq, outcomeFailed, 0, err.Error())
@@ -770,19 +876,26 @@ func (r *Runner) saveUnmatched(ctx context.Context, rc *rowCtx, reason string) e
 	if lang == "" && len(rc.kind.TitleLanguages) > 0 {
 		lang = rc.kind.TitleLanguages[0]
 	}
-	title := rc.entry.Title
-	if title == "" {
-		title = rc.ref.idLabel() + " #" + rc.value
-	}
 	d := plugin.ItemData{
 		ItemSummary: plugin.ItemSummary{Source: manualSource, ID: manualID, Kind: rc.kind.Key,
 			Titles: []plugin.Title{{Lang: lang, Text: title}}},
-		ExternalIDs: map[string]string{rc.idType: rc.value},
+	}
+	if len(rc.entry.ExternalIDs) > 0 {
+		d.ExternalIDs = make(map[string]string, len(rc.entry.ExternalIDs))
+		for k, v := range rc.entry.ExternalIDs {
+			d.ExternalIDs[k] = v
+		}
+	}
+	if len(rc.entry.Fields) > 0 {
+		d.Fields = make(map[string]plugin.FieldValue, len(rc.entry.Fields))
+		for k, v := range rc.entry.Fields {
+			d.Fields[k] = v
+		}
 	}
 	if u := plugin.HTTPSURL(rc.entry.CoverURL); u != "" {
 		d.CoverURL = u
 	}
-	entry, notes := buildEntry(rc.kind, &library.Item{ProgressKeys: rc.kind.Progress.Defaults}, rc.entry)
+	entry, notes := buildEntry(rc.kind, &library.Item{ProgressKeys: rc.kind.Progress.Defaults, Fields: d.Fields}, rc.entry)
 	id, err := r.d.Library.AddToList(ctx, rc.pluginID(), rc.kind.Key, d, entry, library.WithSyncState("pending"))
 	switch {
 	case errors.Is(err, library.ErrAlreadySaved):
@@ -790,7 +903,7 @@ func (r *Runner) saveUnmatched(ctx context.Context, rc *rowCtx, reason string) e
 	case err != nil:
 		return r.record(ctx, rc.importID, rc.seq, outcomeFailed, 0, err.Error())
 	}
-	return r.finishSaved(ctx, rc, id, outcomeUnmatched, joinNotes(append([]string{reason}, notes...)...))
+	return r.finishSaved(ctx, rc, id, outcome, joinNotes(append([]string{reason}, notes...)...))
 }
 
 // finishSaved enqueues the sync job (cover, credits) for a saved item and

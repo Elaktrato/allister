@@ -38,12 +38,22 @@ const (
 	TypeManga = "MANGA"
 )
 
+const searchFields = `id idMal ` + titleFields + ` format episodes chapters volumes seasonYear startDate { year }
+      description(asHtml: true) coverImage { large }
+      studios(isMain: true) { nodes { name } } siteUrl`
+
 const searchQuery = `query ($q: String, $perPage: Int, $type: MediaType) {
   Page(page: 1, perPage: $perPage) {
     media(search: $q, type: $type, sort: SEARCH_MATCH) {
-      id idMal ` + titleFields + ` format episodes chapters volumes seasonYear startDate { year }
-      description(asHtml: true) coverImage { large }
-      studios(isMain: true) { nodes { name } } siteUrl
+      ` + searchFields + `
+    }
+  }
+}`
+
+const searchFormatQuery = `query ($q: String, $perPage: Int, $type: MediaType, $format: MediaFormat) {
+  Page(page: 1, perPage: $perPage) {
+    media(search: $q, type: $type, format: $format, sort: SEARCH_MATCH) {
+      ` + searchFields + `
     }
   }
 }`
@@ -73,8 +83,8 @@ const mediaListQuery = `query ($name: String, $type: MediaType) {
   MediaListCollection(userName: $name, type: $type) {
     lists {
       entries {
-        status score(format: POINT_10) progress updatedAt
-        media { id idMal title { romaji english native } coverImage { large } }
+        status score(format: POINT_10) progress progressVolumes updatedAt
+        media { id idMal format title { romaji english native } coverImage { large } }
       }
     }
   }
@@ -331,6 +341,19 @@ func (m apiMedia) searchResult() SearchResult {
 // Search implements Provider. An empty query returns no results
 // without contacting AniList; results are capped at 20.
 func (c *Client) Search(ctx context.Context, typ, q string) ([]SearchResult, error) {
+	return c.search(ctx, searchQuery, typ, q, "")
+}
+
+// SearchFormat searches only one AniList format (for example NOVEL); an empty
+// format behaves like Search.
+func (c *Client) SearchFormat(ctx context.Context, typ, format, q string) ([]SearchResult, error) {
+	if format == "" {
+		return c.Search(ctx, typ, q)
+	}
+	return c.search(ctx, searchFormatQuery, typ, q, format)
+}
+
+func (c *Client) search(ctx context.Context, query, typ, q, format string) ([]SearchResult, error) {
 	q = strings.TrimSpace(q)
 	if q == "" {
 		return []SearchResult{}, nil
@@ -340,7 +363,11 @@ func (c *Client) Search(ctx context.Context, typ, q string) ([]SearchResult, err
 			Media []apiMedia `json:"media"`
 		} `json:"Page"`
 	}
-	if err := c.do(ctx, searchQuery, map[string]any{"q": q, "perPage": maxResults, "type": typ}, &data); err != nil {
+	vars := map[string]any{"q": q, "perPage": maxResults, "type": typ}
+	if format != "" {
+		vars["format"] = format
+	}
+	if err := c.do(ctx, query, vars, &data); err != nil {
 		return nil, err
 	}
 	out := make([]SearchResult, 0, len(data.Page.Media))
@@ -471,6 +498,7 @@ func (m *apiMedia) media() Media {
 		SourceMaterial: m.Source,
 		ExternalURL:    m.SiteURL,
 		Status:         m.Status,
+		Format:         m.Format,
 	}
 	for _, e := range m.Staff.Edges {
 		a.Staff = append(a.Staff, StaffMember{Role: e.Role, Name: e.Node.Name.Full,

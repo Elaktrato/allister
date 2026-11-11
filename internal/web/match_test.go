@@ -560,6 +560,18 @@ func twoSources(alt *plugintest.FakeSource) func(_, tv *plugintest.Plugin) {
 	}
 }
 
+func TestMatchSourcesFollowKind(t *testing.T) {
+	e := newFixtureEnv(t, withComicKind, kindSources)
+	e.saveFixture(t, "book", "book", plugin.ItemData{ItemSummary: plugin.ItemSummary{Source: "manual", ID: "b1", Kind: "book", Titles: ttl("My Book")}}, library.WithSyncState("done"))
+	e.saveFixture(t, "book", "comic", plugin.ItemData{ItemSummary: plugin.ItemSummary{Source: "manual", ID: "c1", Kind: "comic", Titles: ttl("My Comic")}}, library.WithSyncState("done"))
+	b := e.get("/book/manual/b1/match").Body.String()
+	mustContain(t, b, "Match to Fake Books", "Fake Books URL or id")
+	mustNotContain(t, b, "Open Library")
+	b = e.get("/book/manual/c1/match?kind=comic").Body.String()
+	mustContain(t, b, "Match to Open Library", "Open Library URL or id", `placeholder="https://openlib.example/w/123"`)
+	mustNotContain(t, b, "Fake Books")
+}
+
 func TestMatchWithSeveralSources(t *testing.T) {
 	alt := &plugintest.FakeSource{Data: tvShow("5", "Alt Show")}
 	e := newFixtureEnv(t, twoSources(alt))

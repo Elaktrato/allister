@@ -245,6 +245,8 @@ type SourceInfo struct {
 	SupportsSchedule bool     `json:"supports_schedule,omitempty"`
 	LinkLabel        string   `json:"link_label,omitempty"`
 	URLPatterns      []string `json:"url_patterns,omitempty"`
+	// Kinds lists the kinds this source serves. Empty means every kind.
+	Kinds []string `json:"kinds,omitempty"`
 }
 
 // ImporterInfo describes an import format. ResolveVia names the declared
@@ -268,12 +270,14 @@ type ImporterInfo struct {
 	Accept   []string `json:"accept,omitempty"`
 	// AccountLabel names the account field of an AccountImporter ("Username");
 	// empty means the importer takes a file.
-	AccountLabel      string `json:"account_label,omitempty"`
-	ExternalIDType    string `json:"external_id_type,omitempty"`
-	ExternalIDLabel   string `json:"external_id_label,omitempty"`
-	ResolveVia        string `json:"resolve_via,omitempty"`
-	FallbackTitleLang string `json:"fallback_title_lang,omitempty"`
-	UnmatchedNote     string `json:"unmatched_note,omitempty"`
+	AccountLabel       string   `json:"account_label,omitempty"`
+	ExternalIDType     string   `json:"external_id_type,omitempty"`
+	ExternalIDLabel    string   `json:"external_id_label,omitempty"`
+	ResolveVia         string   `json:"resolve_via,omitempty"`
+	ResolveViaFallback []string `json:"resolve_via_fallback,omitempty"`
+	ManualRows         bool     `json:"manual_rows,omitempty"`
+	FallbackTitleLang  string   `json:"fallback_title_lang,omitempty"`
+	UnmatchedNote      string   `json:"unmatched_note,omitempty"`
 }
 
 // ExporterInfo describes an export format.
