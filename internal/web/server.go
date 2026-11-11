@@ -168,12 +168,12 @@ func newServer(deps Deps, now func() time.Time) (*server, http.Handler) {
 	mux.HandleFunc("POST /settings/import/resume", s.postImportResume)
 	mux.HandleFunc("GET /settings/plugins", s.getPlugins)
 	mux.HandleFunc("POST /settings/plugins/{id}", s.postPlugin)
-	mux.HandleFunc("POST /settings/plugins/keys/{source}", s.postSourceKey)
+	mux.HandleFunc("POST /settings/plugins/{source}/key", s.postSourceKey)
 	mux.HandleFunc("GET /settings/plugins/{id}", s.getPluginSettings)
-	// one pattern for the settings actions below a plugin id: the mux takes
-	// the key route above (a literal segment) as more specific than {action}
-	mux.HandleFunc("POST /settings/plugins/{id}/{action}", s.postPluginAction)
+	mux.HandleFunc("POST /settings/plugins/{id}/title-language", s.postTitleLanguage)
+	mux.HandleFunc("POST /settings/plugins/{id}/home", s.postHomeSettings)
 	mux.HandleFunc("POST /settings/plugins/{id}/import/{importer}", s.postPluginImport)
+	mux.HandleFunc("POST /settings/plugins/{id}/columns", s.postColumns)
 	mux.HandleFunc("GET /settings/backup", s.getBackup)
 	mux.HandleFunc("GET /settings/backup/download", s.getBackupDownload)
 	mux.HandleFunc("POST /settings/backup/restore", s.postBackupRestore)

@@ -116,22 +116,6 @@ func (s *server) settingsPlugin(w http.ResponseWriter, r *http.Request) (plugin.
 	return m, true
 }
 
-// postPluginAction routes POST /settings/plugins/{id}/{action} to the plugin
-// setting it changes. The key forms (/settings/plugins/keys/{source}) match
-// their own, more specific route and never arrive here.
-func (s *server) postPluginAction(w http.ResponseWriter, r *http.Request) {
-	switch r.PathValue("action") {
-	case "title-language":
-		s.postTitleLanguage(w, r)
-	case "home":
-		s.postHomeSettings(w, r)
-	case "columns":
-		s.postColumns(w, r)
-	default:
-		s.errorPage(w, r, http.StatusNotFound, "Not found", "There is no such settings page.", "")
-	}
-}
-
 // pluginSettingsView is the data of a plugin's settings page.
 type pluginSettingsView struct {
 	ID, Name     string

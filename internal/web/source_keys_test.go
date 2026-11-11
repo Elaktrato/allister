@@ -41,7 +41,7 @@ func sourceKeyBlock(t *testing.T, body, id string) string {
 // sourceKeyForm is the key form of source id within a card block.
 func sourceKeyForm(t *testing.T, block, id string) string {
 	t.Helper()
-	start := strings.Index(block, `<form method="post" action="/settings/plugins/keys/`+id+`"`)
+	start := strings.Index(block, `<form method="post" action="/settings/plugins/`+id+`/key"`)
 	if start < 0 {
 		t.Fatalf("no key form for %s in %s", id, block)
 	}
@@ -61,13 +61,13 @@ func TestSourceKeysCardSavesAndClearsWithoutEchoing(t *testing.T) {
 	page := e.get("/settings/plugins").Body.String()
 	block := sourceKeyBlock(t, page, "tvdata")
 	mustContain(t, block, "Fake TV", "API key", "Get one at example.test.",
-		`action="/settings/plugins/keys/tvdata"`, `name="key"`, `type="password"`,
+		`action="/settings/plugins/tvdata/key"`, `name="key"`, `type="password"`,
 		`autocomplete="new-password"`, `spellcheck="false"`)
 	mustNotContain(t, block, "A key is configured.", `name="remove"`)
 	f := sourceKeyForm(t, block, "tvdata")
 	mustNotContain(t, f, "value=") // a key input never carries a value
 
-	rec := e.do("POST", "/settings/plugins/keys/tvdata", url.Values{"key": {"secret"}}, false)
+	rec := e.do("POST", "/settings/plugins/tvdata/key", url.Values{"key": {"secret"}}, false)
 	if rec.Code != http.StatusSeeOther || rec.Header().Get("Location") != "/settings/plugins#source-keys" {
 		t.Fatalf("save: %d %q %s", rec.Code, rec.Header().Get("Location"), rec.Body.String())
 	}
@@ -80,7 +80,7 @@ func TestSourceKeysCardSavesAndClearsWithoutEchoing(t *testing.T) {
 	block = sourceKeyBlock(t, page, "tvdata")
 	mustContain(t, block, "A key is configured.", `name="remove"`, `value="1"`)
 
-	if rec := e.do("POST", "/settings/plugins/keys/tvdata", url.Values{"remove": {"1"}}, false); rec.Code != http.StatusSeeOther ||
+	if rec := e.do("POST", "/settings/plugins/tvdata/key", url.Values{"remove": {"1"}}, false); rec.Code != http.StatusSeeOther ||
 		rec.Header().Get("Location") != "/settings/plugins#source-keys" {
 		t.Fatalf("remove: %d %q", rec.Code, rec.Header().Get("Location"))
 	}
@@ -103,12 +103,12 @@ func TestSourceKeyValidation(t *testing.T) {
 		{"non-ascii", "schéma", "printable ASCII"},
 		{"long", strings.Repeat("k", 501), "500 characters"},
 	} {
-		rec := e.do("POST", "/settings/plugins/keys/tvdata", url.Values{"key": {c.key}}, false)
+		rec := e.do("POST", "/settings/plugins/tvdata/key", url.Values{"key": {c.key}}, false)
 		if rec.Code != http.StatusBadRequest {
 			t.Fatalf("%s: got %d", c.name, rec.Code)
 		}
 		body := rec.Body.String()
-		mustContain(t, body, c.want, `role="alert"`, `action="/settings/plugins/keys/tvdata"`, "<h1")
+		mustContain(t, body, c.want, `role="alert"`, `action="/settings/plugins/tvdata/key"`, "<h1")
 		if c.key != "" {
 			mustNotContain(t, body, c.key)
 		}
@@ -117,7 +117,7 @@ func TestSourceKeyValidation(t *testing.T) {
 		t.Fatalf("invalid key stored %q %v", got, err)
 	}
 	// surrounding white space is trimmed from an otherwise valid key
-	if rec := e.do("POST", "/settings/plugins/keys/tvdata", url.Values{"key": {"  padded  "}}, false); rec.Code != http.StatusSeeOther {
+	if rec := e.do("POST", "/settings/plugins/tvdata/key", url.Values{"key": {"  padded  "}}, false); rec.Code != http.StatusSeeOther {
 		t.Fatalf("padded: %d %s", rec.Code, rec.Body.String())
 	}
 	if got, _ := e.set.SourceKey(ctx, "tvdata"); got != "padded" {
@@ -125,7 +125,7 @@ func TestSourceKeyValidation(t *testing.T) {
 	}
 	// exactly the maximum length is accepted
 	longest := strings.Repeat("k", 500)
-	if rec := e.do("POST", "/settings/plugins/keys/tvdata", url.Values{"key": {longest}}, false); rec.Code != http.StatusSeeOther {
+	if rec := e.do("POST", "/settings/plugins/tvdata/key", url.Values{"key": {longest}}, false); rec.Code != http.StatusSeeOther {
 		t.Fatalf("500 chars: %d %s", rec.Code, rec.Body.String())
 	}
 	if got, _ := e.set.SourceKey(ctx, "tvdata"); got != longest {
@@ -133,7 +133,7 @@ func TestSourceKeyValidation(t *testing.T) {
 	}
 	// an unknown source, and one that declares no key label, answer 404
 	for _, src := range []string{"nope", "books"} {
-		if rec := e.do("POST", "/settings/plugins/keys/"+src, url.Values{"key": {"x"}}, false); rec.Code != http.StatusNotFound {
+		if rec := e.do("POST", "/settings/plugins/"+src+"/key", url.Values{"key": {"x"}}, false); rec.Code != http.StatusNotFound {
 			t.Fatalf("%s: %d", src, rec.Code)
 		}
 	}
@@ -148,7 +148,7 @@ func TestSourceKeysCardHiddenWithoutKeyedSources(t *testing.T) {
 	e := newEnv(t)
 	b := e.get("/settings/plugins").Body.String()
 	mustContain(t, b, "<h1", "Plugins")
-	mustNotContain(t, b, `id="source-keys"`, `name="key"`, "/settings/plugins/keys/")
+	mustNotContain(t, b, `id="source-keys"`, `name="key"`, `/key"`)
 }
 
 // TestSourceKeyFromEnvironmentShowsConfiguredWithoutRemove: a key the
@@ -168,7 +168,7 @@ func TestSourceKeyFromEnvironmentShowsConfiguredWithoutRemove(t *testing.T) {
 	if got, err := e.set.SourceKey(context.Background(), "tvdata"); err != nil || got != "" {
 		t.Fatalf("env key stored %q %v", got, err)
 	}
-	if rec := e.do("POST", "/settings/plugins/keys/tvdata", url.Values{"key": {"stored"}}, false); rec.Code != http.StatusSeeOther {
+	if rec := e.do("POST", "/settings/plugins/tvdata/key", url.Values{"key": {"stored"}}, false); rec.Code != http.StatusSeeOther {
 		t.Fatalf("save: %d %s", rec.Code, rec.Body.String())
 	}
 	block = sourceKeyBlock(t, e.get("/settings/plugins").Body.String(), "tvdata")
@@ -182,13 +182,29 @@ func TestSourceKeysCardDeduplicatesSharedSource(t *testing.T) {
 	movies := plugintest.TVPlugin(plugintest.WithID("movies"))
 	e := newEnvWith(t, withPlugins(book, tv, movies))
 	b := e.get("/settings/plugins").Body.String()
-	if n := strings.Count(b, `action="/settings/plugins/keys/tvdata"`); n != 1 {
+	if n := strings.Count(b, `action="/settings/plugins/tvdata/key"`); n != 1 {
 		t.Fatalf("%d key forms for tvdata: %s", n, b)
 	}
 	if n := strings.Count(b, `data-source-key="tvdata"`); n != 1 {
 		t.Fatalf("%d key blocks for tvdata", n)
 	}
 	sourceKeyBlock(t, b, "tvdata")
+}
+
+// TestSourceKeyRouteKeepsPluginActions: the key route sits next to the plugin
+// settings actions without changing them, and a plugin id is no source (only a
+// manifest-declared keyed source accepts a key).
+func TestSourceKeyRouteKeepsPluginActions(t *testing.T) {
+	e := newEnv(t)
+	if rec := e.do("POST", "/settings/plugins/anime/title-language", url.Values{"title_lang": {"en"}}, false); rec.Code != http.StatusSeeOther {
+		t.Fatalf("title-language: %d %s", rec.Code, rec.Body.String())
+	}
+	if got := e.set.TitleLang(context.Background(), "anime"); got != "en" {
+		t.Fatalf("title language %q", got)
+	}
+	if rec := e.do("POST", "/settings/plugins/anime/key", url.Values{"key": {"x"}}, false); rec.Code != http.StatusNotFound {
+		t.Fatalf("unkeyed source: %d", rec.Code)
+	}
 }
 
 // TestPluginSettingsNoticeForMissingKey: a plugin whose source declares a key
@@ -204,7 +220,7 @@ func TestPluginSettingsNoticeForMissingKey(t *testing.T) {
 	// the book plugin has only a source without a key label: no notice
 	mustNotContain(t, e.get("/settings/plugins/book").Body.String(), "/settings/plugins#source-keys")
 
-	if rec := e.do("POST", "/settings/plugins/keys/tvdata", url.Values{"key": {"secret"}}, false); rec.Code != http.StatusSeeOther {
+	if rec := e.do("POST", "/settings/plugins/tvdata/key", url.Values{"key": {"secret"}}, false); rec.Code != http.StatusSeeOther {
 		t.Fatalf("save: %d %s", rec.Code, rec.Body.String())
 	}
 	b = e.get("/settings/plugins/tv").Body.String()

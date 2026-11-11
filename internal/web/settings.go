@@ -103,7 +103,7 @@ func (s *server) sourceKey(ctx context.Context, id string) (string, error) {
 }
 
 // sourceKeyURL is the form action that saves the key of source id.
-func sourceKeyURL(id string) string { return "/settings/plugins/keys/" + url.PathEscape(id) }
+func sourceKeyURL(id string) string { return "/settings/plugins/" + url.PathEscape(id) + "/key" }
 
 // keyedSource reports whether an installed manifest declares source id with a
 // key label (only such a source can have a key).
@@ -139,7 +139,7 @@ func sourceKeyProblem(key string) string {
 }
 
 // postSourceKey saves or removes the API key of a source
-// (POST /settings/plugins/keys/{source}: field key, or remove=1). The key is
+// (POST /settings/plugins/{source}/key: field key, or remove=1). The key is
 // never echoed: the page only reports whether one is configured. Sources no
 // installed manifest declares with a key label answer 404.
 func (s *server) postSourceKey(w http.ResponseWriter, r *http.Request) {
