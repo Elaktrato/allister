@@ -1,6 +1,9 @@
 package book
 
 import (
+	"bytes"
+	"context"
+	"strings"
 	"testing"
 
 	"github.com/allister/allister/internal/plugin"
@@ -31,5 +34,22 @@ func TestNewProvidesEveryDeclaredSourceImporterAndExporter(t *testing.T) {
 	reg := plugin.NewRegistry(plugintest.NewMemEnabled())
 	if err := reg.Register(p); err != nil {
 		t.Fatalf("register: %v", err)
+	}
+}
+
+func TestBooksJSONExport(t *testing.T) {
+	p := New(Options{})
+	var b bytes.Buffer
+	err := p.Exporter(ExporterJSON).Export(context.Background(), []plugin.ExportEntry{{
+		Kind: KindSeries, Titles: []plugin.Title{{Lang: "en", Text: "Sword Art Online"}},
+		Status: plugin.Active, Progress: map[string]float64{"volume": 1, "chapter": 5},
+	}}, &b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := b.String()
+	if !strings.Contains(out, `"format":"allister.book.export"`) || !strings.Contains(out, `"kind":"series"`) ||
+		!strings.Contains(out, `"chapter":5`) || !strings.Contains(out, "Sword Art Online") {
+		t.Fatalf("export = %s", out)
 	}
 }
