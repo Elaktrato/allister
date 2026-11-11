@@ -1,6 +1,7 @@
 package plugin_test
 
 import (
+	"errors"
 	"math"
 	"strings"
 	"testing"
@@ -8,6 +9,12 @@ import (
 	"github.com/allister/allister/internal/plugin"
 	"github.com/allister/allister/internal/plugin/plugintest"
 )
+
+func TestErrNotConfigured(t *testing.T) {
+	if plugin.ErrNotConfigured == nil || errors.Is(plugin.ErrNotConfigured, plugin.ErrNotFound) {
+		t.Fatal("bad sentinel")
+	}
+}
 
 func TestValidateAcceptsFixtures(t *testing.T) {
 	for _, p := range []plugin.Plugin{plugintest.BookPlugin(), plugintest.TVPlugin()} {
@@ -86,6 +93,20 @@ func TestValidateRejects(t *testing.T) {
 		{"bad id slug leading digit", tv, func(m *plugin.Manifest) { m.ID = "1tv" }, `is not a valid slug`},
 		{"bad id slug underscore", tv, func(m *plugin.Manifest) { m.ID = "my_tv" }, `is not a valid slug`},
 		{"bad id slug too long", tv, func(m *plugin.Manifest) { m.ID = strings.Repeat("a", 33) }, `is not a valid slug`},
+		{"key help without label", tv, func(m *plugin.Manifest) {
+			m.Sources[0].KeyLabel = ""
+			m.Sources[0].KeyHelp = "Get one at example.test."
+		}, `sources[0].key_help: requires key_label`},
+		{"key label with newline", tv, func(m *plugin.Manifest) {
+			m.Sources[0].KeyLabel = "API\nkey"
+		}, `sources[0].key_label: must be a single line without control characters`},
+		{"key label too long", tv, func(m *plugin.Manifest) {
+			m.Sources[0].KeyLabel = strings.Repeat("k", 41)
+		}, `sources[0].key_label: longer than 40 characters`},
+		{"key help too long", tv, func(m *plugin.Manifest) {
+			m.Sources[0].KeyLabel = "API key"
+			m.Sources[0].KeyHelp = strings.Repeat("h", 201)
+		}, `sources[0].key_help: longer than 200 characters`},
 		{"empty id", tv, func(m *plugin.Manifest) { m.ID = "" }, `id: "" is not a valid slug`},
 		{"no kinds", tv, func(m *plugin.Manifest) { m.Kinds = nil }, `kinds: at least one kind required`},
 		{"duplicate kind", tv, func(m *plugin.Manifest) { m.Kinds = append(m.Kinds, m.Kinds[0]) }, `kinds[1].key: duplicate "show"`},

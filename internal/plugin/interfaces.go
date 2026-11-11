@@ -37,6 +37,9 @@ var (
 	ErrBadResponse = errors.New("plugin: bad response from the source")
 	// ErrBadInput: an importer was given a file that is not in its format.
 	ErrBadInput = errors.New("plugin: bad input")
+	// ErrNotConfigured: the source cannot answer because the credential it
+	// needs is missing or was refused.
+	ErrNotConfigured = errors.New("plugin: source is not configured")
 )
 
 // Plugin is a compiled-in or (later) loaded plugin. Manifest is called once,
