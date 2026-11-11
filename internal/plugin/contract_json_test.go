@@ -46,7 +46,7 @@ func TestManifestJSONRoundTrip(t *testing.T) {
 			Tags:     plugin.TermDef{Enabled: true, Label: "Tags", Editable: true, Filterable: true},
 			Statuses: plugin.StatusLabels{Planned: "P", Active: "A", Paused: "Pa", Completed: "C", Dropped: "D"},
 			Progress: plugin.ProgressSpec{
-				Eligible:     []plugin.ProgressDef{{Key: "x", Type: plugin.Count, Label: "X", TotalField: "n"}, {Key: "y", Type: plugin.Percent, Label: "Y"}},
+				Eligible:     []plugin.ProgressDef{{Key: "x", Type: plugin.Count, Label: "X", TotalField: "n"}, {Key: "y", Type: plugin.Percent, Label: "Y", ResetOnPrimary: true}},
 				Defaults:     []string{"x"},
 				Combinations: [][]string{{"x"}, {"y"}},
 				PrimaryKey:   "x",

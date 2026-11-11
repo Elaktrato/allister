@@ -333,13 +333,13 @@ func TestTVPluginEpisodeAndPositionProgress(t *testing.T) {
 	mustContain(t, b, ">Episode</span>", "<span>3 / 26</span>", ">Position</span>", "<span>0:12:34</span>")
 	mustContain(t, e.page(t, "/tv/tvdata/dark"), "Episode: 3 / 26", "Position: 0:12:34")
 
-	// +1 increments the primary episode only
+	// +1 increments the primary episode and resets the position track
 	rec = e.do("POST", "/list/"+dark+"/increment", url.Values{}, true)
 	if rec.Code != 200 {
 		t.Fatalf("increment: %d", rec.Code)
 	}
-	mustContain(t, rec.Body.String(), "<span>4 / 26</span>", "<span>0:12:34</span>")
-	if en, _ := e.lib.Entry(context.Background(), mustID(t, dark)); en == nil || en.Progress["episode"] != 4 || en.Progress["position"] != 754 {
+	mustContain(t, rec.Body.String(), "<span>4 / 26</span>", "<span>0:00:00</span>")
+	if en, _ := e.lib.Entry(context.Background(), mustID(t, dark)); en == nil || en.Progress["episode"] != 4 {
 		t.Fatalf("entry %+v", en)
 	}
 	// a bad position is refused

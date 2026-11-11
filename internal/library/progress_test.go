@@ -614,3 +614,30 @@ func TestCombinationIndex(t *testing.T) {
 		}
 	}
 }
+
+func TestIncrementResetsResetOnPrimaryTrack(t *testing.T) {
+	e := newEnv(t)
+	l := e.lib
+	id := addShow(t, l, "r1", fp(10), Entry{Status: Active, Progress: map[string]float64{"episode": 5, "position": 1200}},
+		WithProgressKeys([]string{"episode", "position"}))
+	if err := l.Increment(bg, id); err != nil {
+		t.Fatal(err)
+	}
+	got := progressOf(t, l, id)
+	if got["episode"] != 6 {
+		t.Fatalf("episode = %v", got)
+	}
+	if _, ok := got["position"]; ok {
+		t.Fatalf("position was not reset: %v", got)
+	}
+	// a capped +1 does not reset the position
+	id = addShow(t, l, "r2", fp(2), Entry{Status: Active, Progress: map[string]float64{"episode": 2, "position": 300}},
+		WithProgressKeys([]string{"episode", "position"}))
+	if err := l.Increment(bg, id); err != nil {
+		t.Fatal(err)
+	}
+	got = progressOf(t, l, id)
+	if got["episode"] != 2 || got["position"] != 300 {
+		t.Fatalf("capped increment = %v", got)
+	}
+}

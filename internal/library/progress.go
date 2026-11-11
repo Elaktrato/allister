@@ -178,6 +178,16 @@ func (l *Library) Increment(ctx context.Context, itemID int64) error {
 		return fmt.Errorf("increment progress: %w", err)
 	}
 	if n, err := res.RowsAffected(); err == nil && n > 0 {
+		// reset tracks that belong to the release the +1 just advanced
+		for _, pd := range def.Progress.Eligible {
+			if !pd.ResetOnPrimary || pd.Key == key || !slices.Contains(active, pd.Key) {
+				continue
+			}
+			if _, err := tx.ExecContext(ctx, `DELETE FROM `+tableEntryProgress+` WHERE item_id = ? AND key = ?`,
+				itemID, pd.Key); err != nil {
+				return fmt.Errorf("increment progress: reset %s: %w", pd.Key, err)
+			}
+		}
 		// a planned entry starts when its progress moves
 		if _, err := tx.ExecContext(ctx, `UPDATE `+tableEntries+` SET status = CASE status WHEN ? THEN ? ELSE status END,
 			updated_at = `+nowSQL+` WHERE item_id = ?`, string(Planned), string(Active), itemID); err != nil {
