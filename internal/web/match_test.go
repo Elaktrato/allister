@@ -577,9 +577,10 @@ func TestMatchWithSeveralSources(t *testing.T) {
 	e := newFixtureEnv(t, twoSources(alt))
 	id := tvManual(t, e.env)
 	e.tv.Data = tvShow("77", "Found")
-	// default: the first source with lookup support
+	// default: the configured source ("tvalt" needs no key, "Fake TV"'s is
+	// missing)
 	b := e.do("GET", "/tv/manual/m1/match", nil, true).Body.String()
-	mustContain(t, b, `name="source" value="tvdata"`, "Fake TV", `href="/tv/manual/m1/match?source=tvalt"`)
+	mustContain(t, b, `name="source" value="tvalt"`, "Alt TV", `href="/tv/manual/m1/match?source=tvdata"`)
 	b = e.do("GET", "/tv/manual/m1/match?source=tvalt", nil, true).Body.String()
 	mustContain(t, b, `name="source" value="tvalt"`, `placeholder="https://alt.example/s/123"`, `hx-get="/tv/manual/m1/match/search?source=tvalt"`)
 	e.do("GET", "/tv/manual/m1/match/search?source=tvalt&q=x", nil, true)

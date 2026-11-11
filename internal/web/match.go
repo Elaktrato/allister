@@ -164,7 +164,7 @@ func (s *server) getMatch(w http.ResponseWriter, r *http.Request, pluginID strin
 	if !ok {
 		return
 	}
-	si, ok := chooseSourceForKind(t.man, t.ref.Kind, r.URL.Query().Get("source"))
+	si, ok := s.chooseSourceForKind(r.Context(), t.man, t.ref.Kind, r.URL.Query().Get("source"))
 	if !ok {
 		s.matchNotFound(w, r)
 		return
@@ -177,7 +177,7 @@ func (s *server) getMatchSearch(w http.ResponseWriter, r *http.Request, pluginID
 	if !ok {
 		return
 	}
-	si, ok := chooseSourceForKind(t.man, t.ref.Kind, r.URL.Query().Get("source"))
+	si, ok := s.chooseSourceForKind(r.Context(), t.man, t.ref.Kind, r.URL.Query().Get("source"))
 	if !ok {
 		s.matchNotFound(w, r)
 		return
@@ -210,11 +210,11 @@ func (s *server) postMatch(w http.ResponseWriter, r *http.Request, pluginID stri
 		return
 	}
 	ctx := r.Context()
-	si, ok := chooseSourceForKind(t.man, t.ref.Kind, strings.TrimSpace(r.PostFormValue("source")))
+	si, ok := s.chooseSourceForKind(ctx, t.man, t.ref.Kind, strings.TrimSpace(r.PostFormValue("source")))
 	pick := strings.TrimSpace(r.PostFormValue("pick"))
 	raw := strings.TrimSpace(r.PostFormValue("source_ref"))
 	if !ok {
-		fallback := defaultSourceForKind(t.man, t.ref.Kind)
+		fallback := s.defaultSourceForKind(ctx, t.man, t.ref.Kind)
 		if fallback.ID == "" {
 			fallback = defaultSource(t.man)
 		}
