@@ -83,8 +83,13 @@ Progress:
 
 - `season` (count, label Season, total field `seasons`)
 - `episode` (count, label Episode, total field `episodes`)
-- `position` (duration, label Position)
-- Defaults `[season, episode]`; combinations `[[season, episode], [episode], [episode, position]]`; primary `episode`.
+- `position` (duration, label Position; stored as seconds, shown as h:mm:ss)
+- Defaults `[season, episode, position]`; combinations
+  `[[season, episode, position], [season, episode], [episode], [episode, position]]`;
+  primary `episode`. The position belongs to the current episode; +1 advances
+  the episode, and the position is edited in the entry dialog. (If we want +1
+  to clear it automatically, that is a small generic `ResetOnPrimary` core
+  flag; decide during implementation.)
 
 Sections: Info (Details), Text (Summary, `synopsis`), Titles, People
 (Cast, roles `actor`), Genres, Tags, Recommendations, Links. No Related
