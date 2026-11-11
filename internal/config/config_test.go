@@ -24,3 +24,10 @@ func TestLoadGoogleBooksKey(t *testing.T) {
 		t.Fatalf("got %+v", c)
 	}
 }
+
+func TestLoadTMDBKey(t *testing.T) {
+	t.Setenv("TMDB_API_KEY", "tmdb")
+	if c := Load(); c.TMDBKey != "tmdb" {
+		t.Fatalf("got %+v", c)
+	}
+}

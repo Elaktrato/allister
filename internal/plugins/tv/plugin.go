@@ -2,8 +2,10 @@ package tv
 
 import (
 	"net/http"
+	"time"
 
 	"github.com/allister/allister/internal/plugin"
+	"github.com/allister/allister/internal/plugins/jsonexport"
 )
 
 // Options configure the plugin. The URL fields exist for tests; empty means
@@ -22,7 +24,26 @@ type tvPlugin struct {
 	exporter  plugin.Exporter
 }
 
-func New(opts Options) plugin.Plugin { return &tvPlugin{opts: opts} }
+func New(opts Options) plugin.Plugin {
+	hc := opts.HTTP
+	if hc == nil {
+		hc = &http.Client{Timeout: 20 * time.Second}
+	}
+	sources := map[string]plugin.Source{
+		SourceTVmaze: &tvmazeSource{c: newTVmazeClient(opts.TVmazeURL, hc)},
+	}
+	if opts.TMDBKey != "" {
+		sources[SourceTMDB] = &tmdbSource{c: newTMDBClient(opts.TMDBURL, opts.TMDBKey, hc)}
+	}
+	return &tvPlugin{
+		opts:    opts,
+		sources: sources,
+		importers: map[string]plugin.Importer{
+			ImporterYamtrack: yamtrackTVImporter{},
+		},
+		exporter: jsonexport.New(exportFormat),
+	}
+}
 
 func (p *tvPlugin) Manifest() plugin.Manifest { return manifest(p.opts) }
 

@@ -9,6 +9,7 @@ services:
       PORT: "${PORT:-8080}"
       DATA_DIR: /data
       GOOGLE_BOOKS_API_KEY: "${GOOGLE_BOOKS_API_KEY:-}"
+      TMDB_API_KEY: "${TMDB_API_KEY:-}"
     volumes:
       # SQLite database (allister.db) and covers/ live here.
       - allister-data:/data

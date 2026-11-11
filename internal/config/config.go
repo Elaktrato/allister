@@ -7,6 +7,7 @@ type Config struct {
 	Port           string
 	DataDir        string
 	GoogleBooksKey string
+	TMDBKey        string
 }
 
 func Load() Config {
@@ -14,6 +15,7 @@ func Load() Config {
 		Port:           env("PORT", "8080"),
 		DataDir:        env("DATA_DIR", "/data"),
 		GoogleBooksKey: env("GOOGLE_BOOKS_API_KEY", ""),
+		TMDBKey:        env("TMDB_API_KEY", ""),
 	}
 }
 
