@@ -255,24 +255,46 @@ func (s *Store) SetEnabled(ctx context.Context, id string, on bool) error {
 	return s.Set(ctx, enabledKey(id), v)
 }
 
-// sourceKeyKey is the settings key holding the API key of source id.
-func sourceKeyKey(id string) string { return "source." + id + ".key" }
+// sourceFieldKey is the settings key holding one named credential field of
+// source id.
+func sourceFieldKey(id, field string) string { return "source." + id + "." + field }
+
+// SourceKeyField returns the stored value of field of source id, "" when none
+// is set. A read failure is returned, so the caller can tell it from an unset
+// field.
+func (s *Store) SourceKeyField(ctx context.Context, sourceID, field string) (string, error) {
+	v, _, err := s.Get(ctx, sourceFieldKey(sourceID, field))
+	return v, err
+}
+
+// SetSourceKeyField stores the value of field of source id, without
+// surrounding white space.
+func (s *Store) SetSourceKeyField(ctx context.Context, sourceID, field, value string) error {
+	return s.Set(ctx, sourceFieldKey(sourceID, field), strings.TrimSpace(value))
+}
+
+// ClearSourceKeys removes every stored field of source id; other sources are
+// untouched.
+func (s *Store) ClearSourceKeys(ctx context.Context, sourceID string) error {
+	prefix := sourceFieldKey(sourceID, "")
+	_, err := s.db.ExecContext(ctx, `DELETE FROM settings WHERE substr(key, 1, length(?)) = ?`, prefix, prefix)
+	return err
+}
 
 // SourceKey returns the stored API key of source id, "" when none is set. A
 // read failure is returned, so the caller can tell it from an unset key.
 func (s *Store) SourceKey(ctx context.Context, sourceID string) (string, error) {
-	v, _, err := s.Get(ctx, sourceKeyKey(sourceID))
-	return v, err
+	return s.SourceKeyField(ctx, sourceID, "key")
 }
 
 // SetSourceKey stores the API key of source id, without surrounding white
 // space.
 func (s *Store) SetSourceKey(ctx context.Context, sourceID, key string) error {
-	return s.Set(ctx, sourceKeyKey(sourceID), strings.TrimSpace(key))
+	return s.SetSourceKeyField(ctx, sourceID, "key", key)
 }
 
 // ClearSourceKey removes the API key of source id.
 func (s *Store) ClearSourceKey(ctx context.Context, sourceID string) error {
-	_, err := s.db.ExecContext(ctx, `DELETE FROM settings WHERE key = ?`, sourceKeyKey(sourceID))
+	_, err := s.db.ExecContext(ctx, `DELETE FROM settings WHERE key = ?`, sourceFieldKey(sourceID, "key"))
 	return err
 }

@@ -165,6 +165,62 @@ func TestSourceKeyRoundTrip(t *testing.T) {
 	}
 }
 
+func TestSourceKeyFields(t *testing.T) {
+	s, _ := newStore(t)
+	ctx := context.Background()
+	if got, err := s.SourceKeyField(ctx, "igdb", "client_id"); got != "" || err != nil {
+		t.Fatalf("unset: %q %v", got, err)
+	}
+	if err := s.SetSourceKeyField(ctx, "igdb", "client_id", " id "); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetSourceKeyField(ctx, "igdb", "client_secret", "secret"); err != nil {
+		t.Fatal(err)
+	}
+	if v, ok, _ := s.Get(ctx, "source.igdb.client_id"); !ok || v != "id" {
+		t.Fatalf("stored %q %v", v, ok)
+	}
+	if err := s.SetSourceKeyField(ctx, "steam", "key", "steam-key"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetSourceKeyField(ctx, "tmdb", "key", "tmdb-key"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.ClearSourceKeys(ctx, "igdb"); err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range []string{"client_id", "client_secret"} {
+		if got, _ := s.SourceKeyField(ctx, "igdb", f); got != "" {
+			t.Fatalf("%s survived: %q", f, got)
+		}
+	}
+	if got, _ := s.SourceKeyField(ctx, "steam", "key"); got != "steam-key" {
+		t.Fatalf("other source: %q", got)
+	}
+	// the single-key API still reads and writes field "key"
+	if got, _ := s.SourceKey(ctx, "tmdb"); got != "tmdb-key" {
+		t.Fatalf("single: %q", got)
+	}
+}
+
+func TestSourceKeyFieldsReportDBErrors(t *testing.T) {
+	d, err := db.Open(filepath.Join(t.TempDir(), "t.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := New(d)
+	d.Close()
+	if _, err := s.SourceKeyField(context.Background(), "igdb", "client_id"); err == nil {
+		t.Fatal("want error")
+	}
+	if err := s.SetSourceKeyField(context.Background(), "igdb", "client_id", "x"); err == nil {
+		t.Fatal("want error")
+	}
+	if err := s.ClearSourceKeys(context.Background(), "igdb"); err == nil {
+		t.Fatal("want error")
+	}
+}
+
 var _ plugin.EnabledStore = (*Store)(nil)
 
 // TestColumnsRoundTrip: the visible columns of a plugin's kind are stored as
