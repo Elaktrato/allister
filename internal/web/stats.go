@@ -17,6 +17,7 @@ package web
 import (
 	"context"
 	"errors"
+	"log"
 	"math"
 	"net/http"
 	"net/url"
@@ -145,8 +146,7 @@ func (s *server) getStats(w http.ResponseWriter, r *http.Request) {
 	v, err := s.buildStatsPage(r.Context(), q)
 	switch {
 	case errors.Is(err, library.ErrTooManyRows):
-		v = s.newStatsPage(scope, q, nil, nil)
-		v.TooMany = true
+		v = s.statsOverflowPage(r.Context(), scope, q)
 	case err != nil:
 		s.internalError(w, r, err)
 		return
@@ -302,7 +302,7 @@ func (s *server) parseStatsQuery(r *http.Request, now time.Time, scope []statsKi
 		return k.Tags.Enabled && k.Tags.Filterable
 	}, reject)
 
-	if len(kinds) == 1 {
+	if q.Media != statsAll && len(kinds) == 1 {
 		fields, bad := parseStatsFields(kinds[0].Kind, params)
 		q.Fields = fields
 		for _, key := range bad {
@@ -313,7 +313,7 @@ func (s *server) parseStatsQuery(r *http.Request, now time.Time, scope []statsKi
 	// everything else is unknown: f.* belongs to one kind only
 	known := map[string]bool{"media": true, "period": true, "from": true, "to": true, "status": true,
 		"genre": true, "tag": true, "genre_mode": true, "tag_mode": true}
-	if len(kinds) == 1 {
+	if q.Media != statsAll && len(kinds) == 1 {
 		for _, fd := range kinds[0].Kind.Fields {
 			if !fd.Filterable {
 				continue
@@ -420,14 +420,15 @@ func statsNarrows(q statsQuery) bool {
 // filled by buildStatsPage.
 func (s *server) newStatsPage(scope []statsKind, q statsQuery, genres, tags []library.TermCount) *statsPage {
 	kinds := statsSelect(scope, q.Media)
+	allMedia := q.Media == statsAll
 	v := &statsPage{
 		NoKinds:       len(scope) == 0,
 		Empty:         true,
-		AllMedia:      q.Media == statsAll,
+		AllMedia:      allMedia,
 		Period:        q.Period,
 		MediaOptions:  statsMediaOptions(scope, q.Media),
 		PeriodOptions: statsPeriodOptions(q.Period),
-		StatusOptions: statsStatusOptions(kinds, q.Status),
+		StatusOptions: statsStatusOptions(kinds, allMedia, q.Status),
 	}
 	if q.Period == "custom" {
 		v.From, v.To = fmtDay(q.From), fmtDay(q.To)
@@ -437,25 +438,26 @@ func (s *server) newStatsPage(scope []statsKind, q statsQuery, genres, tags []li
 	}
 	if slices.ContainsFunc(kinds, func(k statsKind) bool { return k.Kind.Genres.Enabled && k.Kind.Genres.Filterable }) {
 		def := plugin.TermDef{Enabled: true, Label: "Genres"}
-		if len(kinds) == 1 && kinds[0].Kind.Genres.Label != "" {
+		if !allMedia && len(kinds) == 1 && kinds[0].Kind.Genres.Label != "" {
 			def.Label = kinds[0].Kind.Genres.Label
 		}
 		v.Genres = termBar(def, "genre", q.Genres, q.GenresAll, genres)
 	}
 	if slices.ContainsFunc(kinds, func(k statsKind) bool { return k.Kind.Tags.Enabled && k.Kind.Tags.Filterable }) {
 		def := plugin.TermDef{Enabled: true, Label: "Tags"}
-		if len(kinds) == 1 && kinds[0].Kind.Tags.Label != "" {
+		if !allMedia && len(kinds) == 1 && kinds[0].Kind.Tags.Label != "" {
 			def.Label = kinds[0].Kind.Tags.Label
 		}
 		v.Tags = termBar(def, "tag", q.Tags, q.TagsAll, tags)
 	}
-	if len(kinds) == 1 {
+	// the kind's filterable fields belong to a specific kind only
+	if !allMedia && len(kinds) == 1 {
 		v.Fields = statsFieldInputs(kinds[0].Kind, q.Fields)
 	}
 	v.HasTime = slices.ContainsFunc(kinds, func(k statsKind) bool {
 		return k.Kind.Stats != nil && k.Kind.Stats.Time != nil
 	})
-	if len(kinds) == 1 && kinds[0].Kind.Stats != nil && kinds[0].Kind.Stats.Units != nil {
+	if !allMedia && len(kinds) == 1 && kinds[0].Kind.Stats != nil && kinds[0].Kind.Stats.Units != nil {
 		v.HasUnits = true
 	}
 	v.Notice, v.NoticeMore = noticeKeys(q.Notices)
@@ -488,12 +490,13 @@ func statsPeriodOptions(cur string) []option {
 }
 
 // statsStatusOptions are the choices of the status filter: the kind's own
-// labels for one kind, neutral core labels for All media.
-func statsStatusOptions(kinds []statsKind, cur *library.Status) []option {
+// labels for a specific kind, neutral core labels for All media (also when
+// only one kind is enabled).
+func statsStatusOptions(kinds []statsKind, allMedia bool, cur *library.Status) []option {
 	out := []option{{Value: "", Label: "Any status", Selected: cur == nil}}
 	for _, st := range library.Statuses() {
 		label := statsStatusLabel(st)
-		if len(kinds) == 1 {
+		if !allMedia && len(kinds) == 1 {
 			label = statusLabel(kinds[0].Kind, st)
 		}
 		out = append(out, option{Value: string(st), Label: label, Selected: cur != nil && *cur == st})
@@ -715,6 +718,18 @@ func statsBucket(period string) stats.BucketMode {
 	return stats.BucketYear
 }
 
+// statsQueryFor is the library query of one kind: the status and the selected
+// kind's field filters (the term filters are applied after loading, see
+// buildStatsPage).
+func statsQueryFor(sk statsKind, q statsQuery) library.Query {
+	query := library.Query{PluginID: sk.PluginID, Kind: sk.Kind.Key, Status: q.Status}
+	for _, ff := range q.Fields {
+		fd, _ := fieldDef(sk.Kind, ff.Key)
+		query.Filters = append(query.Filters, library.Filter{Key: ff.Key, Op: filterOp(fd, ff.Values), Values: ff.Values})
+	}
+	return query
+}
+
 // buildStatsPage loads the rows of the selected kinds and aggregates them.
 func (s *server) buildStatsPage(ctx context.Context, q statsQuery) (*statsPage, error) {
 	scope := s.statsScope(ctx)
@@ -731,13 +746,8 @@ func (s *server) buildStatsPage(ctx context.Context, q statsQuery) (*statsPage, 
 		// need the rows from before their own filter. The status and field
 		// filters are in the query.
 		if statsKindTermsOK(sk.Kind, q) {
-			query := library.Query{PluginID: sk.PluginID, Kind: sk.Kind.Key, Status: q.Status}
-			for _, ff := range q.Fields {
-				fd, _ := fieldDef(sk.Kind, ff.Key)
-				query.Filters = append(query.Filters, library.Filter{Key: ff.Key, Op: filterOp(fd, ff.Values), Values: ff.Values})
-			}
 			var err error
-			rows, err = s.deps.Library.StatsRows(ctx, query, s.titleLang(ctx, sk.Manifest))
+			rows, err = s.deps.Library.StatsRows(ctx, statsQueryFor(sk, q), s.titleLang(ctx, sk.Manifest))
 			if err != nil {
 				return nil, err
 			}
@@ -771,6 +781,66 @@ func (s *server) buildStatsPage(ctx context.Context, q statsQuery) (*statsPage, 
 	return v, nil
 }
 
+// statsOverflowPage builds the page shown when the row cap is exceeded: the
+// filter form with its term choices and the notice, but no numbers and no
+// empty-list copy.
+func (s *server) statsOverflowPage(ctx context.Context, scope []statsKind, q statsQuery) *statsPage {
+	genres, tags := s.statsTermOptions(ctx, scope, q)
+	v := s.newStatsPage(scope, q, genres, tags)
+	v.TooMany = true
+	return v
+}
+
+// statsTermOptions loads the genre and tag choices from the term index for a
+// page that cannot build a report. It merges across kinds case-insensitively
+// and sums counts. A failed option query leaves that list empty (the notice
+// path stays usable) and is logged.
+func (s *server) statsTermOptions(ctx context.Context, scope []statsKind, q statsQuery) (genres, tags []library.TermCount) {
+	for _, sk := range statsSelect(scope, q.Media) {
+		if sk.Kind.Genres.Enabled && sk.Kind.Genres.Filterable {
+			counts, err := s.deps.Library.Terms(ctx, statsQueryFor(sk, q), "genre")
+			if err != nil {
+				log.Printf("stats: genre options: %v", err)
+			} else {
+				genres = mergeTermCounts(genres, counts)
+			}
+		}
+		if sk.Kind.Tags.Enabled && sk.Kind.Tags.Filterable {
+			counts, err := s.deps.Library.Terms(ctx, statsQueryFor(sk, q), "tag")
+			if err != nil {
+				log.Printf("stats: tag options: %v", err)
+			} else {
+				tags = mergeTermCounts(tags, counts)
+			}
+		}
+	}
+	return genres, tags
+}
+
+// mergeTermCounts adds the term counts of one kind to the merged list: the
+// counts of a term sum case-insensitively and the first spelling wins.
+func mergeTermCounts(into, add []library.TermCount) []library.TermCount {
+	index := make(map[string]int, len(into))
+	for i, c := range into {
+		index[strings.ToLower(c.Term)] = i
+	}
+	for _, c := range add {
+		if i, ok := index[strings.ToLower(c.Term)]; ok {
+			into[i].Count += c.Count
+			continue
+		}
+		index[strings.ToLower(c.Term)] = len(into)
+		into = append(into, c)
+	}
+	sort.Slice(into, func(i, j int) bool {
+		if into[i].Count != into[j].Count {
+			return into[i].Count > into[j].Count
+		}
+		return strings.ToLower(into[i].Term) < strings.ToLower(into[j].Term)
+	})
+	return into
+}
+
 // statsAnyEntries reports whether any enabled kind of the scope has an entry
 // at all, so an empty result can tell an empty list from filters that match
 // nothing.
@@ -792,10 +862,11 @@ func (s *server) statsAnyEntries(ctx context.Context, scope []statsKind) (bool, 
 // fillStatsPage fills the empty state, notices, cards, comparison and
 // dimension tables from the report.
 func (s *server) fillStatsPage(ctx context.Context, v *statsPage, q statsQuery, scope []statsKind, rep stats.Report) error {
-	// one kind's own totals carry the unit sum and the kind's labels; the All
-	// totals are the comparable cross-kind numbers (units are not summed)
+	// a specific kind's own totals carry the unit sum and the kind's labels;
+	// the All media totals are the comparable cross-kind numbers (units are
+	// not summed)
 	total := rep.All
-	if len(rep.Kinds) == 1 {
+	if !v.AllMedia && len(rep.Kinds) == 1 {
 		total = rep.Kinds[0].Totals
 	}
 	v.Empty = total.Entries == 0
@@ -829,7 +900,7 @@ func (s *server) fillStatsPage(ctx context.Context, v *statsPage, q statsQuery, 
 			}
 		}
 	}
-	v.Dimensions = statsDimensions(statsSelect(scope, q.Media), rep, v.HasTime, v.HasUnits)
+	v.Dimensions = statsDimensions(statsSelect(scope, q.Media), rep, v.AllMedia, v.HasTime, v.HasUnits)
 	return nil
 }
 
@@ -959,9 +1030,10 @@ func statsCards(t stats.Totals, hasTime, hasUnits bool) []statCard {
 }
 
 // statsDimensions builds the dimension tables of the selected kinds: the
-// kind's own groups for one kind, the merged genres and tags for All media.
-func statsDimensions(kinds []statsKind, rep stats.Report, hasTime, hasUnits bool) []dimensionView {
-	if len(kinds) == 1 {
+// kind's own groups for a specific kind, the merged genres and tags for All
+// media.
+func statsDimensions(kinds []statsKind, rep stats.Report, allMedia, hasTime, hasUnits bool) []dimensionView {
+	if !allMedia && len(kinds) == 1 {
 		keys := statsDimensionKeys(kinds[0].Kind)
 		var out []dimensionView
 		for i, g := range rep.Kinds[0].Dimensions {

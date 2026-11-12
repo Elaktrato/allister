@@ -2,6 +2,7 @@ package web
 
 import (
 	"context"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -458,6 +459,91 @@ func TestStatsPageMissingTimeNotice(t *testing.T) {
 	b := e.get("/stats?media=anime/anime").Body.String()
 	mustContain(t, b, "1 entry is missing the data needed for their time total",
 		"Update from source", `href="/anime"`, "None of these entries have enough stored data for a time total")
+}
+
+// TestStatsPageAllMediaOneKind: All media is not a specific kind just because
+// only one kind is enabled. The f.* filters stay ignored (with a notice), the
+// per-kind field inputs and unit cards stay hidden, and the status labels stay
+// neutral.
+func TestStatsPageAllMediaOneKind(t *testing.T) {
+	e := newStatsEnv(t)
+	e.disable(t, "book")
+	e.disable(t, "tv")
+	a := animeMedia("1", "One")
+	a.Duration = ip(24)
+	a.Genres = []string{"Action"}
+	e.addStatsAnime(t, a, listEntry{Status: library.Completed, Rating: ip(8), Progress: 12, FinishedOn: day(2025, 12, 1)})
+
+	all := e.get("/stats?f.type=TV")
+	if all.Code != 200 {
+		t.Fatalf("status %d: %s", all.Code, all.Body.String())
+	}
+	b := all.Body.String()
+	// f.* belongs to a specific kind only: ignored with a notice
+	mustContain(t, b, "<code>f.type</code>", "Ignored unknown or invalid parameters:")
+	mustNotContain(t, b, `name="f.type"`, `data-dimension="type"`)
+	if got := statValue(t, b, "entries"); got != "1" {
+		t.Errorf("all-media entries = %q", got)
+	}
+	// neutral core status labels, not the kind's
+	mustContain(t, b, `<option value="planned">Planned</option>`, `<option value="active">Active</option>`,
+		`<option value="completed">Completed</option>`)
+	mustNotContain(t, b, `<option value="planned">Plan to watch</option>`, `<option value="active">Watching</option>`)
+	// All media omits the unit cards even when only one kind is enabled
+	mustNotContain(t, b, `data-stat="units"`)
+	// the media selector still offers the one kind
+	mustContain(t, b, `<option value="anime/anime">Anime</option>`)
+
+	// selecting the kind turns the same page into the specific-kind view
+	one := e.get("/stats?media=anime/anime&f.type=TV").Body.String()
+	mustContain(t, one, `name="f.type"`, `data-dimension="type"`,
+		`<option value="active">Watching</option>`, `data-stat="units"`)
+	mustNotContain(t, one, "Ignored unknown or invalid parameters")
+}
+
+// TestStatsPageAllMediaMultiKindFields: with several kinds, All media still
+// ignores f.* and keeps the neutral labels (the media select is not what makes
+// it specific).
+func TestStatsPageAllMediaMultiKindFields(t *testing.T) {
+	e := newStatsEnv(t)
+	e.addStatsAnime(t, animeMedia("1", "One"), listEntry{Status: library.Completed, Progress: 1, FinishedOn: day(2025, 12, 1)})
+	e.addFixture(t, "book", "book", statsBookItem("b1", "Earthsea", 300),
+		library.Entry{Status: library.Completed, Progress: map[string]float64{"pages": 100}, FinishedOn: day(2025, 12, 2)})
+	b := e.get("/stats?f.type=TV").Body.String()
+	mustContain(t, b, "<code>f.type</code>", `<option value="active">Active</option>`)
+	mustNotContain(t, b, `name="f.type"`, `<option value="active">Watching</option>`, `<option value="reading">Reading</option>`)
+	if got := statValue(t, b, "entries"); got != "2" {
+		t.Errorf("entries = %q", got)
+	}
+}
+
+// TestStatsOverflowPage: the row-cap page keeps the filter form and its term
+// choices and shows the notice instead of the empty-list copy. The view is
+// built directly; seeding the 20,001 rows of the real cap would be wasteful.
+func TestStatsOverflowPage(t *testing.T) {
+	e := newStatsEnv(t)
+	a := animeMedia("1", "One")
+	a.Genres = []string{"Action"}
+	e.addStatsAnime(t, a, listEntry{Status: library.Completed, Progress: 1, FinishedOn: day(2025, 12, 1)})
+
+	scope := e.srv.statsScope(context.Background())
+	q := e.srv.parseStatsQuery(httptestRequest("/stats?genre=Action"), *e.now, scope)
+	v := e.srv.statsOverflowPage(context.Background(), scope, q)
+	if !v.TooMany {
+		t.Fatal("the overflow page is not marked as too many")
+	}
+	if v.Genres == nil || len(v.Genres.Options) == 0 {
+		t.Fatalf("no genre options on the overflow page: %+v", v.Genres)
+	}
+	rec := httptest.NewRecorder()
+	e.srv.render(rec, httptestRequest("/stats?genre=Action"), "stats", v)
+	if rec.Code != 200 {
+		t.Fatalf("render: %d", rec.Code)
+	}
+	b := rec.Body.String()
+	mustContain(t, b, "Too many entries to aggregate", `action="/stats"`, `<option value="Action" selected>Action (1)</option>`)
+	mustNotContain(t, b, "No entries in your list yet", "No entries match these filters", "Open your list")
+	mustNotContain(t, b, `data-stat=`)
 }
 
 func TestStatsNavRow(t *testing.T) {
