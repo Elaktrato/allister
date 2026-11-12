@@ -108,7 +108,7 @@ type server struct {
 
 // pageNames lists every page template (templates/<name>.html). Add a page by
 // dropping its file in templates/ and listing it here.
-var pageNames = []string{"calendar", "settings", "settings_appearance", "settings_plugins_page", "settings_plugin", "search", "item", "list", "person", "manual_form", "details_form", "import", "error", "recommendations", "backup"}
+var pageNames = []string{"calendar", "stats", "settings", "settings_appearance", "settings_plugins_page", "settings_plugin", "search", "item", "list", "person", "manual_form", "details_form", "import", "error", "recommendations", "backup"}
 
 // pagePartials lists extra template files a page needs (also rendered alone
 // for htmx requests).
@@ -119,6 +119,7 @@ var pagePartials = map[string][]string{
 	"list":                  {"templates/list_row.html", "templates/list_cards.html", "templates/filter_bar.html", "templates/entry_dialog.html", "templates/progress_inputs.html"},
 	"manual_form":           {"templates/item_inputs.html", "templates/progress_inputs.html"},
 	"details_form":          {"templates/item_inputs.html"},
+	"stats":                 {"templates/filter_bar.html"},
 }
 
 // parsePages builds one template set per page, each cloned from base.html plus
@@ -160,6 +161,7 @@ func newServer(deps Deps, now func() time.Time) (*server, http.Handler) {
 	})
 	mux.HandleFunc("GET /calendar.ics", s.getCalendar)
 	mux.HandleFunc("GET /calendar", s.getCalendarPage)
+	mux.HandleFunc("GET /stats", s.getStats)
 	mux.Handle("GET /static/", staticHandler())
 	if deps.CoversDir != "" {
 		mux.Handle("GET /covers/", coversHandler(deps.CoversDir))
