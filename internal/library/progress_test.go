@@ -523,6 +523,35 @@ func TestUpdateEntryRecordsChanges(t *testing.T) {
 	})
 }
 
+// TestUpdateEntryRetainedValueIsTheEventBaseline: the baseline is read after
+// the combination switch, so re-activating a key whose stored value is saved
+// unchanged logs nothing, and a real change logs the stored old value.
+func TestUpdateEntryRetainedValueIsTheEventBaseline(t *testing.T) {
+	e := newEnv(t)
+	l := e.lib
+	id := addBook(t, l, "ev-rt", fp(10), Entry{Status: Active, Progress: map[string]float64{"pages": 5}})
+	// pages=5 is retained while percent is the active track
+	if err := l.SetActiveProgress(bg, id, []string{"percent"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := l.UpdateEntry(bg, Entry{ItemID: id, Status: Active, Progress: map[string]float64{"pages": 5}}, []string{"pages"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := readEvents(t, l, id); len(got) != 0 {
+		t.Fatalf("re-saving the retained value wrote events: %s", showEvents(got))
+	}
+	if got := progressOf(t, l, id); got["pages"] != 5 {
+		t.Fatalf("progress = %v", got)
+	}
+	// the same baseline makes a real change start at the stored value
+	if err := l.UpdateEntry(bg, Entry{ItemID: id, Status: Active, Progress: map[string]float64{"pages": 6}}, nil); err != nil {
+		t.Fatal(err)
+	}
+	wantEvents(t, readEvents(t, l, id), []event{
+		{Type: "progress", Key: "pages", OldNum: fp(5), NewNum: fp(6), Origin: OriginManual},
+	})
+}
+
 func TestUpdateEntryRollsBackOnError(t *testing.T) {
 	e := newEnv(t)
 	l := e.lib

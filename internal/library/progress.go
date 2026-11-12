@@ -369,11 +369,6 @@ func (l *Library) UpdateEntry(ctx context.Context, e Entry, activeKeys []string)
 	if !hasEntry {
 		return ErrNoEntry
 	}
-	// the entry before the change is the baseline for the event log
-	old, err := entryTx(ctx, tx, e.ItemID)
-	if err != nil {
-		return err
-	}
 	if activeKeys != nil {
 		def, err := l.kindDef(pluginID, kindKey)
 		if err != nil {
@@ -392,6 +387,12 @@ func (l *Library) UpdateEntry(ctx context.Context, e Entry, activeKeys []string)
 				return fmt.Errorf("update entry: %w", err)
 			}
 		}
+	}
+	// the baseline is read after the combination switch so that keys the
+	// update activates show their retained stored values in the log, not 0
+	old, err := entryTx(ctx, tx, e.ItemID)
+	if err != nil {
+		return err
 	}
 	it, def, err := l.txItem(ctx, tx, e.ItemID)
 	if err != nil {
