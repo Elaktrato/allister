@@ -2,17 +2,20 @@
 
 ## Intent
 
-The Yamtrack export in the repository root has 539 `manga` rows. Eleven of
-them are AniList **NOVELs**; the rest are manga (482), one-shots (43) or no
-longer on AniList (2). The owner wants those eleven imported into the books
+The Yamtrack export in the repository root has 539 `manga` rows: 538 with a
+MyAnimeList id (`mal`) and one with MangaUpdates (`mangaupdates`). Eleven of the
+MAL rows are AniList **NOVELs**; the other 527 MAL rows are manga (482),
+one-shots (43) or no longer on AniList (2). The owner wants those eleven imported into the books
 plugin's **Series** kind (the light-novel series feature), not into the manga
 plugin and not as manual Series rows.
 
 The CSV does not carry the novel format. The importer therefore batch-resolves
 the MAL ids through AniList, keeps only `NOVEL`, and submits those rows through
-the existing books AniList source. Result: 11 imported; every other row of the
-full export is ignored (2,827 for this export, 2,838 rows minus 11; 528 of them
-are the non-novel manga rows, the rest are other media rows). No manual noise.
+the existing books AniList source. Result: 11 imported; all other rows are
+ignored. For the current export (2,838 rows): 11 novels, 2,827 ignored, made of
+528 non-novel manga (527 MAL non-novels plus the one `mangaupdates` row) and
+2,299 other media rows. No skips unless a novel is already in the Series list.
+No manual noise.
 
 ## Goals
 
@@ -161,8 +164,9 @@ remains unchanged; its `Lookup("mal")` already rejects non-novels.
 - Manifest: the importer info exact; `plugin.New` provides every declared
   importer.
 - The real export check (local-only, never committed): 539 manga rows -> 11
-  entries, 2,827 ignored across the full export (528 of them the non-novel
-  manga rows); entry titles/statuses/progress as listed above.
+  entries, 2,827 ignored across the full export (528 non-novel manga: 527 MAL
+  plus one `mangaupdates`; 2,299 other media rows); entry titles/statuses/progress
+  as listed above.
 - Full suite/vet/fmt; preview upload on 18083: 11 imported, 2,827 ignored, the
   Series list shows chapters/volumes/author/cover; no manual non-novel rows.
 
