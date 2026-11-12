@@ -58,7 +58,7 @@ func TestManifest(t *testing.T) {
 		m.Sources[0].URLPatterns[0] != "anilist.co/manga/{id}" {
 		t.Fatalf("source = %+v", m.Sources)
 	}
-	if len(m.Importers) != 2 || m.Importers[0].AccountLabel == "" || m.Importers[1].ExternalIDType != "mal" {
+	if len(m.Importers) != 3 || m.Importers[0].AccountLabel == "" || m.Importers[1].ExternalIDType != "mal" {
 		t.Fatalf("importers = %+v", m.Importers)
 	}
 }

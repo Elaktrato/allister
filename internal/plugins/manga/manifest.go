@@ -6,12 +6,13 @@ import (
 
 // Plugin, source, importer and exporter ids and the one kind key.
 const (
-	PluginID   = "manga"
-	KindManga  = "manga"
-	SourceID   = "anilist"
-	AccountImp = "anilist-user"
-	MALImp     = "mal-xml"
-	ExporterID = "json"
+	PluginID         = "manga"
+	KindManga        = "manga"
+	SourceID         = "anilist"
+	AccountImp       = "anilist-user"
+	MALImp           = "mal-xml"
+	ImporterYamtrack = "yamtrack-manga"
+	ExporterID       = "json"
 )
 
 func num(f float64) *float64 { return &f }
@@ -116,6 +117,17 @@ func manifest() plugin.Manifest {
 			ResolveVia:        SourceID,
 			FallbackTitleLang: "ja-latn",
 			UnmatchedNote:     "Imported from MyAnimeList; AniList had no match for MyAnimeList #{id}.",
+		}, {
+			ID:                ImporterYamtrack,
+			Name:              "Yamtrack Manga CSV",
+			FileHint:          "Upload the Yamtrack general CSV. Manga rows are matched on AniList by MyAnimeList id; novels are skipped (they belong in Books > Series).",
+			Accept:            []string{".csv"},
+			ExternalIDType:    "mal",
+			ExternalIDLabel:   "MyAnimeList",
+			ResolveVia:        SourceID,
+			ManualRows:        true,
+			FallbackTitleLang: "ja-latn",
+			UnmatchedNote:     "Imported from Yamtrack; AniList had no match for MyAnimeList #{id}.",
 		}},
 		Exporters: []plugin.ExporterInfo{{
 			ID: ExporterID, Name: "JSON", Extension: ".json", MIME: "application/json",
