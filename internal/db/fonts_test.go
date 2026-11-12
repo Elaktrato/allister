@@ -36,7 +36,7 @@ func TestFontsTable(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer d.Close()
-	if v, err := goose.GetDBVersion(d); err != nil || v != latestVersion || latestVersion != 16 {
+	if v, err := goose.GetDBVersion(d); err != nil || v != latestVersion || latestVersion != 17 {
 		t.Fatalf("version = %d, %v", v, err)
 	}
 	if v, ok := setting(t, d, "appearance.preset"); !ok || v != "paper" {

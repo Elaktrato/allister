@@ -209,8 +209,17 @@ func (l *Library) AddToList(ctx context.Context, pluginID, kind string, d plugin
 // against the stored item. Status, rating, comment and dates are replaced as a
 // whole; progress values are replaced only for the keys present in e.Progress,
 // other keys are left untouched (see ClearProgress). It returns ErrNoEntry for
-// an unknown item.
-func (l *Library) UpsertEntry(ctx context.Context, e Entry) error {
+// an unknown item. The change is recorded in the event log; the option
+// WithEventOrigin sets its origin (manual by default), and creating the entry
+// records nothing.
+func (l *Library) UpsertEntry(ctx context.Context, e Entry, opts ...EntryOption) error {
+	o := entryOptions{origin: OriginManual}
+	for _, f := range opts {
+		f(&o)
+	}
+	if !validOrigin(o.origin) {
+		return invalid("unknown event origin %q", o.origin)
+	}
 	tx, err := l.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("save entry: %w", err)
@@ -222,10 +231,17 @@ func (l *Library) UpsertEntry(ctx context.Context, e Entry) error {
 	if err != nil {
 		return err
 	}
+	old, err := entryTx(ctx, tx, e.ItemID)
+	if err != nil {
+		return err
+	}
 	if err := l.ValidateEntry(def, it, e); err != nil {
 		return err
 	}
 	if err := writeEntry(ctx, tx, e.ItemID, e); err != nil {
+		return err
+	}
+	if err := recordEvents(ctx, tx, e.ItemID, old, e, o.origin); err != nil {
 		return err
 	}
 	if err := tx.Commit(); err != nil {
@@ -268,11 +284,17 @@ func (l *Library) CreateEntry(ctx context.Context, e Entry) error {
 // Entry returns the item's entry with the values of its active progress keys,
 // or nil, nil when the item has no entry.
 func (l *Library) Entry(ctx context.Context, itemID int64) (*Entry, error) {
+	return loadEntry(ctx, l.db, itemID)
+}
+
+// loadEntry reads the item's entry through q (a database or a transaction) and
+// returns nil, nil when the item has no entry.
+func loadEntry(ctx context.Context, q queryer, itemID int64) (*Entry, error) {
 	e := Entry{ItemID: itemID, Progress: map[string]float64{}}
 	var status, pk, updated string
 	var rating sql.NullInt64
 	var started, finished sql.NullString
-	err := l.db.QueryRowContext(ctx, `SELECT e.status, e.rating, e.comment, e.started_on, e.finished_on, e.updated_at, i.progress_keys
+	err := q.QueryRowContext(ctx, `SELECT e.status, e.rating, e.comment, e.started_on, e.finished_on, e.updated_at, i.progress_keys
 		FROM `+tableEntries+` e JOIN items i ON i.id = e.item_id WHERE e.item_id = ?`, itemID).
 		Scan(&status, &rating, &e.Comment, &started, &finished, &updated, &pk)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -288,7 +310,7 @@ func (l *Library) Entry(ctx context.Context, itemID int64) (*Entry, error) {
 	if err := e.fill(status, rating, started, finished, updated); err != nil {
 		return nil, err
 	}
-	rows, err := l.db.QueryContext(ctx, `SELECT key, value FROM `+tableEntryProgress+` WHERE item_id = ?`, itemID)
+	rows, err := q.QueryContext(ctx, `SELECT key, value FROM `+tableEntryProgress+` WHERE item_id = ?`, itemID)
 	if err != nil {
 		return nil, fmt.Errorf("load entry progress: %w", err)
 	}
@@ -364,7 +386,8 @@ func (l *Library) RemoveEntry(ctx context.Context, itemID int64) error {
 // updated_at. With a non-nil newerThan it does nothing when the entry is not
 // older than that source modification time: the user's own later changes win.
 // Everything else (comment, dates, the other progress tracks) stays as it is.
-// It reports whether anything was written.
+// The change is recorded in the event log with the import origin, which the
+// activity heatmap leaves out. It reports whether anything was written.
 func (l *Library) ApplyImport(ctx context.Context, itemID int64, in Entry, newerThan *time.Time) (bool, error) {
 	cur, err := l.Entry(ctx, itemID)
 	if err != nil {
@@ -400,7 +423,7 @@ func (l *Library) ApplyImport(ctx context.Context, itemID int64, in Entry, newer
 			upd.Progress[key] = value
 		}
 	}
-	if err := l.UpsertEntry(ctx, upd); err != nil {
+	if err := l.UpsertEntry(ctx, upd, WithEventOrigin(OriginImport)); err != nil {
 		return false, err
 	}
 	return true, nil

@@ -500,6 +500,29 @@ func TestUpdateEntrySwitchesCombinationAndWritesAtomically(t *testing.T) {
 	}
 }
 
+// TestUpdateEntryRecordsChanges: the old entry is the baseline, so a track
+// that only becomes active counts from 0, and a status change alone is one
+// event.
+func TestUpdateEntryRecordsChanges(t *testing.T) {
+	e := newEnv(t)
+	l := e.lib
+	id := addShow(t, l, "ev-ue", fp(12), Entry{Status: Active, Progress: map[string]float64{"episode": 2}})
+	if err := l.UpdateEntry(bg, Entry{ItemID: id, Status: Active, Progress: map[string]float64{"episode": 4, "position": 600}},
+		[]string{"position", "episode"}); err != nil {
+		t.Fatal(err)
+	}
+	wantEvents(t, readEvents(t, l, id), []event{
+		{Type: "progress", Key: "episode", OldNum: fp(2), NewNum: fp(4), Origin: OriginManual},
+		{Type: "progress", Key: "position", OldNum: fp(0), NewNum: fp(600), Origin: OriginManual},
+	})
+	if err := l.UpdateEntry(bg, Entry{ItemID: id, Status: Completed, Progress: map[string]float64{"episode": 4, "position": 600}}, nil); err != nil {
+		t.Fatal(err)
+	}
+	wantEvents(t, readEvents(t, l, id)[2:], []event{
+		{Type: "status", OldText: "active", NewText: "completed", Origin: OriginManual},
+	})
+}
+
 func TestUpdateEntryRollsBackOnError(t *testing.T) {
 	e := newEnv(t)
 	l := e.lib
@@ -612,6 +635,56 @@ func TestCombinationIndex(t *testing.T) {
 		if got := CombinationIndex(k, c.keys); got != c.want {
 			t.Errorf("%v: %d, want %d", c.keys, got, c.want)
 		}
+	}
+}
+
+func TestIncrementRecordsProgressAndStatusEvents(t *testing.T) {
+	e := newEnv(t)
+	l := e.lib
+	id := addBook(t, l, "ev-p1", nil, Entry{Status: Planned})
+	if err := l.Increment(bg, id); err != nil {
+		t.Fatal(err)
+	}
+	wantEvents(t, readEvents(t, l, id), []event{
+		{Type: "progress", Key: "pages", OldNum: fp(0), NewNum: fp(1), Origin: OriginManual},
+		{Type: "status", OldText: "planned", NewText: "active", Origin: OriginManual},
+	})
+	// the second +1 moves only the progress
+	if err := l.Increment(bg, id); err != nil {
+		t.Fatal(err)
+	}
+	wantEvents(t, readEvents(t, l, id)[2:], []event{
+		{Type: "progress", Key: "pages", OldNum: fp(1), NewNum: fp(2), Origin: OriginManual},
+	})
+}
+
+func TestIncrementAtTotalWritesNoEvent(t *testing.T) {
+	e := newEnv(t)
+	l := e.lib
+	id := addBook(t, l, "ev-p2", fp(2), Entry{Status: Active, Progress: map[string]float64{"pages": 2}})
+	if err := l.Increment(bg, id); err != nil {
+		t.Fatal(err)
+	}
+	if got := readEvents(t, l, id); len(got) != 0 {
+		t.Fatalf("a capped +1 wrote events: %s", showEvents(got))
+	}
+	// a no-op because the primary track is inactive writes none either
+	inactive := addBook(t, l, "ev-p3", fp(2), Entry{Status: Active}, WithProgressKeys([]string{"percent"}))
+	if err := l.Increment(bg, inactive); err != nil {
+		t.Fatal(err)
+	}
+	if got := readEvents(t, l, inactive); len(got) != 0 {
+		t.Fatalf("an inactive +1 wrote events: %s", showEvents(got))
+	}
+	// RemoveEntry and ClearProgress are not activity
+	if err := l.ClearProgress(bg, id, "pages"); err != nil {
+		t.Fatal(err)
+	}
+	if err := l.RemoveEntry(bg, id); err != nil {
+		t.Fatal(err)
+	}
+	if got := readEvents(t, l, id); len(got) != 0 {
+		t.Fatalf("clear/remove wrote events: %s", showEvents(got))
 	}
 }
 

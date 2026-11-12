@@ -144,9 +144,11 @@ func itemMeta(ctx context.Context, tx *sql.Tx, itemID int64) (pluginID, kind str
 // row is created at 1 when absent, and the value never rises above the total
 // when the item has one (a no-op at the total). A planned entry becomes
 // active — bumping progress means the user started it — every other status
-// stays. It returns ErrNoEntry when the item or its entry does not exist. It
-// is a documented no-op (nil) when the kind has no primary key or the
-// primary key is not active for the item.
+// stays. The move is recorded in the event log (a progress event and a status
+// event when the status changed); a no-op writes none. It returns ErrNoEntry
+// when the item or its entry does not exist. It is a documented no-op (nil)
+// when the kind has no primary key or the primary key is not active for the
+// item.
 func (l *Library) Increment(ctx context.Context, itemID int64) error {
 	tx, err := l.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -169,6 +171,11 @@ func (l *Library) Increment(ctx context.Context, itemID int64) error {
 	if key == "" || !ok || !slices.Contains(active, key) || (pd.Type != plugin.Count && pd.Type != plugin.Pages) {
 		return nil
 	}
+	// the old values are the baseline of the events logged below
+	oldStatus, oldVal, err := incrementPoint(ctx, tx, itemID, key)
+	if err != nil {
+		return err
+	}
 	const total = `(SELECT f.num FROM item_fields f WHERE f.item_id = ?1 AND f.key = ?3 AND f.num > 0 ORDER BY f.seq LIMIT 1)`
 	res, err := tx.ExecContext(ctx, `INSERT INTO `+tableEntryProgress+`(item_id, key, value)
 		SELECT ?1, ?2, 1 WHERE `+total+` IS NULL OR `+total+` >= 1
@@ -177,7 +184,11 @@ func (l *Library) Increment(ctx context.Context, itemID int64) error {
 	if err != nil {
 		return fmt.Errorf("increment progress: %w", err)
 	}
-	if n, err := res.RowsAffected(); err == nil && n > 0 {
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("increment progress: %w", err)
+	}
+	if n > 0 {
 		// reset tracks that belong to the release the +1 just advanced
 		for _, pd := range def.Progress.Eligible {
 			if !pd.ResetOnPrimary || pd.Key == key || !slices.Contains(active, pd.Key) {
@@ -193,11 +204,41 @@ func (l *Library) Increment(ctx context.Context, itemID int64) error {
 			updated_at = `+nowSQL+` WHERE item_id = ?`, string(Planned), string(Active), itemID); err != nil {
 			return fmt.Errorf("increment progress: %w", err)
 		}
+		newStatus, newVal, err := incrementPoint(ctx, tx, itemID, key)
+		if err != nil {
+			return err
+		}
+		if newVal > oldVal {
+			if err := insertEvent(ctx, tx, itemID, eventProgress, key, &oldVal, &newVal, "", "", OriginManual); err != nil {
+				return err
+			}
+		}
+		if newStatus != oldStatus {
+			if err := insertEvent(ctx, tx, itemID, eventStatus, "", nil, nil, oldStatus, newStatus, OriginManual); err != nil {
+				return err
+			}
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("increment progress: %w", err)
 	}
 	return nil
+}
+
+// incrementPoint reads the entry's status and the value of one progress track
+// inside tx; an absent value counts as 0.
+func incrementPoint(ctx context.Context, tx *sql.Tx, itemID int64, key string) (status string, value float64, err error) {
+	if err := tx.QueryRowContext(ctx, `SELECT status FROM `+tableEntries+` WHERE item_id = ?`, itemID).Scan(&status); err != nil {
+		return "", 0, fmt.Errorf("increment progress: %w", err)
+	}
+	err = tx.QueryRowContext(ctx, `SELECT value FROM `+tableEntryProgress+` WHERE item_id = ? AND key = ?`, itemID, key).Scan(&value)
+	if errors.Is(err, sql.ErrNoRows) {
+		return status, 0, nil
+	}
+	if err != nil {
+		return "", 0, fmt.Errorf("increment progress: %w", err)
+	}
+	return status, value, nil
 }
 
 // txItem builds the Item that entry validation needs (active keys and the
@@ -312,8 +353,9 @@ func (l *Library) ClearProgress(ctx context.Context, itemID int64, keys ...strin
 // validated against the item's NEW active keys and totals, and on any error
 // neither the combination nor the entry changes. A nil activeKeys keeps the
 // combination, and an unchanged combination (in any order) leaves the item
-// row untouched. It returns ErrNoEntry when the item or its entry does not
-// exist; it never creates an entry.
+// row untouched. The change is recorded in the event log as manual activity.
+// It returns ErrNoEntry when the item or its entry does not exist; it never
+// creates an entry.
 func (l *Library) UpdateEntry(ctx context.Context, e Entry, activeKeys []string) error {
 	tx, err := l.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -326,6 +368,11 @@ func (l *Library) UpdateEntry(ctx context.Context, e Entry, activeKeys []string)
 	}
 	if !hasEntry {
 		return ErrNoEntry
+	}
+	// the entry before the change is the baseline for the event log
+	old, err := entryTx(ctx, tx, e.ItemID)
+	if err != nil {
+		return err
 	}
 	if activeKeys != nil {
 		def, err := l.kindDef(pluginID, kindKey)
@@ -354,6 +401,9 @@ func (l *Library) UpdateEntry(ctx context.Context, e Entry, activeKeys []string)
 		return err
 	}
 	if err := writeEntry(ctx, tx, e.ItemID, e); err != nil {
+		return err
+	}
+	if err := recordEvents(ctx, tx, e.ItemID, old, e, OriginManual); err != nil {
 		return err
 	}
 	if err := tx.Commit(); err != nil {
