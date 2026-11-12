@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"fmt"
 	"slices"
+	"strings"
+	"time"
 )
 
 // SQL table name of the entry change log.
@@ -41,6 +43,64 @@ type EntryOption func(*entryOptions)
 // (the default is OriginManual).
 func WithEventOrigin(o EventOrigin) EntryOption {
 	return func(opt *entryOptions) { opt.origin = o }
+}
+
+// KindRef names one plugin kind, the unit of the activity heatmap's scope.
+type KindRef struct{ PluginID, Kind string }
+
+// activityStampLayout is the occurred_at format written by nowSQL.
+const activityStampLayout = "2006-01-02T15:04:05Z"
+
+// activityPredicate selects the manual events that count as activity: a
+// progress increase or a status change to completed.
+const activityPredicate = `e.origin = 'manual' AND (
+		(e.event_type = 'progress' AND e.new_num > e.old_num) OR
+		(e.event_type = 'status' AND e.new_text = 'completed' AND e.old_text <> 'completed'))`
+
+// ActivityDays counts the activity events by UTC day. from is inclusive, to
+// exclusive; an empty scope means every kind.
+func (l *Library) ActivityDays(ctx context.Context, from, to time.Time, scope []KindRef) (map[string]int, error) {
+	q := `SELECT substr(e.occurred_at,1,10), COUNT(*) FROM ` + tableEntryEvents + ` e
+		JOIN items i ON i.id = e.item_id
+		WHERE ` + activityPredicate + ` AND e.occurred_at >= ? AND e.occurred_at < ?`
+	args := []any{from.UTC().Format(activityStampLayout), to.UTC().Format(activityStampLayout)}
+	if len(scope) > 0 {
+		parts := make([]string, 0, len(scope))
+		for _, k := range scope {
+			parts = append(parts, "(i.plugin_id = ? AND i.kind = ?)")
+			args = append(args, k.PluginID, k.Kind)
+		}
+		q += " AND (" + strings.Join(parts, " OR ") + ")"
+	}
+	q += " GROUP BY substr(e.occurred_at,1,10)"
+	rows, err := l.db.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("query activity days: %w", err)
+	}
+	days := map[string]int{}
+	for rows.Next() {
+		var day string
+		var n int
+		if err := rows.Scan(&day, &n); err != nil {
+			rows.Close()
+			return nil, fmt.Errorf("query activity days: %w", err)
+		}
+		days[day] = n
+	}
+	if err := closeRows(rows); err != nil {
+		return nil, fmt.Errorf("query activity days: %w", err)
+	}
+	return days, nil
+}
+
+// FirstActivityDay returns the UTC day of the earliest manual event; ok is
+// false when there is none.
+func (l *Library) FirstActivityDay(ctx context.Context) (string, bool, error) {
+	var first sql.NullString
+	if err := l.db.QueryRowContext(ctx, `SELECT MIN(substr(occurred_at,1,10)) FROM `+tableEntryEvents+` WHERE origin = 'manual'`).Scan(&first); err != nil {
+		return "", false, fmt.Errorf("query first activity day: %w", err)
+	}
+	return first.String, first.Valid, nil
 }
 
 // entryTx returns the item's entry as read inside tx, or nil, nil when the

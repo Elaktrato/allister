@@ -5,7 +5,128 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 )
+
+// insertEventAt appends an event with an explicit occurred_at (UTC).
+func insertEventAt(t *testing.T, l *Library, itemID int64, occurredAt time.Time, eventType, key string,
+	oldNum, newNum *float64, oldText, newText string, origin EventOrigin) {
+	t.Helper()
+	var oldV, newV any
+	if oldNum != nil {
+		oldV = *oldNum
+	}
+	if newNum != nil {
+		newV = *newNum
+	}
+	if _, err := l.db.ExecContext(bg, `INSERT INTO entry_events(item_id, occurred_at, event_type, progress_key, old_num, new_num, old_text, new_text, origin)
+		VALUES (?,?,?,?,?,?,?,?,?)`,
+		itemID, occurredAt.UTC().Format("2006-01-02T15:04:05Z"), eventType, key, oldV, newV, oldText, newText, string(origin)); err != nil {
+		t.Fatalf("insert event: %v", err)
+	}
+}
+
+func at(y int, m time.Month, d, h, min, s int) time.Time {
+	return time.Date(y, m, d, h, min, s, 0, time.UTC)
+}
+
+func wantDays(t *testing.T, got map[string]int, want map[string]int) {
+	t.Helper()
+	if fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Fatalf("days = %v, want %v", got, want)
+	}
+}
+
+func TestActivityDaysCountsProgressAndCompletions(t *testing.T) {
+	l := newLib(t)
+	id := addBook(t, l, "act-1", fp(100), Entry{Status: Active, Progress: map[string]float64{"pages": 0}})
+	insertEventAt(t, l, id, at(2026, 3, 1, 10, 0, 0), eventProgress, "pages", fp(0), fp(5), "", "", OriginManual)
+	insertEventAt(t, l, id, at(2026, 3, 1, 11, 0, 0), eventStatus, "", nil, nil, "active", "completed", OriginManual)
+	insertEventAt(t, l, id, at(2026, 3, 1, 12, 0, 0), eventProgress, "pages", fp(5), fp(3), "", "", OriginManual)
+	got, err := l.ActivityDays(bg, day(2026, 3, 1), day(2026, 3, 2), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantDays(t, got, map[string]int{"2026-03-01": 2})
+}
+
+func TestActivityDaysExcludesImportsAndDecreases(t *testing.T) {
+	l := newLib(t)
+	id := addBook(t, l, "act-2", fp(100), Entry{Status: Active, Progress: map[string]float64{"pages": 9}})
+	insertEventAt(t, l, id, at(2026, 3, 2, 9, 0, 0), eventProgress, "pages", fp(0), fp(5), "", "", OriginImport)
+	insertEventAt(t, l, id, at(2026, 3, 2, 9, 1, 0), eventStatus, "", nil, nil, "active", "completed", OriginRestore)
+	insertEventAt(t, l, id, at(2026, 3, 2, 9, 2, 0), eventProgress, "pages", fp(9), fp(4), "", "", OriginManual)
+	insertEventAt(t, l, id, at(2026, 3, 2, 9, 3, 0), eventStatus, "", nil, nil, "completed", "completed", OriginManual)
+	insertEventAt(t, l, id, at(2026, 3, 2, 9, 4, 0), eventStatus, "", nil, nil, "active", "planned", OriginManual)
+	insertEventAt(t, l, id, at(2026, 3, 2, 9, 5, 0), eventRating, "", nil, fp(8), "", "", OriginManual)
+	got, err := l.ActivityDays(bg, day(2026, 3, 2), day(2026, 3, 3), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantDays(t, got, map[string]int{})
+}
+
+func TestActivityDaysFiltersScope(t *testing.T) {
+	l := newLib(t)
+	a := addBook(t, l, "act-3", fp(100), Entry{Status: Active})
+	b := mustSave(t, l, "book2", "book", bookWith("act-4", nil))
+	insertEventAt(t, l, a, at(2026, 3, 3, 8, 0, 0), eventProgress, "pages", fp(0), fp(1), "", "", OriginManual)
+	insertEventAt(t, l, b, at(2026, 3, 3, 8, 0, 0), eventProgress, "pages", fp(0), fp(1), "", "", OriginManual)
+	from, to := day(2026, 3, 3), day(2026, 3, 4)
+	for _, tc := range []struct {
+		name  string
+		scope []KindRef
+		want  int
+	}{
+		{"every kind", nil, 2},
+		{"first plugin", []KindRef{{PluginID: "book", Kind: "book"}}, 1},
+		{"second plugin", []KindRef{{PluginID: "book2", Kind: "book"}}, 1},
+		{"kind mismatch", []KindRef{{PluginID: "book", Kind: "tv"}}, 0},
+		{"both", []KindRef{{PluginID: "book", Kind: "book"}, {PluginID: "book2", Kind: "book"}}, 2},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := l.ActivityDays(bg, from, to, tc.scope)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got["2026-03-03"] != tc.want {
+				t.Fatalf("count = %d, want %d (%v)", got["2026-03-03"], tc.want, got)
+			}
+		})
+	}
+}
+
+func TestActivityDaysGroupsByUTCDayAndRange(t *testing.T) {
+	l := newLib(t)
+	id := addBook(t, l, "act-5", fp(100), Entry{Status: Active, Progress: map[string]float64{"pages": 0}})
+	insertEventAt(t, l, id, at(2026, 3, 3, 23, 59, 59), eventProgress, "pages", fp(0), fp(1), "", "", OriginManual)
+	insertEventAt(t, l, id, at(2026, 3, 4, 23, 59, 59), eventProgress, "pages", fp(1), fp(2), "", "", OriginManual)
+	insertEventAt(t, l, id, at(2026, 3, 5, 0, 0, 0), eventProgress, "pages", fp(2), fp(3), "", "", OriginManual)
+	insertEventAt(t, l, id, at(2026, 3, 5, 12, 0, 0), eventProgress, "pages", fp(3), fp(4), "", "", OriginManual)
+	insertEventAt(t, l, id, at(2026, 3, 6, 0, 0, 0), eventProgress, "pages", fp(4), fp(5), "", "", OriginManual)
+	got, err := l.ActivityDays(bg, day(2026, 3, 4), day(2026, 3, 6), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantDays(t, got, map[string]int{"2026-03-04": 1, "2026-03-05": 2})
+}
+
+func TestFirstActivityDay(t *testing.T) {
+	l := newLib(t)
+	if first, ok, err := l.FirstActivityDay(bg); err != nil || ok || first != "" {
+		t.Fatalf("empty log: FirstActivityDay = %q, %v, %v", first, ok, err)
+	}
+	id := addBook(t, l, "act-6", fp(100), Entry{Status: Active, Progress: map[string]float64{"pages": 0}})
+	insertEventAt(t, l, id, at(2026, 1, 1, 10, 0, 0), eventProgress, "pages", fp(0), fp(1), "", "", OriginImport)
+	if first, ok, err := l.FirstActivityDay(bg); err != nil || ok || first != "" {
+		t.Fatalf("only imports: FirstActivityDay = %q, %v, %v", first, ok, err)
+	}
+	insertEventAt(t, l, id, at(2026, 3, 1, 10, 0, 0), eventProgress, "pages", fp(1), fp(2), "", "", OriginManual)
+	insertEventAt(t, l, id, at(2026, 2, 10, 23, 0, 0), eventRating, "", nil, fp(7), "", "", OriginManual)
+	if first, ok, err := l.FirstActivityDay(bg); err != nil || !ok || first != "2026-02-10" {
+		t.Fatalf("FirstActivityDay = %q, %v, %v, want 2026-02-10", first, ok, err)
+	}
+}
 
 // event is one entry_events row as the tests read it.
 type event struct {
