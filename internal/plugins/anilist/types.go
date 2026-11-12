@@ -62,6 +62,7 @@ type SearchResult struct {
 	Titles                     []Title
 	Type                       string
 	Episodes                   *int
+	Duration                   *int // minutes per episode
 	Chapters, Volumes          *int
 	Year                       *int
 	Studio, Synopsis, CoverURL string

@@ -38,7 +38,7 @@ const (
 	TypeManga = "MANGA"
 )
 
-const searchFields = `id idMal ` + titleFields + ` format episodes chapters volumes seasonYear startDate { year }
+const searchFields = `id idMal ` + titleFields + ` format episodes duration chapters volumes seasonYear startDate { year }
       description(asHtml: true) coverImage { large }
       studios(isMain: true) { nodes { name } } siteUrl`
 
@@ -60,7 +60,7 @@ const searchFormatQuery = `query ($q: String, $perPage: Int, $type: MediaType, $
 
 // mediaFields is the selection shared by Media and MediaByMALID, so both are
 // mapped by the same code.
-const mediaFields = `id idMal ` + titleFields + ` format episodes chapters volumes seasonYear
+const mediaFields = `id idMal ` + titleFields + ` format episodes duration chapters volumes seasonYear
     startDate { year month day } endDate { year month day } source status
     description(asHtml: true) coverImage { large }
     studios(isMain: true) { nodes { name } } siteUrl
@@ -255,6 +255,7 @@ type apiMedia struct {
 	Title       apiTitle `json:"title"`
 	Format      string   `json:"format"`
 	Episodes    *int     `json:"episodes"`
+	Duration    *int     `json:"duration"`
 	Chapters    *int     `json:"chapters"`
 	Volumes     *int     `json:"volumes"`
 	SeasonYear  *int     `json:"seasonYear"`
@@ -323,6 +324,7 @@ func (m apiMedia) searchResult() SearchResult {
 		Titles:   m.Title.titles(),
 		Type:     m.Format,
 		Episodes: m.Episodes,
+		Duration: m.Duration,
 		Chapters: m.Chapters,
 		Volumes:  m.Volumes,
 		Year:     m.SeasonYear,

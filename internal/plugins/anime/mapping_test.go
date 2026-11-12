@@ -36,6 +36,23 @@ func TestItemDataGuardsFields(t *testing.T) {
 	}
 }
 
+func TestDurationMapsAndGuardsRange(t *testing.T) {
+	ok := 24
+	r := anilist.SearchResult{ID: "1", Type: "TV", Duration: &ok}
+	if v := toSummary(r).Fields["duration"].Num; v == nil || *v != 24 {
+		t.Fatalf("summary duration = %v", v)
+	}
+	if v := ItemData(anilist.Media{SearchResult: r}).Fields["duration"].Num; v == nil || *v != 24 {
+		t.Fatalf("item duration = %v", v)
+	}
+	for _, bad := range []int{0, 10001} {
+		b := bad
+		if _, ok := toSummary(anilist.SearchResult{ID: "1", Duration: &b}).Fields["duration"]; ok {
+			t.Errorf("duration %d must be dropped", bad)
+		}
+	}
+}
+
 func TestCreditsDropUnusablePeople(t *testing.T) {
 	ok := anilist.Person{ID: "c1", Name: "C"}
 	cs := Credits([]anilist.CastMember{

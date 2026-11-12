@@ -85,6 +85,9 @@ func (c cleaner) summaryFields(r anilist.SearchResult) map[string]plugin.FieldVa
 	if v, ok := c.numField(r.Episodes, 1, 10000); ok {
 		f["episodes"] = v
 	}
+	if v, ok := c.numField(r.Duration, 1, 10000); ok {
+		f["duration"] = v
+	}
 	if v, ok := c.numField(r.Year, 1900, 2100); ok {
 		f["year"] = v
 	}

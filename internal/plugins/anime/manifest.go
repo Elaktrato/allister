@@ -37,6 +37,7 @@ func manifest() plugin.Manifest {
 			Fields: []plugin.FieldDef{
 				{Key: "type", Label: "Type", Type: plugin.FieldEnum, EnumValues: append([]string(nil), typeValues...), Show: true, Editable: true, Filterable: true, Required: true},
 				{Key: "episodes", Label: "Episodes", Type: plugin.FieldNumber, Unit: "eps", Min: num(1), Max: num(10000), Show: true, Editable: true},
+				{Key: "duration", Label: "Episode duration", Type: plugin.FieldNumber, Unit: "min", Min: num(1), Max: num(10000), Show: true, Editable: true},
 				{Key: "year", Label: "Year", Type: plugin.FieldNumber, Min: num(1900), Max: num(2100), Show: true, Editable: true, Filterable: true, Sortable: true},
 				{Key: "studio", Label: "Studio", Type: plugin.FieldText, Show: true, Editable: true, Filterable: true},
 				{Key: "synopsis", Label: "Synopsis", Type: plugin.FieldText, Editable: true},
@@ -54,6 +55,10 @@ func manifest() plugin.Manifest {
 				Defaults:     []string{"episode"},
 				Combinations: [][]string{{"episode"}},
 				PrimaryKey:   "episode",
+			},
+			Stats: &plugin.StatsDef{
+				Time:  &plugin.StatsTimeDef{Label: "Watchtime", UnitsKey: "episode", PerUnitField: "duration"},
+				Units: &plugin.StatsUnitsDef{Key: "episode", LabelPlural: "Episodes"},
 			},
 			Sections: []plugin.SectionDef{
 				{Type: plugin.SectionInfo, Label: "Information"},

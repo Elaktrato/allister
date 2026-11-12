@@ -560,3 +560,59 @@ func TestSearchStillHasNoFormatFilter(t *testing.T) {
 		t.Fatalf("Search gained a format filter: %s", got)
 	}
 }
+
+// TestQueriesRequestDuration: the per-episode duration belongs to the search
+// selection and to the detail selection shared by Media and MediaByMALID.
+func TestQueriesRequestDuration(t *testing.T) {
+	for name, call := range map[string]func(c *Client) error{
+		"search": func(c *Client) error {
+			_, err := c.Search(context.Background(), TypeAnime, "frieren")
+			return err
+		},
+		"media": func(c *Client) error {
+			_, err := c.Media(context.Background(), TypeAnime, "154587")
+			return err
+		},
+		"media by MAL id": func(c *Client) error {
+			_, err := c.MediaByMALID(context.Background(), TypeAnime, "52991")
+			return err
+		},
+	} {
+		var body string
+		fx := map[string]string{"search": "search.json", "media": "anime.json", "media by MAL id": "anime_mal.json"}[name]
+		if err := call(serve(t, 200, fixture(t, fx), &body)); err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if !strings.Contains(body, "duration") {
+			t.Errorf("%s query does not request duration: %s", name, body)
+		}
+	}
+}
+
+// TestSearchResultMapsDuration: duration decodes into SearchResult.Duration,
+// and an unknown duration stays nil.
+func TestSearchResultMapsDuration(t *testing.T) {
+	body := []byte(`{"data":{"Page":{"media":[{"id":1,"title":{"romaji":"A"},"format":"TV","duration":24},{"id":2,"title":{"romaji":"B"},"format":"TV","duration":null}]}}}`)
+	res, err := serve(t, 200, body, nil).Search(context.Background(), TypeAnime, "x")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res) != 2 || res[0].Duration == nil || *res[0].Duration != 24 {
+		t.Fatalf("duration = %+v", res)
+	}
+	if res[1].Duration != nil {
+		t.Errorf("unknown duration must be nil, got %d", *res[1].Duration)
+	}
+}
+
+// TestMediaMapsDuration: the detail mapping carries the duration too.
+func TestMediaMapsDuration(t *testing.T) {
+	body := []byte(`{"data":{"Media":{"id":1,"title":{"romaji":"A"},"format":"TV","duration":24}}}`)
+	m, err := serve(t, 200, body, nil).Media(context.Background(), TypeAnime, "1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m.Duration == nil || *m.Duration != 24 {
+		t.Fatalf("duration = %v", m.Duration)
+	}
+}

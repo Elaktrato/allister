@@ -131,6 +131,9 @@ func TestSourceSearchMapsToSummaries(t *testing.T) {
 	if n := r.Fields["episodes"].Num; n == nil || *n != 28 {
 		t.Errorf("episodes = %v", n)
 	}
+	if n := r.Fields["duration"].Num; n == nil || *n != 24 {
+		t.Errorf("duration = %v", n)
+	}
 	if n := r.Fields["year"].Num; n == nil || *n != 2023 {
 		t.Errorf("year = %v", n)
 	}
@@ -162,6 +165,9 @@ func TestSourceDetailsMapsFieldsTitlesRelations(t *testing.T) {
 	}
 	if d.Fields["source_material"].Text != "MANGA" {
 		t.Errorf("source_material = %+v", d.Fields["source_material"])
+	}
+	if n := d.Fields["duration"].Num; n == nil || *n != 24 {
+		t.Errorf("duration = %v", n)
 	}
 	for key, want := range map[string]string{"started_on": "2023-09-29", "ended_on": "2024-03-22"} {
 		v := d.Fields[key].Date
