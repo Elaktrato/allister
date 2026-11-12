@@ -83,6 +83,34 @@ func TestTimeChartBars(t *testing.T) {
 			t.Errorf("table row %d = %+v, want %+v", i, v.Table[i], row)
 		}
 	}
+	// every bucket has one x-axis label, centred over its own bar
+	if len(v.Labels) != len(v.Bars) {
+		t.Fatalf("labels = %d, want %d", len(v.Labels), len(v.Bars))
+	}
+	for i, l := range v.Labels {
+		if l.Text != v.Bars[i].Label {
+			t.Errorf("label %d = %q, want %q", i, l.Text, v.Bars[i].Label)
+		}
+		if want := v.Bars[i].X + v.Bars[i].Width/2; l.X != want {
+			t.Errorf("label %d x = %d, want the bar centre %d", i, l.X, want)
+		}
+		if l.Y <= v.Bars[i].Y+v.Bars[i].Height {
+			t.Errorf("label %d sits inside the plot: %+v", i, l)
+		}
+	}
+	// few buckets stay centred on their slots instead of drifting from the bars
+	two := buildTimeChart([]stats.Bucket{{Label: "2025", Seconds: 60}, {Label: "2026", Seconds: 30}})
+	if two == nil || len(two.Labels) != 2 {
+		t.Fatalf("two-bucket chart labels = %+v", two)
+	}
+	if gap := two.Labels[1].X - two.Labels[0].X; gap != chartSlot {
+		t.Errorf("label gap = %d, want one slot %d", gap, chartSlot)
+	}
+	for i, l := range two.Labels {
+		if want := two.Bars[i].X + two.Bars[i].Width/2; l.X != want {
+			t.Errorf("two-bucket label %d x = %d, want the bar centre %d", i, l.X, want)
+		}
+	}
 
 	// no buckets and all-zero buckets have no chart
 	if buildTimeChart(nil) != nil {
@@ -191,6 +219,26 @@ func TestHeatmapGrid(t *testing.T) {
 	}
 	if v.Empty {
 		t.Error("a heatmap with activity is empty")
+	}
+}
+
+func TestHeatmapMonthLabelsSkipPartialLeadingMonth(t *testing.T) {
+	// the window starts late in a month: that partial month must not take the
+	// first label and push the following full month out
+	from := time.Date(2025, 11, 13, 0, 0, 0, 0, time.UTC) // start = Monday 2025-11-10
+	to := time.Date(2026, 2, 10, 0, 0, 0, 0, time.UTC)
+	v := buildHeatmap(nil, from, to, "")
+	for _, m := range v.Months {
+		if m.Label == "Nov" {
+			t.Errorf("the partial leading month is labelled: %+v", v.Months)
+		}
+	}
+	dec := heatMonth(t, v, "Dec") // 2025-12-01 is in the fourth column
+	if dec.X != heatLeft+3*heatStep {
+		t.Errorf("December label x = %d, want %d", dec.X, heatLeft+3*heatStep)
+	}
+	if feb := heatMonth(t, v, "Feb"); feb.X <= heatMonth(t, v, "Jan").X || heatMonth(t, v, "Jan").X <= dec.X {
+		t.Errorf("month labels are not in order: %+v", v.Months)
 	}
 }
 

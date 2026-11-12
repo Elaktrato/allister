@@ -17,25 +17,34 @@ import (
 // Chart geometry in SVG user units: a fixed slot per bucket, the bar centred
 // in its slot, and the baseline shared by every bar. The viewBox scales to the
 // available width when the page renders it; a chart with few buckets keeps at
-// least chartMinSlots so its bars do not fill the page.
+// least chartMinSlots so its bars do not fill the page. Labels sit in the band
+// below the baseline, rotated so neighbouring ones do not collide, and use the
+// same slot geometry as the bars.
 const (
-	chartHeight   = 160
+	chartHeight   = 196
 	chartBaseline = 150
 	chartTopPad   = 8
-	chartSlot     = 28
-	chartBarWidth = 18
+	chartSlot     = 34
+	chartBarWidth = 22
 	chartLeftPad  = 4
 	chartMinSlots = 8
+	// chartLabelY is the anchor line of the bucket labels and
+	// chartMaxLabels the bucket count above which every second label is
+	// dropped (the bars keep their tooltips and the value table).
+	chartLabelY    = 164
+	chartMaxLabels = 24
 )
 
 // timeChartView is the time chart of the selected scope. MaxLabel names the
-// busiest bucket with its value, Total is the sum of every bucket, and Table
-// carries the same values for the details table below the chart.
+// busiest bucket with its value, Total is the sum of every bucket, Table
+// carries the same values for the details table below the chart and Labels
+// carries one x-axis label per drawn bar.
 type timeChartView struct {
 	Bars     []chartBar
 	MaxLabel string
 	Total    string
 	Table    []bucketRow
+	Labels   []chartLabel
 	Width    int
 	Height   int
 }
@@ -47,6 +56,13 @@ type chartBar struct {
 	X, Y          int
 	Width, Height int
 	Title         string
+}
+
+// chartLabel is one bucket label on the x-axis, at the centre of its bar's
+// slot and on the rotated label line.
+type chartLabel struct {
+	X, Y int
+	Text string
 }
 
 // bucketRow is one row of the chart's value table.
@@ -81,6 +97,11 @@ func buildTimeChart(buckets []stats.Bucket) *timeChartView {
 		Height:   chartHeight,
 	}
 	plot := float64(chartBaseline - chartTopPad)
+	// above chartMaxLabels every second label is enough to name the axis
+	labelStep := 1
+	if len(buckets) > chartMaxLabels {
+		labelStep = 2
+	}
 	for i, b := range buckets {
 		height := 0
 		if b.Seconds > 0 {
@@ -89,13 +110,17 @@ func buildTimeChart(buckets []stats.Bucket) *timeChartView {
 				height = 1 // a bucket with time keeps a visible bar
 			}
 		}
-		v.Bars = append(v.Bars, chartBar{
+		bar := chartBar{
 			Label: b.Label, Seconds: b.Seconds,
 			X:     offset + i*chartSlot + (chartSlot-chartBarWidth)/2,
 			Y:     chartBaseline - height,
 			Width: chartBarWidth, Height: height,
 			Title: b.Label + ": " + fmtSpan(b.Seconds),
-		})
+		}
+		v.Bars = append(v.Bars, bar)
+		if i%labelStep == 0 {
+			v.Labels = append(v.Labels, chartLabel{X: bar.X + bar.Width/2, Y: chartLabelY, Text: b.Label})
+		}
 		v.Table = append(v.Table, bucketRow{Label: b.Label, Value: fmtSpan(b.Seconds)})
 	}
 	return v
@@ -225,18 +250,19 @@ func buildHeatmap(counts map[string]int, from, to time.Time, since string) heatm
 }
 
 // heatmapMonths places one label per month in the window at the column of the
-// month's first day. A label closer than four columns to the previous one is
-// dropped, so the short partial month at the left edge does not collide with
-// the next one.
+// month's first day. The leading partial month is not labelled: its label would
+// sit at the first column and push the first full month (only two or three
+// columns away) out under the four-column rule. A later label closer than four
+// columns to the previous one is dropped the same way.
 func heatmapMonths(start, from, to time.Time) []heatmapMonth {
 	var out []heatmapMonth
 	last := -4
-	for month := time.Date(from.Year(), from.Month(), 1, 0, 0, 0, 0, time.UTC); !month.After(to); month = month.AddDate(0, 1, 0) {
-		day := month
-		if day.Before(from) {
-			day = from
-		}
-		col := int(day.Sub(start).Hours()/24) / heatRows
+	month := time.Date(from.Year(), from.Month(), 1, 0, 0, 0, 0, time.UTC)
+	if month.Before(from) {
+		month = month.AddDate(0, 1, 0)
+	}
+	for ; !month.After(to); month = month.AddDate(0, 1, 0) {
+		col := int(month.Sub(start).Hours()/24) / heatRows
 		if col < last+4 {
 			continue
 		}

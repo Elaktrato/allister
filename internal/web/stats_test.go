@@ -631,8 +631,10 @@ func TestStatsPageShowsTimeChart(t *testing.T) {
 	mustContain(t, chart, "Peak 2025 (4h 48m)", "Total 4h 48m",
 		`<svg`, `viewBox="0 0 `, `fill="currentColor"`, "text-indigo-400",
 		`<title>`, `<desc`, "2025: 4h 48m",
-		`data-bucket="2025"`, "Show values")
-	mustNotContain(t, chart, `style=`)
+		`data-bucket="2025"`, "Show values",
+		// the bucket label is an SVG text next to its bar, not an HTML row
+		`<text x=`, `text-anchor="end"`, `rotate(-45 `, `>2025</text>`)
+	mustNotContain(t, chart, `style=`, "flex-1", "truncate")
 }
 
 // TestStatsPageHidesChartWithoutTime: the chart only exists for a scope with a
