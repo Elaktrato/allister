@@ -95,6 +95,7 @@
 {{if .MissingTime}}<p role="status" class="mb-4 rounded border border-amber-800 bg-slate-900 p-3 text-sm text-amber-200">{{.MissingTime}} {{if eq .MissingTime 1}}entry is{{else}}entries are{{end}} missing the data needed for their time total. {{with .MissingTimeURL}}Open an entry from <a class="underline" href="{{.}}">your list</a> and use{{else}}Open an entry and use{{end}} <span class="font-medium">Update from source</span> to add it.</p>{{end}}
 {{if .UndatedCompleted}}<p role="status" class="mb-4 rounded border border-amber-800 bg-slate-900 p-3 text-sm text-amber-200">{{.UndatedCompleted}} completed {{if eq .UndatedCompleted 1}}entry has{{else}}entries have{{end}} no finished date and {{if eq .UndatedCompleted 1}}is{{else}}are{{end}} not in this period.</p>{{end}}
 {{if .NoTime}}<p class="mb-4 rounded border border-slate-800 bg-slate-900 p-3 text-sm text-slate-400">None of these entries have enough stored data for a time total.</p>{{end}}
+{{if .KnownZeroTime}}<p class="mb-4 rounded border border-slate-800 bg-slate-900 p-3 text-sm text-slate-400">No time is recorded for these entries yet.</p>{{end}}
 {{end}}
 
 {{/* the summary cards: entries, completed, time and units (when the scope

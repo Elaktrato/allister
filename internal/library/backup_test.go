@@ -719,6 +719,31 @@ func TestRestoreCreatesEvents(t *testing.T) {
 	wantDays(t, days, map[string]int{"2026-05-01": 1})
 }
 
+// TestRestoreNotesTruncatedEvents: a backup that dropped older events says so
+// in the restore result, and the newest 5,000 events land in the fresh library.
+func TestRestoreNotesTruncatedEvents(t *testing.T) {
+	a := newEnv(t)
+	id := addBook(t, a.lib, "bke-6", fp(100), Entry{Status: Active, Progress: map[string]float64{"pages": 0}})
+	insertEventsBulk(t, a.lib, id, 5001)
+	items := collect(t, a.lib, 200)
+	if len(items) != 1 || items[0].Entry == nil || len(items[0].Entry.Events) != 5000 || !items[0].Entry.EventsTruncated {
+		t.Fatalf("backup = %+v", items)
+	}
+
+	b := newEnv(t)
+	res := restoreAll(t, b.lib, items, keepCovers)
+	if res[0].Outcome != RestoreCreated {
+		t.Fatalf("result = %+v", res[0])
+	}
+	note := "the change log of this entry was truncated in the backup (newest 5,000 events restored); older events are not in the archive"
+	if !slices.Contains(res[0].Notes, note) {
+		t.Fatalf("notes = %q, want the truncation note", res[0].Notes)
+	}
+	if n := count(t, b.db, `SELECT count(*) FROM entry_events`); n != 5000 {
+		t.Fatalf("restored events = %d, want 5000", n)
+	}
+}
+
 func TestRestoreRejectsBadEvent(t *testing.T) {
 	good := BackupItem{PluginID: "book", Kind: "book", Source: "books", SourceID: "bke-bad",
 		Titles: []plugin.Title{{Lang: "en", Text: "Bad"}}, CoverURL: "https://img.example/bke-bad.jpg",

@@ -242,10 +242,13 @@ func factsFor(kind plugin.KindDef, row library.Row) rowFacts {
 // resolveTime applies the documented order: a completed entry's completed
 // field in minutes, then the active duration track in seconds (capped by the
 // completed field), then the active units track times the per-unit field in
-// minutes.
+// minutes. The second result is false when the time is UNKNOWN rather than a
+// known zero: a zero without any positive completed value has no data, and so
+// has a units count without a positive total or per-unit field.
 func resolveTime(kind plugin.KindDef, row library.Row) (float64, bool) {
 	td := kind.Stats.Time
-	if row.Entry.Status == library.Completed && td.CompletedField != "" {
+	completed := row.Entry.Status == library.Completed
+	if completed && td.CompletedField != "" {
 		if v, ok := fieldNum(row, td.CompletedField); ok && v > 0 {
 			return v * 60, true
 		}
@@ -257,13 +260,28 @@ func resolveTime(kind plugin.KindDef, row library.Row) (float64, bool) {
 				seconds = limit
 			}
 		}
-		return seconds, true
+		// a non-completed entry at zero is a known zero; a completed one
+		// without a positive completed field has nothing to fall back to
+		if seconds > 0 || !completed {
+			return seconds, true
+		}
+		return 0, false
 	}
 	if active(row, td.UnitsKey) && td.PerUnitField != "" {
-		if per, ok := fieldNum(row, td.PerUnitField); ok && per > 0 {
-			units, _ := trackValue(kind, row, td.UnitsKey)
-			return units * per * 60, true
+		units, _ := trackValue(kind, row, td.UnitsKey)
+		if units > 0 {
+			if per, ok := fieldNum(row, td.PerUnitField); ok && per > 0 {
+				return units * per * 60, true
+			}
+			// units are known, but the per-unit field is not
+			return 0, false
 		}
+		// zero units: known for a non-completed entry; a completed entry
+		// whose bounded-total fallback found nothing stays unknown
+		if completed {
+			return 0, false
+		}
+		return 0, true
 	}
 	return 0, false
 }

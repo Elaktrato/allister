@@ -278,6 +278,58 @@ func TestTimeRules(t *testing.T) {
 			row:     withFields(withProgress(withKeys(mkRow(1, library.Active, nil), "position"), map[string]float64{"episode": 3, "position": 0}), map[string]plugin.FieldValue{"runtime": {Num: num(30)}}),
 			missing: 1, timeLbl: "Watchtime", unitLbl: "Episodes",
 		},
+		{
+			// no stored duration value and no completed field: nothing to use
+			name:    "completed entry without a duration value or completed field is missing",
+			kind:    movieKind(),
+			row:     mkRow(1, library.Completed, day(2026, 1, 10)),
+			missing: 1, timeLbl: "Watchtime",
+		},
+		{
+			name:    "completed entry at zero without a completed field is missing",
+			kind:    gameKind(),
+			row:     withProgress(withKeys(mkRow(1, library.Completed, day(2026, 1, 10)), "playtime"), map[string]float64{"playtime": 0}),
+			missing: 1, timeLbl: "Playtime",
+		},
+		{
+			name:    "in-progress entry at zero is a known zero",
+			kind:    gameKind(),
+			row:     withProgress(withKeys(mkRow(1, library.Active, nil), "playtime"), map[string]float64{"playtime": 0}),
+			timeLbl: "Playtime",
+		},
+		{
+			name:    "in-progress position zero without a runtime is a known zero",
+			kind:    movieKind(),
+			row:     withProgress(withKeys(mkRow(1, library.Active, nil), "position"), map[string]float64{"position": 0}),
+			timeLbl: "Watchtime",
+		},
+		{
+			name:    "completed position zero without a runtime is missing",
+			kind:    movieKind(),
+			row:     withProgress(withKeys(mkRow(1, library.Completed, day(2026, 1, 10)), "position"), map[string]float64{"position": 0}),
+			missing: 1, timeLbl: "Watchtime",
+		},
+		{
+			// zero units in a non-completed entry is a known zero, not missing
+			name:    "planned zero units without a per-unit field is a known zero",
+			kind:    animeKind(),
+			row:     withFields(withProgress(withKeys(mkRow(1, library.Planned, nil), "episode"), map[string]float64{"episode": 0}), map[string]plugin.FieldValue{"episodes": {Num: num(24)}}),
+			timeLbl: "Watchtime", unitLbl: "Episodes",
+		},
+		{
+			// completed units fall back to the bounded total, which is absent
+			name:    "completed zero units without a total is missing",
+			kind:    showKind(),
+			row:     withProgress(withKeys(mkRow(1, library.Completed, day(2026, 2, 1)), "episode"), map[string]float64{"episode": 0}),
+			missing: 1, timeLbl: "Watchtime", unitLbl: "Episodes",
+		},
+		{
+			// the fallback finds units but no per-unit field to turn into time
+			name:    "completed zero units with a total but no per-unit field is missing",
+			kind:    showKind(),
+			row:     withFields(withProgress(withKeys(mkRow(1, library.Completed, day(2026, 2, 1)), "episode"), map[string]float64{"episode": 0}), map[string]plugin.FieldValue{"episodes": {Num: num(12)}}),
+			missing: 1, units: 12, unitRows: 1, timeLbl: "Watchtime", unitLbl: "Episodes",
+		},
 	}
 
 	for _, tt := range tests {

@@ -119,8 +119,12 @@ type statsPage struct {
 	KindRows     []statsKindRow
 	CompareTime  bool
 	CompareUnits bool
-	NoTime       bool
-	Dimensions   []dimensionView
+	// NoTime: the scope has a time metric, no entry carries time above zero
+	// and every entry's time is unknown. KnownZeroTime: the same without
+	// unknown entries, so the zeros are data rather than gaps.
+	NoTime        bool
+	KnownZeroTime bool
+	Dimensions    []dimensionView
 	// the figures: Chart is nil when the scope has no time metric or no
 	// bucket carries time; Ratings always holds the 12 distribution rows;
 	// Heatmap covers the last 12 months for the media scope only.
@@ -275,6 +279,8 @@ func (s *server) parseStatsQuery(r *http.Request, now time.Time, scope []statsKi
 			q.Period = "custom"
 		}
 	}
+	// the presets are UTC calendar ranges, like finished dates and the heatmap
+	today := dayOf(now)
 	switch q.Period {
 	case "custom":
 		q.From, q.To = from, to
@@ -284,10 +290,10 @@ func (s *server) parseStatsQuery(r *http.Request, now time.Time, scope []statsKi
 			q.From, q.To = nil, nil
 		}
 	case "year":
-		q.From = timePtr(time.Date(now.Year(), time.January, 1, 0, 0, 0, 0, time.UTC))
-		q.To = timePtr(time.Date(now.Year(), time.December, 31, 0, 0, 0, 0, time.UTC))
+		q.From = timePtr(time.Date(today.Year(), time.January, 1, 0, 0, 0, 0, time.UTC))
+		q.To = timePtr(time.Date(today.Year(), time.December, 31, 0, 0, 0, 0, time.UTC))
 	case "12m":
-		firstOfMonth := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC)
+		firstOfMonth := time.Date(today.Year(), today.Month(), 1, 0, 0, 0, 0, time.UTC)
 		q.From = timePtr(firstOfMonth.AddDate(0, -11, 0))
 		q.To = timePtr(firstOfMonth.AddDate(0, 1, 0).AddDate(0, 0, -1))
 	}
@@ -900,7 +906,11 @@ func (s *server) fillStatsPage(ctx context.Context, v *statsPage, q statsQuery, 
 	if v.MissingTime > 0 && !v.AllMedia {
 		v.MissingTimeURL = "/" + url.PathEscape(rep.Kinds[0].PluginID)
 	}
-	v.NoTime = v.HasTime && total.TimeEntries == 0
+	// a time total of zero means one of two different things: every entry's
+	// value is unknown (a gap to fill) or every value is a known zero
+	noTime := v.HasTime && total.Entries > 0 && total.TimeEntries == 0
+	v.NoTime = noTime && total.MissingTime == total.Entries
+	v.KnownZeroTime = noTime && total.MissingTime == 0
 	v.Cards = statsCards(total, v.HasTime, v.HasUnits)
 	if v.AllMedia {
 		for _, kr := range rep.Kinds {

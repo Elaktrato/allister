@@ -484,7 +484,7 @@ type RestoreOptions struct {
 // RestoreResult reports one restored backup item. ItemID and SyncPending are
 // set only for RestoreCreated; Reason only for RestoreFailed and
 // RestoreUnknownPlugin. Notes lists what was restored differently from the
-// backup (a cover left empty).
+// backup (a cover left empty, a truncated change log).
 type RestoreResult struct {
 	Outcome     RestoreOutcome
 	ItemID      int64
@@ -586,6 +586,11 @@ func (l *Library) RestoreItem(ctx context.Context, bi BackupItem, opts RestoreOp
 		return res, err
 	}
 	res.Outcome, res.ItemID, res.SyncPending = RestoreCreated, id, syncState == "pending"
+	// the writer keeps only the newest part of the log; say so rather than
+	// silently restoring a gap
+	if bi.Entry != nil && bi.Entry.EventsTruncated {
+		res.Notes = append(res.Notes, "the change log of this entry was truncated in the backup (newest 5,000 events restored); older events are not in the archive")
+	}
 	return res, nil
 }
 

@@ -250,6 +250,49 @@ func TestStatsPagePeriodFilter(t *testing.T) {
 	mustContain(t, b, `<option value="custom" selected>`, `name="from" value="2025-02-01"`, `name="to" value="2025-12-15"`)
 }
 
+// TestStatsPagePeriodBoundsUseUTCDays: the year and last-12-months bounds are
+// UTC calendar days, like the finished dates and the heatmap, even when the
+// host clock's local date is already in the next year.
+func TestStatsPagePeriodBoundsUseUTCDays(t *testing.T) {
+	e := newStatsEnv(t)
+	finished := func(id string, y int, m time.Month, d int) {
+		a := animeMedia(id, "Show "+id)
+		a.Duration = ip(24)
+		e.addStatsAnime(t, a, listEntry{Status: library.Completed, Progress: 1, FinishedOn: day(y, m, d)})
+	}
+	finished("jan", 2025, 1, 15)
+	finished("jun", 2025, 6, 15)
+	finished("dec", 2025, 12, 31)
+	finished("next", 2026, 1, 1)
+	// 00:30 CET on 2026-01-01 is 2025-12-31 in UTC: the bounds follow UTC
+	local := time.Date(2026, 1, 1, 0, 30, 0, 0, time.FixedZone("CET", 2*60*60))
+	e.now = &local
+
+	// the page selects the UTC year 2025 and leaves the 2026 entry out
+	year := e.get("/stats?media=anime/anime&period=year").Body.String()
+	if got := statValue(t, year, "entries"); got != "3" {
+		t.Errorf("this year entries = %q, want 3 (UTC 2025)", got)
+	}
+
+	scope := e.srv.statsScope(context.Background())
+	for period, want := range map[string][2]string{
+		"year": {"2025-01-01", "2025-12-31"},
+		// the first day of the month 11 months ago through the month's last day
+		"12m": {"2025-01-01", "2025-12-31"},
+	} {
+		q := e.srv.parseStatsQuery(httptestRequest("/stats?period="+period), *e.now, scope)
+		if q.From == nil || q.To == nil {
+			t.Fatalf("%s bounds = %v..%v", period, q.From, q.To)
+		}
+		if got := fmtDay(q.From); got != want[0] {
+			t.Errorf("%s from = %q, want %q", period, got, want[0])
+		}
+		if got := fmtDay(q.To); got != want[1] {
+			t.Errorf("%s to = %q, want %q", period, got, want[1])
+		}
+	}
+}
+
 func TestStatsPageStatusFilter(t *testing.T) {
 	e := newStatsEnv(t)
 	e.addStatsAnime(t, animeMedia("1", "One"), listEntry{Status: library.Completed, Progress: 1, FinishedOn: day(2025, 12, 1)})
@@ -460,6 +503,29 @@ func TestStatsPageMissingTimeNotice(t *testing.T) {
 	b := e.get("/stats?media=anime/anime").Body.String()
 	mustContain(t, b, "1 entry is missing the data needed for their time total",
 		"Update from source", `href="/anime"`, "None of these entries have enough stored data for a time total")
+}
+
+// TestStatsPageKnownZeroTimeNotice: a view whose entries all resolve to a known
+// zero time (nothing watched yet) is not described as missing data. The
+// known-zero copy and the missing-data copy are distinct, and a mixed view
+// keeps only the actionable missing-time note.
+func TestStatsPageKnownZeroTimeNotice(t *testing.T) {
+	e := newStatsEnv(t)
+	e.addStatsAnime(t, animeMedia("1", "Planned"), listEntry{Status: library.Planned})
+	b := e.get("/stats?media=anime/anime").Body.String()
+	if got := statValue(t, b, "time"); got != "0m" {
+		t.Errorf("time = %q, want 0m", got)
+	}
+	mustContain(t, b, "No time is recorded for these entries yet")
+	mustNotContain(t, b, "None of these entries have enough stored data",
+		"missing the data needed for their time total")
+
+	// a missing entry next to the known-zero one: only the missing-time note
+	e.addStatsAnime(t, animeMedia("2", "No duration"), listEntry{Status: library.Completed, Progress: 5, FinishedOn: day(2025, 12, 1)})
+	b = e.get("/stats?media=anime/anime").Body.String()
+	mustContain(t, b, "1 entry is missing the data needed for their time total")
+	mustNotContain(t, b, "No time is recorded for these entries yet",
+		"None of these entries have enough stored data")
 }
 
 // TestStatsPageAllMediaOneKind: All media is not a specific kind just because
