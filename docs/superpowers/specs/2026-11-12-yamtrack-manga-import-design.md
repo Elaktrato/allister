@@ -123,5 +123,5 @@ production); a provider without the method makes the importer answer
 - The 11 novels are skipped, not duplicated in manga.
 - A mangaupdates row cannot be resolved automatically; manual is the honest
   outcome.
-- After merge, release **v1.1.0**; existing volumes upgrade in place (no new
+- After merge, release **v0.2.0**; existing volumes upgrade in place (no new
   migration).

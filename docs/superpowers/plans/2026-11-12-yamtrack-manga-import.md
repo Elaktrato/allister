@@ -170,5 +170,5 @@ Expected: 25 packages pass; vet/fmt silent; `git status` clean except the ledger
 - [ ] **Step 4: Final review and release**
 
 Run the whole-branch review. After merge:
-- Tag `v1.1.0` at the merged `main` and create a GitHub release with the manga importer and the 528/11 partition.
-- Keep the `v1.0.0` release unchanged.
+- Tag `v0.2.0` at the merged `main` and create a GitHub release with the manga importer and the 528/11 partition.
+- Keep the `v0.1.0` release unchanged.
