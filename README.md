@@ -9,7 +9,7 @@ It is a single Go binary with a SQLite database, server-rendered pages, htmx and
 ## Features
 
 - Search AniList and open an overview: titles in several languages, genres and tags (spoiler tags hidden until asked), related entries, cast, and recommendations that load after the page.
-- Your list: status, rating, progress, dates and comment; 100 per page with status tabs, +1, and search and filters in the URL.
+- Your list: status, rating, progress, dates and comment; 100 per page with status tabs, +1, and search and filters in the URL. A **Statistics** page (`/stats`) totals time, units and ratings by finish date, filterable by period, status, genre, tag and field, with an activity heatmap of the last 365 days; **Update from source** on an item fills in missing data such as the anime episode duration.
 - Edit details of any saved entry (titles, fields, genres, tags, cover); AniList never overwrites your edits.
 - Character and voice-actor pages, manual entries with cover upload, and "Match to AniList".
 - Yamtrack, Goodreads and TV imports, the Steam account import, AniList light-novel import, JSON export, and a universal backup with restore.

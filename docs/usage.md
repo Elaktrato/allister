@@ -21,6 +21,32 @@ The search bar above the list (`q`) and the Filters panel next to it (every othe
 
 Unknown or invalid parameters are ignored, and a notice names them.
 
+## Statistics
+
+The Statistics page (`/stats`, in the sidebar) sums your list by the day each entry was finished. Each media kind declares how its time and units are counted (see [Statistics](plugins.md#statistics) in the plugin guide); a kind without a declaration only adds to the entry counts. The page is a plain GET form: every choice is in the URL, so a view can be bookmarked, and it works without JavaScript. Parameters:
+
+| Parameter | Meaning |
+|---|---|
+| `media` | `all` (empty: every enabled kind), `<plugin>/<kind>` (for example `anime/anime`), or a bare `<plugin>` when it has one kind. A single kind also unlocks its `f.<field>` filters and its unit totals. |
+| `period` | `all` (empty: all time), `year` (the current calendar year), `12m` (the last twelve calendar months, this one included) or `custom` (uses `from` and `to`). |
+| `from`, `to` | Calendar days `YYYY-MM-DD`, both inclusive, used with `custom`. A date without `period` implies `custom`. A range that starts after it ends is refused. |
+| `status` | A core status class: `planned`, `active`, `paused`, `completed` or `dropped` (empty: all). |
+| `genre`, `tag` | One or more genres or tags (repeat the parameter), for the kinds that enable them as filters. `genre_mode=all` or `tag_mode=all` requires all of them; the default is any. At most 50 distinct values. |
+| `f.<field>` | The list's field filters (the same syntax as [Searching your list](#searching-your-list)), for the one kind selected by `media`. Number and date fields take `f.<field>.from` and `f.<field>.to`. |
+
+Unknown or invalid parameters are ignored, and a notice names them.
+
+- **Completion-based periods.** A period counts an entry by its finished date. An entry without a finished date is left out of every period, and a completed entry without one is counted only in All time (the page notes how many there are in a period).
+- **All time vs period.** With no period, every entry counts, the chart uses years, and an entry without a finished date still contributes its totals. With a period, the chart uses months for up to 24 months and years beyond that.
+- **Ratings: 0 vs unrated.** A score of 0 is a real rating: it counts in the rated entries and in the average. An unrated entry has no score; it is left out of the average and shown as "unrated" in the distribution.
+- **Time and units.** Time comes from the kind's declaration: for anime, the episodes times the episode duration. An entry whose time cannot be computed (for example an anime without an episode duration) is noted on the page, with a link to its list when one kind is selected. Use **Update from source** on its overview to fill the missing data. It fills in only the fields the item does not have yet, so your edits and earlier values stay. The anime episode duration (minutes per episode) is set in Edit details and filled from AniList when the source has it. Units (episodes, chapters, pages) are never added up across kinds, so All media shows time and entry counts only.
+- **No batch backfill.** The heatmap knows only the activity recorded since the event log was added (migration 00017). Older history is not reconstructed, and the tracked-since note says from which day the record starts.
+- **Size limit.** One page loads at most 20,000 entries. Beyond that the page shows a notice and the filter form, but no numbers.
+
+**Activity heatmap.** The grid beside the figures shows the last 365 days, today included, with weeks starting on Monday. Days are UTC calendar days. It counts only what you did in the app: a progress increase or a status change to completed. Changes made by an import or a restore are not counted, so a large import does not paint the calendar. The heatmap is narrowed by `media` only; the period, status, genre, tag and field filters do not change it. "Tracked since" is the day of the earliest recorded change of yours.
+
+**Backups.** The universal backup carries each entry's change log, newest first, up to 5,000 events per entry. Older events stay in the database; the archive marks an entry whose log was cut (`events_truncated`). A restore accepts no more than 5,000 events per entry.
+
 ## Plugin settings
 
 Every installed plugin (enabled or not) has a settings page at `/settings/plugins/{id}`, linked from Settings > Plugins and Settings > General. Both forms are plain forms (no JavaScript needed) and, like every change, refuse requests from other sites.
@@ -98,6 +124,7 @@ The universal backup includes these settings and the uploaded fonts. A restore s
 | `/healthz` | Answers `ok`, for monitoring |
 | `/calendar` | The month view of upcoming releases (see [Calendar](#calendar)) |
 | `/calendar.ics` | The iCalendar feed of upcoming releases (same page) |
+| `/stats` | The Statistics page with its filters (see [Statistics](#statistics)) |
 
 Changes from the first version: a data volume from the first (pre-plugin) preview build starts empty after the upgrade (its anime tables are dropped, not copied); make a cold backup of the volume first if it holds data you want (see the README). List statuses are the core's status classes, so a bookmark like `/anime?status=watching` now opens the All tab with a notice (use `status=active`). The list's search and filter parameters are new. Edit details (`/anime/{source}/{id}/edit`) and the recommendations fragment (`/anime/{source}/{id}/recommendations`, loaded by the overview) are new routes.
 
