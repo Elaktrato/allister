@@ -212,9 +212,11 @@ func parseStatsDay(raw string) (*time.Time, bool) {
 	return &d, true
 }
 
-// dayOf returns the UTC calendar day of t, keeping the written day.
+// dayOf returns the UTC calendar day of the instant t. Entry dates are read
+// back as UTC midnight and the activity log stamps UTC, so every comparison and
+// the heatmap window use UTC days whatever the host's zone.
 func dayOf(t time.Time) time.Time {
-	y, m, d := t.Date()
+	y, m, d := t.UTC().Date()
 	return time.Date(y, m, d, 0, 0, 0, 0, time.UTC)
 }
 

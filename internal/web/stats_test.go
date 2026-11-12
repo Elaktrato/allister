@@ -694,6 +694,22 @@ func TestStatsPageHeatmapShowsTrackedSince(t *testing.T) {
 	mustNotContain(t, heat, "starts with your next change", "No activity in the last 12 months", `style=`)
 }
 
+// TestStatsPageHeatmapWindowUsesUTCDays: activity is stored by UTC day, so the
+// heatmap window ends on the UTC day even when the host clock is in a zone whose
+// local date is already the next day.
+func TestStatsPageHeatmapWindowUsesUTCDays(t *testing.T) {
+	e := newStatsEnv(t)
+	id := e.addStatsAnime(t, animeMedia("1", "One"), listEntry{Status: library.Active, Progress: 1})
+	// 2025-01-01 UTC is inside the 365 UTC days ending 2025-12-31, but outside
+	// the window ending 2026-01-01 (the host's local date)
+	e.addActivity(t, id, time.Date(2025, 1, 1, 12, 0, 0, 0, time.UTC), 1)
+	local := time.Date(2026, 1, 1, 0, 30, 0, 0, time.FixedZone("CET", 2*60*60))
+	e.now = &local
+
+	heat := statsSection(t, e.get("/stats").Body.String(), "data-heatmap")
+	mustContain(t, heat, "2025-01-01: 1 activity event", `<th scope="row">2025-01-01</th><td>1</td>`)
+}
+
 func TestStatsPageHeatmapEmptyState(t *testing.T) {
 	e := newStatsEnv(t)
 	e.addStatsAnime(t, animeMedia("1", "One"), listEntry{Status: library.Active, Progress: 1})
