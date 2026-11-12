@@ -68,7 +68,7 @@ func TestBooksManifest(t *testing.T) {
 		t.Errorf("anilist ids = %v", si.ExternalIDTypes)
 	}
 
-	if len(m.Importers) != 2 {
+	if len(m.Importers) != 3 {
 		t.Fatalf("importers = %+v", m.Importers)
 	}
 	goodreads := m.Importers[0]
@@ -80,6 +80,21 @@ func TestBooksManifest(t *testing.T) {
 	anilist := m.Importers[1]
 	if anilist.ID != ImporterAniList || anilist.ExternalIDType != "anilist" || anilist.ResolveVia != SourceAniList {
 		t.Fatalf("anilist = %+v", anilist)
+	}
+	wantYamtrack := plugin.ImporterInfo{
+		ID:                ImporterYamtrack,
+		Name:              "Yamtrack Novel CSV",
+		FileHint:          "Upload the Yamtrack general CSV. Only manga rows that AniList reports as novels are imported into Series.",
+		Accept:            []string{".csv"},
+		ExternalIDType:    "mal",
+		ExternalIDLabel:   "MyAnimeList",
+		ResolveVia:        SourceAniList,
+		ManualRows:        false,
+		FallbackTitleLang: "ja-latn",
+		UnmatchedNote:     "Imported from Yamtrack; AniList had no match for MyAnimeList #{id}.",
+	}
+	if yamtrack := m.Importers[2]; !reflect.DeepEqual(yamtrack, wantYamtrack) {
+		t.Fatalf("yamtrack = %+v, want %+v", yamtrack, wantYamtrack)
 	}
 	if len(m.Exporters) != 1 || m.Exporters[0].ID != ExporterJSON {
 		t.Fatalf("exporters = %+v", m.Exporters)

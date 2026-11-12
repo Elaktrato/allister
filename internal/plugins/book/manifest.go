@@ -14,6 +14,7 @@ const (
 	SourceAniList     = "anilist"
 	ImporterGoodreads = "goodreads-csv"
 	ImporterAniList   = "anilist-account"
+	ImporterYamtrack  = "yamtrack-novel"
 	ExporterJSON      = "json"
 	exportFormat      = "allister.book.export"
 )
@@ -97,6 +98,18 @@ func manifest() plugin.Manifest {
 				ResolveVia:        SourceAniList,
 				FallbackTitleLang: "ja-latn",
 				UnmatchedNote:     "Imported from AniList; AniList had no match for #{id}.",
+			},
+			{
+				ID:                ImporterYamtrack,
+				Name:              "Yamtrack Novel CSV",
+				FileHint:          "Upload the Yamtrack general CSV. Only manga rows that AniList reports as novels are imported into Series.",
+				Accept:            []string{".csv"},
+				ExternalIDType:    "mal",
+				ExternalIDLabel:   "MyAnimeList",
+				ResolveVia:        SourceAniList,
+				ManualRows:        false,
+				FallbackTitleLang: "ja-latn",
+				UnmatchedNote:     "Imported from Yamtrack; AniList had no match for MyAnimeList #{id}.",
 			},
 		},
 		Exporters: []plugin.ExporterInfo{

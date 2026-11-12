@@ -47,6 +47,7 @@ func New(opts Options) plugin.Plugin {
 		importers: map[string]plugin.Importer{
 			ImporterGoodreads: goodreadsImporter{},
 			ImporterAniList:   anilistAccountImporter{c: ac},
+			ImporterYamtrack:  yamtrackNovelImporter{c: ac},
 		},
 		exporter: jsonexport.New(exportFormat),
 	}
