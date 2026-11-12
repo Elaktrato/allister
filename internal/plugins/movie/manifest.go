@@ -45,6 +45,9 @@ func movieKind() plugin.KindDef {
 			Defaults:     []string{"position"},
 			Combinations: [][]string{{"position"}},
 		},
+		Stats: &plugin.StatsDef{
+			Time: &plugin.StatsTimeDef{Label: "Watchtime", CompletedField: "runtime", DurationKey: "position"},
+		},
 		Sections: []plugin.SectionDef{
 			{Type: plugin.SectionInfo, Label: "Details"},
 			{Type: plugin.SectionText, Field: "synopsis", Label: "Summary"},

@@ -133,6 +133,9 @@ func bookKind() plugin.KindDef {
 			Combinations: [][]string{{"pages"}, {"percent"}},
 			PrimaryKey:   "pages",
 		},
+		Stats: &plugin.StatsDef{
+			Units: &plugin.StatsUnitsDef{Key: "pages", LabelPlural: "Pages"},
+		},
 		Sections: []plugin.SectionDef{
 			{Type: plugin.SectionInfo, Label: "Details"},
 			{Type: plugin.SectionText, Field: "synopsis", Label: "Summary"},

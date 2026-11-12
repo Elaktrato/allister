@@ -263,3 +263,11 @@ func fieldByKey(fields []plugin.FieldDef, key string) (plugin.FieldDef, bool) {
 	}
 	return plugin.FieldDef{}, false
 }
+
+func TestGameKindStats(t *testing.T) {
+	k := gameKind()
+	want := &plugin.StatsDef{Time: &plugin.StatsTimeDef{Label: "Playtime", DurationKey: "playtime"}}
+	if !reflect.DeepEqual(k.Stats, want) {
+		t.Fatalf("stats = %+v", k.Stats)
+	}
+}

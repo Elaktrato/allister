@@ -219,3 +219,11 @@ func fieldByKey(fields []plugin.FieldDef, key string) (plugin.FieldDef, bool) {
 	}
 	return plugin.FieldDef{}, false
 }
+
+func TestMovieKindStats(t *testing.T) {
+	k := movieKind()
+	want := &plugin.StatsDef{Time: &plugin.StatsTimeDef{Label: "Watchtime", CompletedField: "runtime", DurationKey: "position"}}
+	if !reflect.DeepEqual(k.Stats, want) {
+		t.Fatalf("stats = %+v", k.Stats)
+	}
+}

@@ -49,3 +49,19 @@ func TestManifestAlwaysDeclaresTMDB(t *testing.T) {
 		t.Fatalf("the key must not change the manifest")
 	}
 }
+
+func TestKindStats(t *testing.T) {
+	k := manifest().Kinds[0]
+	wantStats := &plugin.StatsDef{
+		Time:  &plugin.StatsTimeDef{Label: "Watchtime", UnitsKey: "episode", PerUnitField: "runtime"},
+		Units: &plugin.StatsUnitsDef{Key: "episode", LabelPlural: "Episodes"},
+	}
+	if !reflect.DeepEqual(k.Stats, wantStats) {
+		t.Fatalf("stats = %+v", k.Stats)
+	}
+	for _, f := range k.Fields {
+		if f.Key == "runtime" && f.Unit != "min" {
+			t.Fatalf("runtime unit = %q, want min", f.Unit)
+		}
+	}
+}

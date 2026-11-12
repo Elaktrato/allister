@@ -1,6 +1,7 @@
 package book
 
 import (
+	"reflect"
 	"slices"
 	"testing"
 
@@ -113,4 +114,15 @@ func equalCombos(a, b [][]string) bool {
 		}
 	}
 	return true
+}
+
+func TestBooksKindStats(t *testing.T) {
+	m := New(Options{}).Manifest()
+	wantBook := &plugin.StatsDef{Units: &plugin.StatsUnitsDef{Key: "pages", LabelPlural: "Pages"}}
+	if !reflect.DeepEqual(m.Kinds[0].Stats, wantBook) {
+		t.Fatalf("book stats = %+v", m.Kinds[0].Stats)
+	}
+	if m.Kinds[1].Stats != nil {
+		t.Fatalf("series stats = %+v, want nil", m.Kinds[1].Stats)
+	}
 }

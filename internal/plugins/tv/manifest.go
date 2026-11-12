@@ -30,7 +30,7 @@ func showKind() plugin.KindDef {
 			{Key: "year", Label: "Year", Type: plugin.FieldNumber, Min: num(1900), Max: num(2100), Show: true, Editable: true, Filterable: true, Sortable: true},
 			{Key: "seasons", Label: "Seasons", Type: plugin.FieldNumber, Min: num(1), Max: num(1000), Show: true, Editable: true},
 			{Key: "episodes", Label: "Episodes", Type: plugin.FieldNumber, Min: num(1), Max: num(100000), Show: true, Editable: true},
-			{Key: "runtime", Label: "Runtime", Type: plugin.FieldNumber, Min: num(1), Max: num(10000), Show: true, Editable: true},
+			{Key: "runtime", Label: "Runtime", Type: plugin.FieldNumber, Min: num(1), Max: num(10000), Unit: "min", Show: true, Editable: true},
 			{Key: "network", Label: "Network", Type: plugin.FieldText, Show: true, Editable: true, Filterable: true},
 			{Key: "country", Label: "Country", Type: plugin.FieldText, Show: true, Editable: true, Filterable: true},
 			{Key: "air_status", Label: "Air status", Type: plugin.FieldEnum, EnumValues: []string{"running", "ended", "upcoming", "other"}, Show: true, Editable: true, Filterable: true},
@@ -50,6 +50,10 @@ func showKind() plugin.KindDef {
 			Defaults:     []string{"season", "episode", "position"},
 			Combinations: [][]string{{"season", "episode", "position"}, {"season", "episode"}, {"episode"}, {"episode", "position"}},
 			PrimaryKey:   "episode",
+		},
+		Stats: &plugin.StatsDef{
+			Time:  &plugin.StatsTimeDef{Label: "Watchtime", UnitsKey: "episode", PerUnitField: "runtime"},
+			Units: &plugin.StatsUnitsDef{Key: "episode", LabelPlural: "Episodes"},
 		},
 		Sections: []plugin.SectionDef{
 			{Type: plugin.SectionInfo, Label: "Details"},
