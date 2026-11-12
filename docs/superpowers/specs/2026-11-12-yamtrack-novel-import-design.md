@@ -10,8 +10,9 @@ plugin and not as manual Series rows.
 
 The CSV does not carry the novel format. The importer therefore batch-resolves
 the MAL ids through AniList, keeps only `NOVEL`, and submits those rows through
-the existing books AniList source. Result: 11 imported, 528 ignored, no manual
-noise.
+the existing books AniList source. Result: 11 imported; every other row of the
+full export is ignored (2,827 for this export, 2,838 rows minus 11; 528 of them
+are the non-novel manga rows, the rest are other media rows). No manual noise.
 
 ## Goals
 
@@ -160,8 +161,9 @@ remains unchanged; its `Lookup("mal")` already rejects non-novels.
 - Manifest: the importer info exact; `plugin.New` provides every declared
   importer.
 - The real export check (local-only, never committed): 539 manga rows -> 11
-  entries, 528 ignored; entry titles/statuses/progress as listed above.
-- Full suite/vet/fmt; preview upload on 18083: 11 imported, 528 ignored, the
+  entries, 2,827 ignored across the full export (528 of them the non-novel
+  manga rows); entry titles/statuses/progress as listed above.
+- Full suite/vet/fmt; preview upload on 18083: 11 imported, 2,827 ignored, the
   Series list shows chapters/volumes/author/cover; no manual non-novel rows.
 
 ## Constraints and decisions
