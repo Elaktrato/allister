@@ -46,7 +46,7 @@ func TestManifestJSONRoundTrip(t *testing.T) {
 			Tags:     plugin.TermDef{Enabled: true, Label: "Tags", Editable: true, Filterable: true},
 			Statuses: plugin.StatusLabels{Planned: "P", Active: "A", Paused: "Pa", Completed: "C", Dropped: "D"},
 			Progress: plugin.ProgressSpec{
-				Eligible:     []plugin.ProgressDef{{Key: "x", Type: plugin.Count, Label: "X", TotalField: "n"}, {Key: "y", Type: plugin.Percent, Label: "Y", ResetOnPrimary: true}},
+				Eligible:     []plugin.ProgressDef{{Key: "x", Type: plugin.Count, Label: "X", TotalField: "n"}, {Key: "y", Type: plugin.Percent, Label: "Y", ResetOnPrimary: true}, {Key: "d", Type: plugin.Duration, Label: "D"}},
 				Defaults:     []string{"x"},
 				Combinations: [][]string{{"x"}, {"y"}},
 				PrimaryKey:   "x",
@@ -55,6 +55,10 @@ func TestManifestJSONRoundTrip(t *testing.T) {
 			TitleLanguages: []string{"en", "ja"},
 			TitleFallback:  []string{"ja", "en"},
 			Columns:        []plugin.ColumnDef{{Key: "n", Label: "Number", Default: true, Hide: "md"}, {Key: "rating"}},
+			Stats: &plugin.StatsDef{
+				Time:  &plugin.StatsTimeDef{Label: "Time", DurationKey: "d", CompletedField: "n", UnitsKey: "x", PerUnitField: "n"},
+				Units: &plugin.StatsUnitsDef{Key: "x", LabelPlural: "Units"},
+			},
 		}},
 		Sources: []plugin.SourceInfo{{ID: "s", Name: "S", RequestsPerMinute: 30, ExternalIDTypes: []string{"s"}, SupportsLookup: true, LinkLabel: "View on S", URLPatterns: []string{"s.example/{id}"}, Kinds: []string{"k"}, KeyLabel: "API key", KeyHelp: "Get one at example.test.",
 			KeyFields: []plugin.KeyField{{Name: "client_id", Label: "Client ID"}, {Name: "client_secret", Label: "Client Secret", Secret: true}}}},
@@ -210,6 +214,21 @@ func TestKindTitleFallbackJSON(t *testing.T) {
 	k.TitleFallback = nil
 	if b, _ = json.Marshal(k); strings.Contains(string(b), "title_fallback") {
 		t.Fatalf("empty fallback not omitted: %s", b)
+	}
+}
+
+// TestKindStatsJSON: the stats declaration travels as "stats" and is omitted
+// when unset.
+func TestKindStatsJSON(t *testing.T) {
+	k := plugin.KindDef{Key: "k", TitleLanguages: []string{"en"}, Stats: &plugin.StatsDef{Units: &plugin.StatsUnitsDef{Key: "pages", LabelPlural: "Pages"}}}
+	b, err := json.Marshal(k)
+	if err != nil || !strings.Contains(string(b), `"stats":{"units":{"key":"pages","label_plural":"Pages"}}`) {
+		t.Fatalf("json %s %v", b, err)
+	}
+	roundTrip(t, "kind with stats", k)
+	k.Stats = nil
+	if b, _ = json.Marshal(k); strings.Contains(string(b), "stats") {
+		t.Fatalf("nil stats not omitted: %s", b)
 	}
 }
 
