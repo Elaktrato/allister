@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http/httptest"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -731,5 +732,152 @@ func TestOverviewBadSourceAnswerIs502(t *testing.T) {
 	e.tv.Errs = map[string]error{plugintest.OpDetails: errors.New("disk on fire")}
 	if rec := e.get("/tv/tvdata/1"); rec.Code != 500 {
 		t.Fatalf("plain error: %d", rec.Code)
+	}
+}
+
+// --- update from source (POST /{source}/{id}/refresh) ---
+
+func TestItemRefreshAddsMissingFields(t *testing.T) {
+	e := newEnv(t)
+	id := e.saved(t)
+	if _, ok := e.item(t, id).Fields["duration"]; ok {
+		t.Fatal("fixture already has a duration")
+	}
+	e.fp.anime.Duration = ip(24)
+	rec := e.do("POST", "/anime/anilist/1535/refresh", nil, false)
+	if rec.Code != 303 {
+		t.Fatalf("got %d: %s", rec.Code, rec.Body.String())
+	}
+	if loc := rec.Header().Get("Location"); loc != "/anime/anilist/1535?updated=1" {
+		t.Fatalf("location %q", loc)
+	}
+	if n := e.item(t, id).Fields["duration"].Num; n == nil || *n != 24 {
+		t.Fatalf("duration %v", n)
+	}
+	if e.fp.animeCalls != 1 {
+		t.Fatalf("source calls %d", e.fp.animeCalls)
+	}
+	mustContain(t, e.get("/anime/anilist/1535?updated=1").Body.String(), "1 field added from AniList.")
+	mustNotContain(t, e.get("/anime/anilist/1535").Body.String(), "added from AniList")
+}
+
+func TestItemRefreshKeepsExistingFields(t *testing.T) {
+	e := newEnv(t)
+	id := e.saved(t)
+	before := e.item(t, id)
+	e.fp.anime.Duration = ip(24)
+	e.fp.anime.Studio = "CHANGED"
+	e.fp.anime.Synopsis = "CHANGED"
+	e.fp.anime.StartDate, e.fp.anime.EndDate = nil, nil
+	rec := e.do("POST", "/anime/anilist/1535/refresh", nil, false)
+	if rec.Code != 303 || rec.Header().Get("Location") != "/anime/anilist/1535?updated=1" {
+		t.Fatalf("got %d %q", rec.Code, rec.Header().Get("Location"))
+	}
+	it := e.item(t, id)
+	if it.Fields["studio"].Text != before.Fields["studio"].Text || it.Fields["synopsis"].Text != before.Fields["synopsis"].Text {
+		t.Fatalf("existing fields overwritten:\n%+v\n%+v", before.Fields, it.Fields)
+	}
+	if it.Fields["started_on"].Date == nil || !it.Fields["started_on"].Date.Equal(*before.Fields["started_on"].Date) {
+		t.Fatalf("started_on overwritten: %+v", it.Fields["started_on"])
+	}
+	if n := it.Fields["duration"].Num; n == nil || *n != 24 {
+		t.Fatalf("duration %v", n)
+	}
+	if !reflect.DeepEqual(it.Titles, before.Titles) || !reflect.DeepEqual(it.Genres, before.Genres) ||
+		!reflect.DeepEqual(it.Tags, before.Tags) || it.CoverPath != before.CoverPath {
+		t.Fatalf("other parts touched:\n%+v\n%+v", before, it)
+	}
+	// a second run finds nothing new
+	rec = e.do("POST", "/anime/anilist/1535/refresh", nil, false)
+	if rec.Code != 303 || rec.Header().Get("Location") != "/anime/anilist/1535?updated=0" {
+		t.Fatalf("second run: %d %q", rec.Code, rec.Header().Get("Location"))
+	}
+	mustContain(t, e.get("/anime/anilist/1535?updated=0").Body.String(), "Nothing new; every source field is already filled.")
+}
+
+func TestItemRefreshManualItemNotFound(t *testing.T) {
+	e := newEnv(t)
+	if rec := e.do("POST", "/anime/anilist/1535/refresh", nil, false); rec.Code != 404 {
+		t.Fatalf("unsaved item: %d", rec.Code)
+	}
+	if rec := e.do("POST", "/anime/manual/77/refresh", nil, false); rec.Code != 404 {
+		t.Fatalf("unsaved manual item: %d", rec.Code)
+	}
+	m := anilist.Media{SearchResult: anilist.SearchResult{Source: anilist.Manual, ID: "77", Type: "OVA",
+		Titles: []anilist.Title{{Lang: "en", Text: "My Manual Show"}}}}
+	if _, err := saveAnime(context.Background(), e.lib, m, library.WithSyncState("done")); err != nil {
+		t.Fatal(err)
+	}
+	if rec := e.do("POST", "/anime/manual/77/refresh", nil, false); rec.Code != 404 {
+		t.Fatalf("saved manual item: %d", rec.Code)
+	}
+	if e.fp.animeCalls != 0 {
+		t.Fatalf("source calls %d", e.fp.animeCalls)
+	}
+}
+
+func TestItemRefreshSourceError(t *testing.T) {
+	e := newFixtureEnv(t)
+	id := e.saveFixture(t, "tv", "show", tvShow("1", "Show"))
+	before := dump(t, e.env)
+	e.tv.Errs = map[string]error{plugintest.OpDetails: plugin.ErrNotConfigured}
+	rec := e.do("POST", "/tv/tvdata/1/refresh", nil, false)
+	if rec.Code != 503 {
+		t.Fatalf("got %d: %s", rec.Code, rec.Body.String())
+	}
+	mustContain(t, rec.Body.String(), needsKeyMessage, `href="/tv/tvdata/1"`, "Try again")
+	if dump(t, e.env) != before {
+		t.Fatal("changed on a source error")
+	}
+	if e.tv.Calls(plugintest.OpDetails) != 1 {
+		t.Fatalf("source calls %d", e.tv.Calls(plugintest.OpDetails))
+	}
+	if e.item(t, id).Fields["duration"].Num != nil {
+		t.Fatal("fields written")
+	}
+}
+
+func TestItemRefreshKeepsKindParameter(t *testing.T) {
+	e := newFixtureEnv(t, withComicKind)
+	cd := bookItem("7", "The Comic")
+	cd.Kind = "comic"
+	e.saveFixture(t, "book", "comic", cd)
+	mustContain(t, e.get("/book/books/7?kind=comic").Body.String(), `action="/book/books/7/refresh?kind=comic"`)
+	d := bookItem("7", "The Comic")
+	d.Kind = "comic"
+	d.Fields["isbn"] = plugin.FieldValue{Text: "978-7"}
+	e.book.Data = d
+	rec := e.do("POST", "/book/books/7/refresh?kind=comic", nil, false)
+	if rec.Code != 303 || rec.Header().Get("Location") != "/book/books/7?kind=comic&updated=1" {
+		t.Fatalf("got %d %q", rec.Code, rec.Header().Get("Location"))
+	}
+	mustContain(t, e.get("/book/books/7?kind=comic&updated=1").Body.String(), "1 field added from Fake Books.")
+}
+
+func TestItemShowsRefreshActionOnlyForSourcedItems(t *testing.T) {
+	e := newFixtureEnv(t)
+	e.tv.Data = tvShow("1", "Live Show")
+	mustNotContain(t, e.get("/tv/tvdata/1").Body.String(), `action="/tv/tvdata/1/refresh"`, "Update from source")
+	if rec := e.do("POST", "/tv/tvdata/1/refresh", nil, false); rec.Code != 404 {
+		t.Fatalf("unsaved: %d", rec.Code)
+	}
+	e.saveFixture(t, "tv", "show", tvShow("2", "Saved Show"))
+	mustContain(t, e.get("/tv/tvdata/2").Body.String(), `action="/tv/tvdata/2/refresh"`, "Update from source")
+	man := tvShow("3", "Hand Made")
+	man.Source = "manual"
+	e.saveFixture(t, "tv", "show", man)
+	mustNotContain(t, e.get("/tv/manual/3").Body.String(), "Update from source")
+	if rec := e.do("POST", "/tv/manual/3/refresh", nil, false); rec.Code != 404 {
+		t.Fatalf("manual: %d", rec.Code)
+	}
+	if rec := e.do("POST", "/tv/other/2/refresh", nil, false); rec.Code != 404 {
+		t.Fatalf("undeclared source: %d", rec.Code)
+	}
+	// a declared source the plugin does not provide has no action either
+	e2 := newFixtureEnv(t, func(_, tv *plugintest.Plugin) { tv.Sources = nil })
+	e2.saveFixture(t, "tv", "show", tvShow("4", "No Source"))
+	mustNotContain(t, e2.get("/tv/tvdata/4").Body.String(), "Update from source")
+	if rec := e2.do("POST", "/tv/tvdata/4/refresh", nil, false); rec.Code != 404 {
+		t.Fatalf("unimplemented source: %d", rec.Code)
 	}
 }

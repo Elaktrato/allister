@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/allister/allister/internal/plugin"
@@ -228,6 +229,68 @@ func (l *Library) UpdateDetails(ctx context.Context, itemID int64, u DetailsUpda
 		return fmt.Errorf("update details: %w", err)
 	}
 	return nil
+}
+
+// FillMissingFields adds the source fields the item does not have yet, in ONE
+// write-locking transaction. Only keys absent from the item's stored fields
+// (fields with a value) are written; a key that already has a value is never
+// overwritten, so local edits, imported data and earlier refreshes survive.
+// The source fields are validated with the same rules as UpdateDetails (types,
+// bounds, enums, text hygiene, URLs). It bumps the item's updated_at only when
+// something was added and returns the added keys sorted. ErrNoEntry for an
+// unknown item, ErrInvalid for invalid data. Titles, terms, cover, credits,
+// external ids, relations, progress keys and the list entry are never touched.
+func (l *Library) FillMissingFields(ctx context.Context, itemID int64, fields map[string]plugin.FieldValue) ([]string, error) {
+	tx, err := l.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("fill missing fields: %w", err)
+	}
+	defer tx.Rollback()
+	pluginID, kind, stored, err := detailsMeta(ctx, tx, itemID)
+	if err != nil {
+		return nil, err
+	}
+	def, err := l.kindDef(pluginID, kind)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := normalizeFields(def, fields)
+	if err != nil {
+		return nil, err
+	}
+	have := make(map[string]bool, len(stored))
+	for _, k := range stored {
+		have[k] = true
+	}
+	var missing []fieldRow
+	for _, r := range rows {
+		if !have[r.key] {
+			missing = append(missing, r)
+		}
+	}
+	if len(missing) == 0 {
+		return nil, nil
+	}
+	if err := insertFields(ctx, tx, itemID, missing); err != nil {
+		return nil, err
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE items SET updated_at = `+nowSQL+` WHERE id = ?`, itemID); err != nil {
+		return nil, fmt.Errorf("fill missing fields: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("fill missing fields: %w", err)
+	}
+	added := make([]string, 0, len(missing))
+	seen := make(map[string]bool, len(missing))
+	for _, r := range missing {
+		if seen[r.key] {
+			continue
+		}
+		seen[r.key] = true
+		added = append(added, r.key)
+	}
+	slices.Sort(added)
+	return added, nil
 }
 
 // compareAndSet runs a one-row UPDATE ... WHERE ... AND <col> = expected and

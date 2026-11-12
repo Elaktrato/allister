@@ -100,9 +100,14 @@ type itemView struct {
 	// DetailsURL opens "Edit details" (every saved item); it returns to
 	// the overview.
 	DetailsURL string
-	Sections   []sectionView
-	Dialog     *entryForm
-	Match      *matchView
+	// UpdateURL, UpdateLabel: the "Update from source" form of a saved item
+	// whose source is declared, implemented and not manual.
+	UpdateURL, UpdateLabel string
+	// UpdateNotice reports a finished refresh (?updated=N).
+	UpdateNotice string
+	Sections     []sectionView
+	Dialog       *entryForm
+	Match        *matchView
 }
 
 func (s *server) itemView(ctx context.Context, li *loadedItem) itemView {
@@ -117,6 +122,9 @@ func (s *server) itemView(ctx context.Context, li *loadedItem) itemView {
 		v.Cover = covers.Src(it.CoverPath)
 		v.PartialSync = it.SyncState != "done"
 		v.DetailsURL = itemAction(m, d.Source, d.ID, d.Kind, "edit", url.Values{"return": {overview}})
+		if it.Source != manualSource && hasSource(m, it.Source) && s.source(m.ID, it.Source) != nil {
+			v.UpdateURL, v.UpdateLabel = itemAction(m, d.Source, d.ID, d.Kind, "refresh", nil), "Update from source"
+		}
 		if it.Source == manualSource && len(m.Sources) > 0 {
 			v.MatchURL, v.MatchLabel = itemAction(m, d.Source, d.ID, d.Kind, "match", nil), "Match to "+s.defaultSourceForKind(ctx, m, d.Kind).Name
 			v.UnmatchedHint = unmatchedHint(m, it)
@@ -209,6 +217,27 @@ func fmtProgress(def plugin.ProgressDef, v float64, fields map[string]plugin.Fie
 		}
 	}
 	return out
+}
+
+// sourceName is the display name of a declared source, "the source" when the
+// plugin does not declare it.
+func sourceName(m plugin.Manifest, id string) string {
+	if si, ok := sourceInfo(m, id); ok && si.Name != "" {
+		return si.Name
+	}
+	return "the source"
+}
+
+// updateNotice is the message of a finished "Update from source": the number
+// of added fields, or that nothing was missing.
+func updateNotice(n int, source string) string {
+	switch n {
+	case 0:
+		return "Nothing new; every source field is already filled."
+	case 1:
+		return "1 field added from " + source + "."
+	}
+	return strconv.Itoa(n) + " fields added from " + source + "."
 }
 
 // sourceLink is the "View on ..." link of the item's external page (https
