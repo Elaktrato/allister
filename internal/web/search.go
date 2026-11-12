@@ -1,8 +1,9 @@
 package web
 
 // The generic search page: GET /{plugin}/search?q=&source=&kind= asks one of
-// the plugin's sources (the first by default) for items of one of its kinds
-// (the first by default) and renders result cards from the kind's schema.
+// the plugin's sources (the first configured one by default) for items of one
+// of its kinds (the first by default) and renders result cards from the kind's
+// schema.
 
 import (
 	"context"
@@ -136,25 +137,19 @@ func sourcesForKind(m plugin.Manifest, kind string) []plugin.SourceInfo {
 }
 
 // sourceChoiceLabel is a source's name in a source switch, marked with
-// " (needs key)" while the source declares a key label and no effective key is
-// configured. It never changes the heading or the result badges.
+// " (needs key)" while the source is not configured (a key label with no
+// effective key, or a multi-field source with a field missing). It never
+// changes the heading or the result badges.
 func (s *server) sourceChoiceLabel(ctx context.Context, si plugin.SourceInfo) string {
-	if si.KeyLabel == "" {
-		return si.Name
-	}
-	key, err := s.sourceKey(ctx, si.ID)
-	if err != nil {
-		log.Printf("source choice %s: read key: %v", si.ID, err)
-	}
-	if key != "" {
+	if s.sourceConfigured(ctx, si) {
 		return si.Name
 	}
 	return si.Name + " (needs key)"
 }
 
-// defaultSourceForKind is the first source serving kind that supports lookup,
-// else the first one serving it. A plugin whose sources have no Kinds keeps
-// the old default.
+// defaultSourceForKind is the manifest's first source serving kind that
+// supports lookup, else the first one serving it. It ignores credentials: the
+// server's method of the same name prefers a configured source on top.
 func defaultSourceForKind(m plugin.Manifest, kind string) plugin.SourceInfo {
 	valid := sourcesForKind(m, kind)
 	for _, si := range valid {
@@ -168,11 +163,31 @@ func defaultSourceForKind(m plugin.Manifest, kind string) plugin.SourceInfo {
 	return plugin.SourceInfo{}
 }
 
+// defaultSourceForKind is the first source serving kind that is configured and
+// supports lookup, else the first configured one, else the manifest's first
+// (defaultSourceForKind). A plugin whose sources need no credentials keeps the
+// old default.
+func (s *server) defaultSourceForKind(ctx context.Context, m plugin.Manifest, kind string) plugin.SourceInfo {
+	valid := sourcesForKind(m, kind)
+	for _, si := range valid {
+		if si.SupportsLookup && s.sourceConfigured(ctx, si) {
+			return si
+		}
+	}
+	for _, si := range valid {
+		if s.sourceConfigured(ctx, si) {
+			return si
+		}
+	}
+	return defaultSourceForKind(m, kind)
+}
+
 // chooseSourceForKind is the source a request names. An empty or non-serving
-// id falls back to the kind's default; an unknown id is not a source at all.
-func chooseSourceForKind(m plugin.Manifest, kind, id string) (plugin.SourceInfo, bool) {
+// id falls back to the kind's configured default; an unknown id is not a
+// source at all.
+func (s *server) chooseSourceForKind(ctx context.Context, m plugin.Manifest, kind, id string) (plugin.SourceInfo, bool) {
 	if id == "" {
-		si := defaultSourceForKind(m, kind)
+		si := s.defaultSourceForKind(ctx, m, kind)
 		return si, si.ID != ""
 	}
 	si, ok := sourceInfo(m, id)
@@ -180,7 +195,7 @@ func chooseSourceForKind(m plugin.Manifest, kind, id string) (plugin.SourceInfo,
 		return plugin.SourceInfo{}, false
 	}
 	if !sourceServesKind(si, kind) {
-		si = defaultSourceForKind(m, kind)
+		si = s.defaultSourceForKind(ctx, m, kind)
 		return si, si.ID != ""
 	}
 	return si, true
@@ -198,7 +213,7 @@ func (s *server) search(w http.ResponseWriter, r *http.Request, pluginID string)
 		s.errorPage(w, r, http.StatusNotFound, "Not found", "There is no such search.", "")
 		return
 	}
-	si, okSrc := chooseSourceForKind(m, k.Key, qs.Get("source"))
+	si, okSrc := s.chooseSourceForKind(r.Context(), m, k.Key, qs.Get("source"))
 	if !okSrc {
 		s.errorPage(w, r, http.StatusNotFound, "Not found", "There is no such search.", "")
 		return

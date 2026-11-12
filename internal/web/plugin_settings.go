@@ -204,11 +204,7 @@ func (s *server) sourceKeyState(ctx context.Context, m plugin.Manifest) (missing
 			other = true
 			continue
 		}
-		key, err := s.sourceKey(ctx, src.ID)
-		if err != nil {
-			log.Printf("settings %s: read key of source %s: %v", m.ID, src.ID, err)
-		}
-		if key == "" {
+		if !s.sourceConfigured(ctx, src) {
 			missing = append(missing, src.Name)
 		}
 	}

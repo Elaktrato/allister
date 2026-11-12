@@ -19,11 +19,11 @@ scripts/go.sh fmt ./...
 
 ## Architecture rules (enforced by tests)
 
-- `internal/plugin` is the contract (manifest, kinds, fields, progress types, sections, sources, importers/exporters). Plugins declare data only: **no plugin HTML or JS**.
+- `internal/plugin` is the contract (manifest, kinds, fields, progress types, sections, sources, importers/exporters). A source's credentials are declared as data only (`KeyLabel` for a single key, `KeyFields` for named fields such as IGDB's Client ID and Secret). Plugins declare data only: **no plugin HTML or JS**.
 - Only `cmd/allister/main.go` may import `internal/plugins/*`. `internal/guard` fails the build if core Go/HTML files contain media-specific words (anime, episode, `manga`, word-bounded `mal`, ...) or import plugins. Test files and `internal/plugin/plugintest` fixtures are exempt. Media words belong in plugins and docs only.
 - A future marketplace (loading plugins without a rebuild) must stay possible: contract types stay serialisable data (JSON round trip tested), no compile-time coupling beyond `cmd/allister`.
 - Progress types come from a closed core enum (count, pages, percent, duration); each plugin declares which are allowed, the defaults and the primary key.
-- Libraries: `internal/library` (generic items, entries, terms, people, query engine), `internal/jobs` (queue with plugin gate), `internal/importer` (paced, resumable import runner), `internal/backup` (zip backup, merge restore), `internal/covers`, `internal/settings` (per-plugin settings keys `plugin.<id>.*` and source credentials `source.<id>.key`), `internal/web` (handlers, templates, htmx).
+- Libraries: `internal/library` (generic items, entries, terms, people, query engine), `internal/jobs` (queue with plugin gate), `internal/importer` (paced, resumable import runner), `internal/backup` (zip backup, merge restore), `internal/covers`, `internal/settings` (per-plugin settings keys `plugin.<id>.*` and source credentials `source.<id>.<field>`, where a single-key source uses the field `key`), `internal/web` (handlers, templates, htmx).
 
 ## Conventions
 

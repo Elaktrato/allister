@@ -4,18 +4,24 @@ package config
 import "os"
 
 type Config struct {
-	Port           string
-	DataDir        string
-	GoogleBooksKey string
-	TMDBKey        string
+	Port             string
+	DataDir          string
+	GoogleBooksKey   string
+	TMDBKey          string
+	IGDBClientID     string
+	IGDBClientSecret string
+	SteamAPIKey      string
 }
 
 func Load() Config {
 	return Config{
-		Port:           env("PORT", "8080"),
-		DataDir:        env("DATA_DIR", "/data"),
-		GoogleBooksKey: env("GOOGLE_BOOKS_API_KEY", ""),
-		TMDBKey:        env("TMDB_API_KEY", ""),
+		Port:             env("PORT", "8080"),
+		DataDir:          env("DATA_DIR", "/data"),
+		GoogleBooksKey:   env("GOOGLE_BOOKS_API_KEY", ""),
+		TMDBKey:          env("TMDB_API_KEY", ""),
+		IGDBClientID:     env("IGDB_CLIENT_ID", ""),
+		IGDBClientSecret: env("IGDB_CLIENT_SECRET", ""),
+		SteamAPIKey:      env("STEAM_API_KEY", ""),
 	}
 }
 

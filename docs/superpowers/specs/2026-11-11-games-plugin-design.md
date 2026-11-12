@@ -181,10 +181,11 @@ The card on `GET /settings/plugins` renders:
   helper: single key non-empty, or every multi-field non-empty. A source with
   no key fields is always configured. Unconfigured keyed sources keep their
   `" (needs key)"` label.
-- The account import form (`postPluginImport`) maps `ErrNotConfigured` to the
-  same actionable message: "<Source> needs a valid <key label>. Add or replace
-  it in Settings > Plugins." The Steam importer lets the sentinel through; the
-  form never shows the raw "plugin: source is not configured".
+- The account import form (`postPluginImport`) shows the actionable key
+  message: `steamAccountImporter.ImportAccount` maps `ErrNotConfigured` to
+  `ErrBadInput` with "The Steam Web API key is missing or refused; add it in
+  Settings > Plugins." The form renders the bad-input message, so it never
+  shows the raw "plugin: source is not configured".
 - The search/match default source becomes server-aware: the first source
   serving the kind that is configured, else the first as today. This matters
   for games (IGDB first, but Steam when only the Steam key is set).
@@ -272,7 +273,8 @@ Queries:
   platforms.name,genres.name,themes.name,keywords.name,
   involved_companies.company.name,involved_companies.developer,
   involved_companies.publisher,cover.url,similar_games.id,similar_games.name,
-  similar_games.cover.url,external_games.uid,external_games.external_game_source;
+  similar_games.first_release_date,similar_games.cover.url,external_games.uid,
+  external_games.external_game_source;
   where id = <id>; limit 1;`. A slug lookup uses `where slug = "<slug>"`.
 - Time to beat: `/v4/game_time_to_beats`, body `fields hastily,normally,completely,count;
   where game_id = <id>; limit 1;`. Map seconds to whole minutes:
@@ -342,7 +344,7 @@ keyless. The key is never sent to the store endpoints.
   with the shared plain-text helper), `header_image`, `developers[0]`/
   `publishers[0]` (join up to 3), `genres[].description`, `categories[].description`
   as tags, `release_date.date`, `platforms` (windows/mac/linux),
-  `steam_appid`, `website`.
+  `steam_appid`. The kind has no website field; `ExternalURL` is the Steam store page.
 - Release date layouts: `2 Jan, 2006`, `Jan 2, 2006`, `2006`; `coming_soon`
   true -> no date.
 - No People, no recommendations.
@@ -533,9 +535,11 @@ source that returns a different canonical id from the input.
 3. **Steam non-game owned apps** — no pre-filter; they stay manual rows with
    their Steam appid and the unmatched note, and the user deletes them. The
    alternative (an unpaced per-app type check at submit time) is rejected.
-4. **Steam key on the account form** — the web import form maps
-   `ErrNotConfigured` to the same actionable key message; the importer lets the
-   sentinel through.
+4. **Steam key on the account form** — `steamAccountImporter.ImportAccount`
+   maps `ErrNotConfigured` to `ErrBadInput` with the actionable key message
+   ("The Steam Web API key is missing or refused; add it in Settings >
+   Plugins."); the generic import form renders that bad-input message rather
+   than the raw sentinel.
 5. **Links** — one link per item, the item's own source link; an IGDB item
    shows IGDB, a Steam item shows Steam. The stored `steam` external id is not
    a second link; no URL field or core Links change.

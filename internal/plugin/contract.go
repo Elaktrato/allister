@@ -232,6 +232,15 @@ type KindDef struct {
 	Columns        []ColumnDef  `json:"columns,omitempty"`
 }
 
+// KeyField is one named credential field of a source ("client_id"). Name is a
+// lower-case slug, unique within the source; Label is its single-line caption;
+// Secret masks the stored value. Its meaning is set by KeyFields on SourceInfo.
+type KeyField struct {
+	Name   string `json:"name"`
+	Label  string `json:"label"`
+	Secret bool   `json:"secret,omitempty"`
+}
+
 // SourceInfo describes a data source. URLPatterns look like
 // "example.org/item/{id}"; the core matches pasted URLs against them so no
 // plugin code parses URLs.
@@ -253,6 +262,9 @@ type SourceInfo struct {
 	KeyLabel string `json:"key_label,omitempty"`
 	// KeyHelp is one optional sentence telling the user where to get it.
 	KeyHelp string `json:"key_help,omitempty"`
+	// KeyFields, when set, means the source needs several named credentials
+	// (1 to 4) under the group label KeyLabel instead of one key.
+	KeyFields []KeyField `json:"key_fields,omitempty"`
 }
 
 // ImporterInfo describes an import format. ResolveVia names the declared

@@ -69,6 +69,10 @@ type Deps struct {
 	// SourceKey resolves the API key to use for a source id: the stored key,
 	// or one the environment supplies. When nil, Settings.SourceKey answers.
 	SourceKey func(ctx context.Context, sourceID string) (string, error)
+	// SourceKeyField resolves one named credential field of a multi-field
+	// source (settings key source.<id>.<field>): the stored value, or one the
+	// environment supplies. When nil, Settings.SourceKeyField answers.
+	SourceKeyField func(ctx context.Context, sourceID, field string) (string, error)
 }
 
 // JobQueue is the part of jobs.Queue the web layer needs.

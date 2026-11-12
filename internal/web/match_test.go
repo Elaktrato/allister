@@ -575,13 +575,18 @@ func TestMatchSourcesFollowKind(t *testing.T) {
 func TestMatchWithSeveralSources(t *testing.T) {
 	alt := &plugintest.FakeSource{Data: tvShow("5", "Alt Show")}
 	e := newFixtureEnv(t, twoSources(alt))
+	// With a stored key "Fake TV" (tvdata) is the configured default: it is
+	// the lookup source. The request then names "tvalt" explicitly, so the
+	// test proves a real switch away from the default.
+	if err := e.set.SetSourceKey(context.Background(), "tvdata", "secret-key"); err != nil {
+		t.Fatal(err)
+	}
 	id := tvManual(t, e.env)
 	e.tv.Data = tvShow("77", "Found")
-	// default: the first source with lookup support
 	b := e.do("GET", "/tv/manual/m1/match", nil, true).Body.String()
-	mustContain(t, b, `name="source" value="tvdata"`, "Fake TV", `href="/tv/manual/m1/match?source=tvalt"`)
+	mustContain(t, b, `name="source" value="tvdata"`, "Match to Fake TV", `href="/tv/manual/m1/match?source=tvalt"`)
 	b = e.do("GET", "/tv/manual/m1/match?source=tvalt", nil, true).Body.String()
-	mustContain(t, b, `name="source" value="tvalt"`, `placeholder="https://alt.example/s/123"`, `hx-get="/tv/manual/m1/match/search?source=tvalt"`)
+	mustContain(t, b, `name="source" value="tvalt"`, "Match to Alt TV", `placeholder="https://alt.example/s/123"`, `hx-get="/tv/manual/m1/match/search?source=tvalt"`)
 	e.do("GET", "/tv/manual/m1/match/search?source=tvalt&q=x", nil, true)
 	if alt.Calls(plugintest.OpSearch) != 1 || e.tv.Calls(plugintest.OpSearch) != 0 {
 		t.Fatal("searched the wrong source")
@@ -599,13 +604,43 @@ func TestMatchWithSeveralSources(t *testing.T) {
 	}
 }
 
+// The source's canonical id wins over the matched input (a pasted slug
+// stores the numeric or canonical id, so a later add of the same game
+// converges).
+func TestMatchStoresCanonicalSourceID(t *testing.T) {
+	e := newFixtureEnv(t)
+	id := tvManual(t, e.env)
+	e.tv.Data = tvShow("canonical-slug", "Found")
+	rec := e.do("POST", "/tv/manual/m1/match", url.Values{"pick": {"input-id"}}, false)
+	if rec.Code != 303 || rec.Header().Get("Location") != "/tv/tvdata/canonical-slug" {
+		t.Fatalf("%d %q %s", rec.Code, rec.Header().Get("Location"), rec.Body.String())
+	}
+	if it, _ := e.snapshot(t, id); it.Source != "tvdata" || it.SourceID != "canonical-slug" {
+		t.Fatalf("%+v", it)
+	}
+}
+
+// Without a canonical id from the source the matched input is kept.
+func TestMatchCanonicalIDFallsBackToInput(t *testing.T) {
+	e := newFixtureEnv(t)
+	id := tvManual(t, e.env)
+	e.tv.Data = tvShow("", "Found")
+	rec := e.do("POST", "/tv/manual/m1/match", url.Values{"pick": {"input-id"}}, false)
+	if rec.Code != 303 || rec.Header().Get("Location") != "/tv/tvdata/input-id" {
+		t.Fatalf("%d %q %s", rec.Code, rec.Header().Get("Location"), rec.Body.String())
+	}
+	if it, _ := e.snapshot(t, id); it.SourceID != "input-id" {
+		t.Fatalf("%+v", it)
+	}
+}
+
 // A pick and a pasted reference are both any valid source id (a bare id of
 // letters, digits, '_' and '-', or a URL matching the source's patterns);
 // the source's Details verifies it either way.
 func TestMatchPickAcceptsNonDigitIDs(t *testing.T) {
 	e := newFixtureEnv(t)
 	id := tvManual(t, e.env)
-	e.tv.Data = tvShow("x", "Found")
+	e.tv.Data = tvShow("tt-77", "Found")
 	rec := e.do("POST", "/tv/manual/m1/match", url.Values{"pick": {"tt-77"}}, true)
 	if rec.Code != 204 || rec.Header().Get("HX-Redirect") != "/tv/tvdata/tt-77" {
 		t.Fatalf("%d %q %s", rec.Code, rec.Header().Get("HX-Redirect"), rec.Body.String())
@@ -615,7 +650,7 @@ func TestMatchPickAcceptsNonDigitIDs(t *testing.T) {
 	}
 	e2 := newFixtureEnv(t)
 	id2 := tvManual(t, e2.env)
-	e2.tv.Data = tvShow("x", "Found")
+	e2.tv.Data = tvShow("tt-77", "Found")
 	if rec := e2.do("POST", "/tv/manual/m1/match", url.Values{"source_ref": {"tt-77"}}, true); rec.Code != 204 ||
 		rec.Header().Get("HX-Redirect") != "/tv/tvdata/tt-77" {
 		t.Fatalf("reference: %d %q %s", rec.Code, rec.Header().Get("HX-Redirect"), rec.Body.String())

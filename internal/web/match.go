@@ -164,7 +164,7 @@ func (s *server) getMatch(w http.ResponseWriter, r *http.Request, pluginID strin
 	if !ok {
 		return
 	}
-	si, ok := chooseSourceForKind(t.man, t.ref.Kind, r.URL.Query().Get("source"))
+	si, ok := s.chooseSourceForKind(r.Context(), t.man, t.ref.Kind, r.URL.Query().Get("source"))
 	if !ok {
 		s.matchNotFound(w, r)
 		return
@@ -177,7 +177,7 @@ func (s *server) getMatchSearch(w http.ResponseWriter, r *http.Request, pluginID
 	if !ok {
 		return
 	}
-	si, ok := chooseSourceForKind(t.man, t.ref.Kind, r.URL.Query().Get("source"))
+	si, ok := s.chooseSourceForKind(r.Context(), t.man, t.ref.Kind, r.URL.Query().Get("source"))
 	if !ok {
 		s.matchNotFound(w, r)
 		return
@@ -210,11 +210,11 @@ func (s *server) postMatch(w http.ResponseWriter, r *http.Request, pluginID stri
 		return
 	}
 	ctx := r.Context()
-	si, ok := chooseSourceForKind(t.man, t.ref.Kind, strings.TrimSpace(r.PostFormValue("source")))
+	si, ok := s.chooseSourceForKind(ctx, t.man, t.ref.Kind, strings.TrimSpace(r.PostFormValue("source")))
 	pick := strings.TrimSpace(r.PostFormValue("pick"))
 	raw := strings.TrimSpace(r.PostFormValue("source_ref"))
 	if !ok {
-		fallback := defaultSourceForKind(t.man, t.ref.Kind)
+		fallback := s.defaultSourceForKind(ctx, t.man, t.ref.Kind)
 		if fallback.ID == "" {
 			fallback = defaultSource(t.man)
 		}
@@ -278,9 +278,12 @@ func (s *server) postMatch(w http.ResponseWriter, r *http.Request, pluginID stri
 		s.internalError(w, r, err)
 		return
 	}
-	// the identity is the user's choice (matched against the manifest), not
-	// what the source returned
-	d.Source, d.ID, d.Kind = si.ID, id, t.kind.Key
+	// the source is the user's choice (matched against the manifest); the id
+	// is the source's canonical one, the matched input only when it sent none
+	d.Source, d.Kind = si.ID, t.kind.Key
+	if d.ID == "" {
+		d.ID = id
+	}
 
 	// 3. Convert in one transaction (entry untouched, progress clamped).
 	err = s.deps.Library.ConvertToSource(ctx, t.item.ID, d)
@@ -305,5 +308,5 @@ func (s *server) postMatch(w http.ResponseWriter, r *http.Request, pluginID stri
 	}
 
 	s.enqueueSync(ctx, t.man.ID, t.item.ID)
-	s.done(w, r, itemURL(t.man, si.ID, id, t.kind.Key))
+	s.done(w, r, itemURL(t.man, si.ID, d.ID, t.kind.Key))
 }

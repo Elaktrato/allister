@@ -23,6 +23,7 @@ import (
 	"github.com/allister/allister/internal/plugin"
 	"github.com/allister/allister/internal/plugins/anime"
 	"github.com/allister/allister/internal/plugins/book"
+	"github.com/allister/allister/internal/plugins/game"
 	"github.com/allister/allister/internal/plugins/manga"
 	"github.com/allister/allister/internal/plugins/movie"
 	"github.com/allister/allister/internal/plugins/tv"
@@ -57,14 +58,25 @@ func run() error {
 	defer stopWorker()
 
 	settingsStore := settings.New(database)
-	// The stored key wins; when none is saved the environment still supplies
-	// one. Resolved per request, so a key saved in the settings takes effect
-	// without a restart.
-	fallback := map[string]string{"tmdb": cfg.TMDBKey}
-	sourceKey := func(ctx context.Context, sourceID string) (string, error) {
-		return resolveSourceKey(ctx, settingsStore.SourceKey, fallback, sourceID)
+	// The stored value of a named credential field wins; when none is saved
+	// the environment still supplies one. Resolved per request, so a key saved
+	// in the settings takes effect without a restart. A lookup failure is
+	// returned, never replaced by the environment value.
+	fallback := map[string]map[string]string{
+		"tmdb":  {"key": cfg.TMDBKey},
+		"igdb":  {"client_id": cfg.IGDBClientID, "client_secret": cfg.IGDBClientSecret},
+		"steam": {"key": cfg.SteamAPIKey},
 	}
-	tmdbKey := func(ctx context.Context) (string, error) { return sourceKey(ctx, "tmdb") }
+	credential := func(ctx context.Context, sourceID, field string) (string, error) {
+		return resolveSourceKeyField(ctx, settingsStore.SourceKeyField, fallback, sourceID, field)
+	}
+	// Single-key sources keep the older resolver shape over the stored "key"
+	// field (web.Deps.SourceKey).
+	singleFallback := map[string]string{"tmdb": cfg.TMDBKey, "steam": cfg.SteamAPIKey}
+	sourceKey := func(ctx context.Context, sourceID string) (string, error) {
+		return resolveSourceKey(ctx, settingsStore.SourceKey, singleFallback, sourceID)
+	}
+	tmdbKey := func(ctx context.Context) (string, error) { return credential(ctx, "tmdb", "key") }
 	registry := plugin.NewRegistry(settingsStore)
 	if err := registry.Register(manga.New(manga.Options{})); err != nil {
 		log.Printf("startup: %v", err)
@@ -76,6 +88,13 @@ func run() error {
 		log.Printf("startup: %v", err)
 	}
 	if err := registry.Register(movie.New(movie.Options{TMDBKey: tmdbKey})); err != nil {
+		log.Printf("startup: %v", err)
+	}
+	if err := registry.Register(game.New(game.Options{
+		IGDBClientID:     func(ctx context.Context) (string, error) { return credential(ctx, "igdb", "client_id") },
+		IGDBClientSecret: func(ctx context.Context) (string, error) { return credential(ctx, "igdb", "client_secret") },
+		SteamKey:         func(ctx context.Context) (string, error) { return credential(ctx, "steam", "key") },
+	})); err != nil {
 		log.Printf("startup: %v", err)
 	}
 	if err := registry.Register(anime.New(anime.Options{})); err != nil {
@@ -137,6 +156,8 @@ func run() error {
 			Library:   lib,
 			// the same resolver the plugins use: stored key, else the environment
 			SourceKey: sourceKey,
+			// named credential fields (IGDB's Client ID/Secret) resolve the same way
+			SourceKeyField: credential,
 			// uploaded fonts live in DATA_DIR/fonts next to the covers
 			Appearance: appearance.NewService(settingsStore, appearance.NewFontStore(database, filepath.Join(cfg.DataDir, "fonts"))),
 		}),
@@ -160,6 +181,18 @@ func resolveSourceKey(ctx context.Context, stored func(context.Context, string) 
 		return key, err
 	}
 	return fallback[sourceID], nil
+}
+
+// resolveSourceKeyField returns the stored value of one named credential field
+// of sourceID, or fallback[sourceID][field] when none is saved. It follows the
+// same rules as resolveSourceKey: an unknown source or field resolves to "",
+// and a lookup failure is returned instead of falling back.
+func resolveSourceKeyField(ctx context.Context, stored func(context.Context, string, string) (string, error), fallback map[string]map[string]string, sourceID, field string) (string, error) {
+	value, err := stored(ctx, sourceID, field)
+	if err != nil || value != "" {
+		return value, err
+	}
+	return fallback[sourceID][field], nil
 }
 
 // serve listens on srv.Addr and runs srv until ctx is cancelled, then shuts it

@@ -20,6 +20,7 @@ const (
 	maxColumnLabelRunes   = 40
 	maxKeyLabelRunes      = 40
 	maxKeyHelpRunes       = 200
+	maxKeyFieldLabelRunes = 40
 )
 
 var (
@@ -127,6 +128,7 @@ func Validate(m Manifest) error {
 		case h != "" && s.KeyLabel == "":
 			p.add(path+".key_help", "requires key_label")
 		}
+		validateKeyFields(&p, path+".key_fields", s.KeyLabel, s.KeyFields)
 	}
 	importers := map[string]bool{}
 	for i, im := range m.Importers {
@@ -180,6 +182,42 @@ func Validate(m Manifest) error {
 		}
 	}
 	return errors.Join(p.list...)
+}
+
+// maxKeyFields is the most named credential fields one source may declare.
+const maxKeyFields = 4
+
+// validateKeyFields checks a source's named credential fields: they need a
+// group label, at most maxKeyFields, each a unique key slug with a bounded
+// single-line label.
+func validateKeyFields(p *problems, path, groupLabel string, fields []KeyField) {
+	if len(fields) == 0 {
+		return
+	}
+	if groupLabel == "" {
+		p.add(path, "key_label is the group label and is required with key_fields")
+	}
+	if len(fields) > maxKeyFields {
+		p.add(path, "at most %d fields", maxKeyFields)
+	}
+	seen := map[string]bool{}
+	for i, f := range fields {
+		fp := fmt.Sprintf("%s[%d]", path, i)
+		if !keyRe.MatchString(f.Name) {
+			p.add(fp+".name", "%q is not a valid key (lower-case letters, digits and _, 1 to 32 characters, starting with a letter)", f.Name)
+		} else if seen[f.Name] {
+			p.add(fp+".name", "duplicate %q", f.Name)
+		}
+		seen[f.Name] = true
+		switch l := f.Label; {
+		case !utf8.ValidString(l) || strings.IndexFunc(l, isControl) >= 0:
+			p.add(fp+".label", "must be a single line without control characters")
+		case l == "":
+			p.add(fp+".label", "required")
+		case utf8.RuneCountInString(l) > maxKeyFieldLabelRunes:
+			p.add(fp+".label", "longer than %d characters", maxKeyFieldLabelRunes)
+		}
+	}
 }
 
 // validateResolveViaSource checks that one resolution source exists, supports

@@ -201,7 +201,10 @@ func sourceMessage(m plugin.Manifest, source string, err error) string {
 		name = si.Name
 	}
 	if errors.Is(err, plugin.ErrNotConfigured) {
-		if si.KeyLabel != "" {
+		switch {
+		case si.KeyLabel != "" && len(si.KeyFields) > 0:
+			return name + " needs valid " + lowerFirst(si.KeyLabel) + ". Add or replace them in Settings > Plugins."
+		case si.KeyLabel != "":
 			return name + " needs a valid " + lowerFirst(si.KeyLabel) + ". Add or replace it in Settings > Plugins."
 		}
 		return name + " needs a valid credential. Add or replace it in Settings > Plugins."
