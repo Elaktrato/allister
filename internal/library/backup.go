@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"regexp"
 	"slices"
 	"strings"
@@ -69,15 +70,34 @@ type BackupPerson struct {
 
 // BackupEntry is the list entry of a backed-up item. Rating is null when
 // unrated; the dates are YYYY-MM-DD or null; Progress holds EVERY stored
-// value, also those of keys that are not active.
+// value, also those of keys that are not active. Events holds the newest part
+// of the entry's change log, newest first; EventsTruncated says older events
+// stayed behind (see maxBackupEvents).
 type BackupEntry struct {
-	Status     Status             `json:"status"`
-	Rating     *int               `json:"rating"`
-	Comment    string             `json:"comment"`
-	StartedOn  *string            `json:"started_on"`
-	FinishedOn *string            `json:"finished_on"`
-	Progress   map[string]float64 `json:"progress"`
-	UpdatedAt  string             `json:"updated_at,omitempty"` // RFC 3339 UTC
+	Status          Status             `json:"status"`
+	Rating          *int               `json:"rating"`
+	Comment         string             `json:"comment"`
+	StartedOn       *string            `json:"started_on"`
+	FinishedOn      *string            `json:"finished_on"`
+	Progress        map[string]float64 `json:"progress"`
+	UpdatedAt       string             `json:"updated_at,omitempty"` // RFC 3339 UTC
+	Events          []BackupEvent      `json:"events,omitempty"`
+	EventsTruncated bool               `json:"events_truncated,omitempty"`
+}
+
+// BackupEvent is one change of an entry's log, as stored: OccurredAt is an RFC
+// 3339 UTC time, Type is progress, status or rating, OldNum/NewNum carry the
+// progress values or the rating (rating null is "unrated"), OldText/NewText
+// the statuses, and Origin says who made the change.
+type BackupEvent struct {
+	OccurredAt  string   `json:"occurred_at"`
+	Type        string   `json:"type"`
+	ProgressKey string   `json:"progress_key,omitempty"`
+	OldNum      *float64 `json:"old_num,omitempty"`
+	NewNum      *float64 `json:"new_num,omitempty"`
+	OldText     string   `json:"old_text,omitempty"`
+	NewText     string   `json:"new_text,omitempty"`
+	Origin      string   `json:"origin,omitempty"`
 }
 
 // fileNameRE is the shape of a local image file name in a backup.
@@ -94,6 +114,11 @@ const (
 	maxRestoreTitles = 200
 	maxRestoreExtIDs = 100
 	stampLayout      = "2006-01-02T15:04:05Z"
+	// maxBackupEvents caps the change log an entry carries in a backup: the
+	// newest events are kept, older ones stay in the database behind
+	// EventsTruncated. Restore accepts no more than this per entry, so every
+	// backup the writer produces can be restored.
+	maxBackupEvents = 5000
 )
 
 // BackupItems calls fn for every stored item, in ascending id order,
@@ -382,13 +407,48 @@ func (l *Library) backupParts(ctx context.Context, ids []int64, items []BackupIt
 
 	var pkey string
 	var pval float64
-	return l.eachRow(ctx, `SELECT item_id, key, value FROM `+tableEntryProgress+` WHERE item_id IN (?)`, ids,
+	if err := l.eachRow(ctx, `SELECT item_id, key, value FROM `+tableEntryProgress+` WHERE item_id IN (?)`, ids,
 		func(r *sql.Rows) (int64, error) { return id, r.Scan(&id, &pkey, &pval) },
 		func(i int) error {
 			// values without an entry are not part of a backup
 			if items[i].Entry != nil {
 				items[i].Entry.Progress[pkey] = pval
 			}
+			return nil
+		}); err != nil {
+		return err
+	}
+
+	// The change log is read newest first; an entry keeps maxBackupEvents of
+	// them and records that older ones stayed behind. Rows of an item without
+	// an entry (its entry was removed) have no place in a backup.
+	var occurred, evType, evKey, evOrigin string
+	var oldNum, newNum sql.NullFloat64
+	var oldText, newText string
+	return l.eachRow(ctx, `SELECT item_id, occurred_at, event_type, progress_key, old_num, new_num, old_text, new_text, origin
+		FROM `+tableEntryEvents+` WHERE item_id IN (?) ORDER BY item_id, id DESC`, ids,
+		func(r *sql.Rows) (int64, error) {
+			return id, r.Scan(&id, &occurred, &evType, &evKey, &oldNum, &newNum, &oldText, &newText, &evOrigin)
+		},
+		func(i int) error {
+			e := items[i].Entry
+			if e == nil {
+				return nil
+			}
+			if len(e.Events) >= maxBackupEvents {
+				e.EventsTruncated = true
+				return nil
+			}
+			ev := BackupEvent{OccurredAt: occurred, Type: evType, ProgressKey: evKey, OldText: oldText, NewText: newText, Origin: evOrigin}
+			if oldNum.Valid {
+				v := oldNum.Float64
+				ev.OldNum = &v
+			}
+			if newNum.Valid {
+				v := newNum.Float64
+				ev.NewNum = &v
+			}
+			e.Events = append(e.Events, ev)
 			return nil
 		})
 }
@@ -424,7 +484,7 @@ type RestoreOptions struct {
 // RestoreResult reports one restored backup item. ItemID and SyncPending are
 // set only for RestoreCreated; Reason only for RestoreFailed and
 // RestoreUnknownPlugin. Notes lists what was restored differently from the
-// backup (a cover left empty).
+// backup (a cover left empty, a truncated change log).
 type RestoreResult struct {
 	Outcome     RestoreOutcome
 	ItemID      int64
@@ -441,6 +501,7 @@ type restorePlan struct {
 	credits              []plugin.Credit
 	entry                *Entry
 	entryStamp           string
+	events               []BackupEvent
 	createdAt, updatedAt string
 }
 
@@ -525,6 +586,11 @@ func (l *Library) RestoreItem(ctx context.Context, bi BackupItem, opts RestoreOp
 		return res, err
 	}
 	res.Outcome, res.ItemID, res.SyncPending = RestoreCreated, id, syncState == "pending"
+	// the writer keeps only the newest part of the log; say so rather than
+	// silently restoring a gap
+	if bi.Entry != nil && bi.Entry.EventsTruncated {
+		res.Notes = append(res.Notes, "the change log of this entry was truncated in the backup (newest 5,000 events restored); older events are not in the archive")
+	}
 	return res, nil
 }
 
@@ -625,6 +691,9 @@ func (l *Library) planRestore(bi BackupItem) (*restorePlan, error) {
 		if plan.entryStamp, err = restoreStamp("entry updated_at", bi.Entry.UpdatedAt); err != nil {
 			return nil, err
 		}
+		if plan.events, err = restoreEvents(p, bi.Entry.Events); err != nil {
+			return nil, err
+		}
 	}
 	return plan, nil
 }
@@ -714,6 +783,53 @@ func (l *Library) restoreEntry(p *prepared, d plugin.ItemData, be BackupEntry) (
 	return &e, nil
 }
 
+// restoreEvents validates a backed-up change log against the prepared item:
+// at most maxBackupEvents, a known type, origin and progress key (only a
+// progress event carries one), an RFC 3339 time and finite numbers. It
+// returns the events with their time stamps in the stored form. The order is
+// kept as backed up (newest first), writeRestore reverses it.
+func restoreEvents(p *prepared, events []BackupEvent) ([]BackupEvent, error) {
+	if len(events) > maxBackupEvents {
+		return nil, invalid("entry has more than %d events", maxBackupEvents)
+	}
+	out := make([]BackupEvent, 0, len(events))
+	for _, ev := range events {
+		switch ev.Type {
+		case eventProgress:
+			if ev.ProgressKey == "" {
+				return nil, invalid("a progress event needs a progress key")
+			}
+			if _, ok := progressDef(p.def, ev.ProgressKey); !ok {
+				return nil, invalid("event progress %q is not a progress of kind %q", truncateRunes(ev.ProgressKey, 40), p.def.Key)
+			}
+		case eventStatus, eventRating:
+			if ev.ProgressKey != "" {
+				return nil, invalid("a %s event must not carry a progress key", ev.Type)
+			}
+		default:
+			return nil, invalid("event type %q must be one of progress, status, rating", truncateRunes(ev.Type, 40))
+		}
+		if !validOrigin(EventOrigin(ev.Origin)) {
+			return nil, invalid("event origin %q must be one of manual, import, restore", truncateRunes(ev.Origin, 40))
+		}
+		stamp, err := restoreStamp("event occurred_at", ev.OccurredAt)
+		if err != nil {
+			return nil, err
+		}
+		if stamp == "" {
+			return nil, invalid("event occurred_at is missing")
+		}
+		for _, n := range []*float64{ev.OldNum, ev.NewNum} {
+			if n != nil && (math.IsNaN(*n) || math.IsInf(*n, 0)) {
+				return nil, invalid("event numbers must be finite")
+			}
+		}
+		ev.OccurredAt = stamp
+		out = append(out, ev)
+	}
+	return out, nil
+}
+
 // writeRestore writes the planned item in one transaction.
 func (l *Library) writeRestore(ctx context.Context, bi BackupItem, plan *restorePlan, syncState string) (int64, error) {
 	tx, err := l.db.BeginTx(ctx, nil)
@@ -747,11 +863,36 @@ func (l *Library) writeRestore(ctx context.Context, bi BackupItem, plan *restore
 				return 0, fmt.Errorf("restore item: %w", err)
 			}
 		}
+		// the backup holds the log newest first: insert oldest first so the
+		// restored ids stay in chronological order
+		for i := len(plan.events) - 1; i >= 0; i-- {
+			if err := restoreEvent(ctx, tx, id, plan.events[i]); err != nil {
+				return 0, err
+			}
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		return 0, fmt.Errorf("restore item: %w", err)
 	}
 	return id, nil
+}
+
+// restoreEvent appends one backed-up event with its stored time stamp and
+// origin, so the restored log keeps the history of the backup.
+func restoreEvent(ctx context.Context, tx *sql.Tx, itemID int64, ev BackupEvent) error {
+	var oldV, newV any
+	if ev.OldNum != nil {
+		oldV = *ev.OldNum
+	}
+	if ev.NewNum != nil {
+		newV = *ev.NewNum
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO `+tableEntryEvents+`(item_id, occurred_at, event_type, progress_key, old_num, new_num, old_text, new_text, origin)
+		VALUES (?,?,?,?,?,?,?,?,?)`,
+		itemID, ev.OccurredAt, ev.Type, ev.ProgressKey, oldV, newV, ev.OldText, ev.NewText, ev.Origin); err != nil {
+		return fmt.Errorf("restore event: %w", err)
+	}
+	return nil
 }
 
 // restoreCredits writes the credits of a restored item. Unlike SaveCredits

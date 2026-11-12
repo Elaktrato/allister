@@ -46,6 +46,9 @@ func gameKind() plugin.KindDef {
 			Defaults:     []string{"playtime"},
 			Combinations: [][]string{{"playtime"}},
 		},
+		Stats: &plugin.StatsDef{
+			Time: &plugin.StatsTimeDef{Label: "Playtime", DurationKey: "playtime"},
+		},
 		Sections: []plugin.SectionDef{
 			{Type: plugin.SectionInfo, Label: "Details"},
 			{Type: plugin.SectionText, Field: "summary", Label: "Summary"},

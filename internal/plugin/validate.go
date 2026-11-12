@@ -21,6 +21,7 @@ const (
 	maxKeyLabelRunes      = 40
 	maxKeyHelpRunes       = 200
 	maxKeyFieldLabelRunes = 40
+	maxStatsLabelRunes    = 40
 )
 
 var (
@@ -347,6 +348,7 @@ func validateKind(p *problems, path string, k KindDef) {
 
 	validateProgress(p, path+".progress", k.Progress, fields)
 	validateColumns(p, path, k.Columns, fields)
+	validateStats(p, path+".stats", k)
 
 	for i, s := range k.Sections {
 		sp := fmt.Sprintf("%s.sections[%d]", path, i)
@@ -479,6 +481,88 @@ func validateProgress(p *problems, path string, ps ProgressSpec, fields map[stri
 		case t != Count && t != Pages:
 			p.add(path+".primary_key", "%q must be a count or pages progress, not %s", ps.PrimaryKey, t)
 		}
+	}
+}
+
+// validateStats checks a kind's optional statistics declaration against its
+// progress tracks and number fields.
+func validateStats(p *problems, path string, k KindDef) {
+	if k.Stats == nil {
+		return
+	}
+	s := k.Stats
+	if s.Time == nil && s.Units == nil {
+		p.add(path, "needs a time or a units declaration")
+	}
+	types := map[string]ProgressType{}
+	for _, d := range k.Progress.Eligible {
+		types[d.Key] = d.Type
+	}
+	fields := map[string]FieldType{}
+	for _, f := range k.Fields {
+		fields[f.Key] = f.Type
+	}
+	checkProgress := func(at, key, what string, want ...ProgressType) {
+		t, ok := types[key]
+		switch {
+		case !ok:
+			p.add(at, "%q is not an eligible progress key", key)
+		case !slices.Contains(want, t):
+			p.add(at, "%q must be %s, not %s", key, what, t)
+		}
+	}
+	checkNumberField := func(at, name string) {
+		ft, ok := fields[name]
+		switch {
+		case !ok:
+			p.add(at, "no field %q", name)
+		case ft != FieldNumber:
+			p.add(at, "field %q is not a number field", name)
+		}
+	}
+	checkLabel := func(at, label string) {
+		switch {
+		case label == "":
+			p.add(at, "required")
+		case !utf8.ValidString(label) || strings.IndexFunc(label, isControl) >= 0:
+			p.add(at, "must be a single line without control characters")
+		case utf8.RuneCountInString(label) > maxStatsLabelRunes:
+			p.add(at, "longer than %d characters", maxStatsLabelRunes)
+		}
+	}
+	if t := s.Time; t != nil {
+		tp := path + ".time"
+		checkLabel(tp+".label", t.Label)
+		if t.DurationKey == "" && t.CompletedField == "" && (t.UnitsKey == "" || t.PerUnitField == "") {
+			p.add(tp, "needs duration_key, completed_field, or units_key with per_unit_field")
+		}
+		if t.DurationKey != "" {
+			checkProgress(tp+".duration_key", t.DurationKey, "a duration progress", Duration)
+		}
+		if t.CompletedField != "" {
+			checkNumberField(tp+".completed_field", t.CompletedField)
+		}
+		switch {
+		case t.UnitsKey != "" && t.PerUnitField == "":
+			p.add(tp+".per_unit_field", "required with units_key")
+		case t.UnitsKey == "" && t.PerUnitField != "":
+			p.add(tp+".units_key", "required with per_unit_field")
+		}
+		if t.UnitsKey != "" {
+			checkProgress(tp+".units_key", t.UnitsKey, "a count or pages progress", Count, Pages)
+		}
+		if t.PerUnitField != "" {
+			checkNumberField(tp+".per_unit_field", t.PerUnitField)
+		}
+	}
+	if u := s.Units; u != nil {
+		up := path + ".units"
+		if u.Key == "" {
+			p.add(up+".key", "required")
+		} else {
+			checkProgress(up+".key", u.Key, "a count or pages progress", Count, Pages)
+		}
+		checkLabel(up+".label_plural", u.LabelPlural)
 	}
 }
 

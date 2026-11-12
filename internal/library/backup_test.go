@@ -2,12 +2,16 @@ package library
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/allister/allister/internal/plugin"
 )
@@ -548,5 +552,264 @@ func TestRestoreItemManualRulesAndRemoteCoverSync(t *testing.T) {
 	res, err = e.lib.RestoreItem(bg, manual, RestoreOptions{})
 	if err != nil || res.Outcome != RestoreCreated || !res.SyncPending || mustItem(t, e.lib, res.ItemID).SyncState != "pending" {
 		t.Fatalf("manual with remote cover = %+v, %v", res, err)
+	}
+}
+
+// readStampedEvents returns the item's events oldest first, with their stamps.
+func readStampedEvents(t *testing.T, l *Library, itemID int64) []BackupEvent {
+	t.Helper()
+	rows, err := l.db.QueryContext(bg, `SELECT occurred_at, event_type, progress_key, old_num, new_num, old_text, new_text, origin
+		FROM entry_events WHERE item_id = ? ORDER BY id`, itemID)
+	if err != nil {
+		t.Fatalf("read events: %v", err)
+	}
+	var out []BackupEvent
+	for rows.Next() {
+		ev := BackupEvent{}
+		var oldNum, newNum sql.NullFloat64
+		if err := rows.Scan(&ev.OccurredAt, &ev.Type, &ev.ProgressKey, &oldNum, &newNum, &ev.OldText, &ev.NewText, &ev.Origin); err != nil {
+			rows.Close()
+			t.Fatalf("read events: %v", err)
+		}
+		if oldNum.Valid {
+			ev.OldNum = fp(oldNum.Float64)
+		}
+		if newNum.Valid {
+			ev.NewNum = fp(newNum.Float64)
+		}
+		out = append(out, ev)
+	}
+	if err := closeRows(rows); err != nil {
+		t.Fatalf("read events: %v", err)
+	}
+	return out
+}
+
+// insertEventsBulk appends n progress events in one transaction, one per
+// second from 2026-01-01T00:00:00Z, with new_num counting up from 1.
+func insertEventsBulk(t *testing.T, l *Library, itemID int64, n int) {
+	t.Helper()
+	tx, err := l.db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	for i := 0; i < n; i++ {
+		stamp := base.Add(time.Duration(i) * time.Second).Format("2006-01-02T15:04:05Z")
+		if _, err := tx.Exec(`INSERT INTO entry_events(item_id, occurred_at, event_type, progress_key, old_num, new_num, origin)
+			VALUES (?,?,?,?,?,?,?)`, itemID, stamp, "progress", "pages", float64(i), float64(i+1), "manual"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestBackupIncludesEvents(t *testing.T) {
+	e := newEnv(t)
+	id := addBook(t, e.lib, "bke-1", fp(100), Entry{Status: Active, Progress: map[string]float64{"pages": 3}})
+	insertEventAt(t, e.lib, id, at(2026, 5, 1, 8, 0, 0), eventProgress, "pages", fp(1), fp(3), "", "", OriginManual)
+	insertEventAt(t, e.lib, id, at(2026, 5, 1, 9, 0, 0), eventStatus, "", nil, nil, "planned", "active", OriginImport)
+	insertEventAt(t, e.lib, id, at(2026, 5, 2, 10, 0, 0), eventRating, "", nil, fp(0), "", "", OriginManual)
+	items := collect(t, e.lib, 200)
+	if len(items) != 1 || items[0].Entry == nil {
+		t.Fatalf("items = %+v", items)
+	}
+	en := items[0].Entry
+	if en.EventsTruncated {
+		t.Fatal("three events reported as truncated")
+	}
+	want := []BackupEvent{
+		{OccurredAt: "2026-05-02T10:00:00Z", Type: "rating", NewNum: fp(0), Origin: "manual"},
+		{OccurredAt: "2026-05-01T09:00:00Z", Type: "status", OldText: "planned", NewText: "active", Origin: "import"},
+		{OccurredAt: "2026-05-01T08:00:00Z", Type: "progress", ProgressKey: "pages", OldNum: fp(1), NewNum: fp(3), Origin: "manual"},
+	}
+	if !reflect.DeepEqual(en.Events, want) {
+		t.Fatalf("events = %+v, want %+v", en.Events, want)
+	}
+	raw, err := json.Marshal(items[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, part := range []string{`"events":[`, `"occurred_at":"2026-05-02T10:00:00Z"`, `"type":"progress"`,
+		`"progress_key":"pages"`, `"old_num":1`, `"new_num":3`, `"old_text":"planned"`, `"origin":"import"`} {
+		if !strings.Contains(string(raw), part) {
+			t.Fatalf("json lacks %s: %s", part, raw)
+		}
+	}
+	if strings.Contains(string(raw), "events_truncated") {
+		t.Fatalf("untruncated entry sets events_truncated: %s", raw)
+	}
+	// an item without an entry carries no events, even when rows linger
+	if _, err := e.db.Exec(`INSERT INTO entry_events(item_id, occurred_at, event_type, progress_key, origin) VALUES (?, '2026-05-03T00:00:00Z', 'progress', 'pages', 'manual')`, mustSave(t, e.lib, "book", "book", bookData("bke-2"))); err != nil {
+		t.Fatal(err)
+	}
+	for _, bi := range collect(t, e.lib, 200) {
+		if bi.SourceID == "bke-2" && bi.Entry != nil {
+			t.Fatalf("item without an entry grew one: %+v", bi.Entry)
+		}
+	}
+}
+
+func TestBackupKeepsNewestEvents(t *testing.T) {
+	e := newEnv(t)
+	id := addBook(t, e.lib, "bke-3", fp(100), Entry{Status: Active, Progress: map[string]float64{"pages": 0}})
+	insertEventsBulk(t, e.lib, id, 5001)
+	items := collect(t, e.lib, 200)
+	if len(items) != 1 || items[0].Entry == nil {
+		t.Fatalf("items = %+v", items)
+	}
+	en := items[0].Entry
+	if len(en.Events) != 5000 || !en.EventsTruncated {
+		t.Fatalf("events = %d, truncated = %v", len(en.Events), en.EventsTruncated)
+	}
+	// newest first: the oldest (2026-01-01T00:00:00Z) is the dropped one
+	if en.Events[0].OccurredAt != "2026-01-01T01:23:20Z" || en.Events[4999].OccurredAt != "2026-01-01T00:00:01Z" {
+		t.Fatalf("edges = %q ... %q", en.Events[0].OccurredAt, en.Events[4999].OccurredAt)
+	}
+	for _, ev := range en.Events {
+		if ev.OccurredAt == "2026-01-01T00:00:00Z" {
+			t.Fatal("the oldest event was kept")
+		}
+	}
+	// the stored log itself is untouched
+	if n := count(t, e.db, `SELECT count(*) FROM entry_events`); n != 5001 {
+		t.Fatalf("stored events = %d", n)
+	}
+}
+
+func TestRestoreCreatesEvents(t *testing.T) {
+	a := newEnv(t)
+	id := addBook(t, a.lib, "bke-4", fp(100), Entry{Status: Active, Progress: map[string]float64{"pages": 3}})
+	insertEventAt(t, a.lib, id, at(2026, 5, 1, 8, 0, 0), eventProgress, "pages", fp(1), fp(3), "", "", OriginManual)
+	insertEventAt(t, a.lib, id, at(2026, 5, 1, 9, 0, 0), eventStatus, "", nil, nil, "planned", "active", OriginImport)
+	insertEventAt(t, a.lib, id, at(2026, 5, 2, 10, 0, 0), eventRating, "", nil, fp(0), "", "", OriginManual)
+	before := collect(t, a.lib, 200)
+	if len(before) != 1 || before[0].Entry == nil || len(before[0].Entry.Events) != 3 {
+		t.Fatalf("backup = %+v", before)
+	}
+	// the archive carries JSON: the events survive the round trip
+	raw, err := json.Marshal(before[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	var bi BackupItem
+	if err := json.Unmarshal(raw, &bi); err != nil {
+		t.Fatal(err)
+	}
+
+	b := newEnv(t)
+	res := restoreAll(t, b.lib, []BackupItem{bi}, keepCovers)
+	if res[0].Outcome != RestoreCreated || res[0].ItemID == 0 {
+		t.Fatalf("result = %+v", res[0])
+	}
+	// restored oldest first, so the id order stays chronological
+	want := slices.Clone(before[0].Entry.Events)
+	slices.Reverse(want)
+	if got := readStampedEvents(t, b.lib, res[0].ItemID); !reflect.DeepEqual(got, want) {
+		t.Fatalf("events = %+v, want %+v", got, want)
+	}
+	// the restored log feeds the heatmap like the original one
+	days, err := b.lib.ActivityDays(bg, day(2026, 5, 1), day(2026, 5, 3), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantDays(t, days, map[string]int{"2026-05-01": 1})
+}
+
+// TestRestoreNotesTruncatedEvents: a backup that dropped older events says so
+// in the restore result, and the newest 5,000 events land in the fresh library.
+func TestRestoreNotesTruncatedEvents(t *testing.T) {
+	a := newEnv(t)
+	id := addBook(t, a.lib, "bke-6", fp(100), Entry{Status: Active, Progress: map[string]float64{"pages": 0}})
+	insertEventsBulk(t, a.lib, id, 5001)
+	items := collect(t, a.lib, 200)
+	if len(items) != 1 || items[0].Entry == nil || len(items[0].Entry.Events) != 5000 || !items[0].Entry.EventsTruncated {
+		t.Fatalf("backup = %+v", items)
+	}
+
+	b := newEnv(t)
+	res := restoreAll(t, b.lib, items, keepCovers)
+	if res[0].Outcome != RestoreCreated {
+		t.Fatalf("result = %+v", res[0])
+	}
+	note := "the change log of this entry was truncated in the backup (newest 5,000 events restored); older events are not in the archive"
+	if !slices.Contains(res[0].Notes, note) {
+		t.Fatalf("notes = %q, want the truncation note", res[0].Notes)
+	}
+	if n := count(t, b.db, `SELECT count(*) FROM entry_events`); n != 5000 {
+		t.Fatalf("restored events = %d, want 5000", n)
+	}
+}
+
+func TestRestoreRejectsBadEvent(t *testing.T) {
+	good := BackupItem{PluginID: "book", Kind: "book", Source: "books", SourceID: "bke-bad",
+		Titles: []plugin.Title{{Lang: "en", Text: "Bad"}}, CoverURL: "https://img.example/bke-bad.jpg",
+		Entry: &BackupEntry{Status: Active, Progress: map[string]float64{"pages": 3},
+			Events: []BackupEvent{{OccurredAt: "2026-05-01T08:00:00Z", Type: "progress", ProgressKey: "pages",
+				OldNum: fp(1), NewNum: fp(3), Origin: "manual"}}}}
+	inf := math.Inf(1)
+	cases := []struct {
+		name, want string
+		mod        func(*BackupEvent, *BackupEntry)
+	}{
+		{"unknown type", "type", func(ev *BackupEvent, _ *BackupEntry) { ev.Type = "bogus" }},
+		{"status with progress key", "progress key", func(ev *BackupEvent, _ *BackupEntry) { ev.Type = "status" }},
+		{"progress without key", "progress key", func(ev *BackupEvent, _ *BackupEntry) { ev.ProgressKey = "" }},
+		{"progress key not eligible", "not a progress", func(ev *BackupEvent, _ *BackupEntry) { ev.ProgressKey = "chapter" }},
+		{"unknown origin", "origin", func(ev *BackupEvent, _ *BackupEntry) { ev.Origin = "bogus" }},
+		{"missing origin", "origin", func(ev *BackupEvent, _ *BackupEntry) { ev.Origin = "" }},
+		{"bad stamp", "time", func(ev *BackupEvent, _ *BackupEntry) { ev.OccurredAt = "yesterday" }},
+		{"missing stamp", "occurred_at", func(ev *BackupEvent, _ *BackupEntry) { ev.OccurredAt = "" }},
+		{"NaN number", "finite", func(ev *BackupEvent, _ *BackupEntry) { ev.NewNum = fp(math.NaN()) }},
+		{"infinite number", "finite", func(ev *BackupEvent, _ *BackupEntry) { ev.OldNum = &inf }},
+		{"too many events", "events", func(_ *BackupEvent, en *BackupEntry) {
+			for i := 0; i < 5000; i++ {
+				en.Events = append(en.Events, en.Events[0])
+			}
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			e := newEnv(t)
+			raw, _ := json.Marshal(good)
+			var bi BackupItem
+			if err := json.Unmarshal(raw, &bi); err != nil {
+				t.Fatal(err)
+			}
+			tc.mod(&bi.Entry.Events[0], bi.Entry)
+			res, err := e.lib.RestoreItem(bg, bi, keepCovers)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if res.Outcome != RestoreFailed || !strings.Contains(res.Reason, tc.want) {
+				t.Fatalf("result = %+v, want failed mentioning %q", res, tc.want)
+			}
+			if n := count(t, e.db, `SELECT count(*) FROM items`) + count(t, e.db, `SELECT count(*) FROM entry_events`); n != 0 {
+				t.Fatalf("rows written: %d", n)
+			}
+		})
+	}
+}
+
+func TestRestoreSkipsExistingItemEvents(t *testing.T) {
+	a := newEnv(t)
+	id := addBook(t, a.lib, "bke-5", fp(100), Entry{Status: Active, Progress: map[string]float64{"pages": 3}})
+	insertEventAt(t, a.lib, id, at(2026, 5, 1, 8, 0, 0), eventProgress, "pages", fp(1), fp(3), "", "", OriginManual)
+	items := collect(t, a.lib, 200)
+
+	b := newEnv(t)
+	existing := addBook(t, b.lib, "bke-5", fp(100), Entry{Status: Planned})
+	res := restoreAll(t, b.lib, items, keepCovers)
+	if res[0].Outcome != RestoreSkipped || res[0].ItemID != 0 {
+		t.Fatalf("result = %+v", res[0])
+	}
+	if n := count(t, b.db, `SELECT count(*) FROM entry_events`); n != 0 {
+		t.Fatalf("events written for a skipped item: %d", n)
+	}
+	if en := mustEntry(t, b.lib, existing); en.Status != Planned || len(en.Progress) != 0 {
+		t.Fatalf("existing entry touched: %+v", en)
 	}
 }

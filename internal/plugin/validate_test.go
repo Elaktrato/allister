@@ -510,3 +510,85 @@ func TestCoreColumnsAreAClosedSet(t *testing.T) {
 		t.Fatal("CoreColumns must return a fresh slice")
 	}
 }
+
+// TestValidateStats: a kind's optional stats declaration names a time source
+// (duration progress, completed number field, or units with a per-unit number
+// field) and/or a units track (a count or pages progress with a plural label).
+func TestValidateStats(t *testing.T) {
+	withStats := func(s plugin.StatsDef) plugin.Manifest {
+		m := tv()
+		m.Kinds[0].Stats = &s
+		return m
+	}
+	valid := []plugin.StatsDef{
+		{Time: &plugin.StatsTimeDef{Label: "Time", DurationKey: "position"}},
+		{Time: &plugin.StatsTimeDef{Label: "Time", CompletedField: "episodes"}},
+		{Time: &plugin.StatsTimeDef{Label: "Time", UnitsKey: "episode", PerUnitField: "episodes"}},
+		{Units: &plugin.StatsUnitsDef{Key: "season", LabelPlural: "Seasons"}},
+		{
+			Time:  &plugin.StatsTimeDef{Label: "Time", DurationKey: "position", CompletedField: "episodes", UnitsKey: "episode", PerUnitField: "episodes"},
+			Units: &plugin.StatsUnitsDef{Key: "episode", LabelPlural: "Episodes"},
+		},
+		{Time: &plugin.StatsTimeDef{Label: strings.Repeat("é", 40), DurationKey: "position"}},
+	}
+	for i, s := range valid {
+		if err := plugin.Validate(withStats(s)); err != nil {
+			t.Errorf("valid stats %d refused: %v", i, err)
+		}
+	}
+	if err := plugin.Validate(tv()); err != nil {
+		t.Errorf("nil stats refused: %v", err)
+	}
+	for _, c := range []struct {
+		name  string
+		stats plugin.StatsDef
+		want  string
+	}{
+		{"empty stats", plugin.StatsDef{}, `kinds[0].stats: needs a time or a units declaration`},
+		{"time without source", plugin.StatsDef{Time: &plugin.StatsTimeDef{Label: "Time"}},
+			`kinds[0].stats.time: needs duration_key, completed_field, or units_key with per_unit_field`},
+		{"time label missing", plugin.StatsDef{Time: &plugin.StatsTimeDef{DurationKey: "position"}},
+			`kinds[0].stats.time.label: required`},
+		{"time label with newline", plugin.StatsDef{Time: &plugin.StatsTimeDef{Label: "Ti\nme", DurationKey: "position"}},
+			`kinds[0].stats.time.label: must be a single line without control characters`},
+		{"time label too long", plugin.StatsDef{Time: &plugin.StatsTimeDef{Label: strings.Repeat("T", 41), DurationKey: "position"}},
+			`kinds[0].stats.time.label: longer than 40 characters`},
+		{"units key without per unit field", plugin.StatsDef{Time: &plugin.StatsTimeDef{Label: "Time", UnitsKey: "episode"}},
+			`kinds[0].stats.time.per_unit_field: required with units_key`},
+		{"per unit field without units key", plugin.StatsDef{Time: &plugin.StatsTimeDef{Label: "Time", DurationKey: "position", PerUnitField: "episodes"}},
+			`kinds[0].stats.time.units_key: required with per_unit_field`},
+		{"duration key not a duration", plugin.StatsDef{Time: &plugin.StatsTimeDef{Label: "Time", DurationKey: "season"}},
+			`kinds[0].stats.time.duration_key: "season" must be a duration progress, not count`},
+		{"duration key unknown", plugin.StatsDef{Time: &plugin.StatsTimeDef{Label: "Time", DurationKey: "zzz"}},
+			`kinds[0].stats.time.duration_key: "zzz" is not an eligible progress key`},
+		{"units key not count or pages", plugin.StatsDef{Time: &plugin.StatsTimeDef{Label: "Time", UnitsKey: "position", PerUnitField: "episodes"}},
+			`kinds[0].stats.time.units_key: "position" must be a count or pages progress, not duration`},
+		{"units key unknown", plugin.StatsDef{Time: &plugin.StatsTimeDef{Label: "Time", UnitsKey: "zzz", PerUnitField: "episodes"}},
+			`kinds[0].stats.time.units_key: "zzz" is not an eligible progress key`},
+		{"completed field missing", plugin.StatsDef{Time: &plugin.StatsTimeDef{Label: "Time", CompletedField: "nope"}},
+			`kinds[0].stats.time.completed_field: no field "nope"`},
+		{"completed field not a number", plugin.StatsDef{Time: &plugin.StatsTimeDef{Label: "Time", CompletedField: "type"}},
+			`kinds[0].stats.time.completed_field: field "type" is not a number field`},
+		{"per unit field not a number", plugin.StatsDef{Time: &plugin.StatsTimeDef{Label: "Time", UnitsKey: "episode", PerUnitField: "type"}},
+			`kinds[0].stats.time.per_unit_field: field "type" is not a number field`},
+		{"units key missing", plugin.StatsDef{Units: &plugin.StatsUnitsDef{LabelPlural: "Episodes"}},
+			`kinds[0].stats.units.key: required`},
+		{"units key not count or pages", plugin.StatsDef{Units: &plugin.StatsUnitsDef{Key: "position", LabelPlural: "Positions"}},
+			`kinds[0].stats.units.key: "position" must be a count or pages progress, not duration`},
+		{"units key unknown", plugin.StatsDef{Units: &plugin.StatsUnitsDef{Key: "zzz", LabelPlural: "Things"}},
+			`kinds[0].stats.units.key: "zzz" is not an eligible progress key`},
+		{"units label plural missing", plugin.StatsDef{Units: &plugin.StatsUnitsDef{Key: "episode"}},
+			`kinds[0].stats.units.label_plural: required`},
+		{"units label plural with newline", plugin.StatsDef{Units: &plugin.StatsUnitsDef{Key: "episode", LabelPlural: "Ep\nisodes"}},
+			`kinds[0].stats.units.label_plural: must be a single line without control characters`},
+		{"units label plural too long", plugin.StatsDef{Units: &plugin.StatsUnitsDef{Key: "episode", LabelPlural: strings.Repeat("E", 41)}},
+			`kinds[0].stats.units.label_plural: longer than 40 characters`},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			err := plugin.Validate(withStats(c.stats))
+			if err == nil || !strings.Contains(err.Error(), c.want) {
+				t.Fatalf("err = %v, want %q", err, c.want)
+			}
+		})
+	}
+}

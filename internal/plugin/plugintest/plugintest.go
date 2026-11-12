@@ -60,6 +60,11 @@ func WithSourceKeyFields(fields ...plugin.KeyField) Option {
 	return func(p *Plugin) { p.M.Sources[0].KeyFields = fields }
 }
 
+// WithStats sets the statistics declaration of the fixture's first kind.
+func WithStats(s plugin.StatsDef) Option {
+	return func(p *Plugin) { p.M.Kinds[0].Stats = &s }
+}
+
 func num(f float64) *float64 { return &f }
 
 func apply(p *Plugin, opts []Option) *Plugin {

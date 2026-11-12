@@ -76,6 +76,7 @@ A `KindDef` describes one media kind:
 - `Statuses`: labels for the five fixed core status classes `planned`, `active`, `paused`, `completed` and `dropped` ("Plan to watch", "Watching", ...). All five labels are required. A plugin cannot add a status.
 - `Progress`: see [Progress](#progress).
 - `Sections`: see [Sections](#sections).
+- `Stats`: optional, how the kind's time and units count on the Statistics page (see [Statistics](#statistics)). JSON `stats`, omitted when unset.
 
 ### Table columns
 
@@ -175,6 +176,70 @@ Sections choose which of the core's fixed building blocks appear on an item's ov
 | `links` | The "View on ..." link (`SourceInfo.LinkLabel`, else "View on <source name>") to `ItemData.ExternalURL`, https only. |
 
 `Label` overrides a section's heading. `Field` must name a field of the kind.
+
+### Statistics
+
+`StatsDef` is optional. It tells the Statistics page (`/stats`) how a kind's **time** and **units** count. It has a `Time`, a `Units` or both, and at least one is required. The core reads it as data; it never names a media kind. A kind without it still counts its entries and statuses on the page, but adds no time or units.
+
+```go
+type StatsDef struct {
+	Time  *StatsTimeDef  // optional
+	Units *StatsUnitsDef // optional
+}
+
+type StatsTimeDef struct {
+	Label          string // the time's name on the page, e.g. "Playtime"
+	DurationKey    string // an eligible duration progress key
+	CompletedField string // a number field: total minutes of a completed entry
+	UnitsKey       string // a count or pages progress key (with PerUnitField)
+	PerUnitField   string // a number field: minutes per unit (with UnitsKey)
+}
+
+type StatsUnitsDef struct {
+	Key         string // a count or pages progress key of the kind
+	LabelPlural string // e.g. "Chapters"
+}
+```
+
+`Validate` refuses:
+
+- a `StatsDef` with neither `Time` nor `Units`;
+- a time `Label` or units `LabelPlural` that is blank, over 40 characters, or has control characters (single line);
+- a time with none of `DurationKey`, `CompletedField` or the `UnitsKey` and `PerUnitField` pair; `UnitsKey` without `PerUnitField`, or the reverse;
+- a `DurationKey` that is not an eligible `duration` progress, or a `UnitsKey` that is not an eligible `count` or `pages` progress;
+- a `CompletedField` or `PerUnitField` that is not a number field of the kind;
+- units without `Key`, or with a `Key` that is not a `count` or `pages` progress.
+
+**Time order.** Each entry resolves its time with the first rule that applies. "Active" means the key is one of the item's active progress keys; values of retired keys never count.
+
+1. A completed entry whose `CompletedField` is above zero: that field, in minutes.
+2. The active `DurationKey`, in seconds. When `CompletedField` is set and above zero, the value is capped at that many minutes.
+3. The active `UnitsKey` times `PerUnitField` (in minutes) when the per-unit value is above zero. A completed entry at zero units uses the track's `TotalField`.
+4. Otherwise the time is unknown. The page counts such entries and asks the user to update them from their source.
+
+A resolved zero is a known time: it adds nothing to the total but does not count as missing. Units are the value of the active units track on the same rules (a completed entry at zero falls back to `TotalField`). The core never adds units of different kinds together.
+
+**Example** (a generic kind of recordings, the fields and progress tracks it refers to declared as usual):
+
+```go
+Fields: []plugin.FieldDef{
+	{Key: "length", Label: "Length", Type: plugin.FieldNumber, Unit: "min"},
+	{Key: "chapters", Label: "Chapters", Type: plugin.FieldNumber},
+},
+Progress: plugin.ProgressSpec{
+	Eligible: []plugin.ProgressDef{
+		{Key: "listened", Type: plugin.Duration, Label: "Listened"},
+		{Key: "chapter", Type: plugin.Count, Label: "Chapter", TotalField: "chapters"},
+	},
+	// Defaults, Combinations and PrimaryKey as for any kind
+},
+Stats: &plugin.StatsDef{
+	Time:  &plugin.StatsTimeDef{Label: "Listening", DurationKey: "listened", CompletedField: "length"},
+	Units: &plugin.StatsUnitsDef{Key: "chapter", LabelPlural: "Chapters"},
+},
+```
+
+A completed recording counts its `length`; an unfinished one counts what was listened to, never more than its length. The chapters count as units. Entries count by their finished date (see [Statistics](usage.md#statistics)).
 
 ## Sources
 

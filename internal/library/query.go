@@ -798,6 +798,33 @@ func (l *Library) Rows(ctx context.Context, q Query, lang string, limit, offset 
 	return l.loadRows(ctx, c.unmatched, whereSQL, whereArgs, order, orderArgs, limit, max(offset, 0), lang)
 }
 
+// ErrTooManyRows is returned by StatsRows when more entries match than it loads.
+var ErrTooManyRows = errors.New("too many rows to aggregate")
+
+const maxStatsRows = 20000
+
+// StatsRows returns every entry matching q in item-id order, for the
+// statistics aggregation. It fails with ErrTooManyRows above maxStatsRows.
+func (l *Library) StatsRows(ctx context.Context, q Query, lang string) ([]Row, error) {
+	return l.statsRows(ctx, q, lang, maxStatsRows)
+}
+
+func (l *Library) statsRows(ctx context.Context, q Query, lang string, limit int) ([]Row, error) {
+	c, err := l.compile(q)
+	if err != nil {
+		return nil, err
+	}
+	whereSQL, whereArgs := c.where()
+	var total int
+	if err := l.db.QueryRowContext(ctx, `SELECT COUNT(*)`+fromSQL+whereSQL, whereArgs...).Scan(&total); err != nil {
+		return nil, fmt.Errorf("stats rows: %w", err)
+	}
+	if total > limit {
+		return nil, ErrTooManyRows
+	}
+	return l.loadRows(ctx, c.unmatched, whereSQL, whereArgs, ` ORDER BY items.id`, nil, -1, 0, lang)
+}
+
 // Row returns the list row of one item (of any plugin), or nil, nil when the
 // item does not exist or has no entry.
 func (l *Library) Row(ctx context.Context, itemID int64, lang string) (*Row, error) {

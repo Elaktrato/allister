@@ -24,10 +24,16 @@
     {{if .DetailsURL}}
     <a href="{{.DetailsURL}}" class="block rounded border border-slate-700 px-4 py-2 text-center text-sm hover:bg-slate-800">Edit details</a>
     {{end}}
+    {{if .UpdateURL}}
+    <form method="post" action="{{.UpdateURL}}">
+      <button type="submit" class="w-full rounded border border-slate-700 px-4 py-2 text-sm hover:bg-slate-800">{{.UpdateLabel}}</button>
+    </form>
+    {{end}}
   </aside>
   <div class="min-w-0 space-y-6">
     <div>
       <h1 class="text-3xl font-semibold">{{.Title}}</h1>
+      {{if .UpdateNotice}}<p class="mt-2 rounded border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-300">{{.UpdateNotice}}</p>{{end}}
       {{if .PartialSync}}<span title="Some details are still being downloaded in the background" class="mt-2 inline-block rounded bg-slate-800 px-2 py-0.5 text-xs text-amber-300">partially synced</span>{{end}}
     </div>
     {{range .Sections}}{{template "section" .}}{{end}}

@@ -43,12 +43,12 @@ func TestSidebarOneRowPerEnabledPluginWithIcons(t *testing.T) {
 	e := newEnvWith(t, withPlugins(book, plugintest.TVPlugin()))
 	body := e.get("/settings").Body.String()
 	nav := mainNav(t, body)
-	if strings.Count(nav, "<a ") != 5 {
-		t.Fatalf("want 3 plugin rows, Calendar and Settings: %s", nav)
+	if strings.Count(nav, "<a ") != 6 {
+		t.Fatalf("want 3 plugin rows, Statistics, Calendar and Settings: %s", nav)
 	}
-	// manifest (registration) order, Calendar and Settings last
+	// manifest (registration) order, Statistics, Calendar and Settings last
 	last := -1
-	for _, href := range []string{"/anime", "/book", "/tv", "/calendar", "/settings"} {
+	for _, href := range []string{"/anime", "/book", "/tv", "/stats", "/calendar", "/settings"} {
 		i := strings.Index(nav, `href="`+href+`"`)
 		if i < last {
 			t.Errorf("%s out of order in %s", href, nav)
@@ -57,7 +57,7 @@ func TestSidebarOneRowPerEnabledPluginWithIcons(t *testing.T) {
 	}
 	for _, r := range []struct{ href, icon, label string }{
 		{"/anime", "live_tv", "Anime"}, {"/book", "menu_book", "Books"}, {"/tv", "category", "Shows"},
-		{"/calendar", "calendar_month", "Calendar"}, {"/settings", "settings", "Settings"},
+		{"/stats", "bar_chart", "Statistics"}, {"/calendar", "calendar_month", "Calendar"}, {"/settings", "settings", "Settings"},
 	} {
 		row := navRow(t, nav, r.href)
 		mustIcon(t, row, r.icon)
@@ -100,6 +100,7 @@ func TestAriaCurrentExactlyOncePerPage(t *testing.T) {
 		{"/anime", "/anime"}, {"/anime?status=active", "/anime"}, {"/anime?q=death&f.type=TV", "/anime"},
 		{"/anime/anilist/1535", "/anime"}, {"/anime/search", "/anime"}, {"/book", "/book"},
 		{"/list/" + idStr(id) + "/edit", "/anime"}, {e.personPath(t, "c1"), "/anime"},
+		{"/stats", "/stats"},
 		{"/settings", "/settings"}, {"/settings/plugins", "/settings"}, {"/settings/backup", "/settings"},
 	} {
 		rec := e.get(p.path)
@@ -135,7 +136,7 @@ var iconSpan = regexp.MustCompile(`<[a-z]+[^>]*class="(?:[^"]* )?icon(?: [^"]*)?
 func TestIconsAreDecorativeAndPagesHaveNoInlineScript(t *testing.T) {
 	e := newEnv(t)
 	e.addEntry(t, anilist.AniList, "1535", nil, library.Active, 1, titleEn("Death Note")...)
-	for _, p := range []string{"/anime", "/anime?sort=title&f.type=TV", "/anime/anilist/1535", "/anime/search", "/settings", "/settings/plugins", "/settings/backup"} {
+	for _, p := range []string{"/anime", "/anime?sort=title&f.type=TV", "/anime/anilist/1535", "/anime/search", "/stats", "/settings", "/settings/plugins", "/settings/backup"} {
 		b := e.get(p).Body.String()
 		icons := iconSpan.FindAllString(b, -1)
 		if len(icons) < 2 {

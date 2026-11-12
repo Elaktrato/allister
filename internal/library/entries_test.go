@@ -336,6 +336,47 @@ func TestEntryTableConstraints(t *testing.T) {
 	}
 }
 
+// TestInvalidEntryWritesNoEvent: a rejected save leaves neither the entry nor
+// the event log changed.
+func TestInvalidEntryWritesNoEvent(t *testing.T) {
+	e := newEnv(t)
+	l := e.lib
+	id := addBook(t, l, "ev-i1", fp(10), Entry{Status: Active, Progress: map[string]float64{"pages": 2}})
+	wantInvalid(t, l.UpsertEntry(bg, Entry{ItemID: id, Status: Active, Progress: map[string]float64{"pages": 11}}), "total")
+	wantInvalid(t, l.UpdateEntry(bg, Entry{ItemID: id, Status: "watching"}, nil), "status")
+	if n := len(readEvents(t, l, id)); n != 0 {
+		t.Fatalf("invalid saves wrote %d events", n)
+	}
+	if got := mustEntry(t, l, id); got.Status != Active || got.Progress["pages"] != 2 {
+		t.Fatalf("entry changed: %+v", got)
+	}
+}
+
+// TestApplyImportUsesImportOrigin: an import write is recorded, but with the
+// import origin so the activity heatmap can leave it out.
+func TestApplyImportUsesImportOrigin(t *testing.T) {
+	e := newEnv(t)
+	l := e.lib
+	id := addBook(t, l, "ev-a1", fp(10), Entry{Status: Planned, Progress: map[string]float64{"pages": 2}})
+	ok, err := l.ApplyImport(bg, id, Entry{Status: Completed, Progress: map[string]float64{"pages": 4}}, nil)
+	if err != nil || !ok {
+		t.Fatalf("apply: %v %v", ok, err)
+	}
+	wantEvents(t, readEvents(t, l, id), []event{
+		{Type: "progress", Key: "pages", OldNum: fp(2), NewNum: fp(4), Origin: OriginImport},
+		{Type: "status", OldText: "planned", NewText: "completed", Origin: OriginImport},
+	})
+	// an import that is refused as too old writes nothing
+	cur := mustEntry(t, l, id)
+	older := cur.UpdatedAt.Add(-time.Hour)
+	if ok, err := l.ApplyImport(bg, id, Entry{Status: Active}, &older); err != nil || ok {
+		t.Fatalf("older source applied: %v %v", ok, err)
+	}
+	if n := len(readEvents(t, l, id)); n != 2 {
+		t.Fatalf("a refused import wrote events: %d", n)
+	}
+}
+
 func TestCreateEntryInsertsOnlyWhenAbsent(t *testing.T) {
 	e := newEnv(t)
 	id := mustSave(t, e.lib, "book", "book", bookWith("ce1", fp(10)))

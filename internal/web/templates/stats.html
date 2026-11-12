@@ -1,0 +1,278 @@
+{{define "title"}}Statistics - Allister{{end}}
+{{define "content"}}
+<div class="mb-5">
+  <h1 class="text-3xl font-semibold">Statistics</h1>
+  <p class="mt-1 max-w-3xl text-sm text-slate-400">A period selects entries by their finished date; totals use the values stored on those entries today. Entries without a finished date appear only under All time.</p>
+</div>
+
+{{if .NoKinds}}
+<p class="rounded-lg border border-slate-800 bg-slate-900 p-4 text-slate-300"><strong class="font-medium text-slate-100">No plugins are enabled.</strong> Enable a plugin in <a class="text-indigo-300 underline" href="/settings/plugins">Settings &gt; Plugins</a> to see statistics.</p>
+{{else}}
+{{template "stats_form" .}}
+{{template "stats_notices" .}}
+{{if not .TooMany}}
+{{if .Empty}}
+  {{if .AnyEntries}}
+  <p class="rounded-lg border border-slate-800 bg-slate-900 p-4 text-slate-300">No entries match these filters.{{with .ClearURL}} <a class="text-indigo-300 underline" href="{{.}}">Clear filters</a>{{end}}</p>
+  {{else}}
+  <p class="rounded-lg border border-slate-800 bg-slate-900 p-4 text-slate-300"><strong class="font-medium text-slate-100">No entries in your list yet.</strong> <a class="text-indigo-300 underline" href="/">Open your list</a> to start tracking.</p>
+  {{end}}
+{{else}}
+{{template "stats_cards" .}}
+{{if .AllMedia}}{{template "stats_compare" .}}{{end}}
+{{with .Chart}}{{template "stats_chart" .}}{{end}}
+{{template "stats_ratings" .}}
+{{range .Dimensions}}{{template "stats_dimension" .}}{{end}}
+{{end}}
+{{with .Heatmap}}{{if .Weeks}}{{template "stats_heatmap" .}}{{end}}{{end}}
+{{end}}
+{{end}}
+{{end}}
+
+{{/* the plain GET filter form: media, period with its custom range, status,
+     the genre/tag multi-selects and the selected kind's filterable fields */}}
+{{define "stats_form"}}
+<form method="get" action="/stats" aria-label="Statistics filters" class="mb-5 rounded-lg border border-slate-800 bg-slate-900 p-4 text-sm">
+  <div class="flex flex-wrap items-end gap-4">
+    <label class="flex flex-col gap-1"><span class="text-slate-400">Media</span>
+      <select name="media" class="rounded-md border border-slate-700 bg-slate-950 px-2 py-1.5 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500">
+        {{range .MediaOptions}}<option value="{{.Value}}"{{if .Selected}} selected{{end}}>{{.Label}}</option>{{end}}
+      </select></label>
+    <label class="flex flex-col gap-1"><span class="text-slate-400">Period</span>
+      <select name="period" class="rounded-md border border-slate-700 bg-slate-950 px-2 py-1.5 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500">
+        {{range .PeriodOptions}}<option value="{{.Value}}"{{if .Selected}} selected{{end}}>{{.Label}}</option>{{end}}
+      </select></label>
+    {{if eq .Period "custom"}}
+    <fieldset class="flex flex-col gap-1"><legend class="mb-1 text-slate-400">Custom range</legend>
+      <span class="flex items-center gap-1">
+        <input type="date" name="from" value="{{.From}}" aria-label="From" class="rounded-md border border-slate-700 bg-slate-950 px-2 py-1.5 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500">
+        <span aria-hidden="true">–</span>
+        <input type="date" name="to" value="{{.To}}" aria-label="To" class="rounded-md border border-slate-700 bg-slate-950 px-2 py-1.5 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500">
+      </span></fieldset>
+    {{end}}
+    <label class="flex flex-col gap-1"><span class="text-slate-400">Status</span>
+      <select name="status" class="rounded-md border border-slate-700 bg-slate-950 px-2 py-1.5 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500">
+        {{range .StatusOptions}}<option value="{{.Value}}"{{if .Selected}} selected{{end}}>{{.Label}}</option>{{end}}
+      </select></label>
+  </div>
+  {{if or .Genres .Tags .Fields}}
+  <div class="mt-4 flex flex-wrap items-start gap-4">
+    {{with .Genres}}{{template "filter_terms" .}}{{end}}
+    {{with .Tags}}{{template "filter_terms" .}}{{end}}
+    {{range .Fields}}
+    {{if eq .Type "enum"}}
+    <label class="flex flex-col gap-1"><span class="text-slate-400">{{.Label}}</span>
+      <select name="{{.Name}}" class="rounded-md border border-slate-700 bg-slate-950 px-2 py-1.5 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500">
+        <option value="">Any</option>
+        {{range .Options}}<option value="{{.Value}}"{{if .Selected}} selected{{end}}>{{.Label}}</option>{{end}}
+      </select></label>
+    {{else if or (eq .Type "number") (eq .Type "date")}}
+    <fieldset class="flex flex-col gap-1"><legend class="mb-1 text-slate-400">{{.Label}}</legend>
+      <span class="flex items-center gap-1">
+        <input type="{{.Type}}" name="{{.FromName}}" value="{{.From}}" aria-label="{{.Label}} from"{{if eq .Type "number"}} step="any"{{end}} class="w-28 rounded-md border border-slate-700 bg-slate-950 px-2 py-1.5 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500">
+        <span aria-hidden="true">–</span>
+        <input type="{{.Type}}" name="{{.ToName}}" value="{{.To}}" aria-label="{{.Label}} to"{{if eq .Type "number"}} step="any"{{end}} class="w-28 rounded-md border border-slate-700 bg-slate-950 px-2 py-1.5 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500">
+      </span></fieldset>
+    {{else}}
+    <label class="flex flex-col gap-1"><span class="text-slate-400">{{.Label}}</span>
+      <input type="text" name="{{.Name}}" value="{{.Value}}" maxlength="200" autocomplete="off" placeholder="contains…" class="rounded-md border border-slate-700 bg-slate-950 px-2 py-1.5 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"></label>
+    {{end}}
+    {{end}}
+  </div>
+  {{end}}
+  <div class="mt-4 flex items-center gap-4 border-t border-slate-800 pt-4">
+    <button type="submit" class="rounded-md bg-indigo-600 px-3 py-1.5 font-medium hover:bg-indigo-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400">Apply</button>
+    {{with .ClearURL}}<a class="text-indigo-300 hover:underline" href="{{.}}">Clear filters</a>{{end}}
+  </div>
+</form>
+{{end}}
+
+{{/* the notices: ignored parameters, the row cap, entries without the data
+     behind their time total, and completed entries outside a period */}}
+{{define "stats_notices"}}
+{{if .Notice}}<p role="status" class="mb-4 rounded border border-amber-800 bg-slate-900 p-3 text-sm text-amber-200">Ignored unknown or invalid parameters: {{range $i, $k := .Notice}}{{if $i}}, {{end}}<code>{{$k}}</code>{{end}}{{if .NoticeMore}} and {{.NoticeMore}} more{{end}}.</p>{{end}}
+{{if .TooMany}}<p role="status" class="mb-4 rounded border border-amber-800 bg-slate-900 p-3 text-sm text-amber-200">Too many entries to aggregate. Narrow the filters to see statistics.</p>{{end}}
+{{if .MissingTime}}<p role="status" class="mb-4 rounded border border-amber-800 bg-slate-900 p-3 text-sm text-amber-200">{{.MissingTime}} {{if eq .MissingTime 1}}entry is{{else}}entries are{{end}} missing the data needed for their time total. {{with .MissingTimeURL}}Open an entry from <a class="underline" href="{{.}}">your list</a> and use{{else}}Open an entry and use{{end}} <span class="font-medium">Update from source</span> to add it.</p>{{end}}
+{{if .UndatedCompleted}}<p role="status" class="mb-4 rounded border border-amber-800 bg-slate-900 p-3 text-sm text-amber-200">{{.UndatedCompleted}} completed {{if eq .UndatedCompleted 1}}entry has{{else}}entries have{{end}} no finished date and {{if eq .UndatedCompleted 1}}is{{else}}are{{end}} not in this period.</p>{{end}}
+{{if .NoTime}}<p class="mb-4 rounded border border-slate-800 bg-slate-900 p-3 text-sm text-slate-400">None of these entries have enough stored data for a time total.</p>{{end}}
+{{if .KnownZeroTime}}<p class="mb-4 rounded border border-slate-800 bg-slate-900 p-3 text-sm text-slate-400">No time is recorded for these entries yet.</p>{{end}}
+{{end}}
+
+{{/* the summary cards: entries, completed, time and units (when the scope
+     can compute them), average rating and rated/unrated */}}
+{{define "stats_cards"}}
+<ul class="mb-5 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+  {{range .Cards}}
+  <li data-stat="{{.Key}}" class="rounded-lg border border-slate-800 bg-slate-900 p-4">
+    <p class="text-xs uppercase tracking-wide text-slate-500">{{.Label}}</p>
+    <p data-value class="mt-1 text-2xl font-semibold">{{.Value}}</p>
+    {{with .Detail}}<p class="mt-1 text-xs text-slate-400">{{.}}</p>{{end}}
+  </li>
+  {{end}}
+</ul>
+{{end}}
+
+{{/* the per-kind comparison of the All media view; a kind name sets the
+     media filter */}}
+{{define "stats_compare"}}
+<section data-kind-compare class="mb-5 rounded-lg border border-slate-800 bg-slate-900 p-4">
+  <h2 class="mb-3 text-sm font-medium text-slate-400">By media kind</h2>
+  <div class="overflow-x-auto">
+    <table class="w-full text-left text-sm">
+      <thead>
+        <tr class="border-b border-slate-800 text-slate-400">
+          <th scope="col" class="py-2 pr-3 font-medium">Kind</th>
+          <th scope="col" class="py-2 pr-3 text-right font-medium">Entries</th>
+          <th scope="col" class="py-2 pr-3 text-right font-medium">Completed</th>
+          {{if .CompareTime}}<th scope="col" class="py-2 pr-3 text-right font-medium">Time</th>
+          <th scope="col" class="py-2 pr-3 text-right font-medium">Average time</th>{{end}}
+          {{if .CompareUnits}}<th scope="col" class="py-2 pr-3 text-right font-medium">Units</th>{{end}}
+          <th scope="col" class="py-2 text-right font-medium">Average rating</th>
+        </tr>
+      </thead>
+      <tbody>
+        {{range .KindRows}}
+        <tr data-kind="{{.PluginID}}/{{.Kind}}" class="border-b border-slate-800/60">
+          <th scope="row" class="py-1.5 pr-3 font-normal"><a class="text-indigo-300 hover:underline" href="{{.Href}}">{{.Label}}</a></th>
+          <td class="py-1.5 pr-3 text-right tabular-nums">{{.Entries}}</td>
+          <td class="py-1.5 pr-3 text-right tabular-nums">{{.Completed}}</td>
+          {{if $.CompareTime}}<td class="py-1.5 pr-3 text-right tabular-nums">{{.Time}}</td>
+          <td class="py-1.5 pr-3 text-right tabular-nums">{{.AvgTime}}</td>{{end}}
+          {{if $.CompareUnits}}<td class="py-1.5 pr-3 text-right tabular-nums">{{.Units}}</td>{{end}}
+          <td class="py-1.5 text-right tabular-nums">{{.Rating}}</td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+  </div>
+</section>
+{{end}}
+
+{{/* one breakdown: the top values and the rest behind a Show all disclosure */}}
+{{define "stats_dimension"}}
+<section data-dimension="{{.Key}}" class="mb-5 rounded-lg border border-slate-800 bg-slate-900 p-4">
+  <h2 class="mb-3 text-sm font-medium text-slate-400">{{.Label}}</h2>
+  {{if .Top.Rows}}
+  {{template "stats_dimension_table" .Top}}
+  {{if .More.Rows}}
+  <details class="group mt-3">
+    <summary class="cursor-pointer text-sm text-indigo-300 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500">Show all ({{.MoreCount}} more)</summary>
+    <div class="mt-3">{{template "stats_dimension_table" .More}}</div>
+  </details>
+  {{end}}
+  {{else}}
+  <p class="text-sm text-slate-400">No values recorded for these entries.</p>
+  {{end}}
+</section>
+{{end}}
+
+{{define "stats_dimension_table"}}
+<div class="overflow-x-auto">
+  <table class="w-full text-left text-sm">
+    <thead>
+      <tr class="border-b border-slate-800 text-slate-400">
+        <th scope="col" class="py-2 pr-3 font-medium">Value</th>
+        <th scope="col" class="py-2 pr-3 text-right font-medium">Entries</th>
+        {{if .ShowTime}}<th scope="col" class="py-2 pr-3 text-right font-medium">Time</th>{{end}}
+        {{if .ShowUnits}}<th scope="col" class="py-2 pr-3 text-right font-medium">Units</th>{{end}}
+        <th scope="col" class="py-2 text-right font-medium">Average rating</th>
+      </tr>
+    </thead>
+    <tbody>
+      {{range .Rows}}
+      <tr data-value="{{.Value}}" class="border-b border-slate-800/60">
+        <th scope="row" class="py-1.5 pr-3 font-normal">{{.Value}}</th>
+        <td class="py-1.5 pr-3 text-right tabular-nums">{{.Entries}}</td>
+        {{if $.ShowTime}}<td class="py-1.5 pr-3 text-right tabular-nums">{{.Time}}</td>{{end}}
+        {{if $.ShowUnits}}<td class="py-1.5 pr-3 text-right tabular-nums">{{.Units}}</td>{{end}}
+        <td class="py-1.5 text-right tabular-nums">{{.Rating}}</td>
+      </tr>
+      {{end}}
+    </tbody>
+  </table>
+</div>
+{{end}}
+
+{{/* the time chart: one SVG bar per bucket, with attribute geometry only and
+     no inline styles; the figure carries a title, a description and a details
+     table of the values. A mark is fill="currentColor" under a theme class. */}}
+{{define "stats_chart"}}
+<section data-chart class="mb-5 rounded-lg border border-slate-800 bg-slate-900 p-4">
+  <h2 class="mb-1 text-sm font-medium text-slate-400">Time chart</h2>
+  <p class="mb-3 text-xs text-slate-400">Peak {{.MaxLabel}} · Total {{.Total}}</p>
+  <figure>
+    <svg viewBox="0 0 {{.Width}} {{.Height}}" role="img" aria-labelledby="stats-chart-title stats-chart-desc" class="block h-48 w-full text-indigo-400">
+      <title id="stats-chart-title">Time per bucket</title>
+      <desc id="stats-chart-desc">The bars show the time of the entries finished in each bucket, from the smallest to the largest.</desc>
+      {{range .Bars}}<rect x="{{.X}}" y="{{.Y}}" width="{{.Width}}" height="{{.Height}}" rx="2" fill="currentColor" fill-opacity="0.8"><title>{{.Title}}</title></rect>{{end}}
+      {{range .Labels}}<text x="{{.X}}" y="{{.Y}}" text-anchor="end" transform="rotate(-45 {{.X}} {{.Y}})" font-size="9" fill="currentColor" class="text-slate-500">{{.Text}}</text>{{end}}
+    </svg>
+  </figure>
+  <details class="mt-3">
+    <summary class="cursor-pointer text-sm text-indigo-300 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500">Show values</summary>
+    <table class="mt-2 w-full text-left text-sm">
+      <thead><tr class="border-b border-slate-800 text-slate-400"><th scope="col" class="py-2 pr-3 font-medium">Bucket</th><th scope="col" class="py-2 text-right font-medium">Time</th></tr></thead>
+      <tbody>{{range .Table}}<tr data-bucket="{{.Label}}" class="border-b border-slate-800/60"><th scope="row" class="py-1.5 pr-3 font-normal">{{.Label}}</th><td class="py-1.5 text-right tabular-nums">{{.Value}}</td></tr>{{end}}</tbody>
+    </table>
+  </details>
+</section>
+{{end}}
+
+{{/* the rating distribution: rows 0-10 plus unrated, each with a small SVG bar
+     whose width is an attribute */}}
+{{define "stats_ratings"}}
+<section data-rating-distribution class="mb-5 rounded-lg border border-slate-800 bg-slate-900 p-4">
+  <h2 class="mb-3 text-sm font-medium text-slate-400">Rating distribution</h2>
+  <table class="w-full text-left text-sm">
+    <thead><tr class="border-b border-slate-800 text-slate-400"><th scope="col" class="w-16 py-2 pr-3 font-medium">Rating</th><th scope="col" class="py-2 pr-3"><span class="sr-only">Distribution</span></th><th scope="col" class="py-2 text-right font-medium">Entries</th></tr></thead>
+    <tbody>
+      {{range .Ratings}}
+      <tr data-score="{{if .Unrated}}unrated{{else}}{{.Score}}{{end}}" class="border-b border-slate-800/60">
+        <th scope="row" class="py-1.5 pr-3 font-normal">{{if .Unrated}}Unrated{{else}}{{.Score}}{{end}}</th>
+        <td class="py-1.5 pr-3">
+          <svg viewBox="0 0 100 6" preserveAspectRatio="none" aria-hidden="true" class="h-1.5 w-full">
+            <rect x="0" y="0" width="100" height="6" rx="3" fill="currentColor" fill-opacity="0.15" class="text-slate-500"/>
+            <rect x="0" y="0" width="{{.BarWidth}}" height="6" rx="3" fill="currentColor" fill-opacity="0.8" class="text-indigo-400"/>
+          </svg>
+        </td>
+        <td class="py-1.5 text-right tabular-nums">{{.Count}}</td>
+      </tr>
+      {{end}}
+    </tbody>
+  </table>
+</section>
+{{end}}
+
+{{/* the activity heatmap: 53 Monday-first week columns of seven days, month
+     and weekday labels, five intensities, a legend, a title per cell and a
+     visually hidden table of the active days */}}
+{{define "stats_heatmap"}}
+<section data-heatmap class="mb-5 rounded-lg border border-slate-800 bg-slate-900 p-4">
+  <h2 class="mb-1 text-sm font-medium text-slate-400">Activity</h2>
+  <p class="mb-3 text-xs text-slate-400">{{if .Since}}Tracked since {{.Since}}.{{else}}Activity starts with your next change.{{end}} One cell per UTC day of the last 12 months; imports and restores do not count.</p>
+  {{if .Empty}}<p class="mb-3 text-sm text-slate-400">No activity in the last 12 months.</p>{{end}}
+  <div class="overflow-x-auto">
+    <svg viewBox="0 0 {{.Width}} {{.Height}}" role="img" aria-labelledby="stats-heatmap-title stats-heatmap-desc" class="w-full text-indigo-400">
+      <title id="stats-heatmap-title">Activity by day</title>
+      <desc id="stats-heatmap-desc">One cell per day of the last 12 months, in weeks from Monday to Sunday; darker cells carry more activity events.</desc>
+      {{range .Months}}<text x="{{.X}}" y="10" font-size="9" fill="currentColor" class="text-slate-500">{{.Label}}</text>{{end}}
+      {{range .Weekdays}}<text x="0" y="{{.Y}}" font-size="9" fill="currentColor" class="text-slate-500">{{.Label}}</text>{{end}}
+      {{range .Weeks}}{{range .}}{{if .Date}}<rect x="{{.X}}" y="{{.Y}}" width="12" height="12" rx="2" fill="currentColor" class="{{if .Level}}text-indigo-400{{else}}text-slate-500{{end}}" fill-opacity="{{if eq .Level 0}}0.15{{else if eq .Level 1}}0.35{{else if eq .Level 2}}0.55{{else if eq .Level 3}}0.75{{else}}1{{end}}"><title>{{.Title}}</title></rect>{{end}}{{end}}{{end}}
+    </svg>
+  </div>
+  <p class="mt-2 flex items-center gap-1 text-[0.625rem] text-slate-500">
+    <span class="mr-1">Less</span>
+    <svg viewBox="0 0 12 12" aria-hidden="true" class="h-3 w-3"><rect width="12" height="12" rx="2" fill="currentColor" fill-opacity="0.15" class="text-slate-500"/></svg>
+    <svg viewBox="0 0 12 12" aria-hidden="true" class="h-3 w-3 text-indigo-400"><rect width="12" height="12" rx="2" fill="currentColor" fill-opacity="0.35"/></svg>
+    <svg viewBox="0 0 12 12" aria-hidden="true" class="h-3 w-3 text-indigo-400"><rect width="12" height="12" rx="2" fill="currentColor" fill-opacity="0.55"/></svg>
+    <svg viewBox="0 0 12 12" aria-hidden="true" class="h-3 w-3 text-indigo-400"><rect width="12" height="12" rx="2" fill="currentColor" fill-opacity="0.75"/></svg>
+    <svg viewBox="0 0 12 12" aria-hidden="true" class="h-3 w-3 text-indigo-400"><rect width="12" height="12" rx="2" fill="currentColor"/></svg>
+    <span class="ml-1">More</span>
+  </p>
+  <table class="sr-only">
+    <caption>Active days in the last 12 months</caption>
+    <thead><tr><th scope="col">Day</th><th scope="col">Activity events</th></tr></thead>
+    <tbody>{{range .Weeks}}{{range .}}{{if .Count}}<tr><th scope="row">{{.Date}}</th><td>{{.Count}}</td></tr>{{end}}{{end}}{{end}}</tbody>
+  </table>
+</section>
+{{end}}

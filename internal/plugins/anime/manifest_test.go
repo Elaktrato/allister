@@ -63,7 +63,7 @@ func TestManifestMatchesBaseline(t *testing.T) {
 		f[d.Key] = d
 		keys = append(keys, d.Key)
 	}
-	if want := []string{"type", "episodes", "year", "studio", "synopsis", "source_material", "started_on", "ended_on"}; !reflect.DeepEqual(keys, want) {
+	if want := []string{"type", "episodes", "duration", "year", "studio", "synopsis", "source_material", "started_on", "ended_on"}; !reflect.DeepEqual(keys, want) {
 		t.Errorf("fields = %v", keys)
 	}
 	if ty := f["type"]; ty.Type != plugin.FieldEnum || ty.Label != "Type" ||
@@ -72,6 +72,10 @@ func TestManifestMatchesBaseline(t *testing.T) {
 	}
 	if ep := f["episodes"]; ep.Type != plugin.FieldNumber || ep.Min == nil || *ep.Min != 1 || ep.Max == nil || *ep.Max != 10000 {
 		t.Errorf("episodes = %+v", ep)
+	}
+	if du := f["duration"]; du.Type != plugin.FieldNumber || du.Label != "Episode duration" || du.Unit != "min" ||
+		du.Min == nil || *du.Min != 1 || du.Max == nil || *du.Max != 10000 {
+		t.Errorf("duration = %+v", du)
 	}
 	if y := f["year"]; y.Type != plugin.FieldNumber || y.Min == nil || *y.Min != 1900 || y.Max == nil || *y.Max != 2100 {
 		t.Errorf("year = %+v", y)
@@ -86,6 +90,7 @@ func TestManifestMatchesBaseline(t *testing.T) {
 		// type is required: a manual entry must choose one (Task 10)
 		{"type", plugin.FieldEnum, true, true, true, false, "", true},
 		{"episodes", plugin.FieldNumber, true, true, false, false, "eps", false},
+		{"duration", plugin.FieldNumber, true, true, false, false, "min", false},
 		{"year", plugin.FieldNumber, true, true, true, true, "", false},
 		{"studio", plugin.FieldText, true, true, true, false, "", false},
 		{"synopsis", plugin.FieldText, false, true, false, false, "", false},
@@ -106,6 +111,13 @@ func TestManifestMatchesBaseline(t *testing.T) {
 	}
 	if !reflect.DeepEqual(k.Progress, wantProgress) {
 		t.Errorf("progress = %+v", k.Progress)
+	}
+	wantStats := &plugin.StatsDef{
+		Time:  &plugin.StatsTimeDef{Label: "Watchtime", UnitsKey: "episode", PerUnitField: "duration"},
+		Units: &plugin.StatsUnitsDef{Key: "episode", LabelPlural: "Episodes"},
+	}
+	if !reflect.DeepEqual(k.Stats, wantStats) {
+		t.Errorf("stats = %+v", k.Stats)
 	}
 	wantSections := []plugin.SectionDef{
 		{Type: plugin.SectionInfo, Label: "Information"},

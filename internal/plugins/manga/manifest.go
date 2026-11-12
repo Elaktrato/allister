@@ -58,6 +58,9 @@ func manifest() plugin.Manifest {
 				Combinations: [][]string{{"chapter"}, {"volume"}},
 				PrimaryKey:   "chapter",
 			},
+			Stats: &plugin.StatsDef{
+				Units: &plugin.StatsUnitsDef{Key: "chapter", LabelPlural: "Chapters"},
+			},
 			Sections: []plugin.SectionDef{
 				{Type: plugin.SectionInfo, Label: "Information"},
 				{Type: plugin.SectionText, Field: "synopsis", Label: "Synopsis"},

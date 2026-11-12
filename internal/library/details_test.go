@@ -309,6 +309,114 @@ func TestUpdateDetailsNilCoverKeepsCurrent(t *testing.T) {
 	}
 }
 
+// fillEnv is newEnv plus plugin "media": the rich book with two extra number
+// fields, runtime (which the stored item has) and duration (which it lacks),
+// to exercise the source merge of FillMissingFields.
+func fillEnv(t *testing.T) *env {
+	t.Helper()
+	e := newEnv(t)
+	p := richBook(plugintest.WithID("media"))
+	k := &p.M.Kinds[0]
+	k.Fields = append(k.Fields,
+		plugin.FieldDef{Key: "runtime", Label: "Runtime", Type: plugin.FieldNumber, Min: fp(1), Max: fp(10000), Editable: true},
+		plugin.FieldDef{Key: "duration", Label: "Duration", Type: plugin.FieldNumber, Min: fp(1), Max: fp(10000), Editable: true})
+	if err := e.reg.Register(p); err != nil {
+		t.Fatal(err)
+	}
+	return e
+}
+
+// mediaWith saves a "media" item that already has runtime 120 and no duration.
+func mediaWith(t *testing.T, e *env) int64 {
+	t.Helper()
+	d := bookWith("m1", fp(300))
+	d.Fields["runtime"] = plugin.FieldValue{Num: fp(120)}
+	return mustSave(t, e.lib, "media", "book", d)
+}
+
+func TestFillMissingFieldsAddsOnlyMissing(t *testing.T) {
+	e := fillEnv(t)
+	id := mediaWith(t, e)
+	if _, err := e.db.Exec(`UPDATE items SET updated_at = ? WHERE id = ?`, oldStamp, id); err != nil {
+		t.Fatal(err)
+	}
+	added, err := e.lib.FillMissingFields(bg, id, map[string]plugin.FieldValue{
+		"runtime":     {Num: fp(100)},
+		"duration":    {Num: fp(24)},
+		"translators": {List: []string{"A", "B"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(added, []string{"duration", "translators"}) {
+		t.Fatalf("added %v", added)
+	}
+	it := mustItem(t, e.lib, id)
+	if n := it.Fields["runtime"].Num; n == nil || *n != 120 {
+		t.Fatalf("runtime overwritten: %v", n)
+	}
+	if n := it.Fields["duration"].Num; n == nil || *n != 24 {
+		t.Fatalf("duration not added: %v", n)
+	}
+	if !reflect.DeepEqual(it.Fields["translators"].List, []string{"A", "B"}) {
+		t.Fatalf("list not added: %+v", it.Fields["translators"])
+	}
+	var stamp string
+	if err := e.db.QueryRow(`SELECT updated_at FROM items WHERE id = ?`, id).Scan(&stamp); err != nil || stamp == oldStamp {
+		t.Fatalf("updated_at %q %v", stamp, err)
+	}
+}
+
+func TestFillMissingFieldsValidates(t *testing.T) {
+	e := fillEnv(t)
+	id := mediaWith(t, e)
+	before := mustItem(t, e.lib, id)
+	for name, fields := range map[string]map[string]plugin.FieldValue{
+		"unknown key": {"nope": {Text: "x"}},
+		"wrong shape": {"duration": {Text: "24"}},
+		"below min":   {"duration": {Num: fp(0)}},
+	} {
+		if _, err := e.lib.FillMissingFields(bg, id, fields); !errors.Is(err, ErrInvalid) {
+			t.Errorf("%s: err = %v", name, err)
+		}
+	}
+	if after := mustItem(t, e.lib, id); !reflect.DeepEqual(before, after) {
+		t.Fatalf("changed:\n%+v\n%+v", before, after)
+	}
+}
+
+func TestFillMissingFieldsNoChange(t *testing.T) {
+	e := fillEnv(t)
+	id := mediaWith(t, e)
+	if _, err := e.db.Exec(`UPDATE items SET updated_at = ? WHERE id = ?`, oldStamp, id); err != nil {
+		t.Fatal(err)
+	}
+	before := mustItem(t, e.lib, id)
+	for _, fields := range []map[string]plugin.FieldValue{
+		{"runtime": {Num: fp(100)}},
+		nil,
+	} {
+		added, err := e.lib.FillMissingFields(bg, id, fields)
+		if err != nil || added != nil {
+			t.Fatalf("added = %v, %v", added, err)
+		}
+	}
+	if after := mustItem(t, e.lib, id); !reflect.DeepEqual(before, after) {
+		t.Fatalf("changed:\n%+v\n%+v", before, after)
+	}
+	var stamp string
+	if err := e.db.QueryRow(`SELECT updated_at FROM items WHERE id = ?`, id).Scan(&stamp); err != nil || stamp != oldStamp {
+		t.Fatalf("updated_at %q %v", stamp, err)
+	}
+}
+
+func TestFillMissingFieldsUnknownItem(t *testing.T) {
+	e := fillEnv(t)
+	if _, err := e.lib.FillMissingFields(bg, 9999, map[string]plugin.FieldValue{"duration": {Num: fp(24)}}); !errors.Is(err, ErrNoEntry) {
+		t.Fatalf("err = %v", err)
+	}
+}
+
 func TestSetCoverPathIfComparesAndSets(t *testing.T) {
 	e := newEnv(t)
 	id := addBook(t, e.lib, "b1", fp(300), Entry{Status: Planned}) // cover https://img.example/b1.jpg

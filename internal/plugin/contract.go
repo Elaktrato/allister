@@ -209,6 +209,35 @@ type ColumnDef struct {
 	Hide    string `json:"hide,omitempty"`
 }
 
+// StatsDef declares how a kind derives time and units for the Statistics page.
+// It is optional; when set, at least one of Time and Units is set. Time says
+// how a kind's time is measured, Units which progress track counts its units.
+type StatsDef struct {
+	Time  *StatsTimeDef  `json:"time,omitempty"`
+	Units *StatsUnitsDef `json:"units,omitempty"`
+}
+
+// StatsTimeDef is the time measure of a kind. Label names it on the page.
+// DurationKey is an eligible duration progress; CompletedField a number field
+// holding the total of a completed item. UnitsKey (a count or pages progress)
+// and PerUnitField (a number field giving the time per unit) go together.
+// At least one source (DurationKey, CompletedField, or the UnitsKey and
+// PerUnitField pair) is required.
+type StatsTimeDef struct {
+	Label          string `json:"label"`
+	DurationKey    string `json:"duration_key,omitempty"`
+	CompletedField string `json:"completed_field,omitempty"`
+	UnitsKey       string `json:"units_key,omitempty"`
+	PerUnitField   string `json:"per_unit_field,omitempty"`
+}
+
+// StatsUnitsDef names the units a kind counts: Key is a count or pages
+// progress of the kind, LabelPlural its plural label ("Items").
+type StatsUnitsDef struct {
+	Key         string `json:"key"`
+	LabelPlural string `json:"label_plural"`
+}
+
 // KindDef is one media kind of a plugin. TitleLanguages are the language
 // tags of its titles; the user picks one of them per plugin. TitleFallback is
 // the optional order of title languages the core tries when an item has no
@@ -216,7 +245,8 @@ type ColumnDef struct {
 // once); after it, or without it, the item's first stored title is shown.
 // It is omitted from JSON when empty. Columns, when set, are the columns its
 // list table offers (see ColumnDef); without them the core derives the table
-// from the fields. It is omitted from JSON when empty.
+// from the fields. It is omitted from JSON when empty. Stats, when set, is the
+// kind's statistics declaration (see StatsDef).
 type KindDef struct {
 	Key            string       `json:"key"`
 	Label          string       `json:"label"`
@@ -230,6 +260,7 @@ type KindDef struct {
 	TitleLanguages []string     `json:"title_languages"`
 	TitleFallback  []string     `json:"title_fallback,omitempty"`
 	Columns        []ColumnDef  `json:"columns,omitempty"`
+	Stats          *StatsDef    `json:"stats,omitempty"`
 }
 
 // KeyField is one named credential field of a source ("client_id"). Name is a
