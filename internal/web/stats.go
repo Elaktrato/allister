@@ -93,8 +93,7 @@ type dimensionView struct {
 	MoreCount  int
 }
 
-// statsPage is the data of stats.html. Task 11 adds the time chart, rating
-// distribution and heatmap fields.
+// statsPage is the data of stats.html.
 type statsPage struct {
 	// NoKinds: no plugin is enabled. Empty: no row to show. AnyEntries: the
 	// scope holds entries at all (it distinguishes an empty list from
@@ -122,6 +121,12 @@ type statsPage struct {
 	CompareUnits bool
 	NoTime       bool
 	Dimensions   []dimensionView
+	// the figures: Chart is nil when the scope has no time metric or no
+	// bucket carries time; Ratings always holds the 12 distribution rows;
+	// Heatmap covers the last 12 months for the media scope only.
+	Chart   *timeChartView
+	Ratings []ratingRow
+	Heatmap heatmapView
 }
 
 // statsScope lists the enabled media kinds in registry order.
@@ -773,6 +778,12 @@ func (s *server) buildStatsPage(ctx context.Context, q statsQuery) (*statsPage, 
 	if err := s.fillStatsPage(ctx, v, q, scope, rep); err != nil {
 		return nil, err
 	}
+	// the heatmap stands beside the period: it always covers the last 12
+	// months, narrowed by the media filter only, so it is filled even when
+	// the filters leave no entry
+	if err := s.fillStatsActivity(ctx, v, q, scope); err != nil {
+		return nil, err
+	}
 	// a period excludes undated entries before stats.Build counts them, so
 	// the note counts them on the rows the period was applied to
 	if q.Period != statsAll {
@@ -901,6 +912,37 @@ func (s *server) fillStatsPage(ctx context.Context, v *statsPage, q statsQuery, 
 		}
 	}
 	v.Dimensions = statsDimensions(statsSelect(scope, q.Media), rep, v.AllMedia, v.HasTime, v.HasUnits)
+	v.Chart = buildTimeChart(rep.Buckets)
+	v.Ratings = buildRatingRows(total.RatingDistribution, total.Entries-total.Rated)
+	return nil
+}
+
+// fillStatsActivity fills the activity heatmap of the last 12 months. Only the
+// media filter narrows it; the window is independent of the period and of the
+// status, genre, tag and field filters. The activity log is global, so the
+// earliest recorded day ("tracked since") is too.
+func (s *server) fillStatsActivity(ctx context.Context, v *statsPage, q statsQuery, scope []statsKind) error {
+	kinds := statsSelect(scope, q.Media)
+	if len(kinds) == 0 {
+		return nil
+	}
+	refs := make([]library.KindRef, len(kinds))
+	for i, sk := range kinds {
+		refs[i] = library.KindRef{PluginID: sk.PluginID, Kind: sk.Kind.Key}
+	}
+	// 365 days including today: the 53 Monday-first week columns of the
+	// grid always cover the window
+	today := dayOf(s.now())
+	from := today.AddDate(0, 0, -364)
+	counts, err := s.deps.Library.ActivityDays(ctx, from, today.AddDate(0, 0, 1), refs)
+	if err != nil {
+		return err
+	}
+	since, _, err := s.deps.Library.FirstActivityDay(ctx)
+	if err != nil {
+		return err
+	}
+	v.Heatmap = buildHeatmap(counts, from, today, since)
 	return nil
 }
 

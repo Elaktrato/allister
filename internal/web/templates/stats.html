@@ -20,8 +20,11 @@
 {{else}}
 {{template "stats_cards" .}}
 {{if .AllMedia}}{{template "stats_compare" .}}{{end}}
+{{with .Chart}}{{template "stats_chart" .}}{{end}}
+{{template "stats_ratings" .}}
 {{range .Dimensions}}{{template "stats_dimension" .}}{{end}}
 {{end}}
+{{with .Heatmap}}{{if .Weeks}}{{template "stats_heatmap" .}}{{end}}{{end}}
 {{end}}
 {{end}}
 {{end}}
@@ -187,4 +190,90 @@
     </tbody>
   </table>
 </div>
+{{end}}
+
+{{/* the time chart: one SVG bar per bucket, with attribute geometry only and
+     no inline styles; the figure carries a title, a description and a details
+     table of the values. A mark is fill="currentColor" under a theme class. */}}
+{{define "stats_chart"}}
+<section data-chart class="mb-5 rounded-lg border border-slate-800 bg-slate-900 p-4">
+  <h2 class="mb-1 text-sm font-medium text-slate-400">Time chart</h2>
+  <p class="mb-3 text-xs text-slate-400">Peak {{.MaxLabel}} · Total {{.Total}}</p>
+  <figure>
+    <svg viewBox="0 0 {{.Width}} {{.Height}}" preserveAspectRatio="none" role="img" aria-labelledby="stats-chart-title stats-chart-desc" class="h-40 w-full text-indigo-400">
+      <title id="stats-chart-title">Time per bucket</title>
+      <desc id="stats-chart-desc">The bars show the time of the entries finished in each bucket, from the smallest to the largest.</desc>
+      {{range .Bars}}<rect x="{{.X}}" y="{{.Y}}" width="{{.Width}}" height="{{.Height}}" rx="2" fill="currentColor" fill-opacity="0.8"><title>{{.Title}}</title></rect>{{end}}
+    </svg>
+    {{if le (len .Bars) 24}}
+    <p aria-hidden="true" class="mt-1 flex gap-2 text-[0.625rem] text-slate-500">{{range .Bars}}<span class="flex-1 truncate text-center">{{.Label}}</span>{{end}}</p>
+    {{end}}
+  </figure>
+  <details class="mt-3">
+    <summary class="cursor-pointer text-sm text-indigo-300 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500">Show values</summary>
+    <table class="mt-2 w-full text-left text-sm">
+      <thead><tr class="border-b border-slate-800 text-slate-400"><th scope="col" class="py-2 pr-3 font-medium">Bucket</th><th scope="col" class="py-2 text-right font-medium">Time</th></tr></thead>
+      <tbody>{{range .Table}}<tr data-bucket="{{.Label}}" class="border-b border-slate-800/60"><th scope="row" class="py-1.5 pr-3 font-normal">{{.Label}}</th><td class="py-1.5 text-right tabular-nums">{{.Value}}</td></tr>{{end}}</tbody>
+    </table>
+  </details>
+</section>
+{{end}}
+
+{{/* the rating distribution: rows 0-10 plus unrated, each with a small SVG bar
+     whose width is an attribute */}}
+{{define "stats_ratings"}}
+<section data-rating-distribution class="mb-5 rounded-lg border border-slate-800 bg-slate-900 p-4">
+  <h2 class="mb-3 text-sm font-medium text-slate-400">Rating distribution</h2>
+  <table class="w-full text-left text-sm">
+    <thead><tr class="border-b border-slate-800 text-slate-400"><th scope="col" class="w-16 py-2 pr-3 font-medium">Rating</th><th scope="col" class="py-2 pr-3"><span class="sr-only">Distribution</span></th><th scope="col" class="py-2 text-right font-medium">Entries</th></tr></thead>
+    <tbody>
+      {{range .Ratings}}
+      <tr data-score="{{if .Unrated}}unrated{{else}}{{.Score}}{{end}}" class="border-b border-slate-800/60">
+        <th scope="row" class="py-1.5 pr-3 font-normal">{{if .Unrated}}Unrated{{else}}{{.Score}}{{end}}</th>
+        <td class="py-1.5 pr-3">
+          <svg viewBox="0 0 100 6" preserveAspectRatio="none" aria-hidden="true" class="h-1.5 w-full">
+            <rect x="0" y="0" width="100" height="6" rx="3" fill="currentColor" fill-opacity="0.15" class="text-slate-500"/>
+            <rect x="0" y="0" width="{{.BarWidth}}" height="6" rx="3" fill="currentColor" fill-opacity="0.8" class="text-indigo-400"/>
+          </svg>
+        </td>
+        <td class="py-1.5 text-right tabular-nums">{{.Count}}</td>
+      </tr>
+      {{end}}
+    </tbody>
+  </table>
+</section>
+{{end}}
+
+{{/* the activity heatmap: 53 Monday-first week columns of seven days, month
+     and weekday labels, five intensities, a legend, a title per cell and a
+     visually hidden table of the active days */}}
+{{define "stats_heatmap"}}
+<section data-heatmap class="mb-5 rounded-lg border border-slate-800 bg-slate-900 p-4">
+  <h2 class="mb-1 text-sm font-medium text-slate-400">Activity</h2>
+  <p class="mb-3 text-xs text-slate-400">{{if .Since}}Tracked since {{.Since}}.{{else}}Activity starts with your next change.{{end}} One cell per UTC day of the last 12 months; imports and restores do not count.</p>
+  {{if .Empty}}<p class="mb-3 text-sm text-slate-400">No activity in the last 12 months.</p>{{end}}
+  <div class="overflow-x-auto">
+    <svg viewBox="0 0 {{.Width}} {{.Height}}" role="img" aria-labelledby="stats-heatmap-title stats-heatmap-desc" class="w-full text-indigo-400">
+      <title id="stats-heatmap-title">Activity by day</title>
+      <desc id="stats-heatmap-desc">One cell per day of the last 12 months, in weeks from Monday to Sunday; darker cells carry more activity events.</desc>
+      {{range .Months}}<text x="{{.X}}" y="10" font-size="9" fill="currentColor" class="text-slate-500">{{.Label}}</text>{{end}}
+      {{range .Weekdays}}<text x="0" y="{{.Y}}" font-size="9" fill="currentColor" class="text-slate-500">{{.Label}}</text>{{end}}
+      {{range .Weeks}}{{range .}}{{if .Date}}<rect x="{{.X}}" y="{{.Y}}" width="12" height="12" rx="2" fill="currentColor" class="{{if .Level}}text-indigo-400{{else}}text-slate-500{{end}}" fill-opacity="{{if eq .Level 0}}0.15{{else if eq .Level 1}}0.35{{else if eq .Level 2}}0.55{{else if eq .Level 3}}0.75{{else}}1{{end}}"><title>{{.Title}}</title></rect>{{end}}{{end}}{{end}}
+    </svg>
+  </div>
+  <p class="mt-2 flex items-center gap-1 text-[0.625rem] text-slate-500">
+    <span class="mr-1">Less</span>
+    <svg viewBox="0 0 12 12" aria-hidden="true" class="h-3 w-3"><rect width="12" height="12" rx="2" fill="currentColor" fill-opacity="0.15" class="text-slate-500"/></svg>
+    <svg viewBox="0 0 12 12" aria-hidden="true" class="h-3 w-3 text-indigo-400"><rect width="12" height="12" rx="2" fill="currentColor" fill-opacity="0.35"/></svg>
+    <svg viewBox="0 0 12 12" aria-hidden="true" class="h-3 w-3 text-indigo-400"><rect width="12" height="12" rx="2" fill="currentColor" fill-opacity="0.55"/></svg>
+    <svg viewBox="0 0 12 12" aria-hidden="true" class="h-3 w-3 text-indigo-400"><rect width="12" height="12" rx="2" fill="currentColor" fill-opacity="0.75"/></svg>
+    <svg viewBox="0 0 12 12" aria-hidden="true" class="h-3 w-3 text-indigo-400"><rect width="12" height="12" rx="2" fill="currentColor"/></svg>
+    <span class="ml-1">More</span>
+  </p>
+  <table class="sr-only">
+    <caption>Active days in the last 12 months</caption>
+    <thead><tr><th scope="col">Day</th><th scope="col">Activity events</th></tr></thead>
+    <tbody>{{range .Weeks}}{{range .}}{{if .Count}}<tr><th scope="row">{{.Date}}</th><td>{{.Count}}</td></tr>{{end}}{{end}}{{end}}</tbody>
+  </table>
+</section>
 {{end}}

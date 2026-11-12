@@ -3,6 +3,7 @@ package web
 import (
 	"context"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -560,4 +561,163 @@ func TestStatsNavRow(t *testing.T) {
 	if i := strings.LastIndex(nav, "<ul"); i < 0 || i > stats {
 		t.Fatalf("Statistics is not in the bottom list: %s", nav)
 	}
+}
+
+// statsSection returns the <section> that carries the data marker.
+func statsSection(t *testing.T, body, marker string) string {
+	t.Helper()
+	i := strings.Index(body, marker)
+	if i < 0 {
+		t.Fatalf("no %q in %s", marker, body)
+	}
+	start := strings.LastIndex(body[:i], "<section")
+	end := strings.Index(body[i:], "</section>")
+	if start < 0 || end < 0 {
+		t.Fatalf("%q is not a <section> in %s", marker, body)
+	}
+	return body[start : i+end+len("</section>")]
+}
+
+// distRow returns the distribution row of a score ("unrated" for the
+// unrated row).
+func distRow(t *testing.T, body, score string) string {
+	t.Helper()
+	i := strings.Index(body, `data-score="`+score+`"`)
+	if i < 0 {
+		t.Fatalf("no rating row %q in %s", score, body)
+	}
+	start := strings.LastIndex(body[:i], "<tr")
+	end := strings.Index(body[i:], "</tr>")
+	if start < 0 || end < 0 {
+		t.Fatalf("rating row %q is not a <tr> in %s", score, body)
+	}
+	return body[start : i+end+len("</tr>")]
+}
+
+// ratingCount returns the count cell of a distribution row.
+func ratingCount(t *testing.T, row string) string {
+	t.Helper()
+	i := strings.LastIndex(row, "<td")
+	if i < 0 {
+		t.Fatalf("rating row has no count cell: %s", row)
+	}
+	open := strings.Index(row[i:], ">")
+	close := strings.Index(row[i:], "</td>")
+	if open < 0 || close < 0 {
+		t.Fatalf("rating count cell is malformed: %s", row)
+	}
+	return strings.TrimSpace(row[i+open+1 : i+close])
+}
+
+// addActivity records n manual progress increases of an item on a day.
+func (e *env) addActivity(t *testing.T, itemID int64, at time.Time, n int) {
+	t.Helper()
+	for i := 0; i < n; i++ {
+		if _, err := e.d.Exec(`INSERT INTO entry_events(item_id, occurred_at, event_type, progress_key, old_num, new_num, origin)
+			VALUES (?,?,?,?,?,?,'manual')`,
+			itemID, at.UTC().Format("2006-01-02T15:04:05Z"), "progress", "progress", float64(i), float64(i+1)); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestStatsPageShowsTimeChart(t *testing.T) {
+	e := newStatsEnv(t)
+	a := animeMedia("1", "One")
+	a.Duration = ip(24)
+	e.addStatsAnime(t, a, listEntry{Status: library.Completed, Progress: 12, FinishedOn: day(2025, 12, 1)})
+
+	chart := statsSection(t, e.get("/stats?media=anime/anime").Body.String(), "data-chart")
+	mustContain(t, chart, "Peak 2025 (4h 48m)", "Total 4h 48m",
+		`<svg`, `viewBox="0 0 `, `fill="currentColor"`, "text-indigo-400",
+		`<title>`, `<desc`, "2025: 4h 48m",
+		`data-bucket="2025"`, "Show values")
+	mustNotContain(t, chart, `style=`)
+}
+
+// TestStatsPageHidesChartWithoutTime: the chart only exists for a scope with a
+// time metric and at least one bucket with time.
+func TestStatsPageHidesChartWithoutTime(t *testing.T) {
+	e := newStatsEnv(t)
+	e.addFixture(t, "book", "book", statsBookItem("b1", "Earthsea", 300),
+		library.Entry{Status: library.Completed, Progress: map[string]float64{"pages": 250}, FinishedOn: day(2025, 12, 2)})
+	book := e.get("/stats?media=book/book").Body.String()
+	mustContain(t, book, `data-stat="entries"`)
+	mustNotContain(t, book, "data-chart")
+
+	// the time metric exists, but no entry carries time: still no chart
+	e.addStatsAnime(t, animeMedia("1", "No duration"), listEntry{Status: library.Completed, Progress: 1, FinishedOn: day(2025, 12, 1)})
+	anime := e.get("/stats?media=anime/anime").Body.String()
+	mustContain(t, anime, `data-stat="time"`, "None of these entries have enough stored data")
+	mustNotContain(t, anime, "data-chart")
+}
+
+func TestStatsPageShowsRatingDistribution(t *testing.T) {
+	e := newStatsEnv(t)
+	for i, rating := range []*int{ip(8), ip(8), nil} {
+		e.addStatsAnime(t, animeMedia(strconv.Itoa(i+1), "Entry"), listEntry{
+			Status: library.Completed, Rating: rating, Progress: 1, FinishedOn: day(2025, 12, 1+i),
+		})
+	}
+	dist := statsSection(t, e.get("/stats?media=anime/anime").Body.String(), "data-rating-distribution")
+	if got := ratingCount(t, distRow(t, dist, "8")); got != "2" {
+		t.Errorf("score 8 count = %q, want 2", got)
+	}
+	if got := ratingCount(t, distRow(t, dist, "0")); got != "0" {
+		t.Errorf("score 0 count = %q, want 0", got)
+	}
+	if got := ratingCount(t, distRow(t, dist, "unrated")); got != "1" {
+		t.Errorf("unrated count = %q, want 1", got)
+	}
+	// rows 0-10 exist even without a rating
+	for i := 0; i <= 10; i++ {
+		distRow(t, dist, strconv.Itoa(i))
+	}
+	mustContain(t, distRow(t, dist, "8"), `width="100"`)
+}
+
+func TestStatsPageHeatmapShowsTrackedSince(t *testing.T) {
+	e := newStatsEnv(t)
+	id := e.addStatsAnime(t, animeMedia("1", "One"), listEntry{Status: library.Active, Progress: 1})
+	e.addActivity(t, id, time.Date(2025, 6, 15, 10, 0, 0, 0, time.UTC), 2)
+	e.addActivity(t, id, time.Date(2025, 12, 31, 23, 0, 0, 0, time.UTC), 1)
+
+	heat := statsSection(t, e.get("/stats").Body.String(), "data-heatmap")
+	mustContain(t, heat, "Tracked since 15 June 2025",
+		"2025-06-15: 2 activity events", "2025-12-31: 1 activity event",
+		`<th scope="row">2025-06-15</th><td>2</td>`,
+		"fill-opacity", `<svg`, "Less",
+		// the template draws cells of the builder's size
+		`width="`+strconv.Itoa(heatCell)+`" height="`+strconv.Itoa(heatCell)+`"`)
+	mustNotContain(t, heat, "starts with your next change", "No activity in the last 12 months", `style=`)
+}
+
+func TestStatsPageHeatmapEmptyState(t *testing.T) {
+	e := newStatsEnv(t)
+	e.addStatsAnime(t, animeMedia("1", "One"), listEntry{Status: library.Active, Progress: 1})
+	heat := statsSection(t, e.get("/stats").Body.String(), "data-heatmap")
+	mustContain(t, heat, "starts with your next change", "No activity in the last 12 months")
+	mustNotContain(t, heat, `<th scope="row">`)
+}
+
+// TestStatsPageHeatmapFollowsMediaFilter: only the media filter narrows the
+// heatmap; the period, status and genre filters do not.
+func TestStatsPageHeatmapFollowsMediaFilter(t *testing.T) {
+	e := newStatsEnv(t)
+	animeID := e.addStatsAnime(t, animeMedia("1", "One"), listEntry{Status: library.Active, Progress: 1})
+	bookID := e.addFixture(t, "book", "book", statsBookItem("b1", "Earthsea", 300),
+		library.Entry{Status: library.Active, Progress: map[string]float64{"pages": 10}})
+	e.addActivity(t, animeID, time.Date(2025, 6, 15, 10, 0, 0, 0, time.UTC), 2)
+	e.addActivity(t, bookID, time.Date(2025, 7, 1, 10, 0, 0, 0, time.UTC), 1)
+
+	// the filters match nothing, but the heatmap stays (media only)
+	anime := e.get("/stats?media=anime/anime&period=year&status=planned&genre=Missing").Body.String()
+	mustContain(t, anime, "No entries match these filters")
+	heat := statsSection(t, anime, "data-heatmap")
+	mustContain(t, heat, "2025-06-15: 2 activity events")
+	mustNotContain(t, heat, "2025-07-01: 1 activity event")
+
+	book := statsSection(t, e.get("/stats?media=book/book").Body.String(), "data-heatmap")
+	mustContain(t, book, "2025-07-01: 1 activity event")
+	mustNotContain(t, book, "2025-06-15: 2 activity events")
 }
