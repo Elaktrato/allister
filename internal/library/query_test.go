@@ -1081,3 +1081,75 @@ func TestListAndRowUseTheKindsTitleFallback(t *testing.T) {
 		}
 	}
 }
+
+func TestStatsRowsReturnsAllMatching(t *testing.T) {
+	l := newLib(t)
+	const n = 120
+	for i := 1; i <= n; i++ {
+		bookT(t, l, fmt.Sprint(i), fmt.Sprintf("Book %03d", i), nil, Entry{Status: Completed})
+	}
+	rows, err := l.StatsRows(bg, bookQ, "en")
+	if err != nil {
+		t.Fatalf("StatsRows: %v", err)
+	}
+	if len(rows) != n {
+		t.Fatalf("rows = %d, want %d", len(rows), n)
+	}
+	for i := 1; i < len(rows); i++ {
+		if rows[i-1].Item.ID >= rows[i].Item.ID {
+			t.Fatalf("rows not in item-id order at %d: %d then %d", i, rows[i-1].Item.ID, rows[i].Item.ID)
+		}
+	}
+	if rows[0].Title != "Book 001" || rows[0].Entry.Status != Completed {
+		t.Fatalf("first row = %+v", rows[0])
+	}
+}
+
+func TestStatsRowsAppliesFilters(t *testing.T) {
+	l := newLib(t)
+	bookT(t, l, "1", "Dune", map[string]plugin.FieldValue{"author": {Text: "Herbert"}}, Entry{Status: Completed})
+	bookT(t, l, "2", "Emma", map[string]plugin.FieldValue{"author": {Text: "Austen"}}, Entry{Status: Completed})
+	bookT(t, l, "3", "Hamlet", map[string]plugin.FieldValue{"author": {Text: "Shakespeare"}}, Entry{Status: Active})
+	completed := Completed
+	q := bookQ
+	q.Status = &completed
+	rows, err := l.StatsRows(bg, q, "en")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := titlesOf(Page{Rows: rows}); !slices.Equal(got, []string{"Dune", "Emma"}) {
+		t.Fatalf("status rows = %q", got)
+	}
+	q = bookQ
+	q.Filters = []Filter{{Key: "author", Op: OpContains, Values: []string{"herb"}}}
+	rows, err = l.StatsRows(bg, q, "en")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := titlesOf(Page{Rows: rows}); !slices.Equal(got, []string{"Dune"}) {
+		t.Fatalf("author rows = %q", got)
+	}
+	tvTagged(t, l, "t1", "Alpha", Active, []string{"Drama"})
+	tvTagged(t, l, "t2", "Beta", Active, []string{"Comedy"})
+	rows, err = l.StatsRows(bg, Query{PluginID: "tv", Kind: "show", Genres: []string{"drama"}}, "en")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := titlesOf(Page{Rows: rows}); !slices.Equal(got, []string{"Alpha"}) {
+		t.Fatalf("genre rows = %q", got)
+	}
+}
+
+func TestStatsRowsRefusesOverLimit(t *testing.T) {
+	l := newLib(t)
+	for i := 1; i <= 3; i++ {
+		bookT(t, l, fmt.Sprint(i), fmt.Sprintf("Book %d", i), nil, Entry{Status: Planned})
+	}
+	if _, err := l.statsRows(bg, bookQ, "en", 2); !errors.Is(err, ErrTooManyRows) {
+		t.Fatalf("err = %v, want ErrTooManyRows", err)
+	}
+	rows, err := l.statsRows(bg, bookQ, "en", 3)
+	if err != nil || len(rows) != 3 {
+		t.Fatalf("at the limit: %d rows, %v", len(rows), err)
+	}
+}
