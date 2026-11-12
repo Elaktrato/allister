@@ -63,6 +63,8 @@ func (p *mangaPlugin) Importer(id string) plugin.Importer {
 		return accountImporter{c: p.source.c}
 	case MALImp:
 		return malXMLImporter{}
+	case ImporterYamtrack:
+		return yamtrackMangaImporter{c: p.source.c}
 	}
 	return nil
 }
