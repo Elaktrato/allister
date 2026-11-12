@@ -12,7 +12,7 @@ It is a single Go binary with a SQLite database, server-rendered pages, htmx and
 - Your list: status, rating, progress, dates and comment; 100 per page with status tabs, +1, and search and filters in the URL. A **Statistics** page (`/stats`) totals time, units and ratings by finish date, filterable by period, status, genre, tag and field, with an activity heatmap of the last 365 days; **Update from source** on an item fills in missing data such as the anime episode duration.
 - Edit details of any saved entry (titles, fields, genres, tags, cover); AniList never overwrites your edits.
 - Character and voice-actor pages, manual entries with cover upload, and "Match to AniList".
-- Yamtrack, Goodreads and TV imports, the Steam account import, AniList light-novel import, JSON export, and a universal backup with restore.
+- Yamtrack, Yamtrack novel, Goodreads and TV imports, the Steam account import, AniList light-novel import, JSON export, and a universal backup with restore.
 - Plugins you can switch off and on in Settings without losing data; per-plugin title language and list columns; covers and photos stored locally.
 - Appearance: colour presets (light, dark, high contrast or following your system) or every colour by hand, system, bundled or your own fonts, and a text size.
 

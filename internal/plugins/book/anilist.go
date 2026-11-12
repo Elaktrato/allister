@@ -12,13 +12,14 @@ import (
 	"github.com/allister/allister/internal/plugins/anilist"
 )
 
-// novelClient is the part of the shared AniList client the series source and
-// its account importer use.
+// novelClient is the part of the shared AniList client the series source, its
+// account importer and the Yamtrack novel importer use.
 type novelClient interface {
 	SearchFormat(ctx context.Context, typ, format, q string) ([]anilist.SearchResult, error)
 	Media(ctx context.Context, typ, id string) (anilist.Media, error)
 	MediaByMALID(ctx context.Context, typ, malID string) (anilist.Media, error)
 	MediaList(ctx context.Context, typ, userName string) ([]anilist.AccountEntry, error)
+	MediaFormatsByMALIDs(ctx context.Context, typ string, malIDs []int) (map[int]string, error)
 }
 
 type anilistSource struct{ c novelClient }

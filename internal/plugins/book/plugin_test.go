@@ -17,9 +17,14 @@ func TestNewProvidesEveryDeclaredSourceImporterAndExporter(t *testing.T) {
 			t.Errorf("source %q missing", id)
 		}
 	}
-	for _, id := range []string{ImporterGoodreads, ImporterAniList} {
+	for _, id := range []string{ImporterGoodreads, ImporterAniList, ImporterYamtrack} {
 		if p.Importer(id) == nil {
 			t.Errorf("importer %q missing", id)
+		}
+	}
+	for _, info := range p.Manifest().Importers {
+		if p.Importer(info.ID) == nil {
+			t.Errorf("declared importer %q is not provided", info.ID)
 		}
 	}
 	if p.Exporter(ExporterJSON) == nil || p.Exporter("nope") != nil || p.Source("nope") != nil || p.Importer("nope") != nil {

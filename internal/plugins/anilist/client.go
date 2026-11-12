@@ -90,6 +90,15 @@ const mediaListQuery = `query ($name: String, $type: MediaType) {
   }
 }`
 
+const malFormatsQuery = `query ($ids: [Int], $type: MediaType) {
+  Page(page: 1, perPage: 50) {
+    media(idMal_in: $ids, type: $type) { idMal format }
+  }
+}`
+
+// malFormatsChunk is the number of MAL ids sent per request (the Page size).
+const malFormatsChunk = 50
+
 const scheduleQuery = `query ($id: Int) {
   Media(id: $id, type: ANIME) {
     airingSchedule { nodes { episode airingAt } }
@@ -449,6 +458,45 @@ func (c *Client) MediaList(ctx context.Context, typ, userName string) ([]Account
 		res = append(res, l.Entries...)
 	}
 	return res, nil
+}
+
+// MediaFormatsByMALIDs returns the AniList format of each known MAL id,
+// keyed by MAL id. Unknown ids are absent. Ids are deduplicated, non-positive
+// ids are skipped, and the lookup takes one request per 50 ids.
+func (c *Client) MediaFormatsByMALIDs(ctx context.Context, typ string, malIDs []int) (map[int]string, error) {
+	out := map[int]string{}
+	seen := map[int]bool{}
+	var ids []int
+	for _, id := range malIDs {
+		if id <= 0 || seen[id] {
+			continue
+		}
+		seen[id] = true
+		ids = append(ids, id)
+	}
+	for start := 0; start < len(ids); start += malFormatsChunk {
+		end := start + malFormatsChunk
+		if end > len(ids) {
+			end = len(ids)
+		}
+		var data struct {
+			Page struct {
+				Media []struct {
+					IDMal  *int   `json:"idMal"`
+					Format string `json:"format"`
+				} `json:"media"`
+			} `json:"Page"`
+		}
+		if err := c.do(ctx, malFormatsQuery, map[string]any{"ids": ids[start:end], "type": typ}, &data); err != nil {
+			return nil, err
+		}
+		for _, m := range data.Page.Media {
+			if m.IDMal != nil {
+				out[*m.IDMal] = m.Format
+			}
+		}
+	}
+	return out, nil
 }
 
 // Media implements Provider.

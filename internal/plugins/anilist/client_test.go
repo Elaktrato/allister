@@ -589,6 +589,121 @@ func TestQueriesRequestDuration(t *testing.T) {
 	}
 }
 
+func TestMediaFormatsByMALIDs(t *testing.T) {
+	var body string
+	c := serve(t, 200, []byte(`{"data":{"Page":{"media":[{"idMal":1,"format":"NOVEL"},{"idMal":2,"format":"MANGA"},{"idMal":null,"format":"MANGA"}]}}}`), &body)
+	got, err := c.MediaFormatsByMALIDs(context.Background(), TypeManga, []int{1, 2, 3})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 || got[1] != "NOVEL" || got[2] != "MANGA" {
+		t.Fatalf("formats = %v", got)
+	}
+	if _, ok := got[3]; ok {
+		t.Errorf("unknown id 3 must be absent: %v", got)
+	}
+	if !strings.Contains(body, "media(idMal_in: $ids, type: $type)") || !strings.Contains(body, "idMal format") {
+		t.Errorf("query = %s", body)
+	}
+	var req struct {
+		Variables struct {
+			IDs  []int  `json:"ids"`
+			Type string `json:"type"`
+		} `json:"variables"`
+	}
+	if err := json.Unmarshal([]byte(body), &req); err != nil {
+		t.Fatal(err)
+	}
+	if len(req.Variables.IDs) != 3 || req.Variables.IDs[0] != 1 || req.Variables.IDs[2] != 3 || req.Variables.Type != TypeManga {
+		t.Errorf("variables = %+v", req.Variables)
+	}
+}
+
+func TestMediaFormatsByMALIDsChunks(t *testing.T) {
+	var sizes []int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Variables struct {
+				IDs []int `json:"ids"`
+			} `json:"variables"`
+		}
+		b, _ := io.ReadAll(r.Body)
+		if err := json.Unmarshal(b, &req); err != nil {
+			t.Errorf("request: %v", err)
+		}
+		sizes = append(sizes, len(req.Variables.IDs))
+		w.Write([]byte(`{"data":{"Page":{"media":[]}}}`))
+	}))
+	defer srv.Close()
+	ids := make([]int, 51)
+	for i := range ids {
+		ids[i] = i + 1
+	}
+	if _, err := New(srv.URL, srv.Client()).MediaFormatsByMALIDs(context.Background(), TypeManga, ids); err != nil {
+		t.Fatal(err)
+	}
+	if len(sizes) != 2 || sizes[0] != 50 || sizes[1] != 1 {
+		t.Fatalf("request sizes = %v, want [50 1]", sizes)
+	}
+}
+
+func TestMediaFormatsByMALIDsDedupesAndSkipsNonPositive(t *testing.T) {
+	var body string
+	c := serve(t, 200, []byte(`{"data":{"Page":{"media":[{"idMal":7,"format":"NOVEL"}]}}}`), &body)
+	got, err := c.MediaFormatsByMALIDs(context.Background(), TypeManga, []int{7, 7, 0, -3})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[7] != "NOVEL" {
+		t.Fatalf("formats = %v", got)
+	}
+	var req struct {
+		Variables struct {
+			IDs []int `json:"ids"`
+		} `json:"variables"`
+	}
+	if err := json.Unmarshal([]byte(body), &req); err != nil {
+		t.Fatal(err)
+	}
+	if len(req.Variables.IDs) != 1 || req.Variables.IDs[0] != 7 {
+		t.Errorf("ids = %v, want [7]", req.Variables.IDs)
+	}
+}
+
+func TestMediaFormatsByMALIDsEmpty(t *testing.T) {
+	var n int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { atomic.AddInt32(&n, 1) }))
+	defer srv.Close()
+	got, err := New(srv.URL, srv.Client()).MediaFormatsByMALIDs(context.Background(), TypeManga, nil)
+	if err != nil || got == nil || len(got) != 0 {
+		t.Fatalf("got=%v err=%v, want empty non-nil map", got, err)
+	}
+	if n != 0 {
+		t.Fatalf("made %d requests", n)
+	}
+}
+
+func TestMediaFormatsByMALIDsErrors(t *testing.T) {
+	ids := []int{1}
+	for _, c := range []struct {
+		name   string
+		status int
+		body   string
+		want   error
+	}{
+		{"rate limited", 429, `{"errors":[{"message":"Too Many Requests.","status":429}]}`, ErrRateLimited},
+		{"server error", 500, `oops`, ErrUnavailable},
+		{"graphql error", 200, `{"errors":[{"message":"Invalid query","status":400}]}`, ErrBadResponse},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			_, err := serve(t, c.status, []byte(c.body), nil).MediaFormatsByMALIDs(context.Background(), TypeManga, ids)
+			if !errors.Is(err, c.want) {
+				t.Fatalf("err = %v, want %v", err, c.want)
+			}
+		})
+	}
+}
+
 // TestSearchResultMapsDuration: duration decodes into SearchResult.Duration,
 // and an unknown duration stays nil.
 func TestSearchResultMapsDuration(t *testing.T) {

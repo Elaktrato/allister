@@ -18,6 +18,13 @@ type fakeNovelClient struct {
 	err     error
 	format  string
 	queries []string
+
+	// the batch format lookup
+	formats     map[int]string
+	formatErr   error
+	formatType  string
+	formatIDs   []int
+	formatCalls int
 }
 
 func (f *fakeNovelClient) SearchFormat(_ context.Context, _, format, q string) ([]anilist.SearchResult, error) {
@@ -33,6 +40,15 @@ func (f *fakeNovelClient) MediaByMALID(context.Context, string, string) (anilist
 }
 func (f *fakeNovelClient) MediaList(context.Context, string, string) ([]anilist.AccountEntry, error) {
 	return f.account, f.err
+}
+func (f *fakeNovelClient) MediaFormatsByMALIDs(_ context.Context, typ string, malIDs []int) (map[int]string, error) {
+	f.formatCalls++
+	f.formatType = typ
+	f.formatIDs = append(f.formatIDs, malIDs...)
+	if f.formatErr != nil {
+		return nil, f.formatErr
+	}
+	return f.formats, nil
 }
 
 func novelMedia() anilist.Media {

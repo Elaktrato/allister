@@ -223,7 +223,7 @@ Commit: `docs: yamtrack novel import`
 
 Upload `yamtrack_2026-11-09 15_33_37.419384+01_00.csv` to `POST /settings/plugins/book/import/yamtrack-novel` with `mode=skip`. Verify:
 - the upload succeeds (batch AniList lookup);
-- the report shows **11 imported, 528 ignored** (or 10 imported if an existing Series entry is skipped);
+- the report shows **11 imported; all other rows ignored (2,827 for this export: 528 non-novel manga and 2,299 other media rows)** (or 10 imported if an existing Series entry is skipped);
 - `/book/series` shows the novels with chapter progress, statuses, chapters/volumes, author and cover from AniList;
 - no non-novel manga rows became manual Series entries.
 - The CSV stays untracked; do not commit it.
