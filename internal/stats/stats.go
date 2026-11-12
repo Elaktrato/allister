@@ -482,9 +482,10 @@ func termLabel(def plugin.TermDef, fallback string) string {
 }
 
 // termGroup accumulates one value set per row. Values are compared exactly
-// here; mergedTerms compares across kinds case-insensitively.
+// here and units stay comparable because the group belongs to one kind;
+// mergedTerms compares across kinds case-insensitively and omits units.
 func termGroup(label string, facts []rowFacts, values func(rowFacts) []string) DimensionGroup {
-	acc := newAccumulator(false)
+	acc := newAccumulator(false, true)
 	for _, f := range facts {
 		acc.add(f, values(f))
 	}
@@ -518,14 +519,16 @@ func fieldValues(row library.Row, def plugin.FieldDef) []string {
 }
 
 // accumulator collects dimensions. When fold is set, values merge
-// case-insensitively and the first spelling wins.
+// case-insensitively and the first spelling wins. sumUnits is false for the
+// all-media terms, where units of different kinds are not comparable.
 type accumulator struct {
-	fold bool
-	seen map[string]*Dimension
+	fold     bool
+	sumUnits bool
+	seen     map[string]*Dimension
 }
 
-func newAccumulator(fold bool) *accumulator {
-	return &accumulator{fold: fold, seen: map[string]*Dimension{}}
+func newAccumulator(fold, sumUnits bool) *accumulator {
+	return &accumulator{fold: fold, sumUnits: sumUnits, seen: map[string]*Dimension{}}
 }
 
 func (a *accumulator) key(value string) string {
@@ -560,7 +563,7 @@ func (a *accumulator) add(f rowFacts, values []string) {
 		if f.hasTime {
 			d.TimeSeconds += f.seconds
 		}
-		if f.hasUnits {
+		if f.hasUnits && a.sumUnits {
 			d.Units += f.units
 		}
 	}
@@ -586,7 +589,7 @@ func (a *accumulator) values() []Dimension {
 // case-insensitively across kinds; the first display spelling wins. The groups
 // only exist when at least one selected kind enables them.
 func mergedTerms(inputs []Input, facts [][]rowFacts) (genres, tags []Dimension) {
-	gacc, tacc := newAccumulator(true), newAccumulator(true)
+	gacc, tacc := newAccumulator(true, false), newAccumulator(true, false)
 	anyGenres, anyTags := false, false
 	for i, in := range inputs {
 		anyGenres = anyGenres || in.Kind.Genres.Enabled

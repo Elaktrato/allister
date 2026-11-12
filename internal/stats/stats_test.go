@@ -828,6 +828,75 @@ func TestAllMediaMergeAndTotals(t *testing.T) {
 	}
 }
 
+// unitTimeKind is a kind with one units track and one duration track, so a
+// merged-term test can check that time adds up while units do not.
+func unitTimeKind(key, label, unitKey, totalField string) plugin.KindDef {
+	return plugin.KindDef{
+		Key: key, Label: label, LabelPlural: label + "s",
+		Fields:   []plugin.FieldDef{{Key: totalField, Label: totalField, Type: plugin.FieldNumber}},
+		Genres:   plugin.TermDef{Enabled: true, Label: "Genres", Filterable: true},
+		Tags:     plugin.TermDef{Enabled: true, Label: "Tags", Filterable: true},
+		Statuses: plugin.StatusLabels{Planned: "Planned", Active: "Active", Paused: "Paused", Completed: "Completed", Dropped: "Dropped"},
+		Progress: plugin.ProgressSpec{
+			Eligible: []plugin.ProgressDef{
+				{Key: unitKey, Type: plugin.Count, Label: label, TotalField: totalField},
+				{Key: "time", Type: plugin.Duration, Label: "Time"},
+			},
+			Defaults:     []string{unitKey, "time"},
+			Combinations: [][]string{{unitKey, "time"}},
+			PrimaryKey:   unitKey,
+		},
+		Stats: &plugin.StatsDef{
+			Time:  &plugin.StatsTimeDef{Label: "Time", DurationKey: "time"},
+			Units: &plugin.StatsUnitsDef{Key: unitKey, LabelPlural: label + "s"},
+		},
+	}
+}
+
+func TestMergedTermsOmitUnits(t *testing.T) {
+	book := unitTimeKind("book", "book", "pages", "pages")
+	manga := unitTimeKind("manga", "manga", "chapter", "chapters")
+	bookRow := withTags(withGenres(
+		withRating(withProgress(withKeys(mkRow(1, library.Completed, day(2024, 1, 1)), "pages", "time"), map[string]float64{"pages": 120, "time": 3600}), 8),
+		"Fantasy"), "Shared")
+	mangaRow := withTags(withGenres(
+		withProgress(withKeys(mkRow(2, library.Completed, day(2024, 2, 1)), "chapter", "time"), map[string]float64{"chapter": 40, "time": 1800}),
+		"fantasy"), "shared")
+
+	rep := stats.Build([]stats.Input{
+		{PluginID: "p1", Kind: book, Rows: []library.Row{bookRow}},
+		{PluginID: "p2", Kind: manga, Rows: []library.Row{mangaRow}},
+	}, stats.Options{})
+
+	// A merged term adds entries and time across kinds but never units.
+	if len(rep.Genres) != 1 {
+		t.Fatalf("genres = %+v, want one merged value", rep.Genres)
+	}
+	g := rep.Genres[0]
+	if g.Value != "Fantasy" || g.Entries != 2 {
+		t.Fatalf("merged genre = %+v, want Fantasy with 2 entries", g)
+	}
+	approx(t, "merged genre time", g.TimeSeconds, 5400)
+	if g.Units != 0 {
+		t.Fatalf("merged genre units = %v, want 0 (pages and chapters are not comparable)", g.Units)
+	}
+	if len(rep.Tags) != 1 {
+		t.Fatalf("tags = %+v, want one merged value", rep.Tags)
+	}
+	tag := rep.Tags[0]
+	if tag.Value != "Shared" || tag.Entries != 2 {
+		t.Fatalf("merged tag = %+v, want Shared with 2 entries", tag)
+	}
+	approx(t, "merged tag time", tag.TimeSeconds, 5400)
+	if tag.Units != 0 {
+		t.Fatalf("merged tag units = %v, want 0", tag.Units)
+	}
+
+	// The per-kind dimensions keep their own units.
+	approx(t, "book genre units", rep.Kinds[0].Dimensions[0].Values[0].Units, 120)
+	approx(t, "manga genre units", rep.Kinds[1].Dimensions[0].Values[0].Units, 40)
+}
+
 func TestKindWithoutStats(t *testing.T) {
 	row := withGenres(withRating(withFields(mkRow(1, library.Completed, day(2024, 4, 1)), map[string]plugin.FieldValue{"author": {Text: "Someone"}}), 9), "Drama")
 	rep := stats.Build([]stats.Input{{PluginID: "p", Kind: seriesKind(), Rows: []library.Row{row}}}, stats.Options{})
