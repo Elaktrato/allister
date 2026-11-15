@@ -479,3 +479,27 @@ func TestSeriesInfoShowsSetExpectedParts(t *testing.T) {
 	}
 	mustContain(t, fe.get(seriesURL("book", ser.UID)).Body.String(), "Expected parts")
 }
+
+// TestSeriesStaleLinkDoesNotBlockSave: the linked entry left the list after it
+// was linked; the dialog marks it and saving other values still works.
+func TestSeriesStaleLinkDoesNotBlockSave(t *testing.T) {
+	fe := newFixtureEnv(t, withSeriesData)
+	ser, _ := fe.bookSeries(t, "Saga")
+	c := fe.comic(t, "c1", "Gone Comic")
+	k := bookKind(t, fe)
+	if err := fe.lib.UpdateSeriesDetails(bg, ser.ID, k, library.SeriesDetails{Title: "Saga", LinkedItemID: c}); err != nil {
+		t.Fatal(err)
+	}
+	if err := fe.lib.RemoveEntry(bg, c); err != nil {
+		t.Fatal(err)
+	}
+	base := seriesURL("book", ser.UID)
+	mustContain(t, fe.get(base+"/edit").Body.String(), "Gone Comic (current — not in your list)")
+	rec := fe.do("POST", base+"/edit", url.Values{"title": {"Saga"}, "description": {"Edited"}, "linked": {idStr(c)}}, false)
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("save with the stale link: %d %s", rec.Code, alertRe.FindString(rec.Body.String()))
+	}
+	if got := mustSeriesWeb(t, fe, ser.UID); got.Description != "Edited" || got.LinkedItemID != c {
+		t.Fatalf("stored %+v", got)
+	}
+}
