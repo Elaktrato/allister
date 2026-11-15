@@ -327,10 +327,12 @@ func (s *server) postSeriesEdit(w http.ResponseWriter, r *http.Request, m plugin
 			m7 = "Cover upload is not available on this server."
 		}
 	case coverURL != "":
-		if !strings.HasPrefix(coverURL, "https://") {
+		switch {
+		case !strings.HasPrefix(coverURL, "https://"):
 			m7 = "Cover URL must be an https URL like https://example.com/cover.jpg."
+		case s.deps.CoversDir == "" && coverURL != ser.CoverPath:
+			m7 = "Cover download is not available on this server."
 		}
-		det.CoverPath = coverURL
 	case d.RemoveCover, urlPosted && !isLocalCover(ser.CoverPath):
 		det.CoverPath = ""
 	}
@@ -351,6 +353,17 @@ func (s *server) postSeriesEdit(w http.ResponseWriter, r *http.Request, m plugin
 			return
 		}
 		stored, det.CoverPath = name, name
+	} else if coverURL != "" && s.deps.CoversDir != "" {
+		// the image is downloaded into the cover store, never hot-linked;
+		// an older stored URL left unchanged stays when it cannot be fetched
+		name, err := covers.Download(ctx, s.deps.HTTP, s.deps.CoversDir, coverURL)
+		switch {
+		case err == nil:
+			stored, det.CoverPath = name, name
+		case coverURL != ser.CoverPath:
+			s.seriesFail(w, r, m, k, ser, d, msgCoverDownload)
+			return
+		}
 	}
 	switch err := s.deps.Library.UpdateSeriesDetails(ctx, ser.ID, k, det); {
 	case errors.Is(err, library.ErrInvalid):
@@ -371,6 +384,8 @@ func (s *server) postSeriesEdit(w http.ResponseWriter, r *http.Request, m plugin
 	}
 	s.done(w, r, seriesURL(m.ID, ser.UID))
 }
+
+const msgCoverDownload = "Could not download the cover from that URL: it must give a JPEG, PNG, WebP, GIF or AVIF image smaller than 2 MiB."
 
 // seriesFail re-renders the dialog with the message (422).
 func (s *server) seriesFail(w http.ResponseWriter, r *http.Request, m plugin.Manifest, k plugin.KindDef, ser *library.Series, d seriesDialog, msg string) {
