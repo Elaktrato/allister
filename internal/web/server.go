@@ -49,6 +49,9 @@ type Deps struct {
 	ScheduleImport func(pluginID, importerID string) (kind string, payload any)
 	// CoversDir is DATA_DIR/covers; when empty /covers/ is not served.
 	CoversDir string
+	// HTTP downloads the cover URLs entered in forms into CoversDir; nil
+	// gets covers.Download's default client.
+	HTTP *http.Client
 	// DataDir is DATA_DIR: a backup restore spools its upload to
 	// DATA_DIR/tmp. When empty the restore form is not offered.
 	DataDir string
