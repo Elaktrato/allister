@@ -41,7 +41,9 @@ func Entries(rows []Row, kind, want string) plugin.ParseResult {
 			Kind: kind, Title: title, ExternalIDs: map[string]string{"imdb": row.Const},
 			Status: plugin.Planned,
 		}
-		if row.Rating != nil {
+		e.Notes = append(e.Notes, row.Notes...)
+		if row.Rated {
+			// A rated row was watched even when its score is unusable.
 			e.Status, e.Rating, e.FinishedOn = plugin.Completed, row.Rating, row.RatedOn
 		}
 		if row.Year > 0 {

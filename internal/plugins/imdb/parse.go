@@ -32,6 +32,7 @@ const (
 const (
 	maxRows      = 100000
 	maxTitleRune = 300
+	maxRawRunes  = 40
 )
 
 var constRe = regexp.MustCompile(`^tt[0-9]{7,8}$`)
@@ -48,6 +49,8 @@ type Row struct {
 	Rating  *int
 	RatedOn *time.Time
 	Invalid string
+	Rated   bool     // the Your Rating cell is not empty
+	Notes   []string // row problems that keep the row
 }
 
 // NormaliseType lower-cases a Title Type and removes spaces and hyphens.
@@ -128,11 +131,20 @@ func Parse(r io.Reader) ([]Row, error) {
 		if y, err := strconv.Atoi(get("year")); err == nil && y >= 1900 && y <= 2100 {
 			row.Year = y
 		}
-		if n, err := strconv.Atoi(get("your rating")); err == nil && n >= 1 && n <= 10 {
-			row.Rating = &n
+		if raw := get("your rating"); raw != "" {
+			row.Rated = true
+			if n, err := strconv.Atoi(raw); err == nil && n >= 1 && n <= 10 {
+				row.Rating = &n
+			} else {
+				row.Notes = append(row.Notes, fmt.Sprintf("IMDb rating %q is not 1–10; not imported", plugin.SingleLine(raw, maxRawRunes)))
+			}
 		}
-		if d, err := time.Parse("2006-01-02", get("date rated")); err == nil {
-			row.RatedOn = &d
+		if raw := get("date rated"); raw != "" {
+			if d, err := time.Parse("2006-01-02", raw); err == nil {
+				row.RatedOn = &d
+			} else {
+				row.Notes = append(row.Notes, fmt.Sprintf("IMDb date %q not understood", plugin.SingleLine(raw, maxRawRunes)))
+			}
 		}
 		rows = append(rows, row)
 	}
