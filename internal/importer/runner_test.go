@@ -1122,8 +1122,10 @@ type titleSource struct {
 	mu       sync.Mutex
 	searchFn func(q string, n int) ([]plugin.ItemSummary, error)
 	details  map[string]plugin.ItemData
+	lookupFn func(idType, value string) (plugin.ItemData, error)
 	searched []string
 	detailed []string
+	looked   []string
 }
 
 func (s *titleSource) Search(_ context.Context, _, q string) ([]plugin.ItemSummary, error) {
@@ -1145,8 +1147,14 @@ func (s *titleSource) Details(_ context.Context, _, id string) (plugin.ItemData,
 	return d, nil
 }
 
-func (s *titleSource) Lookup(context.Context, string, string, string) (plugin.ItemData, error) {
-	return plugin.ItemData{}, errors.New("title importer rows must not be looked up")
+func (s *titleSource) Lookup(_ context.Context, _, idType, value string) (plugin.ItemData, error) {
+	s.mu.Lock()
+	s.looked = append(s.looked, value)
+	s.mu.Unlock()
+	if s.lookupFn == nil {
+		return plugin.ItemData{}, errors.New("title importer rows must not be looked up")
+	}
+	return s.lookupFn(idType, value)
 }
 
 // titleNote is the UnmatchedNote of the title fixture importer.
@@ -1169,14 +1177,16 @@ func newTitleEnvWith(t *testing.T, searchOnly bool) (*genEnv, *titleSource, *plu
 	bk := plugintest.BookPlugin()
 	bk.M.Kinds[0].Fields = append(bk.M.Kinds[0].Fields, plugin.FieldDef{Key: "year", Label: "Year", Type: plugin.FieldNumber})
 	bk.M.Importers = append(bk.M.Importers, plugin.ImporterInfo{ID: "shelf-csv", Name: "Shelf CSV", Accept: []string{".csv"},
-		ExternalIDType: "shelf", ResolveVia: "books", ResolveByTitle: true, FallbackTitleLang: "en", UnmatchedNote: titleNote})
+		ExternalIDType: "shelf", ResolveVia: "books", ResolveByTitle: true, FallbackTitleLang: "en", UnmatchedNote: titleNote},
+		plugin.ImporterInfo{ID: "isbn-titles", Name: "ISBN or title CSV", Accept: []string{".csv"},
+			ExternalIDType: "isbn", ResolveVia: "books", ResolveByTitle: true, FallbackTitleLang: "en"})
 	src := &titleSource{details: map[string]plugin.ItemData{}}
 	imp := &plugintest.FakeImporter{}
 	bk.Sources = map[string]plugin.Source{"books": src}
-	bk.Importers = map[string]plugin.Importer{"books-csv": &plugintest.FakeImporter{}, "shelf-csv": imp}
+	bk.Importers = map[string]plugin.Importer{"books-csv": &plugintest.FakeImporter{}, "shelf-csv": imp, "isbn-titles": imp}
 	if searchOnly {
 		bk.M.Sources[0].SupportsLookup, bk.M.Sources[0].ExternalIDTypes = false, nil
-		bk.M.Importers = bk.M.Importers[1:]
+		bk.M.Importers = bk.M.Importers[1:2]
 	}
 	e.reg = plugin.NewRegistry(e.enabled)
 	if err := e.reg.Register(bk); err != nil {
@@ -1418,5 +1428,73 @@ func TestTitleResolveSearchOnlySource(t *testing.T) {
 	}
 	if r := e.report(); r.State != "done" || r.Imported != 1 {
 		t.Fatalf("report: %+v", r)
+	}
+}
+
+// A row whose title the runner made up from its id ("shelf #...") is never
+// searched by that title.
+func TestTitleResolvePlaceholderTitleNotSearched(t *testing.T) {
+	e, src, imp := newTitleEnv(t)
+	src.searchFn = func(string, int) ([]plugin.ItemSummary, error) {
+		t.Error("searched a generated title")
+		return nil, nil
+	}
+	imp.Result = plugin.ParseResult{Entries: []plugin.ParsedEntry{shelfEntry("/film/x/", "", 1995)}}
+	id := e.submit("book", "shelf-csv")
+	if err := e.run("book", id); err != nil {
+		t.Fatal(err)
+	}
+	if r := e.report(); r.State != "done" || r.Unmatched != 1 {
+		t.Fatalf("report: %+v", r)
+	}
+	if len(src.searched) != 0 {
+		t.Errorf("searched %v", src.searched)
+	}
+	if msg := e.message(id, 1); !strings.Contains(msg, "no title") {
+		t.Errorf("message = %q", msg)
+	}
+}
+
+// A candidate from another source than ResolveVia never matches.
+func TestTitleResolveForeignSourceCandidateRejected(t *testing.T) {
+	e, src, imp := newTitleEnv(t)
+	foreign := titled("w1", "Heat", 1995)
+	foreign.Source = "elsewhere"
+	src.searchFn = func(string, int) ([]plugin.ItemSummary, error) { return []plugin.ItemSummary{foreign}, nil }
+	src.details["w1"] = titledData("w1", "Heat", 1995)
+	imp.Result = plugin.ParseResult{Entries: []plugin.ParsedEntry{shelfEntry("/film/heat/", "Heat", 1995)}}
+	id := e.submit("book", "shelf-csv")
+	if err := e.run("book", id); err != nil {
+		t.Fatal(err)
+	}
+	if r := e.report(); r.Unmatched != 1 || r.Imported != 0 {
+		t.Fatalf("report: %+v", r)
+	}
+	if len(src.detailed) != 0 {
+		t.Errorf("details fetched for %v", src.detailed)
+	}
+}
+
+// A title importer's row with an id the source can look up takes the id
+// path: Lookup, never Search.
+func TestTitleImporterLookupableIDUsesLookup(t *testing.T) {
+	e, src, imp := newTitleEnv(t)
+	src.searchFn = func(string, int) ([]plugin.ItemSummary, error) {
+		t.Error("searched a row with a lookup-able id")
+		return nil, nil
+	}
+	src.lookupFn = func(_, v string) (plugin.ItemData, error) { return book(v, 300), nil }
+	imp.Result = plugin.ParseResult{Entries: []plugin.ParsedEntry{
+		{Kind: "book", Title: "Heat", ExternalIDs: map[string]string{"isbn": "97"}, Status: plugin.Completed,
+			Fields: map[string]plugin.FieldValue{"year": {Num: pf(1995)}}}}}
+	id := e.submit("book", "isbn-titles")
+	if err := e.run("book", id); err != nil {
+		t.Fatal(err)
+	}
+	if r := e.report(); r.State != "done" || r.Imported != 1 {
+		t.Fatalf("report: %+v", r)
+	}
+	if len(src.looked) != 1 || src.looked[0] != "97" || len(src.searched) != 0 {
+		t.Errorf("looked %v searched %v", src.looked, src.searched)
 	}
 }

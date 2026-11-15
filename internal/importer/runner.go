@@ -608,6 +608,8 @@ type rowCtx struct {
 	kind     plugin.KindDef
 	idType   string
 	value    string
+	// generatedTitle: the title is Submit's "<id label> #<id>", not the file's
+	generatedTitle bool
 }
 
 func (rc *rowCtx) pluginID() string { return rc.ref.manifest.ID }
@@ -616,9 +618,11 @@ func (rc *rowCtx) pluginID() string { return rc.ref.manifest.ID }
 // context cancellation, the source staying unavailable, or a database failure.
 func (r *Runner) process(ctx context.Context, ref *importerRef, importID int64, mode string, pr pendingRow) error {
 	rc := &rowCtx{ref: ref, importID: importID, seq: pr.seq, idType: ref.info.ExternalIDType, mode: normalizeMode(mode)}
-	if err := json.Unmarshal([]byte(pr.data), &rc.entry); err != nil {
+	var se storedEntry
+	if err := json.Unmarshal([]byte(pr.data), &se); err != nil {
 		return r.record(ctx, importID, pr.seq, outcomeFailed, 0, "stored row is unreadable: "+err.Error())
 	}
+	rc.entry, rc.generatedTitle = se.ParsedEntry, se.GeneratedTitle
 	kind, ok := ref.kind(rc.entry.Kind)
 	if !ok {
 		return r.record(ctx, importID, pr.seq, outcomeSkipped, 0, fmt.Sprintf("unknown kind %q", plugin.SingleLine(rc.entry.Kind, 40)))
@@ -765,15 +769,18 @@ func (r *Runner) ask(ctx context.Context, rc *rowCtx, sr sourceRef, what string,
 }
 
 // resolveTitle resolves a row without a lookup-able id by an exact title and
-// year search on the primary source: exactly one candidate of the row's kind
-// whose normalised title and year equal the row's is fetched and saved (or,
+// year search on the primary source: exactly one candidate of that source
+// and the row's kind whose normalised title and year equal the row's is fetched and saved (or,
 // when its item is already stored, handled as an existing entry). A row
-// without a year is not searched; no match, several matches or a missing
+// without a year or a title of its own is not searched; no match, several matches or a missing
 // credential keep the row as an unmatched manual item.
 func (r *Runner) resolveTitle(ctx context.Context, rc *rowCtx) error {
 	dctx := context.WithoutCancel(ctx)
 	year, ok := rowYear(rc.entry)
-	if !ok || rc.entry.Title == "" {
+	switch {
+	case rc.entry.Title == "" || rc.generatedTitle:
+		return r.saveUnmatched(dctx, rc, joinNotes("no title in the row, not searched", titleUnmatchedNote(rc)))
+	case !ok:
 		return r.saveUnmatched(dctx, rc, joinNotes("no year in the row, not searched", titleUnmatchedNote(rc)))
 	}
 	sr := sourceRef{source: rc.ref.source, info: rc.ref.srcInfo}
@@ -790,7 +797,7 @@ func (r *Runner) resolveTitle(ctx context.Context, rc *rowCtx) error {
 	if answer != nil {
 		return r.titleMissed(dctx, rc, answer, sr.info.Name)
 	}
-	match, ok := matchTitle(cands, rc.kind.Key, rc.entry.Title, year)
+	match, ok := matchTitle(cands, sr.info.ID, rc.kind.Key, rc.entry.Title, year)
 	if !ok {
 		return r.saveUnmatched(dctx, rc, joinNotes("no unique match on "+sr.info.Name, titleUnmatchedNote(rc)))
 	}

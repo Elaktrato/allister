@@ -729,3 +729,20 @@ func TestUnmatchedNoteComesFromTheImporter(t *testing.T) {
 	e.saveFixture(t, "book", "book", plain, library.WithSyncState("done"))
 	mustNotContain(t, e.get("/book/manual/m2").Body.String(), "Imported from", "Imported without")
 }
+
+// A title importer's note also gets {title} (the item's title) and {year}
+// (its year field) filled in.
+func TestUnmatchedNoteFillsTitleAndYear(t *testing.T) {
+	e := newFixtureEnv(t, func(book, _ *plugintest.Plugin) {
+		book.M.Kinds[0].Fields = append(book.M.Kinds[0].Fields, plugin.FieldDef{Key: "year", Label: "Year", Type: plugin.FieldNumber})
+		book.M.Importers[0].UnmatchedNote = `No unique match for "{title}" ({year}) #{id}.`
+	})
+	d := bookItem("m1", "Lost Book")
+	d.Source, d.ExternalURL, d.ExternalIDs = "manual", "", map[string]string{"isbn": "9780"}
+	y := 1995.0
+	d.Fields["year"] = plugin.FieldValue{Num: &y}
+	e.saveFixture(t, "book", "book", d, library.WithSyncState("done"))
+	b := e.get("/book/manual/m1").Body.String()
+	mustContain(t, b, "No unique match for &#34;Lost Book&#34; (1995) #9780.")
+	mustNotContain(t, b, "{title}", "{year}")
+}

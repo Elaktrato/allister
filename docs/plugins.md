@@ -316,7 +316,7 @@ type ImporterInfo struct {
 	ResolveByTitle    bool     // rows without the id are resolved by an exact title + year search on ResolveVia
 	ManualRows        bool     // keep rows without the external id as manual entries
 	FallbackTitleLang string   // title language of an unmatched row's manual item
-	UnmatchedNote     string   // <= 200 characters, "{id}" is replaced by the id
+	UnmatchedNote     string   // <= 200 characters; "{id}", "{title}" and "{year}" are filled in
 	AccountLabel      string   // non-empty: the importer takes an account name, not a file
 }
 ```
