@@ -276,6 +276,35 @@ func (l *Library) SeriesByID(ctx context.Context, id int64) (*Series, error) {
 	return s, nil
 }
 
+// SeriesTitles returns the series with the given ids (id, uid, plugin, title)
+// in one query; unknown ids are absent from the map.
+func (l *Library) SeriesTitles(ctx context.Context, ids []int64) (map[int64]Series, error) {
+	out := map[int64]Series{}
+	if len(ids) == 0 {
+		return out, nil
+	}
+	args := make([]any, len(ids))
+	for i, id := range ids {
+		args[i] = id
+	}
+	rows, err := l.db.QueryContext(ctx, `SELECT s.id, s.uid, s.plugin_id, s.title FROM series s WHERE s.id IN (`+placeholders(len(ids))+`)`, args...) //nolint:gosec // G202: constant SQL and placeholders; values are bound
+	if err != nil {
+		return nil, fmt.Errorf("series titles: %w", err)
+	}
+	for rows.Next() {
+		var s Series
+		if err := rows.Scan(&s.ID, &s.UID, &s.PluginID, &s.Title); err != nil {
+			rows.Close()
+			return nil, fmt.Errorf("series titles: %w", err)
+		}
+		out[s.ID] = s
+	}
+	if err := closeRows(rows); err != nil {
+		return nil, fmt.Errorf("series titles: %w", err)
+	}
+	return out, nil
+}
+
 // SeriesOfItem returns the item's series, its 1-based position within its
 // block and whether it is a spin-off part, or (nil, 0, false, nil) when the
 // item is in no series.
