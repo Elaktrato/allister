@@ -20,11 +20,15 @@ const (
 )
 
 type googleBooksClient struct {
-	base, key string
-	hc        *http.Client
+	base string
+	key  func(context.Context) (string, error)
+	hc   *http.Client
 }
 
-func newGoogleBooksClient(base, key string, hc *http.Client) *googleBooksClient {
+// newGoogleBooksClient builds the client; key (may be nil) is asked on every
+// request, so a key saved in the settings applies without a restart. An empty
+// key sends no key parameter.
+func newGoogleBooksClient(base string, key func(context.Context) (string, error), hc *http.Client) *googleBooksClient {
 	if base == "" {
 		base = googleBooksDefaultURL
 	}
@@ -73,8 +77,14 @@ func (c *googleBooksClient) get(ctx context.Context, path string, values url.Val
 	if values == nil {
 		values = url.Values{}
 	}
-	if c.key != "" {
-		values.Set("key", c.key)
+	if c.key != nil {
+		key, err := c.key(ctx)
+		if err != nil {
+			return fmt.Errorf("googlebooks: read key: %w", err)
+		}
+		if key != "" {
+			values.Set("key", key)
+		}
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.base+path+"?"+values.Encode(), nil)
 	if err != nil {

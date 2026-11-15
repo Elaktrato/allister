@@ -63,6 +63,9 @@ func manifest() plugin.Manifest {
 				SupportsLookup:    true,
 				Kinds:             []string{KindBook},
 				LinkLabel:         "View on Google Books",
+				KeyLabel:          "API key",
+				KeyHelp:           "Optional. Without a key Google limits how many searches you can make.",
+				KeyOptional:       true,
 			},
 			{
 				ID:                SourceAniList,

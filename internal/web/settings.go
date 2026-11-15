@@ -61,6 +61,7 @@ func (s *server) renderPlugins(w http.ResponseWriter, r *http.Request, status in
 type sourceKeyView struct {
 	ID, Name, Label, Help, Action string
 	Configured                    bool // every effective credential is set (stored or from the environment)
+	Optional                      bool // the source works without a key
 	Stored                        bool // this install stores a credential, so it can be removed
 	// Fields are the named inputs of a multi-field source; empty for a
 	// single-key source.
@@ -86,8 +87,8 @@ func (s *server) sourceKeyViews(ctx context.Context) ([]sourceKeyView, error) {
 			}
 			seen[src.ID] = true
 			v := sourceKeyView{ID: src.ID, Name: src.Name, Label: src.KeyLabel, Help: src.KeyHelp,
-				Action: sourceKeyURL(src.ID)}
-			configured, err := s.sourceConfigured(ctx, src)
+				Action: sourceKeyURL(src.ID), Optional: src.KeyOptional}
+			configured, err := s.sourceCredentialsSet(ctx, src)
 			if err != nil {
 				return nil, err
 			}
@@ -149,8 +150,18 @@ func (s *server) storedSourceKeyField(ctx context.Context, id, field string) (st
 // field. It is the one configured predicate of the web layer. A failing read
 // is returned, never taken for a missing credential: the caller answers 500
 // (as the plugins card always did), so a broken settings store is not shown
-// as "needs key" or steer the default source elsewhere.
+// as "needs key" or steer the default source elsewhere. A source whose key is
+// optional is always configured.
 func (s *server) sourceConfigured(ctx context.Context, si plugin.SourceInfo) (bool, error) {
+	if si.KeyOptional {
+		return true, nil
+	}
+	return s.sourceCredentialsSet(ctx, si)
+}
+
+// sourceCredentialsSet reports whether every effective credential of si is
+// set, optional or not (the API keys card shows exactly this).
+func (s *server) sourceCredentialsSet(ctx context.Context, si plugin.SourceInfo) (bool, error) {
 	if si.KeyLabel == "" {
 		return true, nil
 	}

@@ -3,6 +3,7 @@ package book
 import (
 	"reflect"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/allister/allister/internal/plugin"
@@ -143,4 +144,17 @@ func TestBooksKindStats(t *testing.T) {
 	if m.Kinds[1].Stats != nil {
 		t.Fatalf("series stats = %+v, want nil", m.Kinds[1].Stats)
 	}
+}
+
+func TestGoogleBooksKeyIsOptional(t *testing.T) {
+	for _, src := range New(Options{}).Manifest().Sources {
+		if src.ID != SourceGoogleBooks {
+			continue
+		}
+		if src.KeyLabel != "API key" || !src.KeyOptional || !strings.Contains(src.KeyHelp, "Optional") {
+			t.Fatalf("google books key = %q optional=%v help=%q", src.KeyLabel, src.KeyOptional, src.KeyHelp)
+		}
+		return
+	}
+	t.Fatal("no google books source")
 }
