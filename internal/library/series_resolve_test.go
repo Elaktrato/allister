@@ -459,10 +459,8 @@ func TestActiveSeriesMatchesDerivedStatusExpected(t *testing.T) {
 			}
 			exp := v.wantExpect(len(c))
 			want[s.ID] = DeriveSeriesStatus(c, exp) == Active
-			wantTotal[s.ID] = len(c)
-			if exp > 0 {
-				wantTotal[s.ID] = exp
-			}
+			// the display total never falls below the counted parts
+			wantTotal[s.ID] = max(exp, len(c))
 		}
 	}
 	// series whose parts are all spin-offs: their status, counts and cover
@@ -605,5 +603,54 @@ func TestResolveExpectedPartsSet(t *testing.T) {
 	linked := &Item{Kind: "book", Fields: map[string]plugin.FieldValue{"volumes": {Num: fp(2)}}}
 	if r := ResolveSeries(Series{Title: "S"}, k, linked, nil, main, nil); r.ExpectedParts != 2 {
 		t.Fatalf("linked: %+v", r)
+	}
+}
+
+// TestSeriesPartsTotalNotBelowParts: more main parts than expected never read
+// "12/10": the shown total is the larger number; the status rule still
+// compares with the expected number.
+func TestSeriesPartsTotalNotBelowParts(t *testing.T) {
+	e := newEnvWith(t, sagaPlugin())
+	var ids []int64
+	for i := range 12 {
+		st := Active
+		if i < 5 {
+			st = Completed
+		}
+		ids = append(ids, addSaga(t, e, fmt.Sprint("p", i), st, nil))
+	}
+	s := mustSeries(t, e, ids[0], "Long")
+	mustAddPart(t, e, s.ID, ids[1:]...)
+	if _, err := e.db.Exec(`UPDATE series SET parts_total = 10 WHERE id = ?`, s.ID); err != nil {
+		t.Fatal(err)
+	}
+	ser, err := e.lib.SeriesByID(bg, s.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := e.lib.LoadResolvedSeries(bg, ser, "en")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.PartsTotal != 12 || res.ExpectedParts != 10 || res.Completed != 5 || res.Status != Active {
+		t.Errorf("resolved %d/%d (expected %d) %s", res.Completed, res.PartsTotal, res.ExpectedParts, res.Status)
+	}
+	pg, err := e.lib.ListSeries(bg, SeriesQuery{PluginID: "saga"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pg.Rows) != 1 || pg.Rows[0].PartsTotal != 12 {
+		t.Errorf("list %+v", pg.Rows)
+	}
+	act, err := e.lib.ActiveSeries(bg, []string{"saga"}, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(act) != 1 || act[0].PartsTotal != 12 || act[0].Completed != 5 {
+		t.Errorf("active %+v", act)
+	}
+	// all twelve completed: 12 >= 10 expected, so completed
+	if got := DeriveSeriesStatus(slices.Repeat([]Status{Completed}, 12), 10); got != Completed {
+		t.Errorf("12 completed of 10 expected: %s", got)
 	}
 }
