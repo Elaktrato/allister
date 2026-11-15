@@ -662,3 +662,53 @@ func TestValidateRefusesSeriesSourceID(t *testing.T) {
 		t.Fatalf("err = %v", err)
 	}
 }
+
+func TestValidateResolveByTitle(t *testing.T) {
+	for name, c := range map[string]struct {
+		mod  func(m *plugin.Manifest)
+		want string // "" means valid
+	}{
+		"without resolve_via": {func(m *plugin.Manifest) {
+			m.Importers[0].ResolveVia, m.Importers[0].ResolveByTitle = "", true
+		}, "importers[0].resolve_by_title: resolve_by_title needs resolve_via"},
+		"with resolve_via": {func(m *plugin.Manifest) { m.Importers[0].ResolveByTitle = true }, ""},
+		"id type the source does not list (R1)": {func(m *plugin.Manifest) {
+			m.Importers[0].ResolveByTitle, m.Importers[0].ExternalIDType = true, "asin"
+		}, ""},
+		"no id type, source without lookup": {func(m *plugin.Manifest) {
+			m.Importers[0].ResolveByTitle, m.Importers[0].ExternalIDType = true, ""
+			m.Sources[0].SupportsLookup = false
+		}, ""},
+		"unknown source still refused": {func(m *plugin.Manifest) {
+			m.Importers[0].ResolveByTitle, m.Importers[0].ResolveVia = true, "ghost"
+		}, `unknown source "ghost"`},
+		"without the flag the id rule stays": {func(m *plugin.Manifest) { m.Importers[0].ExternalIDType = "asin" },
+			`source "books" cannot look up "asin" ids`},
+	} {
+		m := book()
+		c.mod(&m)
+		err := plugin.Validate(m)
+		if (c.want == "") != (err == nil) || (err != nil && !strings.Contains(err.Error(), c.want)) {
+			t.Errorf("%s: %v, want %q", name, err, c.want)
+		}
+	}
+}
+
+func TestValidateKeyOptional(t *testing.T) {
+	m := book()
+	m.Sources[0].KeyLabel, m.Sources[0].KeyHelp, m.Sources[0].KeyFields = "", "", nil
+	m.Sources[0].KeyOptional = true
+	err := plugin.Validate(m)
+	if err == nil || !strings.Contains(err.Error(), "sources[0].key_optional: key_optional needs a key") {
+		t.Errorf("no key: %v", err)
+	}
+	m.Sources[0].KeyLabel = "API key"
+	if err := plugin.Validate(m); err != nil {
+		t.Errorf("with key_label: %v", err)
+	}
+	m.Sources[0].KeyLabel = "Creds"
+	m.Sources[0].KeyFields = []plugin.KeyField{{Name: "id", Label: "ID"}}
+	if err := plugin.Validate(m); err != nil {
+		t.Errorf("with key_fields: %v", err)
+	}
+}

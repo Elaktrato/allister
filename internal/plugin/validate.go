@@ -132,6 +132,9 @@ func Validate(m Manifest) error {
 			p.add(path+".key_help", "requires key_label")
 		}
 		validateKeyFields(&p, path+".key_fields", s.KeyLabel, s.KeyFields)
+		if s.KeyOptional && s.KeyLabel == "" && len(s.KeyFields) == 0 {
+			p.add(path+".key_optional", "key_optional needs a key")
+		}
 	}
 	importers := map[string]bool{}
 	for i, im := range m.Importers {
@@ -153,11 +156,14 @@ func Validate(m Manifest) error {
 			p.add(path+".unmatched_note", "longer than %d characters", maxUnmatchedNoteRunes)
 		}
 		if im.ResolveVia == "" {
+			if im.ResolveByTitle {
+				p.add(path+".resolve_by_title", "resolve_by_title needs resolve_via")
+			}
 			if len(im.ResolveViaFallback) > 0 {
 				p.add(path+".resolve_via_fallback", "requires resolve_via")
 			}
 		} else {
-			validateResolveViaSource(&p, path+".resolve_via", path+".external_id_type", im.ResolveVia, im.ExternalIDType, m.Sources)
+			validateResolveViaSource(&p, path+".resolve_via", path+".external_id_type", im.ResolveVia, im.ExternalIDType, im.ResolveByTitle, m.Sources)
 			seen := map[string]bool{im.ResolveVia: true}
 			for j, id := range im.ResolveViaFallback {
 				fp := fmt.Sprintf("%s.resolve_via_fallback[%d]", path, j)
@@ -166,7 +172,7 @@ func Validate(m Manifest) error {
 					continue
 				}
 				seen[id] = true
-				validateResolveViaSource(&p, fp, fp+".external_id_type", id, im.ExternalIDType, m.Sources)
+				validateResolveViaSource(&p, fp, fp+".external_id_type", id, im.ExternalIDType, im.ResolveByTitle, m.Sources)
 			}
 		}
 	}
@@ -227,8 +233,10 @@ func validateKeyFields(p *problems, path, groupLabel string, fields []KeyField) 
 // validateResolveViaSource checks that one resolution source exists, supports
 // lookup and can look up the importer's ExternalIDType; otherwise every row
 // of every import would fail its lookup. The source error and the external-id
-// error have separate paths so a fallback names itself in both.
-func validateResolveViaSource(p *problems, path, externalPath, sourceID, idType string, sources []SourceInfo) {
+// error have separate paths so a fallback names itself in both. With byTitle
+// the source is only searched, so lookup support and the id type are not
+// required.
+func validateResolveViaSource(p *problems, path, externalPath, sourceID, idType string, byTitle bool, sources []SourceInfo) {
 	var src *SourceInfo
 	for i := range sources {
 		if sources[i].ID == sourceID {
@@ -238,6 +246,10 @@ func validateResolveViaSource(p *problems, path, externalPath, sourceID, idType 
 	}
 	if src == nil {
 		p.add(path, "unknown source %q", sourceID)
+		return
+	}
+	if byTitle {
+		// resolved by a title search: the id stays on the entry only
 		return
 	}
 	if !src.SupportsLookup {

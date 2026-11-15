@@ -61,9 +61,9 @@ func TestManifestJSONRoundTrip(t *testing.T) {
 				Units: &plugin.StatsUnitsDef{Key: "x", LabelPlural: "Units"},
 			},
 		}},
-		Sources: []plugin.SourceInfo{{ID: "s", Name: "S", RequestsPerMinute: 30, ExternalIDTypes: []string{"s"}, SupportsLookup: true, LinkLabel: "View on S", URLPatterns: []string{"s.example/{id}"}, Kinds: []string{"k"}, KeyLabel: "API key", KeyHelp: "Get one at example.test.",
+		Sources: []plugin.SourceInfo{{ID: "s", Name: "S", RequestsPerMinute: 30, ExternalIDTypes: []string{"s"}, SupportsLookup: true, LinkLabel: "View on S", URLPatterns: []string{"s.example/{id}"}, Kinds: []string{"k"}, KeyLabel: "API key", KeyHelp: "Get one at example.test.", KeyOptional: true,
 			KeyFields: []plugin.KeyField{{Name: "client_id", Label: "Client ID"}, {Name: "client_secret", Label: "Client Secret", Secret: true}}}},
-		Importers: []plugin.ImporterInfo{{ID: "i", Name: "I", FileHint: "csv", Accept: []string{".csv"}, ExternalIDType: "s", ExternalIDLabel: "S id", ResolveVia: "s", ResolveViaFallback: []string{"s2"}, ManualRows: true, FallbackTitleLang: "en", UnmatchedNote: "No S match for #{id}."}},
+		Importers: []plugin.ImporterInfo{{ID: "i", Name: "I", FileHint: "csv", Accept: []string{".csv"}, ExternalIDType: "s", ExternalIDLabel: "S id", ResolveVia: "s", ResolveViaFallback: []string{"s2"}, ResolveByTitle: true, ManualRows: true, FallbackTitleLang: "en", UnmatchedNote: "No S match for #{id}."}},
 		Exporters: []plugin.ExporterInfo{{ID: "x", Name: "X", Extension: ".json", MIME: "application/json"}},
 	}
 	roundTrip(t, "full manifest", full)
@@ -281,4 +281,28 @@ func TestExportEntrySeriesJSON(t *testing.T) {
 	if strings.Contains(string(b), "series") {
 		t.Fatalf("zero values not omitted: %s", b)
 	}
+}
+
+func TestImporterResolveByTitleJSON(t *testing.T) {
+	on, _ := json.Marshal(plugin.ImporterInfo{ID: "i", Name: "I", ResolveByTitle: true})
+	if !strings.Contains(string(on), `"resolve_by_title":true`) {
+		t.Errorf("set: %s", on)
+	}
+	off, _ := json.Marshal(plugin.ImporterInfo{ID: "i", Name: "I"})
+	if strings.Contains(string(off), "resolve_by_title") {
+		t.Errorf("unset must be omitted: %s", off)
+	}
+	roundTrip(t, "resolve by title", plugin.ImporterInfo{ID: "i", Name: "I", ResolveByTitle: true})
+}
+
+func TestSourceKeyOptionalJSON(t *testing.T) {
+	on, _ := json.Marshal(plugin.SourceInfo{ID: "s", KeyLabel: "API key", KeyOptional: true})
+	if !strings.Contains(string(on), `"key_optional":true`) {
+		t.Errorf("set: %s", on)
+	}
+	off, _ := json.Marshal(plugin.SourceInfo{ID: "s", KeyLabel: "API key"})
+	if strings.Contains(string(off), "key_optional") {
+		t.Errorf("unset must be omitted: %s", off)
+	}
+	roundTrip(t, "key optional", plugin.SourceInfo{ID: "s", KeyLabel: "API key", KeyOptional: true})
 }

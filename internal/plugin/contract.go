@@ -307,6 +307,10 @@ type SourceInfo struct {
 	// KeyFields, when set, means the source needs several named credentials
 	// (1 to 4) under the group label KeyLabel instead of one key.
 	KeyFields []KeyField `json:"key_fields,omitempty"`
+	// KeyOptional marks the credential as optional: the source works without
+	// it (with lower limits), so the core never reports "needs key". It
+	// requires KeyLabel or KeyFields.
+	KeyOptional bool `json:"key_optional,omitempty"`
 }
 
 // ImporterInfo describes an import format. ResolveVia names the declared
@@ -335,9 +339,15 @@ type ImporterInfo struct {
 	ExternalIDLabel    string   `json:"external_id_label,omitempty"`
 	ResolveVia         string   `json:"resolve_via,omitempty"`
 	ResolveViaFallback []string `json:"resolve_via_fallback,omitempty"`
-	ManualRows         bool     `json:"manual_rows,omitempty"`
-	FallbackTitleLang  string   `json:"fallback_title_lang,omitempty"`
-	UnmatchedNote      string   `json:"unmatched_note,omitempty"`
+	// ResolveByTitle makes the import runner resolve rows without an id of
+	// ExternalIDType by an exact title and year search on the ResolveVia
+	// source (and its fallbacks). It requires ResolveVia; the source then
+	// needs neither SupportsLookup nor to list ExternalIDType, because the
+	// id is only kept on the entry.
+	ResolveByTitle    bool   `json:"resolve_by_title,omitempty"`
+	ManualRows        bool   `json:"manual_rows,omitempty"`
+	FallbackTitleLang string `json:"fallback_title_lang,omitempty"`
+	UnmatchedNote     string `json:"unmatched_note,omitempty"`
 }
 
 // ExporterInfo describes an export format.
