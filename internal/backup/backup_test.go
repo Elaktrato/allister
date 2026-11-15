@@ -53,8 +53,8 @@ func newEnv(t *testing.T) *env {
 	reg := plugin.NewRegistry(plugintest.NewMemEnabled())
 	book := plugintest.BookPlugin()
 	book.M.Kinds[0].SeriesFields = []plugin.FieldDef{
-		{Key: "volumes", Label: "Volumes", Type: plugin.FieldNumber, Min: fp(0)},
-		{Key: "publisher", Label: "Publisher", Type: plugin.FieldText},
+		{Key: "volumes", Label: "Volumes", Type: plugin.FieldNumber, Min: fp(0), Editable: true},
+		{Key: "publisher", Label: "Publisher", Type: plugin.FieldText, Editable: true},
 	}
 	book.M.Kinds[0].SeriesLink = &plugin.SeriesLinkDef{Kind: "book"}
 	for _, p := range []plugin.Plugin{book, plugintest.TVPlugin()} {
