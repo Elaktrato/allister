@@ -91,7 +91,12 @@ func (s *server) postIncrement(w http.ResponseWriter, r *http.Request) {
 	if !parseForm(w, r) {
 		return
 	}
-	ret := safeReturn(r.PostFormValue("return"), ref.PluginID)
+	// the home page's cards return to "/", every other caller to its list
+	home := r.PostFormValue("return") == "/"
+	ret := "/"
+	if !home {
+		ret = safeReturn(r.PostFormValue("return"), ref.PluginID)
+	}
 	if err := s.deps.Library.Increment(r.Context(), ref.ID); err != nil {
 		if errors.Is(err, library.ErrNoEntry) {
 			s.entryNotFound(w, r)
@@ -114,6 +119,9 @@ func (s *server) postIncrement(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	rv := rvs[0]
+	if home {
+		rv.BadgeIcon, rv.BadgeLabel = badge(t.man, t.kind)
+	}
 	// a +1 from a card answers the card, one from the table the row
 	partial := "list_row"
 	if r.PostFormValue("view") == "cards" {

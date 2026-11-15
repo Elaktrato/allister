@@ -41,8 +41,6 @@
      strip's rule with a coloured underline and the surface tint */}}
 {{define "status_tab"}}{{if .Current}}{{if eq .Status "active"}}border-indigo-500 bg-slate-900 text-indigo-300{{else if eq .Status "completed"}}border-emerald-500 bg-slate-900 text-emerald-400{{else if eq .Status "paused"}}border-amber-700 bg-slate-900 text-amber-300{{else if eq .Status "dropped"}}border-rose-500 bg-slate-900 text-red-300{{else}}border-slate-600 bg-slate-900 text-slate-300{{end}}{{else}}border-transparent {{template "status_tone" .Status}}{{end}}{{end}}
 
-{{/* a status tab's colour: the same language as the card view's corners */}}
-{{define "status_tone"}}{{if eq . "active"}}text-indigo-300{{else if eq . "completed"}}text-emerald-400{{else if eq . "paused"}}text-amber-300{{else if eq . "dropped"}}text-red-300{{else if eq . "planned"}}text-slate-400{{else}}text-slate-300{{end}}{{end}}
 
 {{/* list_partial answers the filter bar and the sort links of the table head: the rows region (with the head) plus, out of band, the tabs, the Clear link, the sort control's options, the Filters badge and the genre/tag option lists (never a visible input or a select, which keep focus) */}}
 {{define "list_partial"}}{{template "list_rows" .}}{{template "list_tabs" .}}{{if not .SeriesTab}}{{with .Filters}}{{template "filter_clear" .}}{{template "filter_sort_oob" .}}{{template "filter_count" .}}{{with .Genres}}{{template "filter_term_options_oob" .}}{{end}}{{with .Tags}}{{template "filter_term_options_oob" .}}{{end}}{{end}}{{end}}{{end}}

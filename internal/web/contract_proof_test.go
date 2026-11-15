@@ -755,14 +755,15 @@ func TestNavigationAndSettingsWithThreePlugins(t *testing.T) {
 	mustContain(t, e.page(t, "/book/search"), "Search books")
 	mustContain(t, e.page(t, "/tv/search"), "Search shows")
 
-	// the home page follows the enabled plugins in registry order
-	for _, step := range []struct{ toggle, want string }{{"", "/anime"}, {"anime", "/book"}, {"book", "/tv"}, {"tv", "/settings/plugins"}} {
+	// the home page renders while any plugin is enabled, else Settings > Plugins
+	for _, step := range []struct{ toggle, want string }{{"", ""}, {"anime", ""}, {"book", ""}, {"tv", "/settings/plugins"}} {
 		if step.toggle != "" {
 			if rec := e.do("POST", "/settings/plugins/"+step.toggle, url.Values{"enabled": {"0"}}, false); rec.Code != http.StatusSeeOther {
 				t.Fatalf("disable %s: %d", step.toggle, rec.Code)
 			}
 		}
-		if rec := e.get("/"); rec.Code != http.StatusSeeOther || rec.Header().Get("Location") != step.want {
+		rec := e.get("/")
+		if step.want == "" && rec.Code != http.StatusOK || step.want != "" && (rec.Code != http.StatusSeeOther || rec.Header().Get("Location") != step.want) {
 			t.Errorf("after disabling %q: / -> %d %q", step.toggle, rec.Code, rec.Header().Get("Location"))
 		}
 	}
@@ -781,8 +782,8 @@ func TestNavigationAndSettingsWithThreePlugins(t *testing.T) {
 	nav = navOf(t, e.page(t, "/settings"))
 	mustContain(t, nav, `href="/tv"`)
 	mustNotContain(t, nav, `href="/anime"`, `href="/book"`)
-	if rec := e.get("/"); rec.Header().Get("Location") != "/tv" {
-		t.Fatalf("/ -> %q", rec.Header().Get("Location"))
+	if rec := e.get("/"); rec.Code != http.StatusOK {
+		t.Fatalf("/ -> %d", rec.Code)
 	}
 }
 

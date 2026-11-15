@@ -72,10 +72,10 @@ func TestStaticHtmx(t *testing.T) {
 	}
 }
 
-func TestHomeRedirectsToList(t *testing.T) {
+func TestHomeRendersWithPlugins(t *testing.T) {
 	rec := get(t, "/")
-	if rec.Code != http.StatusSeeOther || rec.Header().Get("Location") != "/anime" {
-		t.Fatalf("got %d %q", rec.Code, rec.Header().Get("Location"))
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), ">Home</h1>") {
+		t.Fatalf("got %d", rec.Code)
 	}
 }
 

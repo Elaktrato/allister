@@ -329,25 +329,19 @@ func TestFixturePluginsGetOnlyCoreRoutes(t *testing.T) {
 	}
 }
 
-func TestRootRedirectsToFirstEnabledOrSettings(t *testing.T) {
+func TestRootIsHomeOrRedirectsToSettings(t *testing.T) {
 	e := newEnvWith(t, withPlugins(plugintest.BookPlugin()))
-	loc := func() string {
-		rec := e.get("/")
-		if rec.Code != 303 {
-			t.Fatalf("code %d", rec.Code)
-		}
-		return rec.Header().Get("Location")
-	}
-	if l := loc(); l != "/anime" {
-		t.Fatalf("got %q", l)
+	if rec := e.get("/"); rec.Code != 200 {
+		t.Fatalf("code %d", rec.Code)
 	}
 	e.disable(t, "anime")
-	if l := loc(); l != "/book" {
-		t.Fatalf("got %q", l)
+	if rec := e.get("/"); rec.Code != 200 {
+		t.Fatalf("code %d", rec.Code)
 	}
 	e.disable(t, "book")
-	if l := loc(); l != "/settings/plugins" {
-		t.Fatalf("got %q", l)
+	rec := e.get("/")
+	if rec.Code != 303 || rec.Header().Get("Location") != "/settings/plugins" {
+		t.Fatalf("got %d %q", rec.Code, rec.Header().Get("Location"))
 	}
 }
 
@@ -382,7 +376,7 @@ func TestAllExistingAnimeURLsStillWork(t *testing.T) {
 		method, path string
 		want         int
 	}{
-		{"GET", "/", 303},
+		{"GET", "/", 200},
 		{"GET", "/anime", 200},
 		{"GET", "/anime?status=watching", 200},
 		{"GET", "/anime/search", 200},
