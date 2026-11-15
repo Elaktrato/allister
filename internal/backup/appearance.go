@@ -261,7 +261,11 @@ func (rs *restorer) restoreAppearanceSettings(ctx context.Context, app *appearan
 func (rs *restorer) restoreTimeZone(ctx context.Context, raw json.RawMessage) error {
 	st := rs.opts.TimeZone
 	var name string
-	if st == nil || json.Unmarshal(raw, &name) != nil || name == "" {
+	if st == nil || string(raw) == "null" {
+		return nil
+	}
+	if json.Unmarshal(raw, &name) != nil || name == "" {
+		rs.note("The time zone of the backup was not restored: it is not a time zone name.")
 		return nil
 	}
 	if rs.zoned {
