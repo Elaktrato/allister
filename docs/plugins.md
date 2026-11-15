@@ -68,7 +68,7 @@ type Exporter interface {
 A `KindDef` describes one media kind:
 
 - `Key`, `Label`, `LabelPlural`: id and display names, all three required. The list page heading uses `LabelPlural`.
-- `TitleLanguages`: the language tags the plugin's titles use (at least one, no duplicates or empty values). Every item has titles per language. The user picks the display language **per plugin** on the plugin's settings page (`/settings/plugins/{id}`) from these tags (the union over the plugin's kinds, in order) plus tags found in the plugin's stored titles. Before the user chooses, the first declared tag is used.
+- `TitleLanguages`: the language tags the plugin's titles use (at least one, no duplicates or empty values). Every item has titles per language, so a source must tag each title it sends (a title without a language is dropped by the shipped plugins' mappings; IGDB and Steam send `en`). The user picks the display language **per plugin** on the plugin's settings page (`/settings/plugins/{id}`) from these tags (the union over the plugin's kinds, in order) plus tags found in the plugin's stored titles. Before the user chooses, the first declared tag is used.
 - `TitleFallback`: optional, the order of languages the core tries when an item has no title in the chosen language, for example `["ja", "ja-latn", "en"]` (the anime plugin). Every entry must be one of `TitleLanguages`, listed once. After it (or without it) the item's first stored title is shown. JSON `title_fallback`, omitted when empty. There is no fallback order in the core any more.
 - `Columns`: optional, the columns of the kind's list table (see [Table columns](#table-columns)).
 - `Fields`: the item schema (below).

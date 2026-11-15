@@ -193,3 +193,82 @@ func TestGameDropsEmptyRecommendations(t *testing.T) {
 		t.Fatalf("kept = %+v", out[0])
 	}
 }
+
+// A text field that is only white space is dropped, not stored as an empty
+// text value.
+func TestGameDropsWhitespaceOnlyText(t *testing.T) {
+	d := gameData(gameRecord{Source: SourceIGDB, ID: "1", Titles: []plugin.Title{{Lang: "en", Text: "G"}},
+		Fields: map[string]plugin.FieldValue{"developer": {Text: " \n\t "}, "summary": {Text: "\n \n"}, "publisher": {Text: " P "}}})
+	if _, ok := d.Fields["developer"]; ok {
+		t.Errorf("developer kept: %+v", d.Fields["developer"])
+	}
+	if _, ok := d.Fields["summary"]; ok {
+		t.Errorf("summary kept: %+v", d.Fields["summary"])
+	}
+	if d.Fields["publisher"].Text != "P" {
+		t.Errorf("publisher = %+v", d.Fields["publisher"])
+	}
+}
+
+// Field keys are capped at 40 runes, external id types at 40 and their values
+// at maxIDRunes (100).
+func TestGameKeyAndIDCaps(t *testing.T) {
+	long := strings.Repeat("k", 50)
+	d := gameData(gameRecord{Source: SourceIGDB, ID: "1", Titles: []plugin.Title{{Lang: "en", Text: "G"}},
+		Fields:      map[string]plugin.FieldValue{long: {Num: num(1)}},
+		ExternalIDs: map[string]string{long: strings.Repeat("9", 150)}})
+	for k := range d.Fields {
+		if n := len([]rune(k)); n > 40 {
+			t.Errorf("field key has %d runes", n)
+		}
+	}
+	if len(d.ExternalIDs) != 1 {
+		t.Fatalf("external ids = %v", d.ExternalIDs)
+	}
+	for k, v := range d.ExternalIDs {
+		if len([]rune(k)) > 40 || len([]rune(v)) > maxIDRunes {
+			t.Errorf("external id %d/%d runes", len([]rune(k)), len([]rune(v)))
+		}
+	}
+}
+
+// A date in another zone keeps its own calendar day, at midnight UTC.
+func TestGameDateIsCalendarDay(t *testing.T) {
+	tokyo := time.FixedZone("JST", 9*3600)
+	late := time.Date(2020, 3, 5, 23, 30, 0, 0, time.FixedZone("UTC-5", -5*3600))
+	early := time.Date(2020, 3, 6, 0, 30, 0, 0, tokyo)
+	for in, want := range map[time.Time]string{late: "2020-03-05", early: "2020-03-06"} {
+		d := gameData(gameRecord{Source: SourceIGDB, ID: "1", Titles: []plugin.Title{{Lang: "en", Text: "G"}},
+			Fields: map[string]plugin.FieldValue{"released_on": {Date: &in}}})
+		got := d.Fields["released_on"].Date
+		if got == nil || got.Location() != time.UTC || got.Format("2006-01-02 15:04") != want+" 00:00" {
+			t.Errorf("%v -> %v, want %s 00:00 UTC", in, got, want)
+		}
+	}
+}
+
+// Recommendations are sanitised like the item: text fields single-line and
+// capped, white-space-only text dropped, numbers kept, the URL https-only.
+func TestGameRecommendationsSanitiseFieldsAndURL(t *testing.T) {
+	recs := gameRecommendations([]plugin.ItemSummary{{
+		Source: SourceIGDB, ID: "5", Titles: []plugin.Title{{Lang: "en", Text: "R"}},
+		Fields: map[string]plugin.FieldValue{"year": {Num: num(2001)}, "developer": {Text: "A\nB"}, "publisher": {Text: "  "}},
+		URL:    "javascript:alert(1)",
+	}, {
+		Source: SourceIGDB, ID: "6", Titles: []plugin.Title{{Lang: "en", Text: "S"}},
+		URL: "https://www.igdb.com/games/s",
+	}})
+	if len(recs) != 2 {
+		t.Fatalf("recs = %+v", recs)
+	}
+	r := recs[0]
+	if r.URL != "" || r.Fields["developer"].Text != "A B" || r.Fields["year"].Num == nil || *r.Fields["year"].Num != 2001 {
+		t.Fatalf("rec = %+v", r)
+	}
+	if _, ok := r.Fields["publisher"]; ok {
+		t.Fatalf("white-space publisher kept: %+v", r.Fields)
+	}
+	if recs[1].URL != "https://www.igdb.com/games/s" {
+		t.Fatalf("https url dropped: %+v", recs[1])
+	}
+}
