@@ -17,6 +17,9 @@ func FillUnmatchedNote(note, id, title string, year int) string {
 	y := ""
 	if year != 0 {
 		y = strconv.Itoa(year)
+	} else {
+		// No year: drop a parenthesised "({year})" instead of leaving "()".
+		note = strings.ReplaceAll(note, " ({year})", "")
 	}
 	return strings.NewReplacer("{id}", id, "{title}", title, "{year}", y).Replace(note)
 }
