@@ -86,6 +86,7 @@ func (c *googleBooksClient) get(ctx context.Context, path string, values url.Val
 			values.Set("key", key)
 		}
 	}
+	keySent := values.Get("key") != ""
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.base+path+"?"+values.Encode(), nil)
 	if err != nil {
 		return fmt.Errorf("googlebooks: %w", plugin.ErrUnavailable)
@@ -103,6 +104,20 @@ func (c *googleBooksClient) get(ctx context.Context, path string, values url.Val
 	case resp.StatusCode == http.StatusOK:
 	case resp.StatusCode == http.StatusNotFound:
 		return plugin.ErrNotFound
+	case keySent && (resp.StatusCode == http.StatusBadRequest || resp.StatusCode == http.StatusForbidden):
+		reasons := gbErrorReasons(resp.Body)
+		switch {
+		case resp.StatusCode == http.StatusBadRequest && reasons["keyInvalid"], reasons["API_KEY_INVALID"]:
+			return fmt.Errorf("googlebooks: the API key was refused: %w", plugin.ErrNotConfigured)
+		case resp.StatusCode == http.StatusForbidden && gbQuotaReason(reasons):
+			return plugin.ErrRateLimited
+		case resp.StatusCode == http.StatusForbidden && (reasons["accessNotConfigured"] || reasons["SERVICE_DISABLED"] ||
+			reasons["API_KEY_SERVICE_BLOCKED"] || reasons["forbidden"]):
+			return fmt.Errorf("googlebooks: the API key has no access to the Books API: %w", plugin.ErrNotConfigured)
+		case resp.StatusCode == http.StatusForbidden:
+			return plugin.ErrRateLimited
+		}
+		return fmt.Errorf("%w: googlebooks status %d", plugin.ErrBadResponse, resp.StatusCode)
 	case resp.StatusCode == http.StatusTooManyRequests, resp.StatusCode == http.StatusForbidden:
 		return plugin.ErrRateLimited
 	case resp.StatusCode >= 500, resp.StatusCode == http.StatusRequestTimeout:
@@ -121,6 +136,38 @@ func (c *googleBooksClient) get(ctx context.Context, path string, values url.Val
 		return fmt.Errorf("%w: googlebooks: %v", plugin.ErrBadResponse, err)
 	}
 	return nil
+}
+
+// gbErrorReasons reads the reasons of a Google error body
+// (error.errors[].reason and error.details[].reason) from at most 64 KiB.
+// An unreadable body yields no reasons.
+func gbErrorReasons(r io.Reader) map[string]bool {
+	var body struct {
+		Error struct {
+			Errors  []struct{ Reason string } `json:"errors"`
+			Details []struct{ Reason string } `json:"details"`
+		} `json:"error"`
+	}
+	reasons := map[string]bool{}
+	if json.NewDecoder(io.LimitReader(r, 64<<10)).Decode(&body) != nil {
+		return reasons
+	}
+	for _, e := range body.Error.Errors {
+		reasons[e.Reason] = true
+	}
+	for _, e := range body.Error.Details {
+		reasons[e.Reason] = true
+	}
+	return reasons
+}
+
+func gbQuotaReason(reasons map[string]bool) bool {
+	for _, r := range []string{"rateLimitExceeded", "dailyLimitExceeded", "userRateLimitExceeded", "RATE_LIMIT_EXCEEDED"} {
+		if reasons[r] {
+			return true
+		}
+	}
+	return false
 }
 
 func (c *googleBooksClient) search(ctx context.Context, q string) ([]plugin.ItemSummary, error) {
