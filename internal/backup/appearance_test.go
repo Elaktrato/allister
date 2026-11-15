@@ -34,7 +34,7 @@ func newAppearanceEnv(t *testing.T) *appearanceEnv {
 func (e *appearanceEnv) archive() []byte {
 	e.t.Helper()
 	var b bytes.Buffer
-	if err := Write(bg, &b, e.lib, nil, e.covers, e.app, clock); err != nil {
+	if err := Write(bg, &b, e.lib, nil, e.covers, e.app, "", clock); err != nil {
 		e.t.Fatal(err)
 	}
 	return b.Bytes()

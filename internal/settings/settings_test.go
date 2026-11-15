@@ -340,3 +340,60 @@ func TestColumnsRoundTrip(t *testing.T) {
 		}
 	}
 }
+
+func TestTimeZoneValidation(t *testing.T) {
+	for _, ok := range []string{"UTC", "Europe/Berlin", "America/New_York"} {
+		if !ValidTimeZone(ok) {
+			t.Errorf("%q should be valid", ok)
+		}
+	}
+	for _, bad := range []string{"", "Local", "Mars/Olympus", "../etc/passwd", "Europe/Berlin\n"} {
+		if ValidTimeZone(bad) {
+			t.Errorf("%q should be invalid", bad)
+		}
+	}
+}
+
+func TestTimeZoneDefaultFollowsTZ(t *testing.T) {
+	s, _ := newStore(t)
+	ctx := context.Background()
+	t.Setenv("TZ", "Europe/Berlin")
+	if got := s.TimeZoneName(ctx); got != "Europe/Berlin" {
+		t.Errorf("TZ default: %q", got)
+	}
+	t.Setenv("TZ", "Not/AZone")
+	if got := s.TimeZoneName(ctx); got != "UTC" {
+		t.Errorf("invalid TZ: %q", got)
+	}
+	t.Setenv("TZ", "")
+	if got := s.TimeZoneName(ctx); got != "UTC" {
+		t.Errorf("no TZ: %q", got)
+	}
+}
+
+func TestTimeZoneStoredWinsAndEmptyResets(t *testing.T) {
+	s, _ := newStore(t)
+	ctx := context.Background()
+	t.Setenv("TZ", "Asia/Tokyo")
+	if err := s.SetTimeZone(ctx, "Europe/Berlin"); err != nil {
+		t.Fatal(err)
+	}
+	if got := s.TimeZoneName(ctx); got != "Europe/Berlin" {
+		t.Errorf("stored: %q", got)
+	}
+	if loc := s.TimeLocation(ctx); loc.String() != "Europe/Berlin" {
+		t.Errorf("location: %v", loc)
+	}
+	if err := s.SetTimeZone(ctx, "Mars/Olympus"); err == nil {
+		t.Error("invalid zone stored")
+	}
+	if err := s.SetTimeZone(ctx, ""); err != nil {
+		t.Fatal(err)
+	}
+	if stored, _ := s.StoredTimeZone(ctx); stored != "" {
+		t.Errorf("still stored: %q", stored)
+	}
+	if got := s.TimeZoneName(ctx); got != "Asia/Tokyo" {
+		t.Errorf("after reset: %q", got)
+	}
+}

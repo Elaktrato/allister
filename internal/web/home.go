@@ -150,7 +150,7 @@ func (s *server) getHome(w http.ResponseWriter, r *http.Request) {
 		s.internalError(w, r, err)
 		return
 	}
-	if v.Days, err = s.homeComingUp(ctx, ms, s.now()); err != nil {
+	if v.Days, err = s.homeComingUp(ctx, ms, s.now().In(s.location(ctx))); err != nil {
 		s.internalError(w, r, err)
 		return
 	}

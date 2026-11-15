@@ -25,11 +25,16 @@ type generalPlugin struct{ Name, Href string }
 // getSettings renders the General section. Display settings (title
 // language, table columns) belong to each plugin, so it links their pages.
 func (s *server) getSettings(w http.ResponseWriter, r *http.Request) {
+	s.render(w, r, "settings", s.generalView(r, s.timeZoneForm(r.Context(), "", "")))
+}
+
+// generalView is the data of the General page, with its time zone form.
+func (s *server) generalView(r *http.Request, tz timeZoneView) map[string]any {
 	var ps []generalPlugin
 	for _, m := range s.deps.Registry.Manifests() {
 		ps = append(ps, generalPlugin{Name: m.Name, Href: pluginSettingsURL(m.ID)})
 	}
-	s.render(w, r, "settings", map[string]any{"Plugins": ps, "Version": version.Get().String()})
+	return map[string]any{"Plugins": ps, "Version": version.Get().String(), "TimeZone": tz}
 }
 
 // getPlugins renders the plugins section of Settings: every installed plugin

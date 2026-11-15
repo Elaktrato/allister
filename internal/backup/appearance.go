@@ -255,3 +255,31 @@ func (rs *restorer) restoreAppearanceSettings(ctx context.Context, app *appearan
 	}
 	return nil
 }
+
+// restoreTimeZone applies the "time_zone" member when this installation has
+// none of its own and the name is valid (a restore never overwrites).
+func (rs *restorer) restoreTimeZone(ctx context.Context, raw json.RawMessage) error {
+	st := rs.opts.TimeZone
+	var name string
+	if st == nil || json.Unmarshal(raw, &name) != nil || name == "" {
+		return nil
+	}
+	if rs.zoned {
+		return nil
+	}
+	rs.zoned = true
+	cur, err := st.StoredTimeZone(ctx)
+	if err != nil {
+		return err
+	}
+	if cur != "" {
+		rs.note("Time zone kept: this installation has its own.")
+		return nil
+	}
+	if err := st.SetTimeZone(ctx, name); err != nil {
+		rs.note("The time zone of the backup was not restored: %s is not a time zone.", clip(name, 60))
+		return nil
+	}
+	rs.note("Time zone restored.")
+	return nil
+}

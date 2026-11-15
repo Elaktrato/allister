@@ -13,6 +13,7 @@ import (
 	"sync"
 	"syscall"
 	"time"
+	_ "time/tzdata" // the distroless image has no zone database
 
 	"github.com/allister/allister/internal/appearance"
 	"github.com/allister/allister/internal/config"
