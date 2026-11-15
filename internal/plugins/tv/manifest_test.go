@@ -29,7 +29,7 @@ func TestManifest(t *testing.T) {
 			t.Fatalf("position must reset on +1")
 		}
 	}
-	if len(m.Sources) != 2 || m.Sources[0].ID != SourceTVmaze || len(m.Importers) != 1 || len(m.Exporters) != 1 {
+	if len(m.Sources) != 2 || m.Sources[0].ID != SourceTVmaze || len(m.Importers) != 2 || len(m.Exporters) != 1 {
 		t.Fatalf("sources/importers/exporters = %+v %+v %+v", m.Sources, m.Importers, m.Exporters)
 	}
 }
