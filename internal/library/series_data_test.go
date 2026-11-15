@@ -18,8 +18,8 @@ func seriesKind(t *testing.T, e *env) plugin.KindDef {
 		t.Fatal(err)
 	}
 	k.SeriesFields = []plugin.FieldDef{
-		{Key: "volumes", Label: "Volumes", Type: plugin.FieldNumber, Min: fp(0)},
-		{Key: "publisher", Label: "Publisher", Type: plugin.FieldText},
+		{Key: "volumes", Label: "Volumes", Type: plugin.FieldNumber, Min: fp(0), Editable: true},
+		{Key: "publisher", Label: "Publisher", Type: plugin.FieldText, Editable: true},
 	}
 	k.SeriesLink = &plugin.SeriesLinkDef{Kind: "book"}
 	return k

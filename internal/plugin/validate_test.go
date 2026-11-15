@@ -662,13 +662,15 @@ func TestValidateSeriesHint(t *testing.T) {
 }
 
 func TestValidateSeriesFields(t *testing.T) {
-	ok := plugin.FieldDef{Key: "volumes", Label: "Volumes", Type: plugin.FieldNumber}
+	ok := plugin.FieldDef{Key: "volumes", Label: "Volumes", Type: plugin.FieldNumber, Editable: true}
 	tests := []struct {
 		name   string
 		fields []plugin.FieldDef
 		want   string
 	}{
-		{"valid", []plugin.FieldDef{ok, {Key: "writer", Label: "Writer", Type: plugin.FieldText}}, ""},
+		{"valid", []plugin.FieldDef{ok, {Key: "writer", Label: "Writer", Type: plugin.FieldText, Editable: true}}, ""},
+		{"required", []plugin.FieldDef{{Key: "x", Label: "X", Type: plugin.FieldText, Editable: true, Required: true}}, "kinds[0].series_fields[0].required: series fields cannot be required"},
+		{"not editable", []plugin.FieldDef{ok, {Key: "x", Label: "X", Type: plugin.FieldText}}, "kinds[0].series_fields[1].editable: series fields must be editable"},
 		{"reserved description", []plugin.FieldDef{{Key: "description", Label: "D", Type: plugin.FieldText}}, `kinds[0].series_fields[0].key: "description" is reserved`},
 		{"reserved parts_total", []plugin.FieldDef{ok, {Key: "parts_total", Label: "P", Type: plugin.FieldNumber}}, `kinds[0].series_fields[1].key: "parts_total" is reserved`},
 		{"duplicate", []plugin.FieldDef{ok, ok}, `kinds[0].series_fields[1].key: duplicate "volumes"`},
@@ -708,6 +710,8 @@ func TestValidateSeriesLink(t *testing.T) {
 		{"start not date", plugin.SeriesLinkDef{Kind: "novel", StartField: "blurb"}, `kinds[0].series_link.start_field: field "blurb" is not a date field`},
 		{"end not date", plugin.SeriesLinkDef{Kind: "novel", EndField: "count"}, `kinds[0].series_link.end_field: field "count" is not a date field`},
 		{"parts not number", plugin.SeriesLinkDef{Kind: "novel", PartsField: "begun"}, `kinds[0].series_link.parts_field: field "begun" is not a number field`},
+		{"same-named field of the same type", plugin.SeriesLinkDef{Kind: "novel"}, ""},
+		{"same-named field of another type", plugin.SeriesLinkDef{Kind: "novel"}, `kinds[0].series_fields[1].type: the linked kind "novel" has a field "pages" of type number`},
 	}
 	for _, tc := range tests {
 		m := book()
@@ -725,6 +729,11 @@ func TestValidateSeriesLink(t *testing.T) {
 		m.Kinds = append(m.Kinds, other)
 		l := tc.link
 		m.Kinds[0].SeriesLink = &l
+		// series fields named like fields of the linked kind take their values
+		m.Kinds[0].SeriesFields = []plugin.FieldDef{{Key: "count", Label: "Count", Type: plugin.FieldNumber, Editable: true}}
+		if tc.name == "same-named field of another type" {
+			m.Kinds[0].SeriesFields = append(m.Kinds[0].SeriesFields, plugin.FieldDef{Key: "pages", Label: "Pages", Type: plugin.FieldText, Editable: true})
+		}
 		err := plugin.Validate(m)
 		if tc.want == "" {
 			if err != nil {
