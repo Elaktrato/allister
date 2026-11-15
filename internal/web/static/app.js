@@ -96,20 +96,17 @@
     document.documentElement.style.setProperty("--al-" + token, (n >> 16) + " " + ((n >> 8) & 255) + " " + (n & 255));
   });
 
-  // A calendar airing time is rendered as UTC by the server (a fallback that
-  // works without JavaScript); show it in the visitor's timezone instead.
-  function localTimes(root) {
-    var nodes = (root || document).querySelectorAll("time[data-local]");
-    for (var i = 0; i < nodes.length; i++) {
-      var d = new Date(nodes[i].getAttribute("datetime"));
-      if (!isNaN(d.getTime())) {
-        nodes[i].textContent = d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-      }
+  // "Use this browser's zone" (Settings > General) fills the time zone field
+  // with the browser's IANA zone name.
+  document.addEventListener("click", function (event) {
+    var btn = event.target.closest("[data-use-browser-zone]");
+    if (!btn) {
+      return;
     }
-  }
-  localTimes();
-  document.addEventListener("htmx:afterSwap", function (event) {
-    localTimes(event.detail.target);
+    var field = document.getElementById("time_zone");
+    if (field && window.Intl && Intl.DateTimeFormat) {
+      field.value = Intl.DateTimeFormat().resolvedOptions().timeZone || "";
+    }
   });
 
   // A form marked data-no-submit never navigates: its fields drive their

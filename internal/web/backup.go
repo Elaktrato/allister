@@ -103,7 +103,11 @@ func (s *server) getBackupDownload(w http.ResponseWriter, r *http.Request) {
 	h.Set("X-Content-Type-Options", "nosniff")
 	h.Set("Cache-Control", "no-store")
 	cw := &countingWriter{w: w}
-	err := s.backupWrite(r.Context(), cw, s.deps.Library, plugins, s.deps.CoversDir, s.appearance, now)
+	zone := ""
+	if s.deps.Settings != nil {
+		zone, _ = s.deps.Settings.StoredTimeZone(r.Context())
+	}
+	err := s.backupWrite(r.Context(), cw, s.deps.Library, plugins, s.deps.CoversDir, s.appearance, zone, now)
 	if err == nil {
 		return
 	}
@@ -183,11 +187,15 @@ func (s *server) postBackupRestore(w http.ResponseWriter, r *http.Request) {
 		s.internalError(w, r, err)
 		return
 	}
-	rep, err := backup.Restore(r.Context(), f, fi.Size(), backup.Options{
+	opts := backup.Options{
 		Library: s.deps.Library, CoversDir: s.deps.CoversDir, Appearance: s.appearance,
 		// disabled plugins' jobs wait at the queue's gate
 		Enqueue: func(ctx context.Context, itemID int64, pluginID string) { s.enqueueSync(ctx, pluginID, itemID) },
-	})
+	}
+	if s.deps.Settings != nil {
+		opts.TimeZone = s.deps.Settings
+	}
+	rep, err := backup.Restore(r.Context(), f, fi.Size(), opts)
 	var rej *backup.RejectError
 	switch {
 	case errors.As(err, &rej):

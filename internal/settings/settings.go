@@ -9,8 +9,10 @@ import (
 	"fmt"
 	"log"
 	"maps"
+	"os"
 	"slices"
 	"strings"
+	"time"
 )
 
 type Store struct{ db *sql.DB }
@@ -329,4 +331,72 @@ func (s *Store) SetSourceKey(ctx context.Context, sourceID, key string) error {
 func (s *Store) ClearSourceKey(ctx context.Context, sourceID string) error {
 	_, err := s.db.ExecContext(ctx, `DELETE FROM settings WHERE key = ?`, sourceFieldKey(sourceID, "key"))
 	return err
+}
+
+// KeyTimeZone is the settings key of the owner's time zone (an IANA name).
+const KeyTimeZone = "time_zone"
+
+// ValidTimeZone reports whether name is an IANA zone name time.LoadLocation
+// knows. "" and "Local" are not names (the server's own zone is chosen with
+// the TZ environment variable, which is the default).
+func ValidTimeZone(name string) bool {
+	if name == "" || name == "Local" {
+		return false
+	}
+	_, err := time.LoadLocation(name)
+	return err == nil
+}
+
+// StoredTimeZone is the zone the owner stored, "" when none (or an invalid
+// one, which is never used).
+func (s *Store) StoredTimeZone(ctx context.Context) (string, error) {
+	v, ok, err := s.Get(ctx, KeyTimeZone)
+	if err != nil || !ok || !ValidTimeZone(v) {
+		return "", err
+	}
+	return v, nil
+}
+
+// SetTimeZone stores the zone name; "" removes it (back to the default). An
+// invalid name is refused.
+func (s *Store) SetTimeZone(ctx context.Context, name string) error {
+	if name == "" {
+		_, err := s.db.ExecContext(ctx, `DELETE FROM settings WHERE key = ?`, KeyTimeZone)
+		return err
+	}
+	if !ValidTimeZone(name) {
+		return fmt.Errorf("settings: %q is not a time zone", name)
+	}
+	return s.Set(ctx, KeyTimeZone, name)
+}
+
+// DefaultTimeZone is the zone used when none is stored: the TZ environment
+// variable when it names a valid zone, else UTC.
+func DefaultTimeZone() string {
+	if tz := os.Getenv("TZ"); ValidTimeZone(tz) {
+		return tz
+	}
+	return "UTC"
+}
+
+// TimeZoneName is the effective zone name: the stored one, else the default.
+// An unreadable setting falls back to the default.
+func (s *Store) TimeZoneName(ctx context.Context) string {
+	stored, err := s.StoredTimeZone(ctx)
+	if err != nil {
+		log.Printf("settings: read %s: %v (using the default zone)", KeyTimeZone, err)
+	}
+	if stored != "" {
+		return stored
+	}
+	return DefaultTimeZone()
+}
+
+// TimeLocation is the effective zone as a location (never nil).
+func (s *Store) TimeLocation(ctx context.Context) *time.Location {
+	loc, err := time.LoadLocation(s.TimeZoneName(ctx))
+	if err != nil {
+		return time.UTC
+	}
+	return loc
 }

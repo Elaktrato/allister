@@ -24,7 +24,7 @@
   <h3 class="mb-1 mt-3 text-sm font-medium text-slate-400">{{.Label}}</h3>
   <ul class="divide-y divide-slate-800 rounded border border-slate-800 bg-slate-900">
     {{range .Releases}}
-    <li class="flex flex-wrap items-baseline gap-x-3 px-3 py-2 text-sm"><time datetime="{{.At.Format "2006-01-02T15:04:05Z07:00"}}" data-local class="text-slate-400">{{.At.Format "15:04"}} UTC</time><a href="{{.Href}}" class="min-w-0 truncate font-medium text-slate-100 hover:underline">{{.Title}}</a><span class="text-slate-300">{{.Label}}</span></li>
+    <li class="flex flex-wrap items-baseline gap-x-3 px-3 py-2 text-sm"><time datetime="{{.At.Format "2006-01-02T15:04:05Z07:00"}}" class="text-slate-400">{{.At.Format "15:04"}}</time><a href="{{.Href}}" class="min-w-0 truncate font-medium text-slate-100 hover:underline">{{.Title}}</a><span class="text-slate-300">{{.Label}}</span></li>
     {{end}}
   </ul>
   {{end}}

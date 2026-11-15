@@ -101,7 +101,7 @@ type server struct {
 	maxBackupBody int64
 	spoolHook     func(path string)
 	// backupWrite produces the download (backup.Write; tests replace it).
-	backupWrite func(ctx context.Context, w io.Writer, lib *library.Library, plugins []backup.PluginVersion, coversDir string, app *appearance.Service, now time.Time) error
+	backupWrite func(ctx context.Context, w io.Writer, lib *library.Library, plugins []backup.PluginVersion, coversDir string, app *appearance.Service, timeZone string, now time.Time) error
 	// appearance is Deps.Appearance (or the default one).
 	appearance *appearance.Service
 }
@@ -171,6 +171,7 @@ func newServer(deps Deps, now func() time.Time) (*server, http.Handler) {
 	}
 	mux.HandleFunc("GET /{$}", s.getHome)
 	mux.HandleFunc("GET /settings", s.getSettings)
+	mux.HandleFunc("POST /settings/time-zone", s.postTimeZone)
 	mux.HandleFunc("GET /settings/import", s.getImport)
 	mux.HandleFunc("POST /settings/import", s.postImport)
 	mux.HandleFunc("POST /settings/import/cancel", s.postImportCancel)

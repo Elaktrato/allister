@@ -8,6 +8,7 @@
 //	              "created_at": "<RFC 3339 UTC>",
 //	              "plugins": [{"id": ..., "version": ...}],   (informational)
 //	              "appearance": {...},                        (optional)
+//	              "time_zone": "Europe/Berlin",               (optional)
 //	              "items": [library.BackupItem, ...],
 //	              "series": [library.BackupSeries, ...]}      (optional, after items)
 //	covers/<name>  the file of every item whose cover is a local file
@@ -139,12 +140,13 @@ func (l Limits) withDefaults() Limits {
 // (deflated, written item by item in batches, never held in memory) followed
 // by covers/<name> (stored: images are already compressed) for every local
 // cover file found in coversDir, then fonts/<name> for every uploaded font
-// of app (nil: no appearance member and no fonts). A local cover whose
+// of app (nil: no appearance member and no fonts). timeZone, when not empty,
+// is the stored time zone setting ("time_zone" member). A local cover whose
 // name is not acceptable or whose file is missing is written as
 // "cover": "" with "cover_missing": true. A write error stops the stream
 // and is returned (the caller has usually sent headers already and can
 // only log it).
-func Write(ctx context.Context, w io.Writer, lib *library.Library, plugins []PluginVersion, coversDir string, app *appearance.Service, now time.Time) error {
+func Write(ctx context.Context, w io.Writer, lib *library.Library, plugins []PluginVersion, coversDir string, app *appearance.Service, timeZone string, now time.Time) error {
 	zw := zip.NewWriter(w)
 	jw, err := zw.CreateHeader(&zip.FileHeader{Name: jsonName, Method: zip.Deflate, Modified: now.UTC()})
 	if err != nil {
@@ -161,7 +163,8 @@ func Write(ctx context.Context, w io.Writer, lib *library.Library, plugins []Plu
 		CreatedAt     string            `json:"created_at"`
 		Plugins       []PluginVersion   `json:"plugins"`
 		Appearance    *appearanceMember `json:"appearance,omitempty"`
-	}{Format, FormatVersion, now.UTC().Format(time.RFC3339), plugins, look})
+		TimeZone      string            `json:"time_zone,omitempty"`
+	}{Format, FormatVersion, now.UTC().Format(time.RFC3339), plugins, look, timeZone})
 	if err != nil {
 		return fmt.Errorf("backup: %w", err)
 	}
@@ -288,6 +291,14 @@ type Options struct {
 	// Appearance restores the appearance member and the uploaded fonts;
 	// when nil they are skipped (noted).
 	Appearance *appearance.Service
+	// TimeZone restores the time zone setting; when nil it is skipped.
+	TimeZone TimeZoneStore
+}
+
+// TimeZoneStore is the stored time zone setting a restore may fill.
+type TimeZoneStore interface {
+	StoredTimeZone(ctx context.Context) (string, error)
+	SetTimeZone(ctx context.Context, name string) error
 }
 
 // Row identifies one backup item in a report. Index is its 1-based position
@@ -379,6 +390,7 @@ type restorer struct {
 	covers  map[string]*zip.File
 	fonts   map[string]*zip.File
 	looked  bool // the appearance member was handled
+	zoned   bool // the time zone member was handled
 	done    map[string]coverResult
 	budget  *budget
 	rep     *Report
@@ -512,11 +524,22 @@ func (rs *restorer) decode(ctx context.Context, dec *json.Decoder) error {
 		return nil
 	}
 	seen := map[string]bool{}
-	// pending holds appearance members read before the header was checked
-	var pending []json.RawMessage
+	// pending holds appearance and time zone members read before the header
+	// was checked
+	type member struct {
+		key string
+		raw json.RawMessage
+	}
+	var pending []member
 	flush := func() error {
-		for _, raw := range pending {
-			if err := rs.restoreAppearance(ctx, raw); err != nil {
+		for _, m := range pending {
+			var err error
+			if m.key == "time_zone" {
+				err = rs.restoreTimeZone(ctx, m.raw)
+			} else {
+				err = rs.restoreAppearance(ctx, m.raw)
+			}
+			if err != nil {
 				return err
 			}
 		}
@@ -580,7 +603,7 @@ func (rs *restorer) decode(ctx context.Context, dec *json.Decoder) error {
 			if err := rs.series(ctx, dec); err != nil {
 				return err
 			}
-		case "appearance":
+		case "appearance", "time_zone":
 			var raw json.RawMessage
 			if err := rs.member(dec, &raw, seen["items"]); err != nil {
 				return err
@@ -588,7 +611,7 @@ func (rs *restorer) decode(ctx context.Context, dec *json.Decoder) error {
 			// applied only once the header is known to be acceptable
 			// (before "items", or at the end of an archive without them),
 			// so a refused archive stores nothing
-			pending = append(pending, raw)
+			pending = append(pending, member{key, raw})
 			if seen["items"] {
 				if err := flush(); err != nil {
 					return err

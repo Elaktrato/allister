@@ -422,7 +422,7 @@ func TestBackupDownloadFailureIsNeverAFinishedZip(t *testing.T) {
 	// a failure after bytes were sent aborts the connection (the browser
 	// marks the download failed instead of saving a truncated zip)
 	e = backupEnv(t)
-	e.srv.backupWrite = func(_ context.Context, w io.Writer, _ *library.Library, _ []backup.PluginVersion, _ string, _ *appearance.Service, _ time.Time) error {
+	e.srv.backupWrite = func(_ context.Context, w io.Writer, _ *library.Library, _ []backup.PluginVersion, _ string, _ *appearance.Service, _ string, _ time.Time) error {
 		w.Write([]byte("PK\x03\x04 partial"))
 		return errors.New("database gone in batch 2")
 	}

@@ -51,7 +51,7 @@ func parseCalendarMonth(raw string, now time.Time) time.Time {
 // alone.
 func (s *server) getCalendarPage(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	now := s.now()
+	now := s.now().In(s.location(ctx))
 	month := parseCalendarMonth(r.URL.Query().Get("month"), now)
 	rows, err := s.deps.Library.ScheduleEntries(ctx)
 	if err != nil {
@@ -83,7 +83,7 @@ func (s *server) fillCalendar(ctx context.Context, v *calendarView, month, now t
 	next := month.AddDate(0, 1, 0)
 	lead := (int(month.Weekday()) + 6) % 7 // Monday first
 	start := month.AddDate(0, 0, -lead)
-	days := int(next.Sub(month).Hours() / 24)
+	days := time.Date(month.Year(), month.Month()+1, 0, 12, 0, 0, 0, month.Location()).Day() // not Sub: a DST month is not whole days
 	cells := lead + days
 	weeks := (cells + 6) / 7
 	// releases keyed by the month's local day

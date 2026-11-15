@@ -6,6 +6,17 @@
     <h1 class="mb-2 text-2xl font-semibold">General</h1>
     <p class="mb-2 max-w-xl text-sm text-slate-400">Colours, font and text size are set under <a href="/settings/appearance" class="text-indigo-300 hover:underline">Appearance</a>.</p>
     <p class="mb-6 max-w-xl text-sm text-slate-400">The title language and the columns of the list table are set per plugin, on each plugin's settings page.</p>
+    <section aria-labelledby="time-zone-heading" class="mb-8 max-w-md rounded-lg border border-slate-800 bg-slate-900/40 p-4">
+      <h2 id="time-zone-heading" class="mb-1 font-semibold">Time zone</h2>
+      <p class="mb-3 text-sm text-slate-400">The zone that groups the days and shows the times of Coming up and the calendar. Leave it empty for the default ({{.TimeZone.Default}}). The calendar feed always uses UTC.</p>
+      {{if .TimeZone.Error}}<p class="mb-3 rounded border border-amber-700 bg-amber-950 p-2 text-sm text-amber-200" role="alert">{{.TimeZone.Error}}</p>{{end}}
+      <form method="post" action="/settings/time-zone" class="flex flex-wrap items-center gap-3">
+        <label for="time_zone" class="sr-only">Time zone</label>
+        <input id="time_zone" name="time_zone" value="{{.TimeZone.Value}}" placeholder="{{.TimeZone.Default}}" maxlength="100" autocomplete="off" spellcheck="false" class="min-w-0 flex-1 rounded-md border border-slate-700 bg-slate-900 px-3 py-2 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500">
+        <button type="button" data-use-browser-zone class="rounded-md border border-slate-700 px-3 py-2 text-sm text-slate-300 hover:bg-slate-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500">Use this browser's zone</button>
+        <button type="submit" class="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium hover:bg-indigo-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400">Save</button>
+      </form>
+    </section>
     {{if .Plugins}}
     <ul class="flex max-w-md flex-col gap-1">
       {{range .Plugins}}
