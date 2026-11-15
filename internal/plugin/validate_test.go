@@ -621,3 +621,44 @@ func TestValidateStats(t *testing.T) {
 		})
 	}
 }
+
+func TestValidateSeriesHint(t *testing.T) {
+	tests := []struct {
+		name string
+		hint plugin.SeriesHintDef
+		want string // empty: valid
+	}{
+		{"valid", plugin.SeriesHintDef{TitleField: "author", PositionField: "pages"}, ""},
+		{"no position", plugin.SeriesHintDef{TitleField: "author"}, ""},
+		{"empty title field", plugin.SeriesHintDef{}, "kinds[0].series_hint.title_field"},
+		{"unknown title field", plugin.SeriesHintDef{TitleField: "nope"}, `kinds[0].series_hint.title_field: no field "nope"`},
+		{"title not text", plugin.SeriesHintDef{TitleField: "pages"}, `kinds[0].series_hint.title_field: field "pages" is not a text field`},
+		{"unknown position", plugin.SeriesHintDef{TitleField: "author", PositionField: "nope"}, `kinds[0].series_hint.position_field: no field "nope"`},
+		{"position not number", plugin.SeriesHintDef{TitleField: "author", PositionField: "isbn"}, `kinds[0].series_hint.position_field: field "isbn" is not a number field`},
+	}
+	for _, tc := range tests {
+		m := book()
+		h := tc.hint
+		m.Kinds[0].SeriesHint = &h
+		err := plugin.Validate(m)
+		if tc.want == "" {
+			if err != nil {
+				t.Errorf("%s: %v", tc.name, err)
+			}
+			continue
+		}
+		if err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("%s: %v, want %q", tc.name, err, tc.want)
+		}
+	}
+}
+
+func TestValidateRefusesSeriesSourceID(t *testing.T) {
+	m := book()
+	m.Sources[0].ID = "series"
+	m.Importers[0].ResolveVia = "series"
+	err := plugin.Validate(m)
+	if err == nil || !strings.Contains(err.Error(), "reserved by the core") {
+		t.Fatalf("err = %v", err)
+	}
+}

@@ -139,4 +139,8 @@ type ExportEntry struct {
 	StartedOn   *time.Time         `json:"started_on,omitempty"`  // calendar day, UTC midnight by convention (see DateOnly)
 	FinishedOn  *time.Time         `json:"finished_on,omitempty"` // calendar day, UTC midnight by convention (see DateOnly)
 	Comment     string             `json:"comment,omitempty"`
+	// Series is the title of the series group the entry belongs to and
+	// SeriesPosition its position in it (0: none).
+	Series         string `json:"series,omitempty"`
+	SeriesPosition int    `json:"series_position,omitempty"`
 }

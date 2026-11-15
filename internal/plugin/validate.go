@@ -45,7 +45,7 @@ var reservedIDs = map[string]bool{
 // reservedSourceIDs are the core's segments right after a plugin's prefix
 // (/{plugin}/manual/..., /{plugin}/export/..., /{plugin}/search): a source
 // with such an id would be shadowed by them under /{plugin}/{source}/{id}.
-var reservedSourceIDs = map[string]bool{"manual": true, "export": true, "search": true}
+var reservedSourceIDs = map[string]bool{"manual": true, "export": true, "search": true, "series": true}
 
 type problems struct{ list []error }
 
@@ -346,6 +346,24 @@ func validateKind(p *problems, path string, k KindDef) {
 		}
 		if f.Min != nil && f.Max != nil && *f.Min > *f.Max {
 			p.add(fp, "min %v is above max %v", *f.Min, *f.Max)
+		}
+	}
+	if h := k.SeriesHint; h != nil {
+		hp := path + ".series_hint"
+		switch t, ok := fields[h.TitleField]; {
+		case h.TitleField == "":
+			p.add(hp+".title_field", "required")
+		case !ok:
+			p.add(hp+".title_field", "no field %q", h.TitleField)
+		case t != FieldText:
+			p.add(hp+".title_field", "field %q is not a text field", h.TitleField)
+		}
+		if h.PositionField != "" {
+			if t, ok := fields[h.PositionField]; !ok {
+				p.add(hp+".position_field", "no field %q", h.PositionField)
+			} else if t != FieldNumber {
+				p.add(hp+".position_field", "field %q is not a number field", h.PositionField)
+			}
 		}
 	}
 
