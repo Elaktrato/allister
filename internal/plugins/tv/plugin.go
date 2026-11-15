@@ -42,6 +42,7 @@ func New(opts Options) plugin.Plugin {
 		},
 		importers: map[string]plugin.Importer{
 			ImporterYamtrack: yamtrackTVImporter{},
+			ImporterIMDb:     imdbTVImporter{},
 		},
 		exporter: jsonexport.New(exportFormat),
 	}

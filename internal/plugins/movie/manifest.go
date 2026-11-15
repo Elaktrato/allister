@@ -10,6 +10,7 @@ const (
 	SourceTMDB = "tmdb"
 
 	ImporterYamtrack = "yamtrack-movie"
+	ImporterIMDb     = "imdb-csv"
 	ExporterJSON     = "json"
 	exportFormat     = "allister.movie.export"
 )
@@ -96,6 +97,13 @@ func manifest() plugin.Manifest {
 			ExternalIDType: "tmdb", ExternalIDLabel: "TMDB",
 			ResolveVia:    SourceTMDB,
 			UnmatchedNote: "Imported from Yamtrack; TMDB could not resolve #{id}.",
+		}, {
+			ID: ImporterIMDb, Name: "IMDb CSV",
+			FileHint: "Upload your IMDb ratings or watchlist export (CSV). Ratings become Seen/Watched, watchlist entries Want to watch.",
+			Accept:   []string{".csv"}, ManualRows: true, FallbackTitleLang: "en",
+			ExternalIDType: "imdb", ExternalIDLabel: "IMDb",
+			ResolveVia:    SourceTMDB,
+			UnmatchedNote: "Imported from IMDb; TMDB had no match for {id}.",
 		}},
 		Exporters: []plugin.ExporterInfo{{ID: ExporterJSON, Name: "JSON", Extension: ".json", MIME: "application/json"}},
 	}
