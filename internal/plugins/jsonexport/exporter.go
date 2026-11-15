@@ -34,6 +34,9 @@ type exportEntry struct {
 	StartedOn   *string            `json:"started_on"`
 	FinishedOn  *string            `json:"finished_on"`
 	Comment     string             `json:"comment"`
+	// Series and SeriesPosition are written only for an entry in a series.
+	Series         string `json:"series,omitempty"`
+	SeriesPosition int    `json:"series_position,omitempty"`
 }
 
 func exportDay(t *time.Time) *string {
@@ -71,6 +74,7 @@ func (e Exporter) Export(ctx context.Context, entries []plugin.ExportEntry, w io
 		ee := exportEntry{
 			Kind: e.Kind, Titles: e.Titles, ExternalIDs: e.ExternalIDs, Status: e.Status, Rating: e.Rating,
 			Progress: e.Progress, StartedOn: exportDay(e.StartedOn), FinishedOn: exportDay(e.FinishedOn), Comment: e.Comment,
+			Series: e.Series, SeriesPosition: e.SeriesPosition,
 		}
 		if ee.Titles == nil {
 			ee.Titles = []plugin.Title{}

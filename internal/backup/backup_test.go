@@ -865,3 +865,139 @@ type failAfter struct {
 }
 
 func (f failAfter) Write(p []byte) (int, error) { return 0, f.err }
+
+// seriesDoc is a series member of a hand-made archive.
+func seriesJSON(uid, title string, parts ...string) string {
+	var ps []string
+	for _, id := range parts {
+		ps = append(ps, `{"plugin_id":"book","kind":"book","source":"books","source_id":"`+id+`"}`)
+	}
+	return `{"uid":"` + uid + `","plugin_id":"book","kind":"book","title":"` + title + `","created_at":"2024-01-02T03:04:05Z","updated_at":"2024-02-03T04:05:06Z","parts":[` + strings.Join(ps, ",") + `]}`
+}
+
+func (e *env) seriesOf(title string, ids ...int64) library.Series {
+	e.t.Helper()
+	s, err := e.lib.CreateSeries(bg, ids[0], title)
+	if err != nil {
+		e.t.Fatal(err)
+	}
+	for _, id := range ids[1:] {
+		if err := e.lib.AddPart(bg, s.ID, id, ""); err != nil {
+			e.t.Fatal(err)
+		}
+	}
+	return s
+}
+
+func (e *env) seriesTitles() []string {
+	e.t.Helper()
+	rows, err := e.db.Query(`SELECT s.title || ':' || group_concat(i.source_id, ',') FROM series s
+		JOIN (SELECT p.* FROM series_parts p ORDER BY p.series_id, p.position) p ON p.series_id = s.id
+		JOIN items i ON i.id = p.item_id GROUP BY s.id ORDER BY s.id`)
+	if err != nil {
+		e.t.Fatal(err)
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var s string
+		if err := rows.Scan(&s); err != nil {
+			e.t.Fatal(err)
+		}
+		out = append(out, s)
+	}
+	return out
+}
+
+func TestBackupRoundTripKeepsSeries(t *testing.T) {
+	a := newEnv(t)
+	i1 := a.book("1", "", &library.Entry{Status: library.Planned})
+	i2 := a.book("2", "", &library.Entry{Status: library.Planned})
+	i3 := a.book("3", "", &library.Entry{Status: library.Planned})
+	a.book("4", "", &library.Entry{Status: library.Planned})
+	s := a.seriesOf("Saga", i3, i1, i2)
+	data := a.archive()
+	d, files := open(t, data)
+	if !strings.Contains(string(files["backup.json"]), `"series":[`) || strings.Index(string(files["backup.json"]), `"series"`) < strings.Index(string(files["backup.json"]), `"items"`) {
+		t.Fatalf("series member missing or before items: %s", files["backup.json"])
+	}
+	_ = d
+
+	b := newEnv(t)
+	rep := mustRestore(t, b, data)
+	if rep.SeriesCreated != 1 || rep.SeriesSkipped != 0 || len(rep.Notes) != 0 {
+		t.Fatalf("report = %+v", rep)
+	}
+	got := b.seriesTitles()
+	if len(got) != 1 || got[0] != "Saga:3,1,2" {
+		t.Fatalf("series = %v", got)
+	}
+	var uid, created, updated string
+	if err := b.db.QueryRow(`SELECT uid, created_at, updated_at FROM series`).Scan(&uid, &created, &updated); err != nil {
+		t.Fatal(err)
+	}
+	if uid != s.UID || created != s.CreatedAt.UTC().Format(time.RFC3339) || updated != s.UpdatedAt.UTC().Format(time.RFC3339) {
+		t.Fatalf("identity not kept: %s %s %s vs %+v", uid, created, updated, s)
+	}
+}
+
+func TestRestoreSeriesIdempotent(t *testing.T) {
+	a := newEnv(t)
+	i1 := a.book("1", "", &library.Entry{Status: library.Planned})
+	i2 := a.book("2", "", &library.Entry{Status: library.Planned})
+	a.seriesOf("Saga", i1, i2)
+	data := a.archive()
+	b := newEnv(t)
+	mustRestore(t, b, data)
+	rep := mustRestore(t, b, data)
+	if rep.SeriesCreated != 0 || rep.SeriesSkipped != 1 {
+		t.Fatalf("report = %+v", rep)
+	}
+	if got := b.seriesTitles(); len(got) != 1 {
+		t.Fatalf("series = %v", got)
+	}
+}
+
+func TestRestoreSeriesLeavesOutTakenParts(t *testing.T) {
+	b := newEnv(t)
+	i1 := b.book("1", "", &library.Entry{Status: library.Planned})
+	b.seriesOf("Other", i1) // book 1 is taken
+	b.book("2", "", &library.Entry{Status: library.Planned})
+	b.book("5", "", &library.Entry{Status: library.Planned})
+	body := `{"format":"allister.backup","format_version":1,"items":[],"series":[` +
+		seriesJSON("u-a", "Mixed", "1", "2", "gone") + `,` +
+		seriesJSON("u-b", "Nothing", "1", "gone") + `,` +
+		seriesJSON("u-c", "Clean", "5") + `]}`
+	rep := mustRestore(t, b, zipOf(t, entry{name: "backup.json", body: []byte(body)}))
+	if rep.SeriesCreated != 2 || rep.SeriesSkipped != 1 { // "Nothing" has no part left
+		t.Fatalf("report = %+v", rep)
+	}
+	if len(rep.Notes) != 2 || rep.Notes[0].Title != "Mixed" || !strings.Contains(rep.Notes[0].Reason, "2 parts left out") ||
+		rep.Notes[1].Title != "Nothing" || !strings.Contains(rep.Notes[1].Reason, "not created") {
+		t.Fatalf("notes = %+v", rep.Notes)
+	}
+	got := b.seriesTitles()
+	if len(got) != 3 || got[1] != "Mixed:2" || got[2] != "Clean:5" {
+		t.Fatalf("series = %v", got)
+	}
+}
+
+func TestRestoreWithoutSeriesMember(t *testing.T) {
+	a := newEnv(t)
+	a.book("1", "", &library.Entry{Status: library.Planned})
+	data := zipOf(t, entry{name: "backup.json", body: jsonOf(t, bookItem("9"))})
+	rep := mustRestore(t, a, data)
+	if rep.Created != 1 || rep.SeriesCreated != 0 || rep.SeriesSkipped != 0 {
+		t.Fatalf("report = %+v", rep)
+	}
+}
+
+func TestRestoreRefusesSeriesBeforeItems(t *testing.T) {
+	e := newEnv(t)
+	body := `{"format":"allister.backup","format_version":1,"series":[],"items":[]}`
+	_, err := e.restore(zipOf(t, entry{name: "backup.json", body: []byte(body)}), Limits{}, nil)
+	var re *RejectError
+	if !errors.As(err, &re) || !strings.Contains(re.Msg, `"series" must come after "items"`) {
+		t.Fatalf("err = %v", err)
+	}
+}

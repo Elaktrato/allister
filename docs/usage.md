@@ -45,6 +45,8 @@ Unknown or invalid parameters are ignored, and a notice names them.
 
 **Activity heatmap.** The grid beside the figures shows the last 365 days, today included, with weeks starting on Monday. Days are UTC calendar days. It counts only what you did in the app: a progress increase or a status change to completed. Changes made by an import or a restore are not counted, so a large import does not paint the calendar. The heatmap is narrowed by `media` only; the period, status, genre, tag and field filters do not change it. "Tracked since" is the day of the earliest recorded change of yours.
 
+**Series in backups and exports.** `backup.json` has a top-level `series` member after `items` (format version 1 is unchanged; older versions skip it): per series its `uid`, `plugin_id`, `kind`, `title`, `created_at`, `updated_at` and `parts` in order, each part identified like an item (`plugin_id`, `kind`, `source`, `source_id`). A restore applies the series after all items, one series at a time. A series whose uid already exists is skipped; otherwise it is created with the parts that exist and are in no series yet, in order. Parts that are missing or already in another series are left out, and the restore summary notes how many; a series left with no part is not created. The summary counts series created and skipped. The per-plugin JSON export adds `series` (the series title) and `series_position` (1-based) to the entries in a series and omits both for the others.
+
 **Backups.** The universal backup carries each entry's change log, newest first, up to 5,000 events per entry. Older events stay in the database; the archive marks an entry whose log was cut (`events_truncated`). A restore accepts no more than 5,000 events per entry.
 
 ## Plugin settings

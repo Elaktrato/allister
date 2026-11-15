@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/allister/allister/internal/plugin"
@@ -116,6 +117,19 @@ func (l *Library) ExportEntries(ctx context.Context, pluginID, kind string) ([]p
 	}
 	if err := closeRows(prows); err != nil {
 		return nil, fmt.Errorf("export entries: %w", err)
+	}
+	ids := make([]int64, 0, len(byID))
+	for id := range byID {
+		ids = append(ids, id)
+	}
+	for chunk := range slices.Chunk(ids, 500) { // stay below SQLite's variable limit
+		memberships, err := l.SeriesOfItems(ctx, chunk)
+		if err != nil {
+			return nil, err
+		}
+		for id, m := range memberships {
+			out[byID[id]].Series, out[byID[id]].SeriesPosition = m.Title, m.Position
+		}
 	}
 	return out, nil
 }
