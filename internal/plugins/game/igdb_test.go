@@ -232,13 +232,19 @@ func TestIGDBTokenCacheKeyedByClientID(t *testing.T) {
 }
 
 func TestIGDBTokenRefreshedBeforeExpiry(t *testing.T) {
+	// A controlled clock: the token is issued at t0 and the second request is
+	// made at the same instant, so the 60-second margin is tested exactly.
 	cases := []struct {
 		name    string
 		expires int
+		later   time.Duration
 		want    int
 	}{
-		{"59 seconds is refreshed", 59, 2},
-		{"61 seconds is cached", 61, 1},
+		{"59 seconds is refreshed", 59, 0, 2},
+		{"60 seconds is refreshed", 60, 0, 2},
+		{"61 seconds is cached", 61, 0, 1},
+		{"one hour is cached after 58 minutes", 3600, 58 * time.Minute, 1},
+		{"one hour is refreshed after 59 minutes", 3600, 59 * time.Minute, 2},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -249,12 +255,16 @@ func TestIGDBTokenRefreshedBeforeExpiry(t *testing.T) {
 			c := newIGDBTestClient(t, rec, token, func(w http.ResponseWriter, r *http.Request) {
 				io.WriteString(w, `[]`)
 			})
+			t0 := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+			clock := t0
+			c.now = func() time.Time { return clock }
 
 			for i := 0; i < 2; i++ {
 				var out []json.RawMessage
 				if err := c.Post(context.Background(), "games", "fields name;", &out); err != nil {
 					t.Fatalf("Post %d: %v", i, err)
 				}
+				clock = t0.Add(tc.later)
 			}
 			if got := rec.tokenRequests(); got != tc.want {
 				t.Errorf("token requests = %d, want %d", got, tc.want)
@@ -1057,4 +1067,22 @@ func TestIGDBBodyLimitAndMalformedJSON(t *testing.T) {
 			t.Fatalf("err = %v, want ErrBadResponse", err)
 		}
 	})
+}
+
+// TestIGDBOverlongSlugIsNotFound: a slug longer than maxIDRunes is refused
+// without a request instead of being cut, which could name another game.
+func TestIGDBOverlongSlugIsNotFound(t *testing.T) {
+	rec := &igdbTestRecorder{}
+	c := newIGDBTestClient(t, rec, func(w http.ResponseWriter, r *http.Request) {
+		io.WriteString(w, `{"access_token":"token","expires_in":3600}`)
+	}, func(w http.ResponseWriter, r *http.Request) {
+		io.WriteString(w, `[{"id":1,"name":"Wrong","slug":"x"}]`)
+	})
+	_, err := (&igdbSource{c: c}).Details(context.Background(), KindGame, strings.Repeat("a", maxIDRunes+1))
+	if !errors.Is(err, plugin.ErrNotFound) {
+		t.Fatalf("err = %v, want ErrNotFound", err)
+	}
+	if n := len(rec.requests()); n != 0 {
+		t.Fatalf("%d requests, want none", n)
+	}
 }
