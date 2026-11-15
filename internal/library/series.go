@@ -747,3 +747,61 @@ func (l *Library) SeriesOfItems(ctx context.Context, itemIDs []int64) (map[int64
 	}
 	return out, nil
 }
+
+// ActiveSeries is the bounded query behind the home page: the series of the
+// listed plugins whose derived status is active, newest part update first,
+// at most limit. The status is computed in SQL from per-series counts by
+// the same rules as DeriveSeriesStatus (a test compares them on every
+// combination of up to three part statuses): not all dropped, not (some
+// completed and the rest dropped), not all planned, and not (paused without
+// any active). A series without parts derives as active, like there.
+func (l *Library) ActiveSeries(ctx context.Context, pluginIDs []string, limit int) ([]SeriesRow, error) {
+	if len(pluginIDs) == 0 || limit <= 0 {
+		return nil, nil
+	}
+	args := make([]any, 0, len(pluginIDs)+1)
+	for _, id := range pluginIDs {
+		args = append(args, id)
+	}
+	args = append(args, limit)
+	//nolint:gosec // G202: constant SQL and placeholders; values are bound
+	rows, err := l.db.QueryContext(ctx, `SELECT `+seriesCols+`,
+			COUNT(e.item_id), COALESCE(SUM(e.status = 'completed'), 0), COALESCE(MAX(e.updated_at), ''),
+			COALESCE((SELECT i2.cover_path FROM series_parts sp2 JOIN `+tableEntries+` e2 ON e2.item_id = sp2.item_id
+				JOIN items i2 ON i2.id = sp2.item_id WHERE sp2.series_id = s.id ORDER BY sp2.position LIMIT 1), '')
+		FROM series s
+		LEFT JOIN series_parts sp ON sp.series_id = s.id
+		LEFT JOIN `+tableEntries+` e ON e.item_id = sp.item_id
+		WHERE s.plugin_id IN (`+placeholders(len(pluginIDs))+`)
+		GROUP BY s.id
+		HAVING NOT (COUNT(e.item_id) > 0 AND SUM(e.status = 'dropped') = COUNT(e.item_id))
+		   AND NOT (COALESCE(SUM(e.status = 'completed'), 0) > 0 AND SUM(e.status IN ('completed', 'dropped')) = COUNT(e.item_id))
+		   AND NOT (COUNT(e.item_id) > 0 AND SUM(e.status = 'planned') = COUNT(e.item_id))
+		   AND NOT (COALESCE(SUM(e.status = 'active'), 0) = 0 AND SUM(e.status = 'paused') > 0)
+		ORDER BY COALESCE(MAX(e.updated_at), '') DESC, s.id DESC
+		LIMIT ?`, args...)
+	if err != nil {
+		return nil, fmt.Errorf("active series: %w", err)
+	}
+	defer rows.Close()
+	var out []SeriesRow
+	for rows.Next() {
+		var r SeriesRow
+		var updated string
+		s, err := scanSeries(rows, &r.Parts, &r.Completed, &updated, &r.Cover)
+		if err != nil {
+			return nil, fmt.Errorf("active series: %w", err)
+		}
+		r.Series, r.Status = *s, Active
+		if updated != "" {
+			if r.Updated, err = time.Parse(time.RFC3339, updated); err != nil {
+				return nil, fmt.Errorf("active series: entry updated_at: %w", err)
+			}
+		}
+		out = append(out, r)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("active series: %w", err)
+	}
+	return out, nil
+}

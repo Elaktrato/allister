@@ -3,6 +3,7 @@ package library
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/allister/allister/internal/plugin"
@@ -73,12 +74,38 @@ func (l *Library) SaveSchedule(ctx context.Context, itemID int64, airings []Airi
 // included (rowid order), ordered by air time. The caller filters by source
 // capability: the library does not know the manifests.
 func (l *Library) ScheduleEntries(ctx context.Context) ([]ScheduledEntry, error) {
+	return l.scheduleQuery(ctx, "", nil, -1)
+}
+
+// ScheduleSource names a plugin's source (the pair the airings are read by).
+type ScheduleSource struct{ PluginID, Source string }
+
+// ScheduleBetween is ScheduleEntries bounded: the airings of active entries
+// with from <= airs_at < to whose item belongs to one of the listed
+// plugin/source pairs, in air order, at most limit.
+func (l *Library) ScheduleBetween(ctx context.Context, from, to time.Time, sources []ScheduleSource, limit int) ([]ScheduledEntry, error) {
+	if len(sources) == 0 || limit <= 0 {
+		return nil, nil
+	}
+	args := []any{from.UTC().Format(scheduleLayout), to.UTC().Format(scheduleLayout)}
+	pairs := make([]string, 0, len(sources))
+	for _, s := range sources {
+		pairs = append(pairs, "(i.plugin_id = ? AND i.source = ?)")
+		args = append(args, s.PluginID, s.Source)
+	}
+	return l.scheduleQuery(ctx, " AND a.airs_at >= ? AND a.airs_at < ? AND ("+strings.Join(pairs, " OR ")+")", args, limit)
+}
+
+// scheduleQuery loads the airings of active entries matching the extra
+// WHERE terms (constant SQL, bound args), titles included.
+func (l *Library) scheduleQuery(ctx context.Context, extra string, args []any, limit int) ([]ScheduledEntry, error) {
+	//nolint:gosec // G202: constant SQL fragments; values are bound
 	rows, err := l.db.QueryContext(ctx, `SELECT a.item_id, i.plugin_id, i.kind, i.source, i.source_id, a.season, a.number, a.airs_at
 		FROM airings a
 		JOIN items i ON i.id = a.item_id
 		JOIN entries e ON e.item_id = a.item_id
-		WHERE e.status = ?
-		ORDER BY a.airs_at, a.item_id, a.season, a.number`, string(Active))
+		WHERE e.status = ?`+extra+`
+		ORDER BY a.airs_at, a.item_id, a.season, a.number LIMIT ?`, append(append([]any{string(Active)}, args...), limit)...)
 	if err != nil {
 		return nil, fmt.Errorf("schedule entries: %w", err)
 	}

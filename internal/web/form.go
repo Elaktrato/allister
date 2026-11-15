@@ -29,6 +29,15 @@ func parseForm(w http.ResponseWriter, r *http.Request) bool {
 	return true
 }
 
+// returnTarget is the return URL of an entry action: the literal "/" (the
+// home page's cards) or else safeReturn's plugin-scoped path.
+func returnTarget(raw, pluginID string) string {
+	if raw == "/" {
+		return "/"
+	}
+	return safeReturn(raw, pluginID)
+}
+
 // safeReturn returns raw when it is a same-site path below the plugin's
 // prefix /{pluginID} (exactly "/{pluginID}", or followed by "?" or "/": the
 // plugin's list with its filters and its item pages), else "/{pluginID}".

@@ -142,7 +142,7 @@ func TestTemplatesUseOnlyThemedColours(t *testing.T) {
 			// pre-existing: the import progress bar's width, and the card
 			// view's progress bar (no colour either)
 			if (path == "templates/import.html" && st == ` style="width: {{.Percent}}%"`) ||
-				(path == "templates/list_cards.html" && st == ` style="width: {{.BarPct}}%"`) {
+				((path == "templates/list_cards.html" || path == "templates/home.html") && st == ` style="width: {{.BarPct}}%"`) {
 				continue
 			}
 			t.Errorf("%s: inline style attribute%s", path, st)

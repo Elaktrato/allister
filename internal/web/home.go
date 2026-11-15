@@ -56,6 +56,7 @@ type homeRelease struct {
 type homeSeries struct {
 	Title, Href, Cover, Progress string
 	BadgeIcon, BadgeLabel        string
+	BarPct                       int // -1: no parts
 }
 
 type homeRecent struct {
@@ -136,16 +137,20 @@ func (s *server) getHome(w http.ResponseWriter, r *http.Request) {
 		rv := s.rowView(he.m, he.row, "/", nil)
 		rv.BadgeIcon, rv.BadgeLabel = badge(he.m, he.k)
 		v.Cards = append(v.Cards, rv)
-		if !linked[he.m.ID] {
-			linked[he.m.ID] = true
-			v.ActiveAll = append(v.ActiveAll, homeLink{Label: he.m.Name, Href: listURL(he.m, he.k.Key, string(library.Active), "", 1)})
+		if key := he.m.ID + "/" + he.k.Key; !linked[key] {
+			linked[key] = true
+			label := he.k.LabelPlural
+			if label == "" {
+				label = he.m.Name
+			}
+			v.ActiveAll = append(v.ActiveAll, homeLink{Label: label, Href: listURL(he.m, he.k.Key, string(library.Active), "", 1)})
 		}
 	}
 	if err := s.markHomeSeries(ctx, v.Cards, entries); err != nil {
 		s.internalError(w, r, err)
 		return
 	}
-	if v.Days, err = s.homeComingUp(ctx, s.now()); err != nil {
+	if v.Days, err = s.homeComingUp(ctx, ms, s.now()); err != nil {
 		s.internalError(w, r, err)
 		return
 	}
@@ -201,32 +206,40 @@ func (s *server) markHomeSeries(ctx context.Context, cards []rowView, entries []
 }
 
 // homeComingUp lists the stored releases of active entries airing in the next
-// 7 days (the calendar feed's data), grouped by day.
-func (s *server) homeComingUp(ctx context.Context, now time.Time) ([]homeDay, error) {
-	rows, err := s.deps.Library.ScheduleEntries(ctx)
+// 7 days (the calendar feed's data), grouped by day: one bounded query over
+// the enabled plugins' schedule-capable sources.
+func (s *server) homeComingUp(ctx context.Context, ms []plugin.Manifest, now time.Time) ([]homeDay, error) {
+	var sources []library.ScheduleSource
+	byID := map[string]plugin.Manifest{}
+	for _, m := range ms {
+		byID[m.ID] = m
+		for _, si := range m.Sources {
+			if si.SupportsSchedule {
+				sources = append(sources, library.ScheduleSource{PluginID: m.ID, Source: si.ID})
+			}
+		}
+	}
+	rows, err := s.deps.Library.ScheduleBetween(ctx, now, now.Add(homeWindow), sources, homeComingLimit)
 	if err != nil {
 		return nil, err
 	}
-	end := now.Add(homeWindow)
+	langs := map[string]string{} // one title language read per plugin
 	var days []homeDay
-	n := 0
 	for _, row := range rows {
-		if row.AirsAt.Before(now) || !row.AirsAt.Before(end) {
-			continue
-		}
-		m, ok := s.deps.Registry.Manifest(row.PluginID)
-		if !ok || !s.deps.Registry.IsEnabled(row.PluginID) || !sourceSchedules(m, row.Source) {
+		m, ok := byID[row.PluginID]
+		if !ok {
 			continue
 		}
 		k, ok := kindDef(m, row.Kind)
 		if !ok {
 			continue
 		}
-		if n == homeComingLimit {
-			break
+		lang, ok := langs[m.ID]
+		if !ok {
+			lang = s.titleLang(ctx, m)
+			langs[m.ID] = lang
 		}
-		n++
-		title := s.resolveTitle(ctx, m, k, row.Kind, row.Titles)
+		title := library.ResolveTitle(row.Titles, lang, titleFallback(m, k, row.Kind))
 		if title == "" {
 			title = "(untitled)"
 		}
@@ -243,34 +256,34 @@ func (s *server) homeComingUp(ctx context.Context, now time.Time) ([]homeDay, er
 }
 
 // homeSeries returns the newest series with derived status active across
-// the plugins.
+// the plugins (one bounded library query).
 func (s *server) homeSeries(ctx context.Context, ms []plugin.Manifest) ([]homeSeries, error) {
-	type item struct {
-		m   plugin.Manifest
-		row library.SeriesRow
-	}
-	var all []item
+	byID := map[string]plugin.Manifest{}
+	ids := make([]string, 0, len(ms))
 	for _, m := range ms {
-		pg, err := s.deps.Library.ListSeries(ctx, library.SeriesQuery{PluginID: m.ID, Status: library.Active, PageSize: homeSeriesLimit})
-		if err != nil {
-			return nil, err
-		}
-		for _, row := range pg.Rows {
-			all = append(all, item{m, row})
-		}
+		byID[m.ID] = m
+		ids = append(ids, m.ID)
 	}
-	slices.SortStableFunc(all, func(a, b item) int {
-		return cmp.Or(b.row.Updated.Compare(a.row.Updated), cmp.Compare(b.row.Series.ID, a.row.Series.ID))
-	})
+	rows, err := s.deps.Library.ActiveSeries(ctx, ids, homeSeriesLimit)
+	if err != nil {
+		return nil, err
+	}
 	var out []homeSeries
-	for _, it := range all[:min(homeSeriesLimit, len(all))] {
-		k, ok := kindDef(it.m, it.row.Series.Kind)
+	for _, row := range rows {
+		m, ok := byID[row.Series.PluginID]
 		if !ok {
-			k = it.m.Kinds[0]
+			continue
 		}
-		icon, label := badge(it.m, k)
-		hs := homeSeries{Title: it.row.Series.Title, Href: seriesURL(it.m.ID, it.row.Series.UID), Cover: covers.Src(it.row.Cover),
-			Progress: strconv.Itoa(it.row.Completed) + "/" + strconv.Itoa(it.row.Parts), BadgeIcon: icon, BadgeLabel: label}
+		k, ok := kindDef(m, row.Series.Kind)
+		if !ok {
+			k = m.Kinds[0]
+		}
+		icon, label := badge(m, k)
+		hs := homeSeries{Title: row.Series.Title, Href: seriesURL(m.ID, row.Series.UID), Cover: covers.Src(row.Cover),
+			Progress: strconv.Itoa(row.Completed) + "/" + strconv.Itoa(row.Parts), BadgeIcon: icon, BadgeLabel: label, BarPct: -1}
+		if row.Parts > 0 {
+			hs.BarPct = row.Completed * 100 / row.Parts
+		}
 		out = append(out, hs)
 	}
 	return out, nil

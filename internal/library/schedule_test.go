@@ -136,3 +136,40 @@ func TestScheduleKeepsSeasonsApart(t *testing.T) {
 		t.Fatalf("%+v", got)
 	}
 }
+
+// TestScheduleBetweenWindowSourcesAndLimit: the bounded query returns only
+// airings of active entries inside [from, to) of the listed plugin/source
+// pairs, in air order, cut at limit, with titles.
+func TestScheduleBetweenWindowSourcesAndLimit(t *testing.T) {
+	e := newEnv(t)
+	l := e.lib
+	id := addShow(t, l, "w1", fp(12), Entry{Status: Active})
+	paused := addShow(t, l, "w2", fp(12), Entry{Status: Paused})
+	now := time.Date(2026, 11, 10, 12, 0, 0, 0, time.UTC)
+	airs := []Airing{
+		{Number: 1, AirsAt: now.Add(-time.Minute)},
+		{Number: 2, AirsAt: now},
+		{Number: 3, AirsAt: now.Add(time.Hour)},
+		{Number: 4, AirsAt: now.Add(2 * time.Hour)},
+		{Number: 5, AirsAt: now.Add(48 * time.Hour)},
+	}
+	for _, i := range []int64{id, paused} {
+		if err := l.SaveSchedule(bg, i, airs, now); err != nil {
+			t.Fatal(err)
+		}
+	}
+	tv := []ScheduleSource{{PluginID: "tv", Source: "tvdata"}}
+	got, err := l.ScheduleBetween(bg, now, now.Add(24*time.Hour), tv, 10)
+	if err != nil || len(got) != 3 || got[0].Number != 2 || got[2].Number != 4 || len(got[0].Titles) == 0 || got[0].ItemID != id {
+		t.Fatalf("%+v %v", got, err)
+	}
+	got, _ = l.ScheduleBetween(bg, now, now.Add(24*time.Hour), tv, 2)
+	if len(got) != 2 || got[1].Number != 3 {
+		t.Fatalf("limit: %+v", got)
+	}
+	for _, other := range [][]ScheduleSource{nil, {{PluginID: "book", Source: "tvdata"}}, {{PluginID: "tv", Source: "other"}}} {
+		if got, err := l.ScheduleBetween(bg, now, now.Add(24*time.Hour), other, 10); err != nil || len(got) != 0 {
+			t.Fatalf("sources %v: %+v %v", other, got, err)
+		}
+	}
+}

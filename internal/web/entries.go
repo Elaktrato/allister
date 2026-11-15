@@ -91,12 +91,8 @@ func (s *server) postIncrement(w http.ResponseWriter, r *http.Request) {
 	if !parseForm(w, r) {
 		return
 	}
-	// the home page's cards return to "/", every other caller to its list
-	home := r.PostFormValue("return") == "/"
-	ret := "/"
-	if !home {
-		ret = safeReturn(r.PostFormValue("return"), ref.PluginID)
-	}
+	ret := returnTarget(r.PostFormValue("return"), ref.PluginID)
+	home := ret == "/"
 	if err := s.deps.Library.Increment(r.Context(), ref.ID); err != nil {
 		if errors.Is(err, library.ErrNoEntry) {
 			s.entryNotFound(w, r)
@@ -262,7 +258,7 @@ func (s *server) getEdit(w http.ResponseWriter, r *http.Request) {
 		s.internalError(w, r, err)
 		return
 	}
-	ret := safeReturn(r.URL.Query().Get("return"), t.man.ID)
+	ret := returnTarget(r.URL.Query().Get("return"), t.man.ID)
 	d := t.dialog(entryFormValues(t.kind, t.row.Entry, stored), t.row.Item.ProgressKeys, ret, stored)
 	s.editResponse(w, r, t, d, http.StatusOK)
 }
@@ -294,7 +290,7 @@ func (s *server) postEdit(w http.ResponseWriter, r *http.Request) {
 		s.internalError(w, r, err)
 		return
 	}
-	ret := safeReturn(r.PostFormValue("return"), t.man.ID)
+	ret := returnTarget(r.PostFormValue("return"), t.man.ID)
 	keys, change := t.row.Item.ProgressKeys, []string(nil)
 	var msg string
 	if raw := strings.TrimSpace(r.PostFormValue(progressKeysField)); raw != "" {
@@ -365,5 +361,5 @@ func (s *server) postRemove(w http.ResponseWriter, r *http.Request) {
 		s.internalError(w, r, err)
 		return
 	}
-	s.done(w, r, safeReturn(r.PostFormValue("return"), ref.PluginID))
+	s.done(w, r, returnTarget(r.PostFormValue("return"), ref.PluginID))
 }
