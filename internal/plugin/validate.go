@@ -87,7 +87,7 @@ func Validate(m Manifest) error {
 		}
 		seenKind[k.Key] = true
 		validateKind(&p, path, k)
-		validateSeriesLink(&p, path+".series_link", k.SeriesLink, m.Kinds)
+		validateSeriesLink(&p, path, k, m.Kinds)
 	}
 
 	sources := map[string]bool{}
@@ -323,6 +323,17 @@ func validateKind(p *problems, path string, k KindDef) {
 
 	fields := validateFieldList(p, path+".fields", k.Fields, nil)
 	validateFieldList(p, path+".series_fields", k.SeriesFields, ReservedSeriesKeys())
+	// the series edit form always offers every series field and stores none
+	// as required, so a manifest cannot ask otherwise
+	for i, f := range k.SeriesFields {
+		fp := fmt.Sprintf("%s.series_fields[%d]", path, i)
+		if f.Required {
+			p.add(fp+".required", "series fields cannot be required")
+		}
+		if !f.Editable {
+			p.add(fp+".editable", "series fields must be editable")
+		}
+	}
 	if h := k.SeriesHint; h != nil {
 		hp := path + ".series_hint"
 		if h.TitleField == "" && h.PositionField == "" && h.ReleaseField == "" {
@@ -640,9 +651,12 @@ func validateFieldList(p *problems, path string, list []FieldDef, reserved []str
 	return fields
 }
 
-// validateSeriesLink checks a kind's series link: it names a kind of the
-// manifest, and each named field exists on that kind with the right type.
-func validateSeriesLink(p *problems, path string, l *SeriesLinkDef, kinds []KindDef) {
+// validateSeriesLink checks the series link of kind k (at path): it names a
+// kind of the manifest, each named field exists on that kind with the right
+// type, and a series field named like a field of that kind (which takes its
+// value) has the same type.
+func validateSeriesLink(p *problems, kindPath string, k KindDef, kinds []KindDef) {
+	l, path := k.SeriesLink, kindPath+".series_link"
 	if l == nil {
 		return
 	}
@@ -658,6 +672,11 @@ func validateSeriesLink(p *problems, path string, l *SeriesLinkDef, kinds []Kind
 	types := map[string]FieldType{}
 	for _, f := range kinds[i].Fields {
 		types[f.Key] = f.Type
+	}
+	for j, f := range k.SeriesFields {
+		if t, ok := types[f.Key]; ok && t != f.Type {
+			p.add(fmt.Sprintf("%s.series_fields[%d].type", kindPath, j), "the linked kind %q has a field %q of type %s", l.Kind, f.Key, t)
+		}
 	}
 	for _, c := range []struct {
 		name, field string

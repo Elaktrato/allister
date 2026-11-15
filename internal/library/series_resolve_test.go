@@ -23,8 +23,8 @@ func sagaPlugin() *plugintest.Plugin {
 		plugin.FieldDef{Key: "publisher", Label: "Publisher", Type: plugin.FieldText, Editable: true},
 	)
 	k.SeriesFields = []plugin.FieldDef{
-		{Key: "publisher", Label: "Publisher", Type: plugin.FieldText},
-		{Key: "note", Label: "Note", Type: plugin.FieldText},
+		{Key: "publisher", Label: "Publisher", Type: plugin.FieldText, Editable: true},
+		{Key: "note", Label: "Note", Type: plugin.FieldText, Editable: true},
 	}
 	k.SeriesLink = &plugin.SeriesLinkDef{Kind: "book", DescriptionField: "isbn", StartField: "released", EndField: "ended", PartsField: "volumes"}
 	k.SeriesHint = &plugin.SeriesHintDef{ReleaseField: "released"}
