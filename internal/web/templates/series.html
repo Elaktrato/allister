@@ -1,0 +1,52 @@
+{{define "title"}}{{.Title}} - Allister{{end}}
+{{define "content"}}
+<div class="min-w-0 space-y-6">
+  <div>
+    <a href="{{.ListURL}}" class="text-sm text-indigo-300 hover:underline">All series</a>
+    <h1 class="mt-1 text-3xl font-semibold">{{.Title}}</h1>
+    <p class="mt-1 text-slate-300"><span>{{.Done}}/{{.Total}}</span> <span class="text-slate-400">completed</span> · <span>{{.Status}}</span></p>
+  </div>
+  <ol class="space-y-2">
+    {{range .Parts}}
+    <li class="flex items-center gap-3 rounded border border-slate-800 bg-slate-900 p-2">
+      {{if .Cover}}<img src="{{.Cover}}" alt="" loading="lazy" class="h-20 w-14 rounded object-cover">
+      {{else}}<span class="block h-20 w-14 rounded bg-slate-800" aria-hidden="true"></span>{{end}}
+      <div class="min-w-0 flex-1">
+        <a href="{{.Href}}" class="font-medium text-indigo-300 hover:underline">{{.Title}}</a>
+        <p class="mt-1 text-sm text-slate-300">{{.Status}}{{range .Progress}} · {{.Label}} {{.Value}}{{end}} · Rating {{.Score}}</p>
+      </div>
+      <div class="flex items-center gap-1">
+        {{if .CanMoveUp}}<form method="post" action="{{.MoveURL}}"><input type="hidden" name="dir" value="up"><button type="submit" aria-label="Move up" title="Move up" class="rounded p-1 hover:bg-slate-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"><span class="icon text-[1.125rem]" aria-hidden="true">arrow_upward</span></button></form>{{end}}
+        {{if .CanMoveDwn}}<form method="post" action="{{.MoveURL}}"><input type="hidden" name="dir" value="down"><button type="submit" aria-label="Move down" title="Move down" class="rounded p-1 hover:bg-slate-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"><span class="icon text-[1.125rem]" aria-hidden="true">arrow_downward</span></button></form>{{end}}
+        <form method="post" action="{{.RemoveURL}}"><button type="submit" aria-label="Remove from series" title="Remove from series" class="rounded p-1 text-red-300 hover:bg-slate-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"><span class="icon text-[1.125rem]" aria-hidden="true">link_off</span></button></form>
+      </div>
+    </li>
+    {{end}}
+  </ol>
+
+  <section class="space-y-2">
+    <h2 class="text-lg font-semibold">Add from your list</h2>
+    <input type="search" name="q" placeholder="Search your {{.KindLabel}} list" autocomplete="off"
+      hx-get="{{.CandidatesURL}}" hx-trigger="input changed delay:300ms, search" hx-target="#series-candidates" hx-swap="innerHTML"
+      class="w-full rounded border border-slate-700 bg-slate-900 px-3 py-2 text-sm">
+    <div id="series-candidates">{{template "series_candidates" .}}</div>
+  </section>
+
+  <section class="space-y-2">
+    <h2 class="text-lg font-semibold">Rename</h2>
+    <form method="post" action="{{.RenameURL}}" class="flex gap-2">
+      <input type="text" name="title" value="{{.Title}}" maxlength="300" required class="min-w-0 flex-1 rounded border border-slate-700 bg-slate-900 px-3 py-2 text-sm">
+      <button type="submit" class="rounded bg-indigo-600 px-4 py-2 font-medium hover:bg-indigo-500">Rename</button>
+    </form>
+  </section>
+
+  <section class="space-y-2">
+    <h2 class="text-lg font-semibold">Delete series</h2>
+    <form method="post" action="{{.DeleteURL}}" class="space-y-2 rounded border border-slate-800 bg-slate-900 p-3 text-sm">
+      <label class="flex items-center gap-2"><input type="radio" name="entries" value="keep" checked> Delete the series, keep the entries</label>
+      <label class="flex items-center gap-2"><input type="radio" name="entries" value="remove"> Delete the series and remove all its entries from your list</label>
+      <button type="submit" class="rounded border border-slate-700 px-4 py-2 text-red-300 hover:bg-slate-800">Delete series</button>
+    </form>
+  </section>
+</div>
+{{end}}
