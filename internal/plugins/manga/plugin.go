@@ -4,7 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
+	"strings"
+	"time"
 
 	"github.com/allister/allister/internal/plugin"
 	"github.com/allister/allister/internal/plugins/anilist"
@@ -32,20 +35,40 @@ type Options struct {
 	// AniListURL and HTTP configure the client when Provider is nil.
 	AniListURL string
 	HTTP       *http.Client
+	// MALClientID returns the MyAnimeList Client ID ("" = not configured);
+	// it is read per request. MALURL (default malDefaultURL) and
+	// MALInterval (default one second between requests) are for tests.
+	MALClientID func(context.Context) (string, error)
+	// Credential, when MALClientID is nil, resolves a named credential field
+	// of a source of this plugin (the core's resolver).
+	Credential  func(ctx context.Context, sourceID, field string) (string, error)
+	MALURL      string
+	MALInterval time.Duration
 }
 
 type mangaPlugin struct{ source *source }
 
+func newMAL(opts Options) *malClient {
+	id := opts.MALClientID
+	if id == nil && opts.Credential != nil {
+		id = func(ctx context.Context) (string, error) { return opts.Credential(ctx, SourceID, MALClientIDField) }
+	}
+	if id == nil {
+		return nil
+	}
+	return newMALClient(opts.MALURL, &http.Client{Timeout: malTimeout}, id, opts.MALInterval)
+}
+
 // New returns the manga plugin.
 func New(opts Options) plugin.Plugin {
 	if opts.Provider != nil {
-		return &mangaPlugin{source: &source{c: opts.Provider}}
+		return &mangaPlugin{source: &source{c: opts.Provider, mal: newMAL(opts)}}
 	}
 	url := opts.AniListURL
 	if url == "" {
 		url = anilist.DefaultURL
 	}
-	return &mangaPlugin{source: &source{c: anilist.New(url, opts.HTTP)}}
+	return &mangaPlugin{source: &source{c: anilist.New(url, opts.HTTP), mal: newMAL(opts)}}
 }
 
 func (p *mangaPlugin) Manifest() plugin.Manifest { return manifest() }
@@ -77,7 +100,10 @@ func (p *mangaPlugin) Exporter(id string) plugin.Exporter {
 }
 
 // source adapts the shared AniList client to plugin.Source for manga.
-type source struct{ c anilist.Provider }
+type source struct {
+	c   anilist.Provider
+	mal *malClient // nil when no Client ID source is wired
+}
 
 func checkKind(kind string) error {
 	if kind != KindManga {
@@ -144,7 +170,29 @@ func (s *source) Details(ctx context.Context, kind, id string) (plugin.ItemData,
 	if err != nil {
 		return plugin.ItemData{}, mapErr(err)
 	}
-	return ItemData(m), nil
+	return s.withMagazine(ctx, ItemData(m)), nil
+}
+
+// withMagazine adds the magazine from MyAnimeList when the item has a MAL id
+// and a Client ID is configured. A failure never fails the details.
+func (s *source) withMagazine(ctx context.Context, d plugin.ItemData) plugin.ItemData {
+	mal := d.ExternalIDs["mal"]
+	if s.mal == nil || mal == "" {
+		return d
+	}
+	names, err := s.mal.Serialization(ctx, mal)
+	switch {
+	case err == nil:
+	case errors.Is(err, plugin.ErrUnavailable), errors.Is(err, plugin.ErrBadResponse), errors.Is(err, plugin.ErrRateLimited):
+		log.Printf("manga: magazine from MyAnimeList skipped: %v", err)
+		return d
+	default:
+		return d
+	}
+	if m := plugin.SingleLine(strings.Join(names, ", "), maxNameRunes); m != "" {
+		d.Fields["magazine"] = plugin.FieldValue{Text: m}
+	}
+	return d
 }
 
 func (s *source) Recommendations(ctx context.Context, kind, id string) ([]plugin.ItemSummary, error) {
@@ -197,5 +245,5 @@ func (s *source) Lookup(ctx context.Context, kind, idType, value string) (plugin
 	if err != nil {
 		return plugin.ItemData{}, mapErr(err)
 	}
-	return ItemData(m), nil
+	return s.withMagazine(ctx, ItemData(m)), nil
 }
