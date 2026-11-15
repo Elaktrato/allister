@@ -933,8 +933,8 @@ func DeriveSeriesStatus(parts []Status, expected int) Status {
 
 // SeriesRow is one row of the series list with its resolved values (see
 // ResolveSeries): Parts and Completed count the main parts (the spin-off
-// parts when there is no main part), PartsTotal is
-// the expected number of parts, Cover the resolved cover; Updated is the
+// parts when there is no main part), PartsTotal is the shown total (the
+// larger of the expected and the counted parts), Cover the resolved cover; Updated is the
 // newest update of any part (the series' own update when it has none).
 type SeriesRow struct {
 	Series           Series
@@ -1413,10 +1413,8 @@ func (l *Library) ActiveSeries(ctx context.Context, pluginIDs []string, limit in
 			return nil, fmt.Errorf("active series: %w", err)
 		}
 		r.Series, r.Status, r.ParentID = *s, Active, s.ParentID
-		r.PartsTotal = expected
-		if r.PartsTotal == 0 {
-			r.PartsTotal = r.Parts
-		}
+		// shown like ResolveSeries: never below the counted parts
+		r.PartsTotal = max(expected, r.Parts)
 		if updated != "" {
 			if r.Updated, err = time.Parse(time.RFC3339, updated); err != nil {
 				return nil, fmt.Errorf("active series: entry updated_at: %w", err)
