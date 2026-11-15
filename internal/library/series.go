@@ -684,26 +684,31 @@ func (l *Library) HasSeries(ctx context.Context, pluginID string) (bool, error) 
 	return n == 1, err
 }
 
-// SeriesMemberIDs returns the ids of the items of the plugin and kind that
-// are a part of any series.
-func (l *Library) SeriesMemberIDs(ctx context.Context, pluginID, kind string) (map[int64]bool, error) {
-	rows, err := l.db.QueryContext(ctx, `SELECT p.item_id FROM series_parts p JOIN series s ON s.id = p.series_id WHERE s.plugin_id = ? AND s.kind = ?`, pluginID, kind)
+// SeriesCandidates returns up to limit entries of the plugin and kind that are
+// in no series and whose title contains text (the list's search rule), the
+// ones whose hintField text equals seriesTitle (trimmed, ASCII
+// case-insensitive) first, then by display title for lang. One query selects
+// the ids; only those rows are loaded.
+func (l *Library) SeriesCandidates(ctx context.Context, pluginID, kind, text, hintField, seriesTitle, lang string, limit int) ([]Row, error) {
+	if limit <= 0 {
+		return nil, nil
+	}
+	c, err := l.compile(Query{PluginID: pluginID, Kind: kind, Text: text})
 	if err != nil {
-		return nil, fmt.Errorf("series members: %w", err)
+		return nil, err
 	}
-	out := map[int64]bool{}
-	for rows.Next() {
-		var id int64
-		if err := rows.Scan(&id); err != nil {
-			rows.Close()
-			return nil, fmt.Errorf("series members: %w", err)
-		}
-		out[id] = true
+	c.clauses = append(c.clauses, clause{"series", `NOT EXISTS (SELECT 1 FROM series_parts sp WHERE sp.item_id = items.id)`, nil})
+	whereSQL, whereArgs := c.where()
+	order, orderArgs, err := c.orderBy(Sort{Kind: SortTitle}, lang)
+	if err != nil {
+		return nil, err
 	}
-	if err := closeRows(rows); err != nil {
-		return nil, fmt.Errorf("series members: %w", err)
+	if want := asciiLower(strings.TrimSpace(seriesTitle)); hintField != "" && want != "" {
+		order = ` ORDER BY NOT EXISTS (SELECT 1 FROM item_fields hf WHERE hf.item_id = items.id AND hf.key = ? AND lower(trim(hf.text)) = ?), ` +
+			strings.TrimPrefix(order, " ORDER BY ")
+		orderArgs = append([]any{hintField, want}, orderArgs...)
 	}
-	return out, nil
+	return l.loadRows(ctx, c.unmatched, whereSQL, whereArgs, order, orderArgs, limit, 0, lang)
 }
 
 // ItemSeries is the series an item belongs to and its 1-based position.
