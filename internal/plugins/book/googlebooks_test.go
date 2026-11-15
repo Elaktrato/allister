@@ -189,3 +189,44 @@ func TestGoogleBooksKeyResolverErrorIsReturned(t *testing.T) {
 		t.Fatalf("err = %v", err)
 	}
 }
+
+func TestGoogleBooksKeyErrors(t *testing.T) {
+	for _, c := range []struct {
+		name   string
+		key    string
+		status int
+		body   string
+		want   error
+	}{
+		{"invalid key", "sekret", 400, `{"error":{"code":400,"message":"API key not valid","errors":[{"reason":"keyInvalid"}]}}`, plugin.ErrNotConfigured},
+		{"invalid key details", "sekret", 400, `{"error":{"code":400,"details":[{"reason":"API_KEY_INVALID"}]}}`, plugin.ErrNotConfigured},
+		{"api not enabled", "sekret", 403, `{"error":{"errors":[{"reason":"accessNotConfigured"}]}}`, plugin.ErrNotConfigured},
+		{"service disabled", "sekret", 403, `{"error":{"details":[{"reason":"SERVICE_DISABLED"}]}}`, plugin.ErrNotConfigured},
+		{"key restricted", "sekret", 403, `{"error":{"details":[{"reason":"API_KEY_SERVICE_BLOCKED"}]}}`, plugin.ErrNotConfigured},
+		{"forbidden with key", "sekret", 403, `{"error":{"errors":[{"reason":"forbidden"}]}}`, plugin.ErrNotConfigured},
+		{"quota rate", "sekret", 403, `{"error":{"errors":[{"reason":"rateLimitExceeded"}]}}`, plugin.ErrRateLimited},
+		{"quota daily", "sekret", 403, `{"error":{"errors":[{"reason":"dailyLimitExceeded"}]}}`, plugin.ErrRateLimited},
+		{"quota user", "sekret", 403, `{"error":{"errors":[{"reason":"userRateLimitExceeded"}]}}`, plugin.ErrRateLimited},
+		{"quota detail", "sekret", 403, `{"error":{"details":[{"reason":"RATE_LIMIT_EXCEEDED"}]}}`, plugin.ErrRateLimited},
+		{"unknown 403 with key", "sekret", 403, `not json`, plugin.ErrRateLimited},
+		{"400 other reason", "sekret", 400, `{"error":{"errors":[{"reason":"invalid"}]}}`, plugin.ErrBadResponse},
+		{"no key 400", "", 400, `{"error":{"errors":[{"reason":"keyInvalid"}]}}`, plugin.ErrBadResponse},
+		{"no key 403", "", 403, `{"error":{"errors":[{"reason":"accessNotConfigured"}]}}`, plugin.ErrRateLimited},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(c.status)
+				_, _ = w.Write([]byte(c.body))
+			}))
+			defer srv.Close()
+			s := &googleBooksSource{c: newGoogleBooksClient(srv.URL, staticKey(c.key), srv.Client())}
+			_, err := s.Search(context.Background(), KindBook, "dune")
+			if !errors.Is(err, c.want) {
+				t.Fatalf("err = %v, want %v", err, c.want)
+			}
+			if c.key != "" && strings.Contains(err.Error(), c.key) {
+				t.Fatalf("error leaks the key: %v", err)
+			}
+		})
+	}
+}
