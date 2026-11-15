@@ -442,20 +442,11 @@ func (s *server) buildList(r *http.Request, m plugin.Manifest, lq listQuery) (li
 		h.Hide = c.Hide
 		v.Head.Columns = append(v.Head.Columns, h)
 	}
-	ids := make([]int64, 0, len(pg.Rows))
 	for _, row := range pg.Rows {
-		ids = append(ids, row.Item.ID)
+		v.Rows = append(v.Rows, s.rowView(m, row, ret, cols))
 	}
-	member, err := s.deps.Library.SeriesOfItems(ctx, ids)
-	if err != nil {
+	if err := s.markSeries(ctx, m, v.Rows, pg.Rows); err != nil {
 		return listView{}, err
-	}
-	for _, row := range pg.Rows {
-		rv := s.rowView(m, row, ret, cols)
-		if ms, ok := member[row.Item.ID]; ok {
-			rv.Series, rv.SeriesPos, rv.SeriesHref = ms.Title, ms.Position, seriesURL(m.ID, ms.UID)
-		}
-		v.Rows = append(v.Rows, rv)
 	}
 	if pg.Total > 0 {
 		v.From, v.To = (pg.PageNo-1)*listPageSize+1, (pg.PageNo-1)*listPageSize+len(pg.Rows)
@@ -672,4 +663,24 @@ func (s *server) buildSeriesTab(r *http.Request, m plugin.Manifest, lq listQuery
 		return listView{}, err
 	}
 	return v, nil
+}
+
+// markSeries sets the part badge (series title, position, link) on the row
+// views built from rows, with one membership query. The list page and the
+// +1 answer both use it.
+func (s *server) markSeries(ctx context.Context, m plugin.Manifest, views []rowView, rows []library.Row) error {
+	ids := make([]int64, 0, len(rows))
+	for _, row := range rows {
+		ids = append(ids, row.Item.ID)
+	}
+	member, err := s.deps.Library.SeriesOfItems(ctx, ids)
+	if err != nil {
+		return err
+	}
+	for i, row := range rows {
+		if ms, ok := member[row.Item.ID]; ok {
+			views[i].Series, views[i].SeriesPos, views[i].SeriesHref = ms.Title, ms.Position, seriesURL(m.ID, ms.UID)
+		}
+	}
+	return nil
 }
