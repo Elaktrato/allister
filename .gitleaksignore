@@ -1,0 +1,6 @@
+# Findings gitleaks reports that are not secrets. One fingerprint per line
+# (commit:file:rule:line); say why above each.
+
+# A dummy TMDB v4 read token for the bearer-header test: header {"alg":"HS256"},
+# payload {}, fake signature.
+3affc50c3322b61855e5e35b5cf8f21b19922865:internal/plugins/tmdb/client_test.go:generic-api-key:96

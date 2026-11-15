@@ -70,7 +70,7 @@ func (l *Library) ActivityDays(ctx context.Context, from, to time.Time, scope []
 			parts = append(parts, "(i.plugin_id = ? AND i.kind = ?)")
 			args = append(args, k.PluginID, k.Kind)
 		}
-		q += " AND (" + strings.Join(parts, " OR ") + ")"
+		q += " AND (" + strings.Join(parts, " OR ") + ")" //nolint:gosec // G202: constant SQL and placeholders; values are bound
 	}
 	q += " GROUP BY substr(e.occurred_at,1,10)"
 	rows, err := l.db.QueryContext(ctx, q, args...)

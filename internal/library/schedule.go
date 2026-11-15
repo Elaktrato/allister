@@ -109,6 +109,7 @@ func (l *Library) ScheduleEntries(ctx context.Context) ([]ScheduledEntry, error)
 	for id := range ids {
 		list = append(list, id)
 	}
+	//nolint:gosec // G202: constant SQL and placeholders; values are bound
 	trows, err := l.db.QueryContext(ctx, `SELECT item_id, lang, text FROM item_titles
 		WHERE item_id IN (`+placeholders(len(list))+`) ORDER BY item_id, rowid`, list...)
 	if err != nil {

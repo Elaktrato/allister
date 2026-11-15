@@ -15,7 +15,7 @@ import (
 func TestCalendarFeed(t *testing.T) {
 	e := newFixtureEnv(t)
 	now := time.Date(2026, 11, 10, 12, 0, 0, 0, time.UTC)
-	e.env.now = &now
+	e.now = &now
 	active := e.addFixture(t, "tv", "show", tvShow("1", "Dark"), library.Entry{Status: library.Active})
 	paused := e.addFixture(t, "tv", "show", tvShow("2", "Light"), library.Entry{Status: library.Paused})
 	book := e.addFixture(t, "book", "book", bookItem("3", "Earthsea"), library.Entry{Status: library.Active})
@@ -51,7 +51,7 @@ func TestCalendarFeed(t *testing.T) {
 func TestCalendarEscapesAndFolds(t *testing.T) {
 	e := newFixtureEnv(t)
 	now := time.Date(2026, 11, 10, 12, 0, 0, 0, time.UTC)
-	e.env.now = &now
+	e.now = &now
 	long := "Comma, semicolon; backslash \\ and " + strings.Repeat("ü", 60)
 	id := e.addFixture(t, "tv", "show", tvShow("1", long), library.Entry{Status: library.Active})
 	if err := e.lib.SaveSchedule(context.Background(), id, []library.Airing{{Number: 7, AirsAt: now.Add(time.Hour)}}, now); err != nil {
@@ -76,7 +76,7 @@ func TestCalendarEscapesAndFolds(t *testing.T) {
 func TestCalendarEnqueuesStaleSchedules(t *testing.T) {
 	e := newFixtureEnv(t)
 	now := time.Date(2026, 11, 10, 12, 0, 0, 0, time.UTC)
-	e.env.now = &now
+	e.now = &now
 	var ids []int64
 	for i := 0; i < 25; i++ {
 		id := e.addFixture(t, "tv", "show", tvShow(fmt.Sprint(i+1), "Show "+fmt.Sprint(i+1)), library.Entry{Status: library.Active})
@@ -124,7 +124,7 @@ func TestCalendarWithoutScheduleJobs(t *testing.T) {
 func TestCalendarPage(t *testing.T) {
 	e := newFixtureEnv(t)
 	now := time.Date(2026, 11, 10, 12, 0, 0, 0, time.UTC)
-	e.env.now = &now
+	e.now = &now
 	id := e.addFixture(t, "tv", "show", tvShow("1", "Dark"), library.Entry{Status: library.Active})
 	err := e.lib.SaveSchedule(context.Background(), id, []library.Airing{
 		{Number: 3, AirsAt: time.Date(2026, 11, 12, 18, 30, 0, 0, time.UTC)},
@@ -176,7 +176,7 @@ var _ = plugin.Airing{}
 func TestCalendarSeasonLabels(t *testing.T) {
 	e := newFixtureEnv(t)
 	now := time.Date(2026, 11, 10, 12, 0, 0, 0, time.UTC)
-	e.env.now = &now
+	e.now = &now
 	id := e.addFixture(t, "tv", "show", tvShow("1", "Dark"), library.Entry{Status: library.Active})
 	if err := e.lib.SaveSchedule(context.Background(), id, []library.Airing{{Season: 2, Number: 5, AirsAt: now.Add(time.Hour)}}, now); err != nil {
 		t.Fatal(err)

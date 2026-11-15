@@ -265,7 +265,7 @@ func DecodePalette(s string) (Palette, error) {
 // rgb returns the channels of a normalised #rrggbb colour.
 func rgb(hex string) (r, g, b uint8) {
 	v, _ := strconv.ParseUint(hex[1:], 16, 32)
-	return uint8(v >> 16), uint8(v >> 8), uint8(v)
+	return uint8(v >> 16), uint8(v >> 8), uint8(v) //nolint:gosec // G115: v is 24 bits (#rrggbb); the truncation picks each channel
 }
 
 // triplet is the "r g b" form used by the CSS properties.
@@ -315,7 +315,7 @@ func SchemeOf(p Palette) string {
 // token. Tests use it to keep the templates, the config and the tokens in
 // step.
 func LoadTailwindMap(path string) (map[string]map[string]string, error) {
-	b, err := os.ReadFile(path)
+	b, err := os.ReadFile(path) //nolint:gosec // G304: a test helper reading the repository's own map file
 	if err != nil {
 		return nil, err
 	}

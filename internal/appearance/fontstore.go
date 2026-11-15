@@ -216,7 +216,7 @@ func (s *FontStore) write(r io.Reader) (file, format string, size int64, fresh b
 	if !ok {
 		return "", "", 0, false, ErrNotFont
 	}
-	if err := os.MkdirAll(s.dir, 0o755); err != nil {
+	if err := os.MkdirAll(s.dir, 0o755); err != nil { //nolint:gosec // G301: same mode as DATA_DIR/covers (cmd/allister)
 		return "", "", 0, false, err
 	}
 	tmp, err := os.CreateTemp(s.dir, ".upload-*")

@@ -173,11 +173,12 @@ func tvEntry(g tvAggregate) (plugin.ParsedEntry, []string, string) {
 		CoverURL: plugin.HTTPSURL(show.ImageURL),
 		Notes:    notes,
 	}
-	if show.Source == SourceTMDB {
+	switch show.Source {
+	case SourceTMDB:
 		if id := numericID(show.MediaID); id != "" {
 			entry.ExternalIDs = map[string]string{"tmdb": id}
 		}
-	} else if show.Source == "tvdb" {
+	case "tvdb":
 		if id := numericID(show.MediaID); id != "" {
 			entry.ExternalIDs = map[string]string{"tvdb": id}
 		}

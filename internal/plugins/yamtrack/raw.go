@@ -45,7 +45,7 @@ var rawRequiredColumns = []string{"media_id", "media_type", "status", "title"}
 func ParseRaw(r io.Reader) ([]RawRow, error) {
 	br := bufio.NewReader(r)
 	if b, _ := br.Peek(3); bytes.Equal(b, []byte{0xEF, 0xBB, 0xBF}) {
-		br.Discard(3)
+		_, _ = br.Discard(3) // cannot fail: Peek just returned these bytes
 	}
 	cr := csv.NewReader(br)
 	cr.FieldsPerRecord = -1
