@@ -720,14 +720,18 @@ func (rs *restorer) series(ctx context.Context, dec *json.Decoder) error {
 			rs.rep.SeriesCreated++
 		default:
 			rs.rep.SeriesSkipped++
-			if leftOut > 0 { // nothing could be restored
-				row.Reason = fmt.Sprintf("not created: none of its %d parts could be restored", leftOut)
+			switch {
+			case len(leftOut) > 0: // nothing could be restored
+				row.Reason = "not created: none of its parts could be restored: " + leftOutList(leftOut)
+				addRow(&rs.rep.Notes, &rs.rep.MoreNotes, row)
+			case len(bs.Parts) == 0:
+				row.Reason = "not created: it has no parts"
 				addRow(&rs.rep.Notes, &rs.rep.MoreNotes, row)
 			}
 			continue
 		}
-		if leftOut > 0 {
-			row.Reason = fmt.Sprintf("%d parts left out (missing, or already in another series)", leftOut)
+		if len(leftOut) > 0 {
+			row.Reason = fmt.Sprintf("%d parts left out: %s", len(leftOut), leftOutList(leftOut))
 			addRow(&rs.rep.Notes, &rs.rep.MoreNotes, row)
 		}
 	}
@@ -735,6 +739,27 @@ func (rs *restorer) series(ctx context.Context, dec *json.Decoder) error {
 		return rs.syntax(err)
 	}
 	return nil
+}
+
+// maxNamedParts is how many left-out parts a series note names.
+const maxNamedParts = 5
+
+// leftOutList names the first parts of left (source:id, with the title when
+// known, and why), then "and N more".
+func leftOutList(left []library.LeftOutPart) string {
+	var parts []string
+	for i, p := range left {
+		if i == maxNamedParts {
+			parts = append(parts, fmt.Sprintf("and %d more", len(left)-maxNamedParts))
+			break
+		}
+		name := clip(p.Ref.Source, 30) + ":" + clip(p.Ref.SourceID, 40)
+		if p.Title != "" {
+			name = clip(p.Title, 40) + " " + name
+		}
+		parts = append(parts, name+" ("+p.Reason+")")
+	}
+	return strings.Join(parts, ", ")
 }
 
 func (rs *restorer) seriesSkipped(r Row) {

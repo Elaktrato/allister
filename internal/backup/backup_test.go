@@ -973,12 +973,34 @@ func TestRestoreSeriesLeavesOutTakenParts(t *testing.T) {
 		t.Fatalf("report = %+v", rep)
 	}
 	if len(rep.Notes) != 2 || rep.Notes[0].Title != "Mixed" || !strings.Contains(rep.Notes[0].Reason, "2 parts left out") ||
-		rep.Notes[1].Title != "Nothing" || !strings.Contains(rep.Notes[1].Reason, "not created") {
+		!strings.Contains(rep.Notes[0].Reason, "books:1 (in another series)") || !strings.Contains(rep.Notes[0].Reason, "books:gone (missing)") ||
+		rep.Notes[1].Title != "Nothing" || !strings.Contains(rep.Notes[1].Reason, "not created") ||
+		!strings.Contains(rep.Notes[1].Reason, "books:gone (missing)") {
 		t.Fatalf("notes = %+v", rep.Notes)
 	}
 	got := b.seriesTitles()
 	if len(got) != 3 || got[1] != "Mixed:2" || got[2] != "Clean:5" {
 		t.Fatalf("series = %v", got)
+	}
+}
+
+func TestRestoreSeriesNotesAreBounded(t *testing.T) {
+	b := newEnv(t)
+	b.book("5", "", &library.Entry{Status: library.Planned})
+	var parts []string
+	for i := 0; i < 40; i++ {
+		parts = append(parts, "gone"+strings.Repeat("x", 80)+fmt.Sprint(i))
+	}
+	parts = append(parts, "5")
+	body := `{"format":"allister.backup","format_version":1,"items":[],"series":[` +
+		seriesJSON("u-a", "Many", parts...) + `,` + seriesJSON("u-e", "Empty") + `]}`
+	rep := mustRestore(t, b, zipOf(t, entry{name: "backup.json", body: []byte(body)}))
+	if len(rep.Notes) != 2 || len(rep.Notes[0].Reason) > 600 || !strings.Contains(rep.Notes[0].Reason, "40 parts left out") ||
+		!strings.Contains(rep.Notes[0].Reason, "and 35 more") {
+		t.Fatalf("notes = %+v", rep.Notes)
+	}
+	if rep.Notes[1].Title != "Empty" || !strings.Contains(rep.Notes[1].Reason, "no parts") || rep.SeriesSkipped != 1 {
+		t.Fatalf("empty series: %+v skipped=%d", rep.Notes[1], rep.SeriesSkipped)
 	}
 }
 
