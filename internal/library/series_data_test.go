@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/allister/allister/internal/plugin"
 )
@@ -396,5 +397,30 @@ func TestSpinOffsOf(t *testing.T) {
 	}
 	if got, err := e.lib.SpinOffsOf(bg, other.ID); err != nil || len(got) != 0 {
 		t.Fatalf("no spin-offs: %+v %v", got, err)
+	}
+}
+
+// TestSeriesDescriptionCapCountsNormalisedText: the 20000-character cap counts
+// the stored text, after line breaks are normalised (CRLF is one character).
+func TestSeriesDescriptionCapCountsNormalisedText(t *testing.T) {
+	e := newEnv(t)
+	k := seriesKind(t, e)
+	s := mustSeries(t, e, addBook(t, e.lib, "1", fp(1), Entry{Status: Planned}), "S")
+	// 20000 characters once each CRLF is one line break (30000 as sent)
+	text := strings.Repeat("ab\r\n", maxSeriesDescriptionRunes/3) + "ab"
+	want := strings.ReplaceAll(text, "\r\n", "\n")
+	if n := utf8.RuneCountInString(want); n > maxSeriesDescriptionRunes || n < maxSeriesDescriptionRunes-3 {
+		t.Fatalf("fixture has %d characters", n)
+	}
+	if err := e.lib.UpdateSeriesDetails(bg, s.ID, k, SeriesDetails{Title: "S", Description: text}); err != nil {
+		t.Fatalf("description of %d characters after normalising: %v", utf8.RuneCountInString(want), err)
+	}
+	if got := mustSeriesByUID(t, e, s.UID).Description; got != want {
+		t.Fatalf("stored %d characters, want %d", utf8.RuneCountInString(got), utf8.RuneCountInString(want))
+	}
+	// one character more is still refused
+	over := want + strings.Repeat("x", maxSeriesDescriptionRunes-utf8.RuneCountInString(want)+1)
+	if err := e.lib.UpdateSeriesDetails(bg, s.ID, k, SeriesDetails{Title: "S", Description: over}); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("over the cap: %v", err)
 	}
 }
