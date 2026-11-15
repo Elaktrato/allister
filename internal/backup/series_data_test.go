@@ -266,3 +266,63 @@ func TestRestoreSeriesDropsBadValuesOnly(t *testing.T) {
 		t.Fatalf("invalid title notes = %q", notes[""])
 	}
 }
+
+// TestBackupRoundTripPartlessSeries (R6): a series kept without parts (for
+// its own data, or as the parent of a spin-off series) is archived with an
+// empty parts list and restored; one archived without parts or own values
+// that nothing names as parent is not created.
+func TestBackupRoundTripPartlessSeries(t *testing.T) {
+	a := newEnv(t)
+	k := a.bookKind()
+	i1 := a.book("1", "", &library.Entry{Status: library.Planned})
+	i2 := a.book("2", "", &library.Entry{Status: library.Planned})
+	i3 := a.book("3", "", &library.Entry{Status: library.Planned})
+	own := a.seriesOf("Own", i1)
+	if err := a.lib.UpdateSeriesDetails(bg, own.ID, k, library.SeriesDetails{Title: "Own", Description: "Kept", PartsTotal: 3}); err != nil {
+		t.Fatal(err)
+	}
+	parent := a.seriesOf("Parent", i2)
+	kid := a.seriesOf("Kid", i3)
+	if err := a.lib.UpdateSeriesDetails(bg, kid.ID, k, library.SeriesDetails{Title: "Kid", ParentID: parent.ID}); err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range []struct{ s, i int64 }{{own.ID, i1}, {parent.ID, i2}} {
+		if err := a.lib.RemovePart(bg, p.s, p.i); err != nil {
+			t.Fatal(err)
+		}
+	}
+	data := a.archive()
+	_, files := open(t, data)
+	var d struct {
+		Series []library.BackupSeries `json:"series"`
+	}
+	if err := json.Unmarshal(files["backup.json"], &d); err != nil {
+		t.Fatal(err)
+	}
+	if len(d.Series) != 3 || len(d.Series[0].Parts) != 0 || len(d.Series[1].Parts) != 0 || d.Series[0].Description != "Kept" {
+		t.Fatalf("archived %+v", d.Series)
+	}
+	if !strings.Contains(string(files["backup.json"]), `"parts":[]`) {
+		t.Fatal("a part-less series has no parts list")
+	}
+	b := newEnv(t)
+	rep := mustRestore(t, b, data)
+	if rep.SeriesCreated != 3 || rep.SeriesSkipped != 0 || len(rep.Notes) != 0 {
+		t.Fatalf("report = %+v", rep)
+	}
+	if got := b.seriesByUID(own.UID); got.Description != "Kept" || got.PartsTotal != 3 {
+		t.Fatalf("own = %+v", got)
+	}
+	gotParent := b.seriesByUID(parent.UID)
+	if gotKid := b.seriesByUID(kid.UID); gotKid.ParentID != gotParent.ID {
+		t.Fatalf("kid parent = %d, want %d", gotKid.ParentID, gotParent.ID)
+	}
+	body := `{"format":"allister.backup","format_version":1,"items":[],"series":[` + seriesJSON("u-none", "Nothing") + `]}`
+	rep = mustRestore(t, b, zipOf(t, entry{name: "backup.json", body: []byte(body)}))
+	if rep.SeriesCreated != 0 || rep.SeriesSkipped != 1 || len(rep.Notes) != 1 || !strings.Contains(rep.Notes[0].Reason, "no parts") {
+		t.Fatalf("empty series report = %+v", rep)
+	}
+	if _, err := b.lib.SeriesByUID(bg, "book", "u-none"); err == nil {
+		t.Fatal("an empty series nothing names as parent was restored")
+	}
+}

@@ -590,3 +590,70 @@ func TestSeriesUnchangedLegacyCoverURL(t *testing.T) {
 		}
 	}
 }
+
+// TestPartlessSeriesPages (R6): removing the last part of a series with own
+// data keeps it; its page, the Series tab and home show it with no parts.
+func TestPartlessSeriesPages(t *testing.T) {
+	fe := newFixtureEnv(t, withSeriesData)
+	ser, ids := fe.bookSeries(t, "Saga")
+	k := bookKind(t, fe)
+	if err := fe.lib.UpdateSeriesDetails(bg, ser.ID, k, library.SeriesDetails{Title: "Saga", Description: "Kept text", PartsTotal: 3}); err != nil {
+		t.Fatal(err)
+	}
+	base := seriesURL("book", ser.UID)
+	for _, id := range ids {
+		rec := fe.do("POST", base+"/parts/"+idStr(id)+"/remove", url.Values{}, false)
+		if rec.Code != http.StatusSeeOther || rec.Header().Get("Location") != base {
+			t.Fatalf("remove %d: %d %q", id, rec.Code, rec.Header().Get("Location"))
+		}
+	}
+	rec := fe.get(base)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("series page: %d", rec.Code)
+	}
+	body := rec.Body.String()
+	mustContain(t, body, "Kept text", "0/3", "No parts yet", "Add a part", "Want to read")
+	mustNotContain(t, body, "Part 1")
+	tab := fe.get("/book?tab=series&view=table").Body.String()
+	mustContain(t, tab, base, "0/3")
+	if rec := fe.get("/"); rec.Code != http.StatusOK {
+		t.Fatalf("home: %d", rec.Code)
+	}
+	// a series without own data still goes with its last part
+	bare, bareIDs := fe.bookSeries(t, "Bare")
+	fe.do("POST", seriesURL("book", bare.UID)+"/parts/"+idStr(bareIDs[0])+"/remove", url.Values{}, false)
+	rec = fe.do("POST", seriesURL("book", bare.UID)+"/parts/"+idStr(bareIDs[1])+"/remove", url.Values{}, false)
+	if rec.Code != http.StatusSeeOther || rec.Header().Get("Location") == seriesURL("book", bare.UID) {
+		t.Fatalf("bare: %d %q", rec.Code, rec.Header().Get("Location"))
+	}
+}
+
+// TestDeleteSeriesReleasesCover: deleting a series removes its cover file
+// unless another row still references it.
+func TestDeleteSeriesReleasesCover(t *testing.T) {
+	fe := newFixtureEnv(t, withSeriesData)
+	a, _ := fe.bookSeries(t, "A")
+	b, _ := fe.bookSeries(t, "B")
+	c, _ := fe.bookSeries(t, "C")
+	for _, x := range []struct {
+		ser *library.Series
+		img string
+	}{{a, "shared"}, {b, "shared"}, {c, "own"}} {
+		rec := fe.postMultipart(t, seriesURL("book", x.ser.UID)+"/edit", url.Values{"title": {x.ser.Title}}, &upload{"cover", "c.png", "image/png", png1(x.img)})
+		if rec.Code != http.StatusSeeOther {
+			t.Fatalf("upload: %d", rec.Code)
+		}
+	}
+	shared, own := mustSeriesWeb(t, fe, a.UID).CoverPath, mustSeriesWeb(t, fe, c.UID).CoverPath
+	for _, uid := range []string{a.UID, c.UID} {
+		if rec := fe.do("POST", seriesURL("book", uid)+"/delete", url.Values{"entries": {"keep"}}, false); rec.Code != http.StatusSeeOther {
+			t.Fatalf("delete: %d", rec.Code)
+		}
+	}
+	if hasFile(fe.env, own) {
+		t.Error("the deleted series' own cover file stays")
+	}
+	if !hasFile(fe.env, shared) {
+		t.Error("a cover file another series references went")
+	}
+}
