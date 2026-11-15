@@ -6,10 +6,9 @@ How a release is cut: move the entries under "Unreleased" to a new `## vX.Y.Z - 
 
 ## Unreleased
 
-The first tagged release (suggested: v0.1.0). Everything until now: the generic core with the anime plugin (AniList search and overviews, your list with filters and sorting, edit details, manual entries and matching, character and voice-actor pages, Yamtrack import, JSON export, universal backup and restore, plugins switchable in Settings), and:
-
 ### Added
 
+- Yamtrack Manga CSV import in the manga plugin: the general Yamtrack export's manga rows resolve through AniList by MyAnimeList id; light novels stay in Books > Series.
 - `GET /version` (JSON: version, commit, build date, Go version) and the version in Settings > General; the Docker build takes `VERSION`, `COMMIT` and `DATE` build args.
 - GitHub Actions: lint (golangci-lint, gofmt, go mod tidy, go vet), govulncheck, tests with coverage, hadolint, actionlint, shellcheck, gitleaks, an image smoke test and Trivy scan, CodeQL, dependency review, OpenSSF Scorecard, mutation testing on `main` and `dev`, Dependabot, and a release workflow (multi-architecture image on GHCR with provenance, SBOM and cosign signature; binaries, SBOM and signed checksums on the GitHub release).
 - `scripts/ci.sh` runs every check locally with the same pinned tools; `scripts/release-check.sh` checks a release before tagging.
@@ -22,3 +21,7 @@ The first tagged release (suggested: v0.1.0). Everything until now: the generic 
 ### Fixed
 
 - Request paths are logged quoted, so a path with an encoded newline cannot forge log lines.
+
+## v0.1.0 - 2026-11-12
+
+The first release, tagged by hand: the generic core with six media plugins (anime, manga, books, TV, movies, games), statistics, the calendar, appearance settings, the imports (Yamtrack, Yamtrack novel, Goodreads, AniList account, MyAnimeList XML, Steam account), JSON export and the universal backup with restore. See the GitHub release for the details.

@@ -1,6 +1,6 @@
 # CI, security checks and releases
 
-Allister's checks run on GitHub Actions and, identically, on your machine: every workflow step calls `scripts/ci.sh <check>`, which runs each tool from a container image pinned by digest (or builds it from the pinned `tools/` module). Only Docker is needed locally. The branches are `main` (releases are tagged here) and `dev` (integration); the `dev` branch does not exist yet, the workflows already run for it once it is pushed.
+Allister's checks run on GitHub Actions and, identically, on your machine: every workflow step calls `scripts/ci.sh <check>`, which runs each tool from a container image pinned by digest (or builds it from the pinned `tools/` module). Only Docker is needed locally. The branches are `main` (releases are tagged here) and `dev` (integration).
 
 ## Workflows
 
@@ -91,15 +91,15 @@ Versions released less than a week before pinning were skipped for the previous 
 
 ## Releases
 
-Versions are semantic version tags on `main`: `vMAJOR.MINOR.PATCH`, release candidates `vMAJOR.MINOR.PATCH-rc.N`. **v0.1.0 is the suggested first tag** for the current state (no tag exists yet).
+Versions are semantic version tags on `main`: `vMAJOR.MINOR.PATCH`, release candidates `vMAJOR.MINOR.PATCH-rc.N`. v0.2.0 (2026-11-12) was tagged and released by hand, before these workflows existed; the next release is the first one the Release workflow publishes.
 
 1. Merge everything for the release into `main`, push it, and wait for CI on `main` to pass.
 2. Move the entries under "Unreleased" in `CHANGELOG.md` to a section for the new version and commit that on `main`.
-3. Dry run: `scripts/release-check.sh v0.1.0`. It checks the version format, that the tag does not exist (locally and on `origin`), that the working tree is clean, that you are on `main` and level with `origin/main`, and runs `go vet` and the full test suite. It prints the commands and never tags or pushes.
+3. Dry run: `scripts/release-check.sh v0.2.0`. It checks the version format, that the tag does not exist (locally and on `origin`), that the working tree is clean, that you are on `main` and level with `origin/main`, and runs `go vet` and the full test suite. It prints the commands and never tags or pushes.
 4. Tag and push (an annotated tag carries the tagger and date):
    ```
-   git tag -a v0.1.0 -m "Allister v0.1.0"
-   git push origin v0.1.0
+   git tag -a v0.2.0 -m "Allister v0.2.0"
+   git push origin v0.2.0
    ```
 
 The **Release** workflow then:
@@ -115,14 +115,14 @@ To preview the notes: `scripts/release-notes.sh HEAD`.
 ### Verifying a release
 
 ```
-cosign verify ghcr.io/<owner>/<repo>:0.1.0 \
+cosign verify ghcr.io/<owner>/<repo>:0.2.0 \
   --certificate-identity-regexp '^https://github.com/<owner>/<repo>/.github/workflows/release.yml@refs/tags/v' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
 cosign verify-blob checksums.txt --bundle checksums.txt.sigstore.json \
   --certificate-identity-regexp '^https://github.com/<owner>/<repo>/.github/workflows/release.yml@refs/tags/v' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
 sha256sum -c checksums.txt --ignore-missing
-docker buildx imagetools inspect ghcr.io/<owner>/<repo>:0.1.0 --format '{{ json .Provenance }}'
+docker buildx imagetools inspect ghcr.io/<owner>/<repo>:0.2.0 --format '{{ json .Provenance }}'
 ```
 
 ### First release on GitHub
