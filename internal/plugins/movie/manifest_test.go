@@ -227,3 +227,14 @@ func TestMovieKindStats(t *testing.T) {
 		t.Fatalf("stats = %+v", k.Stats)
 	}
 }
+
+func TestSeriesHintReleaseField(t *testing.T) {
+	k := manifest().Kinds[0]
+	want := &plugin.SeriesHintDef{ReleaseField: "released_on"}
+	if !reflect.DeepEqual(k.SeriesHint, want) {
+		t.Fatalf("series hint = %+v, want %+v", k.SeriesHint, want)
+	}
+	if k.SeriesFields != nil || k.SeriesLink != nil {
+		t.Fatalf("series fields/link = %+v %+v", k.SeriesFields, k.SeriesLink)
+	}
+}

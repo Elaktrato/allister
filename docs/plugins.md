@@ -77,7 +77,9 @@ A `KindDef` describes one media kind:
 - `Progress`: see [Progress](#progress).
 - `Sections`: see [Sections](#sections).
 - `Stats`: optional, how the kind's time and units count on the Statistics page (see [Statistics](#statistics)). JSON `stats`, omitted when unset.
-- `SeriesHint`: optional `SeriesHintDef{TitleField, PositionField}` naming fields of the same kind that already hold a series title (a text field, required) and the position in it (a number field, optional), so the core can propose series groups from them. Unknown or mistyped fields are refused. JSON `series_hint`, omitted when unset.
+- `SeriesHint`: optional `SeriesHintDef{TitleField, PositionField, ReleaseField}` naming fields of the same kind: a text field that already holds a series title (`TitleField`, optional), a number field with the position in it (`PositionField`, optional) and a date field used for derived series dates (`ReleaseField`, optional). A hint names at least one field; without `TitleField` the core skips the title prefill of "Make this a series" and the "same series first" ordering. Unknown or mistyped fields are refused. JSON `series_hint`, omitted when unset.
+- `SeriesFields`: optional extra fields of this kind's series groups, validated like `Fields`. Keys must not be one of the core's own series keys (`cover`, `description`, `started_on`, `ended_on`, `finished`, `parts_total`). JSON `series_fields`, omitted when empty.
+- `SeriesLink`: optional `SeriesLinkDef{Kind, DescriptionField, StartField, EndField, PartsField}`: the kind of the same plugin whose entries a series can be linked to, and which of its fields fill the series' description (text), start and end date (date) and expected number of parts (number); each field is optional. The kind must exist in the manifest and the fields must exist on it with those types. JSON `series_link`, omitted when unset.
 
 ### Table columns
 

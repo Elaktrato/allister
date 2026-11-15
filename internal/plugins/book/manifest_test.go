@@ -34,17 +34,33 @@ func TestBooksManifest(t *testing.T) {
 		!slices.Equal(book.Progress.Defaults, []string{"pages"}) {
 		t.Fatalf("book progress = %+v", book.Progress)
 	}
-	if h := book.SeriesHint; h == nil || h.TitleField != "series" || h.PositionField != "series_number" {
+	if h := book.SeriesHint; h == nil || h.TitleField != "series" || h.PositionField != "series_number" || h.ReleaseField != "published_on" {
 		t.Fatalf("book series hint = %+v", h)
+	}
+	wantSF := []plugin.FieldDef{
+		{Key: "volumes", Label: "Volumes", Type: plugin.FieldNumber, Min: num(1), Max: num(10000), Show: true, Editable: true},
+		{Key: "chapters", Label: "Chapters", Type: plugin.FieldNumber, Min: num(1), Max: num(100000), Show: true, Editable: true},
+		{Key: "author", Label: "Author", Type: plugin.FieldText, Show: true, Editable: true},
+	}
+	if !reflect.DeepEqual(book.SeriesFields, wantSF) {
+		t.Fatalf("book series fields = %+v", book.SeriesFields)
+	}
+	wantLink := &plugin.SeriesLinkDef{Kind: "series", DescriptionField: "synopsis", StartField: "published_on", EndField: "ended_on", PartsField: "volumes"}
+	if !reflect.DeepEqual(book.SeriesLink, wantLink) {
+		t.Fatalf("book series link = %+v", book.SeriesLink)
 	}
 	series := m.Kinds[1]
 	if series.Key != "series" || series.Label != "Light novel" || series.LabelPlural != "Light novels" {
 		t.Fatalf("series kind = %+v", series)
 	}
-	for _, key := range []string{"author", "volumes", "chapters", "year", "synopsis", "published_on"} {
+	for _, key := range []string{"author", "volumes", "chapters", "year", "synopsis", "published_on", "ended_on"} {
 		if !hasField(series, key) {
 			t.Errorf("series field %q missing", key)
 		}
+	}
+	wantEnded := plugin.FieldDef{Key: "ended_on", Label: "Ended", Type: plugin.FieldDate, Show: true, Editable: true}
+	if i := slices.IndexFunc(series.Fields, func(f plugin.FieldDef) bool { return f.Key == "ended_on" }); i < 0 || !reflect.DeepEqual(series.Fields[i], wantEnded) {
+		t.Errorf("ended_on = %+v", series.Fields)
 	}
 	wantSeries := [][]string{{"volume", "chapter"}, {"chapter"}, {"volume"}}
 	if !equalCombos(series.Progress.Combinations, wantSeries) || series.Progress.PrimaryKey != "chapter" ||

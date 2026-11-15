@@ -164,6 +164,10 @@ func novelData(m anilist.Media) plugin.ItemData {
 		day := plugin.DateOnly(*m.StartDate)
 		d.Fields["published_on"] = plugin.FieldValue{Date: &day}
 	}
+	if m.EndDate != nil {
+		day := plugin.DateOnly(*m.EndDate)
+		d.Fields["ended_on"] = plugin.FieldValue{Date: &day}
+	}
 	return d
 }
 

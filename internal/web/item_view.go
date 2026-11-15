@@ -186,7 +186,7 @@ func (s *server) seriesBlock(ctx context.Context, v *itemView, li *loadedItem, l
 	}
 	if ser == nil {
 		title := v.Title
-		if h := k.SeriesHint; h != nil {
+		if h := k.SeriesHint; h != nil && h.TitleField != "" {
 			if t := strings.TrimSpace(it.Fields[h.TitleField].Text); t != "" {
 				title = t
 			}

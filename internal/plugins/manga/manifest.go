@@ -41,6 +41,7 @@ func manifest() plugin.Manifest {
 			Key:         KindManga,
 			Label:       "Manga",
 			LabelPlural: "Manga",
+			SeriesHint:  &plugin.SeriesHintDef{ReleaseField: "started_on"},
 			Fields: []plugin.FieldDef{
 				{Key: "type", Label: "Type", Type: plugin.FieldEnum, EnumValues: append([]string(nil), typeValues...), Show: true, Editable: true, Filterable: true, Required: true},
 				{Key: "chapters", Label: "Chapters", Type: plugin.FieldNumber, Unit: "ch", Min: num(1), Max: num(100000), Show: true, Editable: true},

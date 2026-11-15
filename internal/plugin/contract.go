@@ -264,14 +264,41 @@ type KindDef struct {
 	// SeriesHint names the kind's own fields that already carry a series
 	// title and a position in it, so the core can propose series groups.
 	SeriesHint *SeriesHintDef `json:"series_hint,omitempty"`
+	// SeriesFields are extra fields of this kind's series groups, validated
+	// like Fields; their keys must not collide with the core's own series
+	// keys (see ReservedSeriesKeys).
+	SeriesFields []FieldDef `json:"series_fields,omitempty"`
+	// SeriesLink names the kind whose entries a series of this kind can be
+	// linked to, and which of its fields fill the series' own data.
+	SeriesLink *SeriesLinkDef `json:"series_link,omitempty"`
 }
 
-// SeriesHintDef points at fields of the same kind: TitleField (a text field)
-// holds the series title, PositionField (an optional number field) the
-// entry's position in it.
+// ReservedSeriesKeys are the keys of the series data the core owns; a kind's
+// SeriesFields must not use them.
+func ReservedSeriesKeys() []string {
+	return []string{"cover", "description", "started_on", "ended_on", "finished", "parts_total"}
+}
+
+// SeriesLinkDef declares which kind of the same plugin a series can be linked
+// to (Kind) and which of that kind's fields fill the series' description
+// (DescriptionField, text), start and end date (StartField, EndField, date)
+// and expected number of parts (PartsField, number). Each field is optional.
+type SeriesLinkDef struct {
+	Kind             string `json:"kind"`
+	DescriptionField string `json:"description_field,omitempty"`
+	StartField       string `json:"start_field,omitempty"`
+	EndField         string `json:"end_field,omitempty"`
+	PartsField       string `json:"parts_field,omitempty"`
+}
+
+// SeriesHintDef points at fields of the same kind: TitleField (an optional
+// text field) holds the series title, PositionField (an optional number
+// field) the entry's position in it, ReleaseField (an optional date field)
+// the date used for derived series dates. A hint names at least one field.
 type SeriesHintDef struct {
-	TitleField    string `json:"title_field"`
+	TitleField    string `json:"title_field,omitempty"`
 	PositionField string `json:"position_field,omitempty"`
+	ReleaseField  string `json:"release_field,omitempty"`
 }
 
 // KeyField is one named credential field of a source ("client_id"). Name is a

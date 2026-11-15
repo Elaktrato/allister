@@ -27,6 +27,7 @@ func gameKind() plugin.KindDef {
 		Key:         KindGame,
 		Label:       "Game",
 		LabelPlural: "Games",
+		SeriesHint:  &plugin.SeriesHintDef{ReleaseField: "released_on"},
 		Fields: []plugin.FieldDef{
 			{Key: "year", Label: "Year", Type: plugin.FieldNumber, Min: num(1950), Max: num(2100), Show: true, Editable: true, Filterable: true, Sortable: true},
 			{Key: "released_on", Label: "Released", Type: plugin.FieldDate, Show: true, Editable: true},

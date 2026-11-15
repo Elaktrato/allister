@@ -87,6 +87,7 @@ func Validate(m Manifest) error {
 		}
 		seenKind[k.Key] = true
 		validateKind(&p, path, k)
+		validateSeriesLink(&p, path+".series_link", k.SeriesLink, m.Kinds)
 	}
 
 	sources := map[string]bool{}
@@ -320,62 +321,32 @@ func validateKind(p *problems, path string, k KindDef) {
 		}
 	}
 
-	fields := map[string]FieldType{}
-	for i, f := range k.Fields {
-		fp := fmt.Sprintf("%s.fields[%d]", path, i)
-		if !keyRe.MatchString(f.Key) {
-			p.add(fp+".key", "%q is not a valid key", f.Key)
-		} else if _, dup := fields[f.Key]; dup {
-			p.add(fp+".key", "duplicate %q", f.Key)
-		}
-		fields[f.Key] = f.Type
-		if f.Label == "" {
-			p.add(fp+".label", "required")
-		}
-		if !validFieldType(f.Type) {
-			p.add(fp+".type", "unknown field type %q", f.Type)
-		}
-		if f.Type == FieldEnum && len(f.EnumValues) == 0 {
-			p.add(fp+".enum_values", "enum field needs at least one value")
-		}
-		if f.Type != FieldEnum && len(f.EnumValues) > 0 {
-			p.add(fp+".enum_values", "only enum fields take values")
-		}
-		if f.Unit != "" {
-			switch {
-			case f.Type != FieldNumber:
-				p.add(fp+".unit", "only number fields take a unit")
-			case !utf8.ValidString(f.Unit) || strings.IndexFunc(f.Unit, isControl) >= 0:
-				p.add(fp+".unit", "must be a single line without control characters")
-			case utf8.RuneCountInString(f.Unit) > maxUnitRunes:
-				p.add(fp+".unit", "longer than %d characters", maxUnitRunes)
-			}
-		}
-		if f.Min != nil && !finite(*f.Min) {
-			p.add(fp+".min", "must be a finite number")
-		}
-		if f.Max != nil && !finite(*f.Max) {
-			p.add(fp+".max", "must be a finite number")
-		}
-		if f.Min != nil && f.Max != nil && *f.Min > *f.Max {
-			p.add(fp, "min %v is above max %v", *f.Min, *f.Max)
-		}
-	}
+	fields := validateFieldList(p, path+".fields", k.Fields, nil)
+	validateFieldList(p, path+".series_fields", k.SeriesFields, ReservedSeriesKeys())
 	if h := k.SeriesHint; h != nil {
 		hp := path + ".series_hint"
-		switch t, ok := fields[h.TitleField]; {
-		case h.TitleField == "":
-			p.add(hp+".title_field", "required")
-		case !ok:
-			p.add(hp+".title_field", "no field %q", h.TitleField)
-		case t != FieldText:
-			p.add(hp+".title_field", "field %q is not a text field", h.TitleField)
+		if h.TitleField == "" && h.PositionField == "" && h.ReleaseField == "" {
+			p.add(hp, "name at least one field")
+		}
+		if h.TitleField != "" {
+			if t, ok := fields[h.TitleField]; !ok {
+				p.add(hp+".title_field", "no field %q", h.TitleField)
+			} else if t != FieldText {
+				p.add(hp+".title_field", "field %q is not a text field", h.TitleField)
+			}
 		}
 		if h.PositionField != "" {
 			if t, ok := fields[h.PositionField]; !ok {
 				p.add(hp+".position_field", "no field %q", h.PositionField)
 			} else if t != FieldNumber {
 				p.add(hp+".position_field", "field %q is not a number field", h.PositionField)
+			}
+		}
+		if h.ReleaseField != "" {
+			if t, ok := fields[h.ReleaseField]; !ok {
+				p.add(hp+".release_field", "no field %q", h.ReleaseField)
+			} else if t != FieldDate {
+				p.add(hp+".release_field", "field %q is not a date field", h.ReleaseField)
 			}
 		}
 	}
@@ -617,3 +588,93 @@ func sameSet(a, b []string) bool {
 }
 
 func finite(f float64) bool { return !math.IsNaN(f) && !math.IsInf(f, 0) }
+
+// validateFieldList checks a list of field declarations at path (for example
+// "kinds[0].fields"): keys, labels, types, enum values, units and bounds. Keys
+// in reserved are refused. It returns the field types by key.
+func validateFieldList(p *problems, path string, list []FieldDef, reserved []string) map[string]FieldType {
+	fields := map[string]FieldType{}
+	for i, f := range list {
+		fp := fmt.Sprintf("%s[%d]", path, i)
+		if !keyRe.MatchString(f.Key) {
+			p.add(fp+".key", "%q is not a valid key", f.Key)
+		} else if _, dup := fields[f.Key]; dup {
+			p.add(fp+".key", "duplicate %q", f.Key)
+		} else if slices.Contains(reserved, f.Key) {
+			p.add(fp+".key", "%q is reserved", f.Key)
+		}
+		fields[f.Key] = f.Type
+		if f.Label == "" {
+			p.add(fp+".label", "required")
+		}
+		if !validFieldType(f.Type) {
+			p.add(fp+".type", "unknown field type %q", f.Type)
+		}
+		if f.Type == FieldEnum && len(f.EnumValues) == 0 {
+			p.add(fp+".enum_values", "enum field needs at least one value")
+		}
+		if f.Type != FieldEnum && len(f.EnumValues) > 0 {
+			p.add(fp+".enum_values", "only enum fields take values")
+		}
+		if f.Unit != "" {
+			switch {
+			case f.Type != FieldNumber:
+				p.add(fp+".unit", "only number fields take a unit")
+			case !utf8.ValidString(f.Unit) || strings.IndexFunc(f.Unit, isControl) >= 0:
+				p.add(fp+".unit", "must be a single line without control characters")
+			case utf8.RuneCountInString(f.Unit) > maxUnitRunes:
+				p.add(fp+".unit", "longer than %d characters", maxUnitRunes)
+			}
+		}
+		if f.Min != nil && !finite(*f.Min) {
+			p.add(fp+".min", "must be a finite number")
+		}
+		if f.Max != nil && !finite(*f.Max) {
+			p.add(fp+".max", "must be a finite number")
+		}
+		if f.Min != nil && f.Max != nil && *f.Min > *f.Max {
+			p.add(fp, "min %v is above max %v", *f.Min, *f.Max)
+		}
+
+	}
+	return fields
+}
+
+// validateSeriesLink checks a kind's series link: it names a kind of the
+// manifest, and each named field exists on that kind with the right type.
+func validateSeriesLink(p *problems, path string, l *SeriesLinkDef, kinds []KindDef) {
+	if l == nil {
+		return
+	}
+	if l.Kind == "" {
+		p.add(path+".kind", "required")
+		return
+	}
+	i := slices.IndexFunc(kinds, func(k KindDef) bool { return k.Key == l.Kind })
+	if i < 0 {
+		p.add(path+".kind", "no kind %q", l.Kind)
+		return
+	}
+	types := map[string]FieldType{}
+	for _, f := range kinds[i].Fields {
+		types[f.Key] = f.Type
+	}
+	for _, c := range []struct {
+		name, field string
+		want        FieldType
+	}{
+		{"description_field", l.DescriptionField, FieldText},
+		{"start_field", l.StartField, FieldDate},
+		{"end_field", l.EndField, FieldDate},
+		{"parts_field", l.PartsField, FieldNumber},
+	} {
+		if c.field == "" {
+			continue
+		}
+		if t, ok := types[c.field]; !ok {
+			p.add(path+"."+c.name, "no field %q on kind %q", c.field, l.Kind)
+		} else if t != c.want {
+			p.add(path+"."+c.name, "field %q is not a %s field", c.field, c.want)
+		}
+	}
+}

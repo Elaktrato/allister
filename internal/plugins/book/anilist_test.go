@@ -53,6 +53,7 @@ func (f *fakeNovelClient) MediaFormatsByMALIDs(_ context.Context, typ string, ma
 
 func novelMedia() anilist.Media {
 	date := time.Date(2009, 4, 10, 0, 0, 0, 0, time.UTC)
+	endDate := time.Date(2024, 11, 2, 0, 0, 0, 0, time.UTC)
 	return anilist.Media{
 		SearchResult: anilist.SearchResult{
 			Source: anilist.AniList, ID: "51479", Type: "NOVEL",
@@ -60,7 +61,7 @@ func novelMedia() anilist.Media {
 			Year:   ip(2009), Volumes: ip(12), Chapters: ip(120), CoverURL: "https://img.example/sao.jpg",
 			Synopsis: "A death game.",
 		},
-		StartDate: &date, Format: "NOVEL", MALID: "21479", ExternalURL: "https://anilist.co/manga/51479",
+		StartDate: &date, EndDate: &endDate, Format: "NOVEL", MALID: "21479", ExternalURL: "https://anilist.co/manga/51479",
 		Genres: []string{"Fantasy", "Romance"},
 		Tags:   []anilist.Tag{{Name: "Isekai", Rank: ip(90), Spoiler: true}},
 		Staff: []anilist.StaffMember{
@@ -97,7 +98,8 @@ func TestNovelDetailsMapsFieldsAndStaff(t *testing.T) {
 	if d.Fields["author"].Text != "Reki Kawahara" || d.Fields["volumes"].Num == nil || *d.Fields["volumes"].Num != 12 ||
 		d.Fields["chapters"].Num == nil || *d.Fields["chapters"].Num != 120 ||
 		d.Fields["year"].Num == nil || *d.Fields["year"].Num != 2009 ||
-		d.Fields["published_on"].Date == nil || d.Fields["published_on"].Date.Format("2006-01-02") != "2009-04-10" {
+		d.Fields["published_on"].Date == nil || d.Fields["published_on"].Date.Format("2006-01-02") != "2009-04-10" ||
+		d.Fields["ended_on"].Date == nil || d.Fields["ended_on"].Date.Format("2006-01-02") != "2024-11-02" {
 		t.Fatalf("fields = %+v", d.Fields)
 	}
 	if len(d.Titles) != 3 || d.Titles[1].Text != "Sword Art Online" || len(d.Genres) != 2 ||
@@ -146,5 +148,18 @@ func TestNovelErrors(t *testing.T) {
 				t.Fatalf("err = %v, want %v", err, c.want)
 			}
 		})
+	}
+}
+
+func TestNovelDetailsWithoutEndDate(t *testing.T) {
+	m := novelMedia()
+	m.EndDate = nil
+	s := &anilistSource{c: &fakeNovelClient{media: m}}
+	d, err := s.Details(context.Background(), KindSeries, "51479")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := d.Fields["ended_on"]; ok {
+		t.Fatalf("ended_on set without an end date: %+v", d.Fields["ended_on"])
 	}
 }
