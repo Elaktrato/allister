@@ -37,7 +37,7 @@ State of the project when the work moved from Claude Code to another agent. Afte
 
 ## Known follow-ups (none blocking)
 
-- After the CI workflows are first pushed: configure the GitHub settings listed at the end of `docs/ci.md` and create the `dev` branch. Later releases follow `docs/ci.md#releases` (`scripts/release-check.sh vX.Y.Z`).
+- After the CI workflows are first pushed: configure the GitHub settings listed at the end of `docs/ci.md`. Later releases follow `docs/ci.md#releases` (`scripts/release-check.sh vX.Y.Z`).
 - Deferred (statistics): book series have no time or units declaration (a series is flat: volumes and cumulative chapters, no per-volume items to time); manga and books have no time, only units; the heatmap has no history before the event log (no backfill, by design).
 - Not built: model 3 (series -> volume child items; issue #1), a manga release calendar (AniList has no chapter schedule; a MangaDex source could add one), a Goodreads/StoryGraph/Calibre import beyond the Goodreads CSV, a Google Books key in the API keys card (it is an environment variable), MyAnimeList as a live source (deliberately skipped), other movie sources and imports (Letterboxd, IMDb, Trakt), GOG and HowLongToBeat (no official library API or export; deliberately out), dashboards, accounts.
 
@@ -48,11 +48,6 @@ State of the project when the work moved from Claude Code to another agent. Afte
 
 ## Pushing to GitHub
 
-The repo has no remote. The owner pushes themselves:
-
-```
-git remote add origin <repo URL>
-git push -u origin main
-```
+The remote is `origin` (GitHub, `main` and `dev`). The owner pushes themselves; agents never push or tag.
 
 The workflows start with that push; the first release is a pushed tag (see `docs/ci.md#releases`).
