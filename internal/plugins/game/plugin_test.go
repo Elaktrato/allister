@@ -11,49 +11,67 @@ import (
 	"github.com/allister/allister/internal/plugin/plugintest"
 )
 
-// TestNewProvidesDeclaredSourcesImportersAndExporter: the plugin wires what its
-// manifest declares, leaves unknown ids nil, keeps the account importer's
-// optional capability, and refuses a second registration.
+// TestNewProvidesDeclaredSourcesImportersAndExporter: the plugin wires every
+// source, importer and exporter its manifest declares, leaves unknown ids nil,
+// gives each account importer its optional capability, and refuses a second
+// registration. Without credentials the keyed sources answer ErrNotConfigured
+// without a single request (the fake servers keep the test hermetic).
 func TestNewProvidesDeclaredSourcesImportersAndExporter(t *testing.T) {
-	p := New(Options{})
-	for _, id := range []string{SourceIGDB, SourceSteam} {
-		if p.Source(id) == nil {
-			t.Fatalf("source %q not wired", id)
+	igdbRec, steamRec := &igdbTestRecorder{}, &steamTestRecorder{}
+	tokenSrv, dataSrv := newIGDBTestServers(t, igdbRec, http.NotFound, http.NotFound)
+	apiSrv, storeSrv := newSteamTestServers(t, steamRec, nil, nil)
+	opts := Options{IGDBURL: dataSrv.URL, IGDBTokenURL: tokenSrv.URL, SteamAPIURL: apiSrv.URL, SteamStoreURL: storeSrv.URL}
+	p := New(opts)
+	m := p.Manifest()
+	if len(m.Sources) == 0 || len(m.Importers) == 0 || len(m.Exporters) == 0 {
+		t.Fatalf("manifest declares nothing to wire: %+v", m)
+	}
+	for _, si := range m.Sources {
+		if p.Source(si.ID) == nil {
+			t.Fatalf("source %q not wired", si.ID)
 		}
 	}
-	for _, id := range []string{ImporterYamtrack, ImporterSteam} {
-		if p.Importer(id) == nil {
-			t.Fatalf("importer %q not wired", id)
+	for _, im := range m.Importers {
+		got := p.Importer(im.ID)
+		if got == nil {
+			t.Fatalf("importer %q not wired", im.ID)
+		}
+		if _, ok := got.(plugin.AccountImporter); ok != (im.AccountLabel != "") {
+			t.Fatalf("importer %q: AccountImporter %v, account label %q", im.ID, ok, im.AccountLabel)
 		}
 	}
-	if _, ok := p.Importer(ImporterSteam).(plugin.AccountImporter); !ok {
-		t.Fatal("Steam importer does not implement AccountImporter")
-	}
-	if p.Exporter(ExporterJSON) == nil {
-		t.Fatal("JSON exporter not wired")
+	for _, ex := range m.Exporters {
+		if p.Exporter(ex.ID) == nil {
+			t.Fatalf("exporter %q not wired", ex.ID)
+		}
 	}
 	if p.Exporter("nope") != nil || p.Source("nope") != nil || p.Importer("nope") != nil {
 		t.Fatal("unknown ids must be nil")
 	}
-	if err := plugin.Validate(p.Manifest()); err != nil {
+	if err := plugin.Validate(m); err != nil {
 		t.Fatalf("manifest: %v", err)
 	}
 
-	// Nil key funcs mean no credentials: the keyed sources report
+	// Nil key funcs mean no credentials: every keyed source reports
 	// ErrNotConfigured instead of calling a server.
 	ctx := context.Background()
-	if _, err := p.Source(SourceIGDB).Details(ctx, KindGame, "1"); !errors.Is(err, plugin.ErrNotConfigured) {
-		t.Fatalf("keyless IGDB details err = %v, want ErrNotConfigured", err)
+	for _, si := range m.Sources {
+		if si.KeyLabel == "" {
+			continue
+		}
+		if _, err := p.Source(si.ID).Details(ctx, KindGame, "1"); !errors.Is(err, plugin.ErrNotConfigured) {
+			t.Fatalf("keyless %s details err = %v, want ErrNotConfigured", si.ID, err)
+		}
 	}
-	if _, err := p.Source(SourceSteam).Details(ctx, KindGame, "1"); !errors.Is(err, plugin.ErrNotConfigured) {
-		t.Fatalf("keyless Steam details err = %v, want ErrNotConfigured", err)
+	if n := igdbRec.tokenRequests() + igdbRec.dataCount() + steamRec.count(); n != 0 {
+		t.Fatalf("keyless calls made %d requests", n)
 	}
 
 	reg := plugin.NewRegistry(plugintest.NewMemEnabled())
 	if err := reg.Register(p); err != nil {
 		t.Fatal(err)
 	}
-	if err := reg.Register(New(Options{})); err == nil {
+	if err := reg.Register(New(opts)); err == nil {
 		t.Fatal("second games registration should be refused")
 	}
 }
@@ -75,7 +93,7 @@ func TestNewResolvesCredentialsPerRequest(t *testing.T) {
 		}
 	})
 	steamRec := &steamTestRecorder{}
-	_, storeSrv := newSteamTestServers(t, steamRec, nil, func(w http.ResponseWriter, r *http.Request) {
+	apiSrv, storeSrv := newSteamTestServers(t, steamRec, nil, func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/appdetails" {
 			http.NotFound(w, r)
 			return
@@ -86,8 +104,8 @@ func TestNewResolvesCredentialsPerRequest(t *testing.T) {
 	var clientID, clientSecret, steamKey string
 	p := New(Options{
 		IGDBURL: dataSrv.URL, IGDBTokenURL: tokenSrv.URL,
-		SteamStoreURL: storeSrv.URL,
-		IGDBClientID:  func(context.Context) (string, error) { return clientID, nil },
+		SteamAPIURL: apiSrv.URL, SteamStoreURL: storeSrv.URL,
+		IGDBClientID: func(context.Context) (string, error) { return clientID, nil },
 		IGDBClientSecret: func(context.Context) (string, error) {
 			return clientSecret, nil
 		},
@@ -100,6 +118,9 @@ func TestNewResolvesCredentialsPerRequest(t *testing.T) {
 	}
 	if _, err := p.Source(SourceSteam).Details(ctx, KindGame, "7"); !errors.Is(err, plugin.ErrNotConfigured) {
 		t.Fatalf("Steam before key: err = %v, want ErrNotConfigured", err)
+	}
+	if n := igdbRec.tokenRequests() + igdbRec.dataCount() + steamRec.count(); n != 0 {
+		t.Fatalf("keyless calls made %d requests", n)
 	}
 
 	clientID, clientSecret, steamKey = "client-id", "client-secret", "steam-key"
