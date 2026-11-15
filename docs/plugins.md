@@ -61,7 +61,7 @@ type Exporter interface {
 | `Kinds` | One or more media kinds (below). At least one is required. |
 | `Sources`, `Importers`, `Exporters` | Optional declarations (below). |
 
-**Reserved ids.** Plugin ids `list`, `people`, `settings`, `covers`, `static`, `healthz` and `api` belong to the core's first URL segment. Source ids `manual`, `export` and `search` would be hidden by the core's own routes under `/{plugin}/` and are refused too. Kind, source, importer and exporter ids use the slug rule above. Field and progress keys use `^[a-z][a-z0-9_]{0,31}$`.
+**Reserved ids.** Plugin ids `list`, `people`, `settings`, `covers`, `static`, `healthz`, `api` and `version` belong to the core's first URL segment. Source ids `manual`, `export` and `search` would be hidden by the core's own routes under `/{plugin}/` and are refused too. Kind, source, importer and exporter ids use the slug rule above. Field and progress keys use `^[a-z][a-z0-9_]{0,31}$`.
 
 ### Kinds
 

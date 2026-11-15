@@ -21,6 +21,7 @@ State of the project when the work moved from Claude Code to another agent. Afte
 - **Statistics.** `/stats` (the sidebar's Statistics entry) sums time, units, ratings and entry counts by completion date, for all enabled kinds or one kind, with period (all, year, 12m, custom), status, genre/tag (any/all) and `f.<field>` filters. Each kind declares `StatsDef` (`Time`, `Units`) as data; `internal/stats` aggregates, the web layer draws the SVG chart, rating distribution and 12-month activity heatmap. Time sources: anime (episodes × episode duration, a new `duration` field collected from AniList), TV (episodes × runtime), movies (runtime, position), games (playtime); manga and books count units only. Series (book series kind) declares no stats and is deferred. The `entry_events` log (migration 00017, append-only, written in each entry change's transaction with origin `manual`, `import` or `restore`) feeds the heatmap; the heatmap counts only manual progress increases and completions, shows the last 365 days in UTC, and is narrowed by media only. The log is not backfilled: history before it is not reconstructed. The backup carries the newest 5,000 events per entry (`events_truncated` marks a cut log). "Update from source" on an overview (`POST /{plugin}/{source}/{id}/refresh`) fills only the fields an item lacks, one item at a time; there is no batch backfill. `StatsRows` loads at most 20,000 entries per request; above that the page shows a notice and no numbers.
 - **Deferred TV work.** MyDramaList is issue #2; Trakt and TV Time imports are issue #3. Model 3 (book series hierarchy) remains issue #1.
 - **Builds.** Everything pinned and checksummed, see `PINS.md`.
+- **CI and releases.** GitHub Actions (lint, govulncheck, tests, image smoke test and Trivy, gitleaks, CodeQL, dependency review, Scorecard, mutation tests on `main`/`dev`, Dependabot) and a tag-driven release workflow; every check runs locally with `scripts/ci.sh`. See `docs/ci.md`. The workflows have not run on GitHub yet (they start with the first push that contains them).
 
 ## Decisions worth knowing
 
@@ -36,6 +37,7 @@ State of the project when the work moved from Claude Code to another agent. Afte
 
 ## Known follow-ups (none blocking)
 
+- After the CI workflows are first pushed: configure the GitHub settings listed at the end of `docs/ci.md` and create the `dev` branch. Later releases follow `docs/ci.md#releases` (`scripts/release-check.sh vX.Y.Z`).
 - Deferred (statistics): book series have no time or units declaration (a series is flat: volumes and cumulative chapters, no per-volume items to time); manga and books have no time, only units; the heatmap has no history before the event log (no backfill, by design).
 - Not built: model 3 (series -> volume child items; issue #1), a manga release calendar (AniList has no chapter schedule; a MangaDex source could add one), a Goodreads/StoryGraph/Calibre import beyond the Goodreads CSV, a Google Books key in the API keys card (it is an environment variable), MyAnimeList as a live source (deliberately skipped), other movie sources and imports (Letterboxd, IMDb, Trakt), GOG and HowLongToBeat (no official library API or export; deliberately out), dashboards, accounts.
 
@@ -52,3 +54,5 @@ The repo has no remote. The owner pushes themselves:
 git remote add origin <repo URL>
 git push -u origin main
 ```
+
+The workflows start with that push; the first release is a pushed tag (see `docs/ci.md#releases`).

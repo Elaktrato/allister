@@ -125,6 +125,7 @@ The universal backup includes these settings and the uploaded fonts. A restore s
 | `/calendar` | The month view of upcoming releases (see [Calendar](#calendar)) |
 | `/calendar.ics` | The iCalendar feed of upcoming releases (same page) |
 | `/stats` | The Statistics page with its filters (see [Statistics](#statistics)) |
+| `/version` | The build's version as JSON: `version` (tag or `dev`), `commit`, `date` (build time) and `go` |
 
 Changes from the first version: a data volume from the first (pre-plugin) preview build starts empty after the upgrade (its anime tables are dropped, not copied); make a cold backup of the volume first if it holds data you want (see the README). List statuses are the core's status classes, so a bookmark like `/anime?status=watching` now opens the All tab with a notice (use `status=active`). The list's search and filter parameters are new. Edit details (`/anime/{source}/{id}/edit`) and the recommendations fragment (`/anime/{source}/{id}/recommendations`, loaded by the overview) are new routes.
 
@@ -189,3 +190,5 @@ Schedules are not fetched while a calendar app polls: the database answers, and 
 - `internal/guard`: tests that keep the core free of media-specific code and plugin imports
 - `internal/appearance`: colour tokens and presets, fonts, the generated `/appearance.css`, uploaded fonts
 - `internal/covers`, `internal/settings`, `internal/config`, `internal/ids`: small helpers
+- `internal/version`: the build's version information (set at link time)
+- `tools/`: a separate Go module pinning the CI tools govulncheck and gremlins (see `docs/ci.md`)
