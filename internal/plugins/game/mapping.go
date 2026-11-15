@@ -140,3 +140,18 @@ func cleanTags(in []plugin.Tag) []plugin.Tag {
 	}
 	return out
 }
+
+// joinNames sanitises names (IGDB and Steam both use it) and joins them with ", ". limit <= 0 means no
+// limit.
+func joinNames(names []string, limit int) string {
+	clean := make([]string, 0, len(names))
+	for _, raw := range names {
+		if limit > 0 && len(clean) == limit {
+			break
+		}
+		if name := plugin.SingleLine(raw, maxTermRunes); name != "" {
+			clean = append(clean, name)
+		}
+	}
+	return strings.Join(clean, ", ")
+}

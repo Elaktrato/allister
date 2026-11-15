@@ -120,7 +120,7 @@ func TestSteamOwnedGames(t *testing.T) {
 	}
 	first := games[0]
 	if first.AppID != 440 || first.Name != "Team Fortress 2" || first.PlaytimeForever != 1234 ||
-		first.Playtime2Weeks != 12 || first.IconURL != "abc" {
+		first.Playtime2Weeks != 12 || first.IconHash != "abc" {
 		t.Errorf("first game = %+v", first)
 	}
 	if second := games[1]; second.AppID != 730 || second.PlaytimeForever != 0 {
@@ -359,8 +359,9 @@ func TestSteamSourceSearchStatusErrors(t *testing.T) {
 		status int
 		want   error
 	}{
-		{http.StatusUnauthorized, plugin.ErrNotConfigured},
-		{http.StatusForbidden, plugin.ErrNotConfigured},
+		// the store endpoints carry no key, so a refusal is not ErrNotConfigured
+		{http.StatusUnauthorized, plugin.ErrUnavailable},
+		{http.StatusForbidden, plugin.ErrUnavailable},
 		{http.StatusTooManyRequests, plugin.ErrRateLimited},
 		{http.StatusInternalServerError, plugin.ErrUnavailable},
 	}
@@ -574,8 +575,8 @@ func TestSteamSourceDetailsStatusErrors(t *testing.T) {
 		status int
 		want   error
 	}{
-		{http.StatusUnauthorized, plugin.ErrNotConfigured},
-		{http.StatusForbidden, plugin.ErrNotConfigured},
+		{http.StatusUnauthorized, plugin.ErrUnavailable},
+		{http.StatusForbidden, plugin.ErrUnavailable},
 		{http.StatusNotFound, plugin.ErrNotFound},
 		{http.StatusTooManyRequests, plugin.ErrRateLimited},
 		{http.StatusInternalServerError, plugin.ErrUnavailable},
@@ -718,4 +719,57 @@ func steamFieldNum(d plugin.ItemData, key string) (float64, bool) {
 		return 0, false
 	}
 	return *v.Num, true
+}
+
+// TestSteamSourceDetailsValidatesIDBeforeKey: a bogus id is not found (422)
+// even when the source has no key; a valid id still needs the key.
+func TestSteamSourceDetailsValidatesIDBeforeKey(t *testing.T) {
+	rec := &steamTestRecorder{}
+	_, src := newSteamTestClient(t, rec, nil, nil, "")
+	if _, err := src.Details(context.Background(), KindGame, "abc"); !errors.Is(err, plugin.ErrNotFound) {
+		t.Fatalf("bogus id: err = %v, want ErrNotFound", err)
+	}
+	if _, err := src.Details(context.Background(), KindGame, "730"); !errors.Is(err, plugin.ErrNotConfigured) {
+		t.Fatalf("valid id: err = %v, want ErrNotConfigured", err)
+	}
+	if got := rec.count(); got != 0 {
+		t.Errorf("requests = %d, want 0", got)
+	}
+}
+
+// TestSteamOwnedGamesNeedsKeyBeforeRequest: an empty key never reaches the Web API.
+func TestSteamOwnedGamesNeedsKeyBeforeRequest(t *testing.T) {
+	rec := &steamTestRecorder{}
+	c, _ := newSteamTestClient(t, rec, nil, nil, "  ")
+	if _, err := c.ownedGames(context.Background(), "76561198000000000"); !errors.Is(err, plugin.ErrNotConfigured) {
+		t.Fatalf("err = %v, want ErrNotConfigured", err)
+	}
+	if got := rec.count(); got != 0 {
+		t.Errorf("requests = %d, want 0", got)
+	}
+}
+
+// TestSteamKeyResolvedPerRequest: a key saved in the settings takes effect on
+// the next request, without a new client.
+func TestSteamKeyResolvedPerRequest(t *testing.T) {
+	rec := &steamTestRecorder{}
+	apiSrv, storeSrv := newSteamTestServers(t, rec, func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `{"response":{"games":[{"appid":440,"name":"Team Fortress 2"}]}}`)
+	}, nil)
+	keys := []string{"key-1", "key-2"}
+	calls := 0
+	c := newSteamClient(apiSrv.URL, storeSrv.URL, func(context.Context) (string, error) {
+		k := keys[calls]
+		calls++
+		return k, nil
+	}, apiSrv.Client())
+	for range keys {
+		if _, err := c.ownedGames(context.Background(), "76561198000000000"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	reqs := rec.all()
+	if len(reqs) != 2 || reqs[0].query.Get("key") != "key-1" || reqs[1].query.Get("key") != "key-2" {
+		t.Fatalf("requests = %+v", reqs)
+	}
 }
