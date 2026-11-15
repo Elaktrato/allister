@@ -365,11 +365,11 @@ func unmatchedRowHint(m plugin.Manifest) string {
 func (s *server) buildList(r *http.Request, m plugin.Manifest, lq listQuery) (listView, error) {
 	ctx := r.Context()
 	k, _ := kindDef(m, lq.Kind)
+	has, err := s.deps.Library.HasSeries(ctx, m.ID)
+	if err != nil {
+		return listView{}, err
+	}
 	if lq.Tab == "series" {
-		has, err := s.deps.Library.HasSeries(ctx, m.ID)
-		if err != nil {
-			return listView{}, err
-		}
 		if has {
 			return s.buildSeriesTab(r, m, lq)
 		}
@@ -469,9 +469,7 @@ func (s *server) buildList(r *http.Request, m plugin.Manifest, lq listQuery) (li
 			Href:    filteredListURL(m, k.Key, string(st), lq.View, 1, f),
 			Current: string(st) == lq.Status, Status: string(st)})
 	}
-	if v.Kinds, err = s.kindTabs(ctx, m, k, lq.View, false); err != nil {
-		return listView{}, err
-	}
+	v.Kinds = kindTabs(m, k, has, lq.View, false)
 	return v, nil
 }
 
@@ -554,13 +552,9 @@ func (s *server) showList(w http.ResponseWriter, r *http.Request, m plugin.Manif
 }
 
 // kindTabs is the tab bar above the status tabs: the kinds of a plugin with
-// several, plus the Series tab once the plugin has a series (a one-kind
+// several, plus the Series tab once the plugin has a series (has; a one-kind
 // plugin then shows "All | Series").
-func (s *server) kindTabs(ctx context.Context, m plugin.Manifest, cur plugin.KindDef, view string, onSeries bool) ([]tabView, error) {
-	has, err := s.deps.Library.HasSeries(ctx, m.ID)
-	if err != nil {
-		return nil, err
-	}
+func kindTabs(m plugin.Manifest, cur plugin.KindDef, has bool, view string, onSeries bool) []tabView {
 	var tabs []tabView
 	// another kind has another schema: its link starts without filters
 	switch {
@@ -574,7 +568,7 @@ func (s *server) kindTabs(ctx context.Context, m plugin.Manifest, cur plugin.Kin
 	if has {
 		tabs = append(tabs, tabView{Label: "Series", Href: seriesTabURL(m.ID, "", view, "", "", 1), Current: onSeries})
 	}
-	return tabs, nil
+	return tabs
 }
 
 // seriesTabURL is the Series tab of a plugin (defaults omitted).
@@ -660,9 +654,7 @@ func (s *server) buildSeriesTab(r *http.Request, m plugin.Manifest, lq listQuery
 		v.Tabs = append(v.Tabs, tabView{Label: statusLabel(k, st), Count: counts[st], Href: at(string(st), 1),
 			Current: string(st) == lq.Status, Status: string(st)})
 	}
-	if v.Kinds, err = s.kindTabs(ctx, m, k, lq.View, true); err != nil {
-		return listView{}, err
-	}
+	v.Kinds = kindTabs(m, k, true, lq.View, true)
 	return v, nil
 }
 

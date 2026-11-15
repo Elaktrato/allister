@@ -201,8 +201,9 @@ func TestSeriesCandidatesPreferHint(t *testing.T) {
 	mk("2", "Beta", "")
 	mk("3", "Zulu", " my SAGA ")
 	mk("4", "Taken", "")
-	taken, _ := fe.lib.CreateSeries(bg, mk("5", "Other", ""), "Else")
-	_ = taken
+	if _, err := fe.lib.CreateSeries(bg, mk("5", "Other", ""), "Else"); err != nil {
+		t.Fatal(err)
+	}
 	ser, err := fe.lib.CreateSeries(bg, first, "My Saga")
 	if err != nil {
 		t.Fatal(err)
@@ -353,12 +354,11 @@ func TestSearchAddIntoSeries(t *testing.T) {
 		t.Fatalf("listed position %d", n)
 	}
 	// in another series: 409
-	other, _ := fe.tvSeries(t, "Other")
+	fe.tvSeries(t, "Other")
 	rec = fe.do("POST", "/tv/tvdata/1Other/add?series="+ser.UID, form, false)
 	if rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), "This entry is already in a series.") {
 		t.Fatalf("other series: %d", rec.Code)
 	}
-	_ = other
 	// the parameter rides on the search results, the overview and the dialog
 	fe.tv.Summaries = []plugin.ItemSummary{tvShow("9", "Found").ItemSummary}
 	mustContain(t, fe.get("/tv/search?q=x&series="+ser.UID).Body.String(), "series="+ser.UID)
@@ -472,9 +472,8 @@ func (fe *fixtureEnv) partIDs(t *testing.T, ser *library.Series) []int64 {
 func TestSeriesMoveRemoveRefuseBadAndForeignItems(t *testing.T) {
 	fe := newFixtureEnv(t)
 	ser, ids := fe.tvSeries(t, "Saga")
-	other, oids := fe.tvSeries(t, "Other")
+	_, oids := fe.tvSeries(t, "Other")
 	base := seriesURL("tv", ser.UID)
-	_ = other
 	for _, item := range []string{"abc", idStr(oids[0])} {
 		if rec := fe.do("POST", base+"/parts/"+item+"/move", url.Values{"dir": {"up"}}, false); rec.Code != http.StatusNotFound {
 			t.Errorf("move %s: %d", item, rec.Code)

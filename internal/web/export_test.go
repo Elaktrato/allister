@@ -18,12 +18,11 @@ import (
 func TestExportJSONViaRoute(t *testing.T) {
 	e := newEnv(t)
 	d := anime.ItemData(e.fp.anime)
-	id, err := e.lib.AddToList(context.Background(), "anime", "anime", d, library.Entry{Status: library.Active, Rating: ip(9),
+	_, err := e.lib.AddToList(context.Background(), "anime", "anime", d, library.Entry{Status: library.Active, Rating: ip(9),
 		Progress: map[string]float64{"episode": 5}, Comment: "c <b>"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	_ = id
 	rec := e.get("/anime/export/json")
 	if rec.Code != 200 {
 		t.Fatalf("status %d: %s", rec.Code, rec.Body.String())

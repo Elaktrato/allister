@@ -58,6 +58,10 @@
     seriesToggle(toggle, false);
   }, true);
   document.addEventListener("htmx:afterSwap", function (event) {
+    var source = event.detail.requestConfig && event.detail.requestConfig.elt;
+    if (!source || !source.matches("[data-series-toggle]")) {
+      return; // another request that happened to swap into a tbody
+    }
     var body = event.detail.target;
     var prev = body && body.previousElementSibling;
     var toggle = prev && prev.querySelector("[data-series-toggle]");
