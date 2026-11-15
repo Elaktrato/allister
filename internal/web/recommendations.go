@@ -184,7 +184,7 @@ func (s *server) getRecommendations(w http.ResponseWriter, r *http.Request, plug
 			recs = nil
 			s.recs.put(key, nil)
 		default:
-			log.Printf("recommendations %s: %v", key, err)
+			log.Printf("recommendations %s: %s", logSafe(key), logSafe(err))
 			v.Failed = true
 			if errors.Is(err, plugin.ErrNotConfigured) {
 				v.Message = sourceMessage(m, ref.Source, err)
@@ -216,7 +216,7 @@ func (s *server) recommendationsKind(ctx context.Context, m plugin.Manifest, ref
 		it, sk, err := s.findSaved(ctx, m, ref)
 		if err != nil {
 			if !errors.Is(err, errAmbiguousKind) {
-				log.Printf("recommendations %s/%s/%s: %v", m.ID, ref.Source, ref.ID, err)
+				log.Printf("recommendations %s/%s/%s: %s", m.ID, ref.Source, logSafe(ref.ID), logSafe(err))
 			}
 			return plugin.KindDef{}, false
 		}

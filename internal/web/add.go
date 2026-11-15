@@ -471,7 +471,7 @@ func (s *server) addFailure(w http.ResponseWriter, r *http.Request, m plugin.Man
 		s.itemFail(w, r, m, ref.Source, err, retry)
 		return
 	}
-	log.Printf("%s %q: %v", r.Method, r.URL.Path, err)
+	log.Printf("%s %q: %s", logSafe(r.Method), r.URL.Path, logSafe(err))
 	msg := sourceMessage(m, ref.Source, err)
 	k := kindFor(m, ref)
 	f := newEntryForm(m, k, ref.Source, ref.ID, progressContext{Keys: k.Progress.Defaults}, v)

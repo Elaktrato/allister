@@ -298,11 +298,11 @@ func (s *server) postMatch(w http.ResponseWriter, r *http.Request, pluginID stri
 		fail(http.StatusUnprocessableEntity, si.Name+" has no "+strings.ToLower(t.kind.Label)+" with that id.")
 		return
 	case errors.Is(err, plugin.ErrBadResponse):
-		log.Printf("match %s/%s: fetch %s/%s: %v", t.man.ID, t.ref.ID, si.ID, id, err)
+		log.Printf("match %s/%s: fetch %s/%s: %s", t.man.ID, logSafe(t.ref.ID), si.ID, logSafe(id), logSafe(err))
 		fail(http.StatusBadGateway, sourceMessage(t.man, si.ID, err)+" Nothing was changed.")
 		return
 	case errors.Is(err, plugin.ErrRateLimited), errors.Is(err, plugin.ErrUnavailable), errors.Is(err, plugin.ErrNotConfigured):
-		log.Printf("match %s/%s: fetch %s/%s: %v", t.man.ID, t.ref.ID, si.ID, id, err)
+		log.Printf("match %s/%s: fetch %s/%s: %s", t.man.ID, logSafe(t.ref.ID), si.ID, logSafe(id), logSafe(err))
 		fail(http.StatusServiceUnavailable, sourceMessage(t.man, si.ID, err)+" Nothing was changed.")
 		return
 	default:
@@ -317,7 +317,7 @@ func (s *server) postMatch(w http.ResponseWriter, r *http.Request, pluginID stri
 	}
 	// a canonical id that is no valid path id could never be opened again
 	if !validPathID(d.ID) {
-		log.Printf("match %s/%s: %s/%s answered with an unusable id (%d bytes)", t.man.ID, t.ref.ID, si.ID, id, len(d.ID))
+		log.Printf("match %s/%s: %s/%s answered with an unusable id (%d bytes)", t.man.ID, logSafe(t.ref.ID), si.ID, logSafe(id), len(d.ID))
 		fail(http.StatusUnprocessableEntity, si.Name+" answered with an id that cannot be stored, so nothing was changed.")
 		return
 	}

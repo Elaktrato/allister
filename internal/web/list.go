@@ -345,7 +345,7 @@ func (s *server) buildList(r *http.Request, m plugin.Manifest, lq listQuery) (li
 	if errors.Is(err, library.ErrInvalid) && f.active() {
 		// parseFilters checks every part against the schema, so this is a
 		// safety net: show the list without filters and say so
-		log.Printf("list %s: filters refused: %v", m.ID, err)
+		log.Printf("list %s: filters refused: %s", m.ID, logSafe(err))
 		lq.Filters, lq.Rejected = listFilters{}, append(lq.Rejected, "filters")
 		return s.buildList(r, m, lq)
 	}
