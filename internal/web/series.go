@@ -197,15 +197,20 @@ func (s *server) postSeriesAddPart(w http.ResponseWriter, r *http.Request, m plu
 	http.Redirect(w, r, seriesURL(m.ID, ser.UID), http.StatusSeeOther)
 }
 
+// partPositionField is the field that orders the parts of ser (the kind's
+// series hint), "" for none.
+func partPositionField(m plugin.Manifest, ser *library.Series) string {
+	if k, ok := kindDef(m, ser.Kind); ok && k.SeriesHint != nil {
+		return k.SeriesHint.PositionField
+	}
+	return ""
+}
+
 // addPart appends the entry of item as the series' last part (ordered by the
 // kind's hint position field when it has one). On failure it writes the error
 // page and returns false.
 func (s *server) addPart(w http.ResponseWriter, r *http.Request, m plugin.Manifest, ser *library.Series, item int64) bool {
-	field := ""
-	if k, ok := kindDef(m, ser.Kind); ok && k.SeriesHint != nil {
-		field = k.SeriesHint.PositionField
-	}
-	err := s.deps.Library.AddPart(r.Context(), ser.ID, item, field)
+	err := s.deps.Library.AddPart(r.Context(), ser.ID, item, partPositionField(m, ser))
 	switch {
 	case err == nil:
 		return true
@@ -293,8 +298,33 @@ func (s *server) addFinished(w http.ResponseWriter, r *http.Request, t *addTarge
 		s.redirectAfterAdd(w, r, "/"+url.PathEscape(t.man.ID))
 		return
 	}
-	if s.addPart(w, r, t.man, ser, item) {
-		s.redirectAfterAdd(w, r, seriesURL(t.man.ID, ser.UID))
+	s.attachAfterAdd(w, r, t.man, ser, item, t.overviewURL())
+}
+
+// overviewURL is the overview of the target as it is now (saved, else the
+// live item).
+func (t *addTarget) overviewURL() string {
+	if t.saved != nil {
+		return itemURL(t.man, t.saved.Source, t.saved.SourceID, t.saved.Kind)
+	}
+	return itemURL(t.man, t.data.Source, t.data.ID, t.kind.Key)
+}
+
+// attachAfterAdd puts the entry that an add just created into the series the
+// add targeted and goes to the series page. The series may have changed since
+// it was checked (deleted, or the item taken into another series); the entry
+// is in the list by then, so that is not an error page: the answer is the
+// item's overview with a notice that it could not be put into the series.
+func (s *server) attachAfterAdd(w http.ResponseWriter, r *http.Request, m plugin.Manifest, ser *library.Series, item int64, overview string) {
+	err := s.deps.Library.AddPart(r.Context(), ser.ID, item, partPositionField(m, ser))
+	switch {
+	case err == nil:
+		s.redirectAfterAdd(w, r, seriesURL(m.ID, ser.UID))
+	case errors.Is(err, library.ErrAlreadyInSeries), errors.Is(err, library.ErrNoSeries),
+		errors.Is(err, library.ErrNoEntry), errors.Is(err, library.ErrInvalid):
+		s.redirectAfterAdd(w, r, noticeURL(overview, noticeSeriesAttach))
+	default:
+		s.internalError(w, r, err)
 	}
 }
 

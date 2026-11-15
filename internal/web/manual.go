@@ -217,11 +217,10 @@ func (s *server) postManualNew(w http.ResponseWriter, r *http.Request, pluginID 
 		s.internalError(w, r, err)
 		return
 	}
+	overview := itemURL(m, manualSource, id, k.Key)
 	if ser != nil {
-		if s.addPart(w, r, m, ser, item) {
-			http.Redirect(w, r, seriesURL(m.ID, ser.UID), http.StatusSeeOther)
-		}
+		s.attachAfterAdd(w, r, m, ser, item, overview)
 		return
 	}
-	http.Redirect(w, r, itemURL(m, manualSource, id, k.Key), http.StatusSeeOther)
+	http.Redirect(w, r, overview, http.StatusSeeOther)
 }
