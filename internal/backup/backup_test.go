@@ -1001,3 +1001,62 @@ func TestRestoreRefusesSeriesBeforeItems(t *testing.T) {
 		t.Fatalf("err = %v", err)
 	}
 }
+
+func TestRestoreHostileSeriesMember(t *testing.T) {
+	listed := func(id string) string {
+		it := bookItem(id)
+		it.Entry = &library.BackupEntry{Status: library.Planned}
+		b, _ := json.Marshal(it)
+		return string(b)
+	}
+	good := seriesJSON("u-ok", "Fine", "1")
+	cases := []struct {
+		name, series string
+		lim          Limits
+		aborted      string // substring of Report.Aborted ("" = not aborted)
+		created      int    // series created
+		skipped      int
+	}{
+		{name: "not a list", series: `{}`, aborted: "not a list"},
+		{name: "non-object elements", series: `42,"x",[1],null,` + good, created: 1, skipped: 4},
+		{name: "oversize element", series: good + `,` + seriesJSON("u-big", strings.Repeat("t", 3000), "2"),
+			lim: Limits{MaxItemBytes: 1500}, aborted: "is larger than", created: 1},
+		{name: "empty parts", series: seriesJSON("u-none", "None") + `,` + good, created: 1, skipped: 1},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			e := newEnv(t)
+			body := header("1") + listed("1") + `,` + listed("2") + `],"series":[` + c.series + `]}`
+			if c.name == "not a list" {
+				body = header("1") + listed("1") + `,` + listed("2") + `],"series":` + c.series + `}`
+			}
+			rep, err := e.restore(zipOf(t, entry{name: "backup.json", body: []byte(body)}), c.lim, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if (c.aborted == "") != (rep.Aborted == "") || !strings.Contains(rep.Aborted, c.aborted) {
+				t.Fatalf("aborted = %q, want %q", rep.Aborted, c.aborted)
+			}
+			if rep.Created != 2 || itemCount(t, e) != 2 {
+				t.Fatalf("items = %d, report %+v", itemCount(t, e), rep)
+			}
+			if rep.SeriesCreated != c.created || rep.SeriesSkipped != c.skipped {
+				t.Fatalf("series created/skipped = %d/%d, want %d/%d", rep.SeriesCreated, rep.SeriesSkipped, c.created, c.skipped)
+			}
+			if got := len(e.seriesTitles()); got != c.created {
+				t.Fatalf("series stored = %v", e.seriesTitles())
+			}
+		})
+	}
+	t.Run("duplicate series member", func(t *testing.T) {
+		e := newEnv(t)
+		body := header("1") + listed("1") + `],"series":[` + good + `],"series":[` + seriesJSON("u-2", "Again", "1") + `]}`
+		rep, err := e.restore(zipOf(t, entry{name: "backup.json", body: []byte(body)}), Limits{}, nil)
+		if err != nil || !strings.Contains(rep.Aborted, `more than one "series"`) {
+			t.Fatalf("report = %+v, %v", rep, err)
+		}
+		if got := e.seriesTitles(); len(got) != 1 || got[0] != "Fine:1" || itemCount(t, e) != 1 {
+			t.Fatalf("series = %v, items = %d", got, itemCount(t, e))
+		}
+	})
+}
