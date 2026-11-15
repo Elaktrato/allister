@@ -155,18 +155,11 @@ Other checks on the code base at the time (all green):
 - gitleaks: no leaks in the history.
 - Race detector (2026-11-15, `CGO_ENABLED=1 go test -race ./...`, Go 1.27.3): no data race in any package. It is slow: `internal/backup` about 7 minutes, `internal/library` about 5.5 minutes (over the default 10-minute `go test` timeout when run alongside the other packages on a busy machine, so pass `-timeout 30m`), `internal/importer` about 5 minutes.
 
-## GitHub settings to configure
+## GitHub settings
 
-These cannot be set from files in the repository; set them once in the repository settings (Settings > ...). A ruleset (Settings > Rules > Rulesets) covers the branch and tag rules.
+These live in the repository settings, not in files. State on 2026-11-15:
 
-- **Branch ruleset for `main` and `dev`**:
-  - require a pull request before merging (for `main` at least; zero required approvals works for a single maintainer);
-  - require status checks to pass, up to date with the base branch: `Lint`, `Security advisories`, `Test`, `Dockerfile and workflows`, `Secret scan`, `Image build, smoke test and scan` (CI), `Analyze (Go)` (CodeQL) and `Dependency review`;
-  - require linear history; block force pushes and deletions;
-  - optionally require signed commits.
-- **Tag ruleset for `v*`**: restrict creation, update and deletion to the maintainer (repository admins), so only you can cut a release and a published tag cannot be moved.
-- **Code security** (Settings > Code security): dependency graph, Dependabot alerts and Dependabot security updates on; code scanning shows CodeQL, Trivy and Scorecard results (no default setup needed: the workflows upload); secret scanning and **push protection** on; **private vulnerability reporting** on (`SECURITY.md` points to it).
-- **Actions** (Settings > Actions > General): workflow permissions "Read repository contents and packages permissions" (the workflows ask for more per job); allow GitHub Actions to create pull requests off; optionally allow only actions pinned to a full SHA ("Require actions to be pinned to a full-length commit SHA").
-- **Packages**: after the first release, set the GHCR package's visibility and link it to the repository.
-- **Labels**: create `feat`, `fix`, `docs`, `build`, `ci`, `test`, `breaking` and `skip-changelog` for the generated release notes (`dependencies` is created by Dependabot).
+- **Applied:** secret scanning with push protection, Dependabot alerts and security updates, private vulnerability reporting (`SECURITY.md` points to it); the release-note labels `feat`, `fix`, `docs`, `build`, `ci`, `test`, `breaking` and `skip-changelog` (`dependencies` is created by Dependabot); Actions require every action to be pinned to a full commit SHA; workflow token permissions are read-only by default and Actions cannot approve pull requests; the tag ruleset **Release tags** (`refs/tags/v*`: only repository admins may create, move or delete a release tag).
+- **Branch ruleset `main and dev`** (strict, no bypass): pull request required (zero approvals, squash or rebase merge), status checks required and up to date with the base branch (`Lint`, `Security advisories`, `Test`, `Dockerfile and workflows`, `Secret scan`, `Image build, smoke test and scan`, `Analyze (Go)`, `Dependency review`), linear history, no force pushes, no deletion. With it, nothing is pushed to `main` directly: push a branch and merge its pull request on GitHub.
+- **Still to do by hand:** after the first release the workflow publishes, set the GHCR package's visibility and link it to the repository (Package settings).
 - **CODEOWNERS** is not included: it only names reviewers by GitHub account, which adds nothing for a single maintainer. When there are more, add `.github/CODEOWNERS` with `* @<account>` and require code owner review in the ruleset.
