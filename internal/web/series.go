@@ -27,11 +27,6 @@ func seriesURL(pluginID, uid string) string {
 	return "/" + url.PathEscape(pluginID) + "/series/" + url.PathEscape(uid)
 }
 
-// seriesListURL is the plugin's list on its series tab.
-func seriesListURL(pluginID string) string {
-	return "/" + url.PathEscape(pluginID) + "?tab=series"
-}
-
 func (s *server) seriesRoutes(reg routeRegistrar, pluginID string) {
 	h := func(f func(http.ResponseWriter, *http.Request, plugin.Manifest, *library.Series)) http.HandlerFunc {
 		return func(w http.ResponseWriter, r *http.Request) { s.withSeries(w, r, pluginID, f) }
@@ -73,11 +68,10 @@ func (s *server) seriesNotFound(w http.ResponseWriter, r *http.Request) {
 
 type seriesPartView struct {
 	rowView
-	ID         string
-	CanMoveUp  bool
-	CanMoveDwn bool
-	MoveURL    string
-	RemoveURL  string
+	CanMoveUp   bool
+	CanMoveDown bool
+	MoveURL     string
+	RemoveURL   string
 }
 
 type candidateView struct {
@@ -109,7 +103,7 @@ func (s *server) buildSeries(r *http.Request, m plugin.Manifest, ser *library.Se
 	base := seriesURL(m.ID, ser.UID)
 	v := seriesView{Title: ser.Title, Total: len(rows), KindLabel: lowerFirst(k.Label),
 		RenameURL: base + "/rename", AddURL: base + "/parts", DeleteURL: base + "/delete",
-		CandidatesURL: base + "/candidates", ListURL: seriesListURL(m.ID)}
+		CandidatesURL: base + "/candidates", ListURL: seriesTabURL(m.ID, "", "", "", "", 1)}
 	v.SearchURL, v.SearchLabel = seriesSearchLink(m, ser)
 	v.DeleteNote = "Delete the series and remove its " + strconv.Itoa(len(rows)) + " " + entriesWord(len(rows)) + " from your list"
 	sts := make([]library.Status, 0, len(rows))
@@ -119,8 +113,8 @@ func (s *server) buildSeries(r *http.Request, m plugin.Manifest, ser *library.Se
 			v.Done++
 		}
 		id := strconv.FormatInt(row.Item.ID, 10)
-		v.Parts = append(v.Parts, seriesPartView{rowView: s.rowView(m, row, base, nil), ID: id,
-			CanMoveUp: i > 0, CanMoveDwn: i < len(rows)-1,
+		v.Parts = append(v.Parts, seriesPartView{rowView: s.rowView(m, row, base, nil),
+			CanMoveUp: i > 0, CanMoveDown: i < len(rows)-1,
 			MoveURL: base + "/parts/" + id + "/move", RemoveURL: base + "/parts/" + id + "/remove"})
 	}
 	st := library.DeriveSeriesStatus(sts)
@@ -419,7 +413,7 @@ func (s *server) postSeriesRemove(w http.ResponseWriter, r *http.Request, m plug
 	_, err := s.deps.Library.SeriesByUID(r.Context(), m.ID, ser.UID)
 	switch {
 	case errors.Is(err, library.ErrNoSeries):
-		http.Redirect(w, r, seriesListURL(m.ID), http.StatusSeeOther)
+		http.Redirect(w, r, seriesTabURL(m.ID, "", "", "", "", 1), http.StatusSeeOther)
 	case err != nil:
 		s.internalError(w, r, err)
 	default:
@@ -448,7 +442,7 @@ func (s *server) postSeriesDelete(w http.ResponseWriter, r *http.Request, m plug
 		s.internalError(w, r, err)
 		return
 	}
-	http.Redirect(w, r, seriesListURL(m.ID), http.StatusSeeOther)
+	http.Redirect(w, r, seriesTabURL(m.ID, "", "", "", "", 1), http.StatusSeeOther)
 }
 
 // seriesCandidates lists up to maxCandidates entries of the series' plugin and
@@ -495,7 +489,7 @@ func (s *server) getSeriesParts(w http.ResponseWriter, r *http.Request, m plugin
 		s.internalError(w, r, err)
 		return
 	}
-	ret := seriesListURL(m.ID)
+	ret := seriesTabURL(m.ID, "", "", "", "", 1)
 	var v struct{ Rows []rowView }
 	for i, row := range rows {
 		rv := s.rowView(m, row, ret, nil)

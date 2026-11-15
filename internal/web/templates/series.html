@@ -17,7 +17,7 @@
       </div>
       <div class="flex items-center gap-1">
         {{if .CanMoveUp}}<form method="post" action="{{.MoveURL}}"><input type="hidden" name="dir" value="up"><button type="submit" aria-label="Move up" title="Move up" class="rounded p-1 hover:bg-slate-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"><span class="icon text-[1.125rem]" aria-hidden="true">arrow_upward</span></button></form>{{end}}
-        {{if .CanMoveDwn}}<form method="post" action="{{.MoveURL}}"><input type="hidden" name="dir" value="down"><button type="submit" aria-label="Move down" title="Move down" class="rounded p-1 hover:bg-slate-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"><span class="icon text-[1.125rem]" aria-hidden="true">arrow_downward</span></button></form>{{end}}
+        {{if .CanMoveDown}}<form method="post" action="{{.MoveURL}}"><input type="hidden" name="dir" value="down"><button type="submit" aria-label="Move down" title="Move down" class="rounded p-1 hover:bg-slate-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"><span class="icon text-[1.125rem]" aria-hidden="true">arrow_downward</span></button></form>{{end}}
         <form method="post" action="{{.RemoveURL}}"><button type="submit" aria-label="Remove from series" title="Remove from series" class="rounded p-1 text-red-300 hover:bg-slate-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"><span class="icon text-[1.125rem]" aria-hidden="true">link_off</span></button></form>
       </div>
     </li>

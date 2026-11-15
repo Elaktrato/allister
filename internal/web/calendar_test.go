@@ -157,7 +157,7 @@ func TestCalendarPage(t *testing.T) {
 		t.Fatalf("unexpected enqueues: %d", len(e.jobs.got))
 	}
 	// a watching entry without a stored schedule is enqueued from the page
-	other := e.addFixture(t, "tv", "show", tvShow("2", "Fresh"), library.Entry{Status: library.Active})
+	e.addFixture(t, "tv", "show", tvShow("2", "Fresh"), library.Entry{Status: library.Active})
 	e.get("/calendar")
 	found := false
 	for _, j := range e.jobs.got {
@@ -168,7 +168,6 @@ func TestCalendarPage(t *testing.T) {
 	if !found {
 		t.Fatalf("stale schedule not enqueued from the page: %+v", e.jobs.got)
 	}
-	_ = other
 }
 
 var _ = plugin.Airing{}

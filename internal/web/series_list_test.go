@@ -118,7 +118,7 @@ func TestSeriesTabExpandOffersCollapse(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	mustContain(t, string(js), "[data-series-toggle]", `"aria-expanded"`, "replaceChildren")
+	mustContain(t, string(js), "[data-series-toggle]", `"aria-expanded"`, "replaceChildren", "requestConfig.elt")
 }
 
 func TestIncrementKeepsSeriesBadge(t *testing.T) {
