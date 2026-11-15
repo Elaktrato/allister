@@ -109,6 +109,17 @@
     }
   });
 
+  // Enter in a search marked data-search-only (the pickers inside the series
+  // dialog) runs its htmx search instead of submitting the enclosing form.
+  document.addEventListener("keydown", function (event) {
+    var el = event.target;
+    if (event.key !== "Enter" || !el.matches || !el.matches("[data-search-only]")) {
+      return;
+    }
+    event.preventDefault();
+    el.dispatchEvent(new Event("search", { bubbles: true }));
+  });
+
   // A form marked data-no-submit never navigates: its fields drive their
   // own htmx requests (the match dialog's search form).
   document.addEventListener("submit", function (event) {
