@@ -17,7 +17,7 @@
   <span class="absolute right-0 top-0 h-0 w-0 border-l-[1.5rem] border-t-[1.5rem] border-l-transparent{{template "status_corner" .StatusKey}}" title="{{.Status}}"><span class="sr-only">{{.Status}}</span></span>
   <div class="absolute inset-x-0 bottom-0 bg-slate-950/90 p-2.5">
     <a href="{{.Href}}" class="line-clamp-2 text-sm font-medium leading-snug text-white hover:underline">{{.Title}}</a>
-    {{if .Series}}<a href="{{.SeriesHref}}" title="Part {{.SeriesPos}} of {{.Series}}" class="mt-1 inline-block max-w-full truncate rounded bg-slate-800 px-1.5 text-xs text-indigo-300 hover:underline">{{.SeriesPos}} · {{.Series}}</a>{{end}}
+    {{if .Series}}<a href="{{.SeriesHref}}" title="{{if .SeriesSpinOff}}Spin-off {{.SeriesPos}}{{else}}Part {{.SeriesPos}}{{end}} of {{.Series}}" class="mt-1 inline-block max-w-full truncate rounded bg-slate-800 px-1.5 text-xs text-indigo-300 hover:underline">{{if .SeriesSpinOff}}Spin-off · {{.Series}}{{else}}{{.SeriesPos}} · {{.Series}}{{end}}</a>{{end}}
     <div class="mt-1 flex items-center justify-between gap-2 text-xs text-slate-300">
       <span class="min-w-0">{{range .Progress}}<span>{{if $.ShowLabels}}<span class="text-slate-400">{{.Label}}</span> {{else}}<span class="sr-only">{{.Label}}</span> {{end}}{{.Value}}</span> {{end}}</span>
       <span class="flex shrink-0 items-center gap-1">

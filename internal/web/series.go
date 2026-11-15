@@ -39,6 +39,11 @@ func (s *server) seriesRoutes(reg routeRegistrar, pluginID string) {
 	reg.Handle("POST /series/{uid}/delete", h(s.postSeriesDelete))
 	reg.Handle("GET /series/{uid}/parts", h(s.getSeriesParts))
 	reg.Handle("GET /series/{uid}/candidates", h(s.getSeriesCandidates))
+	reg.Handle("GET /series/{uid}/edit", h(s.getSeriesEdit))
+	reg.Handle("POST /series/{uid}/edit", h(s.postSeriesEdit))
+	reg.Handle("POST /series/{uid}/parts/{item}/spinoff", h(s.postSeriesSpinOff))
+	reg.Handle("GET /series/{uid}/link-candidates", h(s.getSeriesLinkCandidates))
+	reg.Handle("GET /series/{uid}/parent-candidates", h(s.getSeriesParentCandidates))
 }
 
 // withSeries resolves the plugin and the series of the request; an unknown
@@ -70,18 +75,36 @@ type seriesPartView struct {
 	rowView
 	CanMoveUp   bool
 	CanMoveDown bool
+	// Pos is the 1-based position within the part's block; SpinOff says which
 	MoveURL     string
 	RemoveURL   string
+	Pos         int
+	SpinOff     bool
+	SpinOffURL  string
+	SpinOffNext string // the spin_off value the toggle posts: "1" or "0"
 }
 
 type candidateView struct {
 	ID, Title, Cover string
 }
 
+// spinOffSeriesView is a spin-off series in the Spin-offs block.
+type spinOffSeriesView struct {
+	Title, Href, Cover, Status, StatusKey string
+	Done, Total                           int
+}
+
 type seriesView struct {
 	Title, Status, StatusKey string
 	Done, Total              int
-	Parts                    []seriesPartView
+	// Parts are the main parts, SpinOffParts the spin-off parts in order
+	Parts, SpinOffParts      []seriesPartView
+	SpinOffSeries            []spinOffSeriesView
+	Cover, Description       string
+	Info                     []infoRow
+	ParentTitle, ParentHref  string
+	EditURL                  string
+	Dialog                   *seriesDialog
 	RenameURL, AddURL        string
 	DeleteURL, CandidatesURL string
 	Candidates               []candidateView
@@ -93,32 +116,115 @@ type seriesView struct {
 	DeleteNote string
 }
 
+// seriesInfo is the info block of the header: the dates, finished marker and
+// expected parts, then the kind's series fields in their declared order.
+func seriesInfo(k plugin.KindDef, res library.ResolvedSeries) []infoRow {
+	var out []infoRow
+	switch {
+	case res.StartedOn != nil && res.EndedOn != nil:
+		out = append(out, infoRow{Label: "Started - ended", Text: fmtDay(res.StartedOn) + " - " + fmtDay(res.EndedOn)})
+	case res.StartedOn != nil:
+		out = append(out, infoRow{Label: "Started", Text: fmtDay(res.StartedOn)})
+	case res.EndedOn != nil:
+		out = append(out, infoRow{Label: "Ended", Text: fmtDay(res.EndedOn)})
+	}
+	if res.Finished {
+		out = append(out, infoRow{Label: "Finished", Text: "Yes"})
+	}
+	counted := res.MainParts
+	if counted == 0 {
+		counted = res.SpinOffParts
+	}
+	if res.PartsTotal > 0 && res.PartsTotal != counted {
+		out = append(out, infoRow{Label: "Expected parts", Text: strconv.Itoa(res.PartsTotal)})
+	}
+	for _, fd := range k.SeriesFields {
+		v, ok := res.Fields[fd.Key]
+		if !ok || !hasValue(v) {
+			continue
+		}
+		text, href := fieldText(fd, v)
+		if text != "" {
+			out = append(out, infoRow{Label: fd.Label, Text: text, Href: href})
+		}
+	}
+	return out
+}
+
 func (s *server) buildSeries(r *http.Request, m plugin.Manifest, ser *library.Series) (seriesView, error) {
 	ctx := r.Context()
+	lang := s.titleLang(ctx, m)
 	k, _ := kindDef(m, ser.Kind)
-	rows, err := s.deps.Library.SeriesParts(ctx, ser.ID, s.titleLang(ctx, m))
+	res, err := s.deps.Library.LoadResolvedSeries(ctx, ser, lang)
 	if err != nil {
 		return seriesView{}, err
 	}
+	order, err := s.deps.Library.SeriesPartsOrder(ctx, ser.ID)
+	if err != nil {
+		return seriesView{}, err
+	}
+	rows, err := s.deps.Library.SeriesParts(ctx, ser.ID, lang)
+	if err != nil {
+		return seriesView{}, err
+	}
+	spin := map[int64]bool{}
+	for _, p := range order {
+		spin[p.ItemID] = p.SpinOff
+	}
 	base := seriesURL(m.ID, ser.UID)
-	v := seriesView{Title: ser.Title, Total: len(rows), KindLabel: lowerFirst(k.Label),
+	v := seriesView{Title: ser.Title, Total: res.PartsTotal, Done: res.Completed, KindLabel: lowerFirst(k.Label),
+		Cover: covers.Src(res.Cover), Description: res.Description, Info: seriesInfo(k, res), EditURL: base + "/edit",
 		RenameURL: base + "/rename", AddURL: base + "/parts", DeleteURL: base + "/delete",
 		CandidatesURL: base + "/candidates", ListURL: seriesTabURL(m.ID, "", "", "", "", 1)}
 	v.SearchURL, v.SearchLabel = seriesSearchLink(m, ser)
 	v.DeleteNote = "Delete the series and remove its " + strconv.Itoa(len(rows)) + " " + entriesWord(len(rows)) + " from your list"
-	sts := make([]library.Status, 0, len(rows))
-	for i, row := range rows {
-		sts = append(sts, row.Entry.Status)
-		if row.Entry.Status == library.Completed {
-			v.Done++
+	var mainRows, spinRows []library.Row
+	for _, row := range rows {
+		if spin[row.Item.ID] {
+			spinRows = append(spinRows, row)
+		} else {
+			mainRows = append(mainRows, row)
 		}
-		id := strconv.FormatInt(row.Item.ID, 10)
-		v.Parts = append(v.Parts, seriesPartView{rowView: s.rowView(m, row, base, nil),
-			CanMoveUp: i > 0, CanMoveDown: i < len(rows)-1,
-			MoveURL: base + "/parts/" + id + "/move", RemoveURL: base + "/parts/" + id + "/remove"})
 	}
-	st := library.DeriveSeriesStatus(sts, 0)
-	v.Status, v.StatusKey = statusLabel(k, st), string(st)
+	part := func(block []library.Row, i int, isSpin bool) seriesPartView {
+		row := block[i]
+		id := strconv.FormatInt(row.Item.ID, 10)
+		next := "1"
+		if isSpin {
+			next = "0"
+		}
+		return seriesPartView{rowView: s.rowView(m, row, base, nil),
+			CanMoveUp: i > 0, CanMoveDown: i < len(block)-1, Pos: i + 1, SpinOff: isSpin,
+			MoveURL: base + "/parts/" + id + "/move", RemoveURL: base + "/parts/" + id + "/remove",
+			SpinOffURL: base + "/parts/" + id + "/spinoff", SpinOffNext: next}
+	}
+	for i := range mainRows {
+		v.Parts = append(v.Parts, part(mainRows, i, false))
+	}
+	for i := range spinRows {
+		v.SpinOffParts = append(v.SpinOffParts, part(spinRows, i, true))
+	}
+	v.Status, v.StatusKey = statusLabel(k, res.Status), string(res.Status)
+	if ser.ParentID != 0 {
+		if p, err := s.deps.Library.SeriesByID(ctx, ser.ParentID); err == nil && p != nil {
+			v.ParentTitle, v.ParentHref = p.Title, seriesURL(m.ID, p.UID)
+		} else if err != nil && !errors.Is(err, library.ErrNoSeries) {
+			return v, err
+		}
+	}
+	kids, err := s.deps.Library.SpinOffsOf(ctx, ser.ID)
+	if err != nil {
+		return v, err
+	}
+	for i := range kids {
+		kk, _ := kindDef(m, kids[i].Kind)
+		cr, err := s.deps.Library.LoadResolvedSeries(ctx, &kids[i], lang)
+		if err != nil {
+			return v, err
+		}
+		v.SpinOffSeries = append(v.SpinOffSeries, spinOffSeriesView{Title: kids[i].Title, Href: seriesURL(m.ID, kids[i].UID),
+			Cover: covers.Src(cr.Cover), Status: statusLabel(kk, cr.Status), StatusKey: string(cr.Status), Done: cr.Completed, Total: cr.PartsTotal})
+	}
 	v.Candidates, err = s.seriesCandidates(r, m, k, ser, "")
 	return v, err
 }
@@ -489,10 +595,19 @@ func (s *server) getSeriesParts(w http.ResponseWriter, r *http.Request, m plugin
 		return
 	}
 	ret := seriesTabURL(m.ID, "", "", "", "", 1)
+	order, err := s.deps.Library.SeriesPartsOrder(ctx, ser.ID)
+	if err != nil {
+		s.internalError(w, r, err)
+		return
+	}
+	pos := map[int64]library.SeriesPart{}
+	for _, p := range order {
+		pos[p.ItemID] = p
+	}
 	var v struct{ Rows []rowView }
-	for i, row := range rows {
+	for _, row := range rows {
 		rv := s.rowView(m, row, ret, nil)
-		rv.SeriesPos = i + 1
+		rv.SeriesPos, rv.SeriesSpinOff = pos[row.Item.ID].Position, pos[row.Item.ID].SpinOff
 		v.Rows = append(v.Rows, rv)
 	}
 	s.renderPartial(w, "list", "series_parts", v)

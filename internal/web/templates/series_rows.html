@@ -97,7 +97,7 @@
   </td>
   <td class="min-w-40 py-2 pr-3">
     <a href="{{.Href}}" class="font-medium text-indigo-300 hover:underline">{{.Title}}</a>
-    <div class="mt-1 text-xs text-slate-400">Part {{.SeriesPos}}</div>
+    <div class="mt-1 text-xs text-slate-400">{{if .SeriesSpinOff}}Spin-off{{else}}Part{{end}} {{.SeriesPos}}</div>
   </td>
   <td class="py-2 pr-3 whitespace-nowrap">
     <span class="inline-flex flex-wrap items-center gap-2">

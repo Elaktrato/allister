@@ -48,7 +48,7 @@
       <h1 class="text-3xl font-semibold">{{.Title}}</h1>
       {{with .Series}}
       <div class="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-slate-300">
-        <span>Part {{.Position}} of <a href="{{.Href}}" class="text-indigo-300 hover:underline">{{.Title}}</a></span>
+        <span>{{if .SpinOff}}Spin-off{{else}}Part{{end}} {{.Position}} of <a href="{{.Href}}" class="text-indigo-300 hover:underline">{{.Title}}</a></span>
         {{with .Prev}}<a href="{{.Href}}" class="text-indigo-300 hover:underline">Previous part: {{.Title}}</a>{{end}}
         {{with .Next}}<a href="{{.Href}}" class="text-indigo-300 hover:underline">Next part: {{.Title}}</a>{{end}}
         <form method="post" action="{{.RemoveURL}}"><button type="submit" class="text-red-300 hover:underline">Remove from series</button></form>

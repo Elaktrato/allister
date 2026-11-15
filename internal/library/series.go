@@ -261,6 +261,18 @@ func (l *Library) SeriesByUID(ctx context.Context, pluginID, uid string) (*Serie
 	return s, nil
 }
 
+// SeriesByID returns the series with the id, or ErrNoSeries.
+func (l *Library) SeriesByID(ctx context.Context, id int64) (*Series, error) {
+	s, err := scanSeries(l.db.QueryRowContext(ctx, `SELECT `+seriesCols+` FROM series s WHERE s.id = ?`, id))
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrNoSeries
+	}
+	if err != nil {
+		return nil, err
+	}
+	return s, nil
+}
+
 // SeriesOfItem returns the item's series, its 1-based position within its
 // block and whether it is a spin-off part, or (nil, 0, false, nil) when the
 // item is in no series.
@@ -393,6 +405,13 @@ func checkSeriesLink(ctx context.Context, tx *sql.Tx, pluginID string, kind plug
 	}
 	if iPlugin != pluginID || iKind != kind.SeriesLink.Kind {
 		return invalid("the linked entry must be of kind %q of this plugin", kind.SeriesLink.Kind)
+	}
+	var listed int
+	if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM entries WHERE item_id = ?`, itemID).Scan(&listed); err != nil {
+		return fmt.Errorf("update series: %w", err)
+	}
+	if listed == 0 {
+		return invalid("the linked entry is not in your list")
 	}
 	return nil
 }

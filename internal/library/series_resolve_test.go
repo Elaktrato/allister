@@ -543,3 +543,19 @@ func TestActiveSeriesMatchesDerivedStatusExpected(t *testing.T) {
 		}
 	}
 }
+
+// TestResolveDerivedDatesFallBackToSpinOffs: without main parts the derived
+// dates come from the spin-off parts; with a main part they do not.
+func TestResolveDerivedDatesFallBackToSpinOffs(t *testing.T) {
+	k := sagaKind()
+	spins := []Row{partRow("", Completed, sday(2012, 5, 1)), partRow("", Completed, sday(2003, 1, 2))}
+	r := ResolveSeries(Series{Title: "S", Finished: true}, k, nil, nil, nil, spins)
+	if !sameDay(r.StartedOn, sday(2003, 1, 2)) || !sameDay(r.EndedOn, sday(2012, 5, 1)) {
+		t.Fatalf("no main: start %v end %v", r.StartedOn, r.EndedOn)
+	}
+	main := []Row{partRow("", Planned, sday(2020, 1, 1))}
+	r = ResolveSeries(Series{Title: "S", Finished: true}, k, nil, nil, main, spins)
+	if !sameDay(r.StartedOn, sday(2020, 1, 1)) || !sameDay(r.EndedOn, sday(2020, 1, 1)) {
+		t.Fatalf("with main: start %v end %v", r.StartedOn, r.EndedOn)
+	}
+}

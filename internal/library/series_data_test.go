@@ -110,6 +110,11 @@ func TestUpdateSeriesDetailsRefuses(t *testing.T) {
 		t.Fatal(err)
 	}
 	book := addBook(t, e.lib, "b", fp(1), Entry{Status: Planned})
+	// saved as an item but without a list entry
+	unlisted, err := e.lib.SaveItem(bg, "book", "book", bookWith("u", fp(1)))
+	if err != nil {
+		t.Fatal(err)
+	}
 	noLink := k
 	noLink.SeriesLink = nil
 	otherKind := k
@@ -134,6 +139,7 @@ func TestUpdateSeriesDetailsRefuses(t *testing.T) {
 		"link other kind":      {s.ID, otherKind, SeriesDetails{Title: "S", LinkedItemID: book}, "link"},
 		"link not declared":    {s.ID, noLink, SeriesDetails{Title: "S", LinkedItemID: book}, "link"},
 		"link unknown item":    {s.ID, k, SeriesDetails{Title: "S", LinkedItemID: 99999}, "link"},
+		"link not in list":     {s.ID, k, SeriesDetails{Title: "S", LinkedItemID: unlisted}, "not in your list"},
 		"parent self":          {s.ID, k, SeriesDetails{Title: "S", ParentID: s.ID}, "parent"},
 		"parent has a parent":  {s.ID, k, SeriesDetails{Title: "S", ParentID: mid.ID}, "parent"},
 		"parent other plugin":  {s.ID, k, SeriesDetails{Title: "S", ParentID: otherPluginSeries.ID}, "parent"},

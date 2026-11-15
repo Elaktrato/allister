@@ -7,7 +7,7 @@
   <td class="min-w-40 py-2 pr-3">
     <a href="{{.Href}}" class="font-medium text-indigo-300 hover:underline">{{.Title}}</a>
     <div class="mt-1 flex flex-wrap gap-1 text-xs">
-      {{if .Series}}<a href="{{.SeriesHref}}" title="Part {{.SeriesPos}} of {{.Series}}" class="rounded bg-slate-800 px-2 py-0.5 text-indigo-300 hover:underline">{{.SeriesPos}} · {{.Series}}</a>{{end}}
+      {{if .Series}}<a href="{{.SeriesHref}}" title="{{if .SeriesSpinOff}}Spin-off {{.SeriesPos}}{{else}}Part {{.SeriesPos}}{{end}} of {{.Series}}" class="rounded bg-slate-800 px-2 py-0.5 text-indigo-300 hover:underline">{{if .SeriesSpinOff}}Spin-off · {{.Series}}{{else}}{{.SeriesPos}} · {{.Series}}{{end}}</a>{{end}}
       {{if .PartialSync}}<span title="Some details are still being downloaded in the background" class="rounded bg-slate-800 px-2 py-0.5 text-amber-300">partially synced</span>{{end}}
       {{if .Unmatched}}<span title="{{.UnmatchedHint}}" class="rounded bg-slate-800 px-2 py-0.5 text-sky-300">unmatched</span>{{end}}
     </div>

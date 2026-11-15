@@ -34,10 +34,11 @@ type ResolvedSeries struct {
 // the description, dates and expected parts through the link's fields, each
 // series field from its same-named field, and "finished" when the owner's
 // marker is not set but it has an end date. Derived values come from the
-// main parts: the start is the earliest date of the kind's release field,
+// counted parts: the start is the earliest date of the kind's release field,
 // the end the latest one when the series is finished. The status, Completed,
 // the derived expected parts (their number) and the cover fallback count the
-// main parts, or the spin-off parts when there is no main part. The cover is
+// main parts, or the spin-off parts when there is no main part (the derived
+// dates too). The cover is
 // the own cover, else the linked cover, else the first counted part's
 // cover. linkedEntry is accepted for callers that load it;
 // the resolution reads the linked item's fields only.
@@ -81,7 +82,7 @@ func ResolveSeries(s Series, kind plugin.KindDef, linked *Item, linkedEntry *Ent
 	}
 	r.Finished = s.Finished || linkedEnd != nil
 
-	first, last := releaseRange(kind, main)
+	first, last := releaseRange(kind, counted)
 	r.StartedOn = s.StartedOn
 	if r.StartedOn == nil && link != nil {
 		r.StartedOn = linkedValue(link.StartField).Date
