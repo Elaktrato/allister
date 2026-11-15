@@ -23,18 +23,13 @@ import (
 // API key.
 func newFieldFixtureEnv(t *testing.T, mod ...func(book, tv *plugintest.Plugin)) *fixtureEnv {
 	t.Helper()
-	book, tv := plugintest.BookPlugin(), plugintest.TVPlugin(plugintest.WithSourceKeyFields(
-		plugin.KeyField{Name: "client_id", Label: "Client ID"},
-		plugin.KeyField{Name: "client_secret", Label: "Client Secret", Secret: true},
-	))
-	for _, m := range mod {
-		m(book, tv)
+	withFields := func(_, tv *plugintest.Plugin) {
+		plugintest.WithSourceKeyFields(
+			plugin.KeyField{Name: "client_id", Label: "Client ID"},
+			plugin.KeyField{Name: "client_secret", Label: "Client Secret", Secret: true},
+		)(tv)
 	}
-	fe := &fixtureEnv{}
-	fe.book, _ = book.Sources["books"].(*plugintest.FakeSource)
-	fe.tv, _ = tv.Sources["tvdata"].(*plugintest.FakeSource)
-	fe.env = newEnvWith(t, withPlugins(book, tv))
-	return fe
+	return newFixtureEnv(t, append([]func(book, tv *plugintest.Plugin){withFields}, mod...)...)
 }
 
 // withSourceKeyField serves e through a Deps.SourceKeyField resolver (what
@@ -193,6 +188,52 @@ func TestSourceKeyFieldsLabelsAndNotice(t *testing.T) {
 	mustContain(t, b, "Fake TV", "Fake TV Free")
 	mustNotContain(t, b, "(needs key)")
 
+	b = e.get("/settings/plugins/tv").Body.String()
+	mustNotContain(t, b, `href="/settings/plugins#source-keys"`, "needs key")
+}
+
+// TestSourceKeyFieldsOneStoredFieldWithoutEnvironment: one stored field and
+// no environment (no Deps.SourceKeyField resolver) leaves the source not
+// configured, while the card still offers Remove for the stored field.
+func TestSourceKeyFieldsOneStoredFieldWithoutEnvironment(t *testing.T) {
+	e := newFieldFixtureEnv(t)
+	if err := e.set.SetSourceKeyField(context.Background(), "tvdata", "client_secret", "stored-secret"); err != nil {
+		t.Fatal(err)
+	}
+	block := sourceKeyBlock(t, e.get("/settings/plugins").Body.String(), "tvdata")
+	mustContain(t, block, `name="remove"`, `name="field.client_id"`, `name="field.client_secret"`)
+	mustNotContain(t, block, "A key is configured.", "stored-secret")
+
+	b := e.get("/settings/plugins/tv").Body.String()
+	mustContain(t, b, `href="/settings/plugins#source-keys"`, "Fake TV")
+}
+
+// TestSourceKeyFieldsFromEnvironmentInLabelsAndNotice: fields the environment
+// supplies (through the Deps.SourceKeyField resolver) count as configured in
+// the source switch and the plugin notice too, field by field: one field from
+// the environment is not enough, both are.
+func TestSourceKeyFieldsFromEnvironmentInLabelsAndNotice(t *testing.T) {
+	e := newFieldFixtureEnv(t, func(_, tv *plugintest.Plugin) {
+		tv.M.Sources = append(tv.M.Sources, plugin.SourceInfo{ID: "tvfree", Name: "Fake TV Free", RequestsPerMinute: 60})
+	})
+	env := map[string]string{"client_id": "env-id"}
+	e.withSourceKeyField(func(ctx context.Context, id, field string) (string, error) {
+		if v, err := e.set.SourceKeyField(ctx, id, field); err != nil || v != "" {
+			return v, err
+		}
+		if id == "tvdata" {
+			return env[field], nil
+		}
+		return "", nil
+	})
+	b := e.get("/tv/search?q=x").Body.String()
+	mustContain(t, b, "Fake TV (needs key)")
+	mustContain(t, e.get("/settings/plugins/tv").Body.String(), `href="/settings/plugins#source-keys"`)
+
+	env["client_secret"] = "env-secret"
+	b = e.get("/tv/search?q=x").Body.String()
+	mustContain(t, b, "Fake TV", "Fake TV Free")
+	mustNotContain(t, b, "(needs key)", "env-id", "env-secret")
 	b = e.get("/settings/plugins/tv").Body.String()
 	mustNotContain(t, b, `href="/settings/plugins#source-keys"`, "needs key")
 }
