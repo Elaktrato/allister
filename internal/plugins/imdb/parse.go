@@ -61,7 +61,7 @@ func NormaliseType(s string) string {
 
 var typeTable = map[string]string{
 	"movie": TypeMovie, "film": TypeMovie, "tvmovie": TypeMovie, "fernsehfilm": TypeMovie,
-	"short": TypeMovie, "kurzfilm": TypeMovie, "video": TypeMovie, "tvspecial": TypeMovie, "fernsehspecial": TypeMovie,
+	"short": TypeMovie, "tvshort": TypeMovie, "kurzfilm": TypeMovie, "video": TypeMovie, "tvspecial": TypeMovie, "fernsehspecial": TypeMovie,
 	"tvseries": TypeTV, "fernsehserie": TypeTV, "tvminiseries": TypeTV, "miniserie": TypeTV,
 	"tvepisode": TypeIgnored, "fernsehepisode": TypeIgnored, "videogame": TypeIgnored, "videospiel": TypeIgnored,
 	"podcastseries": TypeIgnored, "podcastepisode": TypeIgnored, "musicvideo": TypeIgnored, "musikvideo": TypeIgnored,

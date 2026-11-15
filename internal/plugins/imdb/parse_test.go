@@ -58,7 +58,7 @@ func TestParseMissingRequiredColumn(t *testing.T) {
 func TestClassify(t *testing.T) {
 	cases := map[string]string{
 		"Film": TypeMovie, "Movie": TypeMovie, "Video": TypeMovie, "TV Movie": TypeMovie, "Fernsehfilm": TypeMovie,
-		"Short": TypeMovie, "Kurzfilm": TypeMovie, "TV Special": TypeMovie,
+		"Short": TypeMovie, "Kurzfilm": TypeMovie, "TV Special": TypeMovie, "TV Short": TypeMovie,
 		"Fernsehserie": TypeTV, "TV Series": TypeTV, "Miniserie": TypeTV, "TV Mini Series": TypeTV,
 		"Fernsehepisode": TypeIgnored, "TV Episode": TypeIgnored, "Video Game": TypeIgnored, "Videospiel": TypeIgnored,
 		"Podcast Series": TypeIgnored, "Music Video": TypeIgnored,

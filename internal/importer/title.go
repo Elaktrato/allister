@@ -9,7 +9,7 @@ import (
 
 // normaliseTitle is the form two titles are compared in when a row is
 // resolved by title: lower case, "&" read as "and", every rune that is not a
-// letter, a combining mark or a digit dropped. Diacritics are not folded and
+// letter, a combining mark or a number (digits, superscripts, Roman numeral runes) dropped. Diacritics are not folded and
 // combining marks are kept, so "Amélie" (composed or not) and "Amelie"
 // differ: the row then stays unmatched, as a wrong match is worse than none.
 func normaliseTitle(s string) string {
@@ -18,7 +18,7 @@ func normaliseTitle(s string) string {
 		switch {
 		case r == '&':
 			b.WriteString("and")
-		case unicode.IsLetter(r) || unicode.IsMark(r) || unicode.IsDigit(r):
+		case unicode.IsLetter(r) || unicode.IsMark(r) || unicode.IsNumber(r):
 			b.WriteRune(r)
 		}
 	}
