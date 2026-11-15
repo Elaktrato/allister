@@ -36,7 +36,7 @@
     <fieldset class="space-y-2 text-sm">
       <legend class="font-medium">Linked entry</legend>
       <label class="flex items-center gap-2"><input type="radio" name="linked" value="0"{{if not .LinkedID}} checked{{end}}> None</label>
-      <input type="search" name="q" placeholder="Search your {{.LinkLabel}} entries" autocomplete="off" aria-label="Search your entries to link"
+      <input type="search" data-search-only name="q" placeholder="Search your {{.LinkLabel}} entries" autocomplete="off" aria-label="Search your entries to link"
         hx-get="{{.LinkURL}}" hx-trigger="input changed delay:300ms, search" hx-target="#series-link-results" hx-swap="innerHTML"
         class="w-full rounded border border-slate-700 bg-slate-950 px-3 py-2">
       <div id="series-link-results">{{template "series_pick" .LinkPick}}</div>
@@ -46,7 +46,7 @@
       <legend class="font-medium">Spin-off of</legend>
       {{if .ParentLocked}}<p class="text-slate-400">{{.ParentLocked}}</p>{{else}}
       <label class="flex items-center gap-2"><input type="radio" name="parent" value="0"{{if not .ParentID}} checked{{end}}> None</label>
-      <input type="search" name="q" placeholder="Search your series" autocomplete="off" aria-label="Search your series"
+      <input type="search" data-search-only name="q" placeholder="Search your series" autocomplete="off" aria-label="Search your series"
         hx-get="{{.ParentURL}}" hx-trigger="input changed delay:300ms, search" hx-target="#series-parent-results" hx-swap="innerHTML"
         class="w-full rounded border border-slate-700 bg-slate-950 px-3 py-2">
       <div id="series-parent-results">{{template "series_pick" .ParentPick}}</div>

@@ -657,3 +657,27 @@ func TestDeleteSeriesReleasesCover(t *testing.T) {
 		t.Error("a cover file another series references went")
 	}
 }
+
+// TestSeriesPickerSearchEnterDoesNotSubmit: Enter in a picker search inside
+// the edit dialog searches instead of saving the dialog: the inputs carry
+// data-search-only and app.js turns Enter there into the search event.
+func TestSeriesPickerSearchEnterDoesNotSubmit(t *testing.T) {
+	fe := newFixtureEnv(t, withSeriesData)
+	ser, _ := fe.bookSeries(t, "Saga")
+	fe.bookSeries(t, "Other")
+	body := fe.do("GET", seriesURL("book", ser.UID)+"/edit", nil, true).Body.String()
+	searches := regexp.MustCompile(`<input type="search"[^>]*>`).FindAllString(body, -1)
+	if len(searches) != 2 {
+		t.Fatalf("%d picker searches", len(searches))
+	}
+	for _, in := range searches {
+		if !strings.Contains(in, "data-search-only") {
+			t.Errorf("picker search without data-search-only: %s", in)
+		}
+	}
+	js, err := staticFS.ReadFile("static/app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	mustContain(t, string(js), `"keydown"`, "[data-search-only]", `event.key !== "Enter"`, "preventDefault", `new Event("search"`)
+}
