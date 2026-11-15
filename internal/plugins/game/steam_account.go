@@ -25,7 +25,10 @@ const (
 // describes the library.
 type steamAccountImporter struct{ c *steamClient }
 
-var _ plugin.AccountImporter = steamAccountImporter{}
+var (
+	_ plugin.Importer        = steamAccountImporter{}
+	_ plugin.AccountImporter = steamAccountImporter{}
+)
 
 // Parse refuses a file: this importer fetches the library of a SteamID64.
 func (steamAccountImporter) Parse(context.Context, io.Reader) (plugin.ParseResult, error) {
@@ -55,11 +58,17 @@ func (si steamAccountImporter) ImportAccount(ctx context.Context, steamID string
 	res := plugin.ParseResult{Entries: make([]plugin.ParsedEntry, 0, len(games))}
 	for _, g := range games {
 		// A game without a positive appid cannot be identified or resolved;
-		// the Web API never sends one, so this only guards broken data.
+		// the Web API never sends one, so this only guards broken data and
+		// reports it instead of dropping it silently.
 		if g.AppID <= 0 {
-			res.Ignored++
+			res.Skipped = append(res.Skipped, plugin.SkippedRow{
+				Title:  plugin.SingleLine(g.Name, maxTitleRunes),
+				Reason: fmt.Sprintf("Steam sent no valid appid (%d)", g.AppID),
+			})
 			continue
 		}
+		// Steam never reports a negative playtime; the clamp keeps broken
+		// data from becoming an invalid progress value.
 		minutes := max(g.PlaytimeForever, 0)
 		status := plugin.Active
 		if minutes == 0 {
