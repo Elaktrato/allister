@@ -122,3 +122,46 @@ func hasNote(notes []string, want string) bool {
 	}
 	return false
 }
+
+// TestYamtrackGameValidatesBeforeDedupe: a first row that cannot be imported
+// (unknown status) must not hide a later valid row with the same id, and the
+// source is part of the identity case-insensitively (igdb and IGDB dedupe).
+func TestYamtrackGameValidatesBeforeDedupe(t *testing.T) {
+	csv := `media_id,source,media_type,title,status,progress
+200,igdb,game,Hidden Game,Sometimes,1min
+200,igdb,game,Hidden Game,Completed,2min
+201,igdb,game,Twice Game,Completed,3min
+201,IGDB,game,Twice Game,Completed,3min
+202,igdb,game,Active Game,In progress,4min
+203,igdb,game,Dropped Game,Dropped,5min
+`
+	res, err := yamtrackGameImporter{}.Parse(context.Background(), strings.NewReader(csv))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Entries) != 4 || len(res.Skipped) != 2 {
+		t.Fatalf("entries=%+v skipped=%+v", res.Entries, res.Skipped)
+	}
+	if e := res.Entries[0]; e.ExternalIDs["igdb"] != "200" || e.Status != plugin.Completed || e.Progress["playtime"] != 120 {
+		t.Fatalf("valid duplicate after an invalid row = %+v", e)
+	}
+	if e := res.Entries[1]; e.ExternalIDs["igdb"] != "201" {
+		t.Fatalf("twice = %+v", e)
+	}
+	if e := res.Entries[2]; e.Status != plugin.Active || e.Progress["playtime"] != 240 {
+		t.Fatalf("in progress = %+v", e)
+	}
+	if e := res.Entries[3]; e.Status != plugin.Dropped || e.Progress["playtime"] != 300 {
+		t.Fatalf("dropped = %+v", e)
+	}
+	want := map[int]string{2: `unknown status "Sometimes"`, 5: "duplicate"}
+	for _, s := range res.Skipped {
+		if r, ok := want[s.Line]; !ok || !strings.Contains(s.Reason, r) {
+			t.Fatalf("unexpected skipped row %+v", s)
+		}
+		delete(want, s.Line)
+	}
+	if len(want) != 0 {
+		t.Fatalf("missing skipped rows %v (got %+v)", want, res.Skipped)
+	}
+}
