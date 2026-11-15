@@ -16,6 +16,19 @@
     <a href="{{.AddURL}}" hx-get="{{.AddURL}}" hx-target="#dialog-slot" hx-swap="innerHTML"
       class="block rounded bg-indigo-600 px-4 py-2 text-center font-medium hover:bg-indigo-500">Add to list</a>
     {{end}}
+    {{if .AddToSeriesURL}}
+    <form method="post" action="{{.AddToSeriesURL}}">
+      <button type="submit" class="w-full rounded bg-indigo-600 px-4 py-2 font-medium hover:bg-indigo-500">Add to series “{{.SeriesTitle}}”</button>
+    </form>
+    {{end}}
+    {{with .MakeSeries}}
+    <form method="post" action="{{.Action}}" class="space-y-2 rounded border border-slate-800 bg-slate-900 p-3 text-sm">
+      <label class="block">Series title
+        <input type="text" name="title" value="{{.Title}}" maxlength="300" required class="mt-1 w-full rounded border border-slate-700 bg-slate-950 px-3 py-2">
+      </label>
+      <button type="submit" class="w-full rounded border border-slate-700 px-4 py-2 hover:bg-slate-800">Make this a series</button>
+    </form>
+    {{end}}
     {{if .MatchURL}}
     <a href="{{.MatchURL}}" hx-get="{{.MatchURL}}" hx-target="#dialog-slot" hx-swap="innerHTML"
       class="block rounded border border-indigo-500 px-4 py-2 text-center font-medium text-indigo-200 hover:bg-slate-800">{{.MatchLabel}}</a>
@@ -33,6 +46,14 @@
   <div class="min-w-0 space-y-6">
     <div>
       <h1 class="text-3xl font-semibold">{{.Title}}</h1>
+      {{with .Series}}
+      <div class="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-slate-300">
+        <span>Part {{.Position}} of <a href="{{.Href}}" class="text-indigo-300 hover:underline">{{.Title}}</a></span>
+        {{with .Prev}}<a href="{{.Href}}" class="text-indigo-300 hover:underline">Previous part: {{.Title}}</a>{{end}}
+        {{with .Next}}<a href="{{.Href}}" class="text-indigo-300 hover:underline">Next part: {{.Title}}</a>{{end}}
+        <form method="post" action="{{.RemoveURL}}"><button type="submit" class="text-red-300 hover:underline">Remove from series</button></form>
+      </div>
+      {{end}}
       {{if .UpdateNotice}}<p class="mt-2 rounded border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-300">{{.UpdateNotice}}</p>{{end}}
       {{if .PartialSync}}<span title="Some details are still being downloaded in the background" class="mt-2 inline-block rounded bg-slate-800 px-2 py-0.5 text-xs text-amber-300">partially synced</span>{{end}}
     </div>

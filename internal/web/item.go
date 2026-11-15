@@ -61,6 +61,7 @@ func (s *server) coreRoutes(pluginID string) routeSet {
 		reg.Handle("GET /{source}/{id}/match/search", func(w http.ResponseWriter, r *http.Request) { s.getMatchSearch(w, r, pluginID) })
 		reg.Handle("POST /{source}/{id}/match", func(w http.ResponseWriter, r *http.Request) { s.postMatch(w, r, pluginID) })
 		reg.Handle("GET /export/{exporter}", func(w http.ResponseWriter, r *http.Request) { s.getExport(w, r, pluginID) })
+		reg.Handle("POST /{source}/{id}/series", func(w http.ResponseWriter, r *http.Request) { s.postMakeSeries(w, r, pluginID) })
 		s.seriesRoutes(reg, pluginID)
 	}
 }
@@ -260,7 +261,40 @@ func (s *server) showItem(w http.ResponseWriter, r *http.Request, ref itemRef, x
 		v.Dialog = &f
 	}
 	v.Match = x.Match
+	if err := s.carrySeries(r, li, &v); err != nil {
+		s.internalError(w, r, err)
+		return
+	}
 	s.renderStatus(w, r, status, "item", v)
+}
+
+// carrySeries keeps a ?series= parameter (a search into a series) on the add
+// links of the overview, and offers an entry that is already listed and in no
+// series to join it. An unknown series, or one of another kind, is ignored.
+func (s *server) carrySeries(r *http.Request, li *loadedItem, v *itemView) error {
+	uid := seriesParam(r)
+	if uid == "" {
+		return nil
+	}
+	ser, err := s.deps.Library.SeriesByUID(r.Context(), li.man.ID, uid)
+	if errors.Is(err, library.ErrNoSeries) || (err == nil && ser.Kind != li.kind.Key) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if v.AddURL != "" {
+		v.AddURL = withSeriesParam(v.AddURL, uid)
+	}
+	if v.Dialog != nil {
+		v.Dialog.Action = withSeriesParam(v.Dialog.Action, uid)
+	}
+	if li.saved != nil && li.entry != nil && v.Series == nil {
+		d := li.data
+		v.AddToSeriesURL = withSeriesParam(itemAction(li.man, d.Source, d.ID, d.Kind, "add", nil), uid)
+		v.SeriesTitle = ser.Title
+	}
+	return nil
 }
 
 // itemFail writes the error page of a load error.

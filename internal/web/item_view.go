@@ -88,10 +88,30 @@ type entryView struct {
 	Progress  []progressView
 }
 
+// partLink is a link to a neighbouring part of a series.
+type partLink struct{ Title, Href string }
+
+// seriesNavView is the "Part N of <series>" block of a part's overview.
+type seriesNavView struct {
+	Title, Href, RemoveURL string
+	Position               int
+	Prev, Next             *partLink
+}
+
+// makeSeriesView is the "Make this a series" form (Title is the prefill).
+type makeSeriesView struct{ Action, Title string }
+
 type itemView struct {
 	Title, Cover string
-	PartialSync  bool
-	Entry        *entryView
+	// Series is set for a part of a series, MakeSeries for a listed entry in
+	// none, AddToSeriesURL (with SeriesTitle) when the overview was reached
+	// from a search into a series and the entry can join it.
+	Series         *seriesNavView
+	MakeSeries     *makeSeriesView
+	AddToSeriesURL string
+	SeriesTitle    string
+	PartialSync    bool
+	Entry          *entryView
 	// AddURL opens the add dialog (items not in the list).
 	AddURL string
 	// MatchURL, MatchLabel and UnmatchedHint: a manual item that can be
@@ -138,6 +158,9 @@ func (s *server) itemView(ctx context.Context, li *loadedItem) (itemView, error)
 		if li.entry != nil {
 			v.Entry = entrySummary(k, it, li.entry)
 			v.Entry.EditHXURL = v.Entry.EditURL + "?" + url.Values{"return": {overview}}.Encode()
+			if err := s.seriesBlock(ctx, &v, li, lang); err != nil {
+				return itemView{}, err
+			}
 		}
 	} else {
 		v.Cover = httpURL(d.CoverURL)
@@ -151,6 +174,53 @@ func (s *server) itemView(ctx context.Context, li *loadedItem) (itemView, error)
 		}
 	}
 	return v, nil
+}
+
+// seriesBlock fills the series parts of the overview of a listed saved item:
+// the part navigation, or the "Make this a series" form.
+func (s *server) seriesBlock(ctx context.Context, v *itemView, li *loadedItem, lang string) error {
+	m, k, it := li.man, li.kind, li.saved
+	ser, pos, err := s.deps.Library.SeriesOfItem(ctx, it.ID)
+	if err != nil {
+		return err
+	}
+	if ser == nil {
+		title := v.Title
+		if h := k.SeriesHint; h != nil {
+			if t := strings.TrimSpace(it.Fields[h.TitleField].Text); t != "" {
+				title = t
+			}
+		}
+		v.MakeSeries = &makeSeriesView{Action: itemAction(m, it.Source, it.SourceID, it.Kind, "series", nil), Title: title}
+		return nil
+	}
+	rows, err := s.deps.Library.SeriesParts(ctx, ser.ID, lang)
+	if err != nil {
+		return err
+	}
+	base := seriesURL(m.ID, ser.UID)
+	nav := &seriesNavView{Title: ser.Title, Href: base, Position: pos,
+		RemoveURL: base + "/parts/" + strconv.FormatInt(it.ID, 10) + "/remove"}
+	link := func(row library.Row) *partLink {
+		t := row.Title
+		if t == "" {
+			t = "(untitled)"
+		}
+		return &partLink{Title: t, Href: itemURL(m, row.Item.Source, row.Item.SourceID, row.Item.Kind)}
+	}
+	for i, row := range rows {
+		if row.Item.ID != it.ID {
+			continue
+		}
+		if i > 0 {
+			nav.Prev = link(rows[i-1])
+		}
+		if i < len(rows)-1 {
+			nav.Next = link(rows[i+1])
+		}
+	}
+	v.Series = nav
+	return nil
 }
 
 func statusLabel(k plugin.KindDef, st library.Status) string {
