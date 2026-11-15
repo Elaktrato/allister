@@ -93,6 +93,10 @@ type seriesView struct {
 	Candidates               []candidateView
 	KindLabel                string
 	ListURL                  string
+	// SearchURL and SearchLabel: add a part by searching the kind's sources
+	SearchURL, SearchLabel string
+	// DeleteNote names the entries a delete with "remove" takes along
+	DeleteNote string
 }
 
 func (s *server) buildSeries(r *http.Request, m plugin.Manifest, ser *library.Series) (seriesView, error) {
@@ -106,6 +110,8 @@ func (s *server) buildSeries(r *http.Request, m plugin.Manifest, ser *library.Se
 	v := seriesView{Title: ser.Title, Total: len(rows), KindLabel: lowerFirst(k.Label),
 		RenameURL: base + "/rename", AddURL: base + "/parts", DeleteURL: base + "/delete",
 		CandidatesURL: base + "/candidates", ListURL: seriesListURL(m.ID)}
+	v.SearchURL, v.SearchLabel = seriesSearchLink(m, ser)
+	v.DeleteNote = "Delete the series and remove its " + strconv.Itoa(len(rows)) + " " + entriesWord(len(rows)) + " from your list"
 	sts := make([]library.Status, 0, len(rows))
 	for i, row := range rows {
 		sts = append(sts, row.Entry.Status)
@@ -121,6 +127,31 @@ func (s *server) buildSeries(r *http.Request, m plugin.Manifest, ser *library.Se
 	v.Status, v.StatusKey = statusLabel(k, st), string(st)
 	v.Candidates, err = s.seriesCandidates(r, m, k, ser, "")
 	return v, err
+}
+
+// seriesSearchLink is the search page that adds into ser ("" when no source
+// serves the series' kind) and its label naming the sources.
+func seriesSearchLink(m plugin.Manifest, ser *library.Series) (href, label string) {
+	srcs := sourcesForKind(m, ser.Kind)
+	if len(srcs) == 0 {
+		return "", ""
+	}
+	names := make([]string, 0, len(srcs))
+	for _, si := range srcs {
+		names = append(names, si.Name)
+	}
+	u := "/" + url.PathEscape(m.ID) + "/search"
+	if len(m.Kinds) > 1 {
+		u += "?kind=" + url.QueryEscape(ser.Kind)
+	}
+	return withSeriesParam(u, ser.UID), "Search " + strings.Join(names, " / ")
+}
+
+func entriesWord(n int) string {
+	if n == 1 {
+		return "entry"
+	}
+	return "entries"
 }
 
 func (s *server) getSeries(w http.ResponseWriter, r *http.Request, m plugin.Manifest, ser *library.Series) {
@@ -216,6 +247,12 @@ func withSeriesParam(u, uid string) string {
 // saved: none is (nil, true); a malformed or unknown uid is a 404, a series of
 // another kind than the item a 422 (false: the page is written).
 func (s *server) addSeries(w http.ResponseWriter, r *http.Request, t *addTarget) (*library.Series, bool) {
+	return s.targetSeries(w, r, t.man.ID, t.kind)
+}
+
+// targetSeries is addSeries for any request that adds an entry of kind k to
+// plugin pluginID (the add dialog, the manual form).
+func (s *server) targetSeries(w http.ResponseWriter, r *http.Request, pluginID string, k plugin.KindDef) (*library.Series, bool) {
 	raw := r.URL.Query().Get("series")
 	if raw == "" {
 		return nil, true
@@ -224,7 +261,7 @@ func (s *server) addSeries(w http.ResponseWriter, r *http.Request, t *addTarget)
 		s.seriesNotFound(w, r)
 		return nil, false
 	}
-	ser, err := s.deps.Library.SeriesByUID(r.Context(), t.man.ID, raw)
+	ser, err := s.deps.Library.SeriesByUID(r.Context(), pluginID, raw)
 	switch {
 	case errors.Is(err, library.ErrNoSeries):
 		s.seriesNotFound(w, r)
@@ -233,9 +270,9 @@ func (s *server) addSeries(w http.ResponseWriter, r *http.Request, t *addTarget)
 		s.internalError(w, r, err)
 		return nil, false
 	}
-	if ser.Kind != t.kind.Key {
+	if ser.Kind != k.Key {
 		s.errorPage(w, r, http.StatusUnprocessableEntity, "Series",
-			"This series holds "+lowerFirst(t.kind.LabelPlural)+" of another kind; it cannot take this entry.", "")
+			"This series holds "+lowerFirst(k.LabelPlural)+" of another kind; it cannot take this entry.", "")
 		return nil, false
 	}
 	return ser, true

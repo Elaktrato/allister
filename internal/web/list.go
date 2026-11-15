@@ -17,6 +17,7 @@ import (
 	"net/url"
 	"slices"
 	"strconv"
+	"strings"
 
 	"github.com/allister/allister/internal/covers"
 	"github.com/allister/allister/internal/library"
@@ -80,6 +81,7 @@ type listHead struct {
 
 type listView struct {
 	Heading              string // the kind's plural label
+	Title                string // the page title when it is not "<Heading> list"
 	AddLabel             string // "Add book": the search link's text
 	Kinds                []tabView
 	Head                 listHead
@@ -618,14 +620,13 @@ func (s *server) buildSeriesTab(r *http.Request, m plugin.Manifest, lq listQuery
 	at := func(status string, page int) string {
 		return seriesTabURL(m.ID, status, lq.View, sq.Text, sort, page)
 	}
-	v := listView{Heading: k.LabelPlural, SeriesTab: true, AnyEntries: all > 0, Total: pg.Total, View: lq.View,
+	v := listView{Heading: "Series", Title: m.Name + " series", SeriesTab: true, AnyEntries: all > 0, Total: pg.Total, View: lq.View,
 		Filtered: sq.Text != "", PushURL: at(lq.Status, pg.Page),
 		SearchURL: "/" + url.PathEscape(m.ID) + "/search", EmptyNoun: "series", Exports: s.exportLinks(m),
-		AddLabel:     "Add " + lowerFirst(k.Label),
 		ViewCardsURL: seriesTabURL(m.ID, lq.Status, "cards", sq.Text, sort, pg.Page),
 		ViewTableURL: seriesTabURL(m.ID, lq.Status, "table", sq.Text, sort, pg.Page),
 		Search:       seriesSearch{Action: "/" + url.PathEscape(m.ID), Q: sq.Text, Sort: sort, Status: lq.Status, View: lq.View}}
-	v.Notice, v.NoticeMore = noticeKeys(lq.Rejected)
+	v.Notice, v.NoticeMore = noticeKeys(append(lq.Rejected, ignoredByTab(r.URL.Query(), lq)...))
 	if manual := "/" + m.ID + "/manual/new"; slices.Contains(s.pluginRoutes[m.ID], "GET "+manual) {
 		v.ManualURL = manual
 	}
@@ -663,6 +664,27 @@ func (s *server) buildSeriesTab(r *http.Request, m plugin.Manifest, lq listQuery
 		return listView{}, err
 	}
 	return v, nil
+}
+
+// ignoredByTab names the entry parameters q carries that the Series tab does
+// not use (entry filters, terms, rating and progress bounds, a sort other than
+// by title, the kind), without those parseListQuery already rejected.
+func ignoredByTab(q url.Values, lq listQuery) []string {
+	var out []string
+	for key, vals := range q {
+		if strings.TrimSpace(strings.Join(vals, "")) == "" || slices.Contains(lq.Rejected, key) {
+			continue
+		}
+		switch {
+		case strings.HasPrefix(key, "f."), key == "kind", key == "genre", key == "genre_mode", key == "tag", key == "tag_mode",
+			key == "progress", key == "rmin", key == "rmax", key == "dir":
+			out = append(out, key)
+		case key == "sort" && lq.Filters.Sort != string(library.SortTitle):
+			out = append(out, key)
+		}
+	}
+	slices.Sort(out)
+	return out
 }
 
 // markSeries sets the part badge (series title, position, link) on the row

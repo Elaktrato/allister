@@ -37,7 +37,7 @@ const (
 )
 
 // listParamKeys are the keys parseListQuery reads itself.
-var listParamKeys = []string{"kind", "status", "view", "page"}
+var listParamKeys = []string{"kind", "status", "view", "page", "tab"}
 
 // fieldFilter is one valid field filter in canonical form: Values for an
 // enum (one or more), else one value ("a..b" for a range).

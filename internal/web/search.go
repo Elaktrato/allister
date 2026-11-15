@@ -240,7 +240,7 @@ func (s *server) search(w http.ResponseWriter, r *http.Request, pluginID string)
 		Action:      "/" + url.PathEscape(m.ID) + "/search",
 		Placeholder: "Search " + si.Name + "…",
 		EmptyHint:   "Type a title to search " + si.Name + ".",
-		ManualURL:   "/" + url.PathEscape(m.ID) + "/manual/new",
+		ManualURL:   withSeriesParam(manualPath(m, k.Key), uid),
 		Query:       q,
 	}
 	v.RetryURL = v.Action + "?q=" + url.QueryEscape(q)

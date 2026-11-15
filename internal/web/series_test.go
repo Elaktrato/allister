@@ -49,7 +49,11 @@ func TestSeriesPageShowsParts(t *testing.T) {
 	body := rec.Body.String()
 	mustContain(t, body, "Saga", "1/3", "Watched")
 	// completed + planned + active: the header shows the active label
-	head := body[strings.Index(body, "<h1"):strings.Index(body, "<ol")]
+	h1, ol := strings.Index(body, "<h1"), strings.Index(body, "<ol")
+	if h1 < 0 || ol < h1 {
+		t.Fatalf("page structure: <h1 at %d, <ol at %d", h1, ol)
+	}
+	head := body[h1:ol]
 	mustContain(t, head, "Watching")
 	last := -1
 	for i, id := range ids {
@@ -407,4 +411,88 @@ func TestSeriesRoutesAreGuarded(t *testing.T) {
 	if rec := fe.do("POST", "/tv/tvdata/1Saga/series", url.Values{"title": {"x"}}, false); rec.Code != http.StatusNotFound {
 		t.Fatalf("make series: %d", rec.Code)
 	}
+}
+
+func TestSeriesPageLinksSearchIntoSeries(t *testing.T) {
+	fe := newFixtureEnv(t)
+	ser, _ := fe.tvSeries(t, "Saga")
+	body := fe.get(seriesURL("tv", ser.UID)).Body.String()
+	mustContain(t, body, `href="/tv/search?series=`+ser.UID+`"`, "Search Fake TV")
+	mustNotContain(t, body, "kind=")
+
+	// several kinds: the link names the series' kind
+	fe = newFixtureEnv(t, func(_, tv *plugintest.Plugin) {
+		k := tv.M.Kinds[0]
+		k.Key, k.Label, k.LabelPlural = "film", "Film", "Films"
+		tv.M.Kinds = append(tv.M.Kinds, k)
+	})
+	ser, _ = fe.tvSeries(t, "Saga")
+	body = fe.get(seriesURL("tv", ser.UID)).Body.String()
+	mustContain(t, body, `href="/tv/search?kind=show&amp;series=`+ser.UID+`"`)
+}
+
+func TestManualEntryFromSeriesSearchBecomesPart(t *testing.T) {
+	fe := newFixtureEnv(t)
+	ser, ids := fe.tvSeries(t, "Saga")
+	// the search page's manual link and the manual form carry the series
+	mustContain(t, fe.get("/tv/search?q=x&series="+ser.UID).Body.String(), `href="/tv/manual/new?series=`+ser.UID+`"`)
+	mustContain(t, fe.get("/tv/manual/new?series="+ser.UID).Body.String(), `action="/tv/manual/new?series=`+ser.UID+`"`)
+	before := len(fe.partIDs(t, ser))
+	rec := fe.postMultipart(t, "/tv/manual/new?series="+ser.UID,
+		url.Values{"title": {"Hand Made"}, "status": {"planned"}}, nil)
+	if rec.Code != http.StatusSeeOther || rec.Header().Get("Location") != seriesURL("tv", ser.UID) {
+		t.Fatalf("manual into series: %d %s %s", rec.Code, rec.Header().Get("Location"), rec.Body.String())
+	}
+	if got := fe.partIDs(t, ser); len(got) != before+1 || got[0] != ids[0] {
+		t.Fatalf("parts %v", got)
+	}
+	// an unknown series is refused before anything is saved
+	n := fe.itemCount(t)
+	if rec := fe.postMultipart(t, "/tv/manual/new?series=nope", url.Values{"title": {"X"}, "status": {"planned"}}, nil); rec.Code != http.StatusNotFound {
+		t.Fatalf("unknown series: %d", rec.Code)
+	}
+	if fe.itemCount(t) != n {
+		t.Fatal("saved despite the refusal")
+	}
+}
+
+func (fe *fixtureEnv) partIDs(t *testing.T, ser *library.Series) []int64 {
+	t.Helper()
+	rows, err := fe.lib.SeriesParts(bg, ser.ID, "en")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out []int64
+	for _, r := range rows {
+		out = append(out, r.Item.ID)
+	}
+	return out
+}
+
+func TestSeriesMoveRemoveRefuseBadAndForeignItems(t *testing.T) {
+	fe := newFixtureEnv(t)
+	ser, ids := fe.tvSeries(t, "Saga")
+	other, oids := fe.tvSeries(t, "Other")
+	base := seriesURL("tv", ser.UID)
+	_ = other
+	for _, item := range []string{"abc", idStr(oids[0])} {
+		if rec := fe.do("POST", base+"/parts/"+item+"/move", url.Values{"dir": {"up"}}, false); rec.Code != http.StatusNotFound {
+			t.Errorf("move %s: %d", item, rec.Code)
+		}
+		if rec := fe.do("POST", base+"/parts/"+item+"/remove", url.Values{}, false); rec.Code != http.StatusNotFound {
+			t.Errorf("remove %s: %d", item, rec.Code)
+		}
+	}
+	if got := fe.partIDs(t, ser); len(got) != len(ids) {
+		t.Fatalf("parts changed: %v", got)
+	}
+	if _, n, _ := fe.lib.SeriesOfItem(bg, oids[0]); n != 1 {
+		t.Fatal("foreign part touched")
+	}
+}
+
+func TestSeriesDeleteWordingNamesPartCount(t *testing.T) {
+	fe := newFixtureEnv(t)
+	ser, _ := fe.tvSeries(t, "Saga")
+	mustContain(t, fe.get(seriesURL("tv", ser.UID)).Body.String(), "Delete the series and remove its 3 entries from your list")
 }
