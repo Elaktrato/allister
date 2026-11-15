@@ -2,6 +2,7 @@ package movie
 
 import (
 	"archive/zip"
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/csv"
@@ -20,6 +21,9 @@ import (
 const (
 	letterboxdMaxUpload = 20 << 20 // the upload cap, enforced again here
 	letterboxdMaxMember = 10 << 20 // uncompressed bytes per CSV
+	letterboxdMaxRows   = 100000   // data rows across all files
+	letterboxdMaxFields = 64       // fields per record
+	letterboxdMaxListed = 1000     // skipped rows listed before one summary row
 )
 
 // letterboxdFiles are the only archive members that are read, at the root and
@@ -27,7 +31,7 @@ const (
 var letterboxdFiles = []string{"watched.csv", "diary.csv", "ratings.csv", "watchlist.csv", "reviews.csv"}
 
 // letterboxdImporter reads the ZIP Letterboxd sends for a data export. Rows are
-// merged per film. The key is the normalised name and year, not the URI: the
+// merged per film. The key is the lower-cased name and year, not the URI: the
 // URI in diary.csv and reviews.csv names the log entry, not the film, so only
 // the film URIs (watched, ratings, watchlist) are kept as the external id.
 type letterboxdImporter struct{}
@@ -39,15 +43,16 @@ type lbRow struct {
 }
 
 type lbFilm struct {
-	title, uri, diaryURI string
-	year                 int
-	first                int
-	watched, planned     bool
-	diary, rewatches     int
-	rating               *int
-	finished             *time.Time
-	review               string
-	reviewKey            string
+	title, uri       string
+	year             int
+	watched, planned bool
+	diary, rewatches int
+	rating           *int
+	diaryRating      *int
+	ratingFrom       time.Time // watch date of the diary rating
+	finished         *time.Time
+	review           string
+	reviewDay        *time.Time
 }
 
 func (letterboxdImporter) Parse(ctx context.Context, r io.Reader) (plugin.ParseResult, error) {
@@ -78,6 +83,7 @@ func (letterboxdImporter) Parse(ctx context.Context, r io.Reader) (plugin.ParseR
 	var res plugin.ParseResult
 	films := map[string]*lbFilm{}
 	var order []*lbFilm
+	total, unnamed := 0, 0
 	for _, name := range letterboxdFiles {
 		f := members[name]
 		if f == nil {
@@ -86,32 +92,46 @@ func (letterboxdImporter) Parse(ctx context.Context, r io.Reader) (plugin.ParseR
 		if err := ctx.Err(); err != nil {
 			return plugin.ParseResult{}, err
 		}
-		rows, err := readLetterboxdCSV(f)
-		if err != nil {
-			return plugin.ParseResult{}, fmt.Errorf("%w: %s: %w", plugin.ErrBadInput, name, err)
-		}
-		for _, row := range rows {
+		err := readLetterboxdCSV(f, func(row lbRow) error {
+			total++
+			if total > letterboxdMaxRows {
+				return errTooManyRows
+			}
 			title := plugin.SingleLine(row.name, maxTitleRunes)
 			if title == "" {
-				res.Skipped = append(res.Skipped, plugin.SkippedRow{Line: row.line, Reason: name + ": row has no film name"})
-				continue
+				if unnamed++; unnamed <= letterboxdMaxListed {
+					res.Skipped = append(res.Skipped, plugin.SkippedRow{Line: row.line, Reason: name + ": row has no film name"})
+				}
+				return nil
 			}
 			year := parseYear(row.year)
 			key := lbKey(title, year)
 			film := films[key]
 			if film == nil {
-				film = &lbFilm{title: title, year: year, first: len(order)}
+				film = &lbFilm{title: title, year: year}
 				films[key] = film
 				order = append(order, film)
 			}
 			film.apply(name, row)
+			return nil
+		})
+		if errors.Is(err, errTooManyRows) {
+			return plugin.ParseResult{}, fmt.Errorf("%w: the export has more than 100,000 rows", plugin.ErrBadInput)
 		}
+		if err != nil {
+			return plugin.ParseResult{}, fmt.Errorf("%w: %s: %w", plugin.ErrBadInput, name, err)
+		}
+	}
+	if unnamed > letterboxdMaxListed {
+		res.Skipped = append(res.Skipped, plugin.SkippedRow{Reason: fmt.Sprintf("…and %d more rows without a name", unnamed-letterboxdMaxListed)})
 	}
 	for _, film := range order {
 		res.Entries = append(res.Entries, film.entry())
 	}
 	return res, nil
 }
+
+var errTooManyRows = errors.New("too many rows")
 
 func (f *lbFilm) apply(file string, row lbRow) {
 	uri := letterboxdPath(row.uri)
@@ -130,19 +150,17 @@ func (f *lbFilm) apply(file string, row lbRow) {
 	case "diary.csv":
 		f.watched = true
 		f.diary++
-		if f.diaryURI == "" {
-			f.diaryURI = uri
-		}
 		if strings.EqualFold(strings.TrimSpace(row.rewatch), "yes") {
 			f.rewatches++
 		}
-		if d, ok := parseDay(row.watchedDate); ok && (f.finished == nil || d.After(*f.finished)) {
+		d, hasDay := parseDay(row.watchedDate)
+		if hasDay && (f.finished == nil || d.After(*f.finished)) {
 			f.finished = &d
 		}
-		if f.rating == nil {
-			if v, ok := halfStars(row.rating); ok {
-				f.rating = &v
-			}
+		// The rating of the latest watch (a later row wins a tie or a missing
+		// date); ratings.csv overrides it below.
+		if v, ok := halfStars(row.rating); ok && (f.diaryRating == nil || !d.Before(f.ratingFrom)) {
+			f.diaryRating, f.ratingFrom = &v, d
 		}
 	case "reviews.csv":
 		f.watched = true
@@ -150,13 +168,16 @@ func (f *lbFilm) apply(file string, row lbRow) {
 		if text == "" {
 			return
 		}
-		// Latest watched date wins; a later row wins a tie.
-		k := row.watchedDate
-		if k == "" {
-			k = row.date
+		// Latest watched date (fallback: log date) wins; a later row wins a tie.
+		day, ok := parseDay(row.watchedDate)
+		if !ok {
+			day, ok = parseDay(row.date)
 		}
-		if f.review == "" || k >= f.reviewKey {
-			f.review, f.reviewKey = text, k
+		if !ok {
+			day = time.Time{}
+		}
+		if f.review == "" || f.reviewDay == nil || !day.Before(*f.reviewDay) {
+			f.review, f.reviewDay = text, &day
 		}
 	}
 }
@@ -172,6 +193,9 @@ func (f *lbFilm) entry() plugin.ParsedEntry {
 	if f.watched {
 		e.Status = plugin.Completed
 		e.Rating = f.rating
+		if e.Rating == nil {
+			e.Rating = f.diaryRating
+		}
 		e.FinishedOn = f.finished
 		e.Comment = f.review
 	}
@@ -239,54 +263,89 @@ func letterboxdPath(raw string) string {
 	return plugin.SingleLine(strings.Trim(u.Path, "/"), maxIDRunes)
 }
 
-// readLetterboxdCSV reads one member through a size cap (the header's size is
-// not trusted) and returns its rows with the columns found by name.
-func readLetterboxdCSV(f *zip.File) ([]lbRow, error) {
+// readLetterboxdCSV streams one member through a size cap (the header's size
+// is not trusted), finds the columns by name and hands each data row to
+// emit. Records are limited to letterboxdMaxFields fields.
+func readLetterboxdCSV(f *zip.File, emit func(lbRow) error) error {
 	rc, err := f.Open()
 	if err != nil {
-		return nil, err
+		return err
 	}
 	defer rc.Close()
-	data, err := io.ReadAll(io.LimitReader(rc, letterboxdMaxMember+1))
-	if err != nil {
-		return nil, err
+	lr := &io.LimitedReader{R: rc, N: letterboxdMaxMember + 1}
+	br := bufio.NewReader(&lineCapReader{r: lr})
+	if b, err := br.Peek(3); err == nil && string(b) == "\xef\xbb\xbf" {
+		_, _ = br.Discard(3)
 	}
-	if len(data) > letterboxdMaxMember {
-		return nil, errors.New("file is larger than 10 MiB")
-	}
-	data = bytes.TrimPrefix(data, []byte("\xef\xbb\xbf"))
-	cr := csv.NewReader(bytes.NewReader(data))
+	cr := csv.NewReader(br)
 	cr.FieldsPerRecord = -1
-	records, err := cr.ReadAll()
-	if err != nil {
-		return nil, err
-	}
-	if len(records) == 0 {
-		return nil, nil
-	}
-	col := map[string]int{}
-	for i, h := range records[0] {
-		h = strings.ToLower(strings.TrimSpace(h))
-		if _, dup := col[h]; !dup {
-			col[h] = i
+	cr.ReuseRecord = true
+	tooBig := func() bool { return lr.N <= 0 }
+	var col map[string]int
+	line := 0
+	for {
+		rec, err := cr.Read()
+		if tooBig() {
+			return errors.New("file is larger than 10 MiB")
+		}
+		if err == io.EOF {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		line++
+		if len(rec) > letterboxdMaxFields {
+			return fmt.Errorf("a record has more than %d fields", letterboxdMaxFields)
+		}
+		if col == nil {
+			col = map[string]int{}
+			for i, h := range rec {
+				h = strings.ToLower(strings.TrimSpace(h))
+				if _, dup := col[h]; !dup {
+					col[h] = i
+				}
+			}
+			continue
+		}
+		get := func(name string) string {
+			if i, ok := col[name]; ok && i < len(rec) {
+				return rec[i]
+			}
+			return ""
+		}
+		row := lbRow{
+			line: line,
+			name: get("name"), year: get("year"), uri: get("letterboxd uri"),
+			rating: get("rating"), rewatch: get("rewatch"), review: get("review"),
+			watchedDate: strings.TrimSpace(get("watched date")), date: strings.TrimSpace(get("date")),
+		}
+		if err := emit(row); err != nil {
+			return err
 		}
 	}
-	get := func(rec []string, name string) string {
-		if i, ok := col[name]; ok && i < len(rec) {
-			return rec[i]
+}
+
+// lineCapReader fails a read that carries on for more than letterboxdMaxLine
+// bytes without a newline, so one giant line cannot become millions of fields
+// before the field limit is checked.
+type lineCapReader struct {
+	r   io.Reader
+	run int
+}
+
+const letterboxdMaxLine = 1 << 20
+
+func (l *lineCapReader) Read(p []byte) (int, error) {
+	n, err := l.r.Read(p)
+	for _, b := range p[:n] {
+		if b == '\n' {
+			l.run = 0
+		} else if l.run++; l.run > letterboxdMaxLine {
+			return n, errors.New("a line is longer than 1 MiB")
 		}
-		return ""
 	}
-	var rows []lbRow
-	for i, rec := range records[1:] {
-		rows = append(rows, lbRow{
-			line: i + 2,
-			name: get(rec, "name"), year: get(rec, "year"), uri: get(rec, "letterboxd uri"),
-			rating: get(rec, "rating"), rewatch: get(rec, "rewatch"), review: get(rec, "review"),
-			watchedDate: strings.TrimSpace(get(rec, "watched date")), date: strings.TrimSpace(get(rec, "date")),
-		})
-	}
-	return rows, nil
+	return n, err
 }
 
 var _ plugin.Importer = letterboxdImporter{}

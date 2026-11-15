@@ -7,6 +7,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/allister/allister/internal/plugin"
 )
@@ -48,10 +49,10 @@ func TestLetterboxdMerge(t *testing.T) {
 	res, err := lbParse(t, map[string]string{
 		"watched.csv": "Date,Name,Year,Letterboxd URI\n2026-01-01,Film One,2001,https://boxd.it/test1\n2026-01-02,Film Three,2003,https://boxd.it/test3\n",
 		"diary.csv": "Date,Name,Year,Letterboxd URI,Rating,Rewatch,Tags,Watched Date\n" +
-			"2026-02-01,Film One,2001,https://boxd.it/entry1,4.5,,,2026-01-30\n" +
-			"2026-03-01,Film One,2001,https://boxd.it/entry2,4.5,Yes,,2026-02-27\n",
+			"2026-03-01,Film One,2001,https://boxd.it/entry2,3.5,Yes,,2026-02-27\n" +
+			"2026-02-01,Film One,2001,https://boxd.it/entry1,3.5,,,2026-01-30\n",
 		"ratings.csv":   "Date,Name,Year,Letterboxd URI,Rating\n2026-01-05,Film One,2001,https://boxd.it/test1,4.5\n",
-		"reviews.csv":   "Date,Name,Year,Letterboxd URI,Rating,Rewatch,Review,Tags,Watched Date\n2026-02-01,Film One,2001,https://boxd.it/r1,4.5,,Old take,,2026-01-30\n2026-03-01,Film One,2001,https://boxd.it/r2,4.5,Yes,\"New take,\nsecond line\",,2026-02-27\n",
+		"reviews.csv":   "Date,Name,Year,Letterboxd URI,Rating,Rewatch,Review,Tags,Watched Date\n2026-03-01,Film One,2001,https://boxd.it/r2,4.5,Yes,\"New take,\nsecond line\",,2026-02-27\n2026-02-01,Film One,2001,https://boxd.it/r1,4.5,,Old take,,2026-01-30\n",
 		"watchlist.csv": "Date,Name,Year,Letterboxd URI\n2026-01-09,Film Two,1999,https://boxd.it/test2\n2026-01-10,Film Three,2003,https://boxd.it/test3\n",
 	})
 	if err != nil {
@@ -122,6 +123,10 @@ func TestLetterboxdRefusesOversizeAndPaths(t *testing.T) {
 	}
 	// Nested and traversing names are ignored, so nothing usable is left.
 	good := "Date,Name,Year,Letterboxd URI\n2026-01-01,Film One,2001,https://boxd.it/test1\n"
+	other := "Date,Name,Year,Letterboxd URI\n2026-01-01,Film Evil,2001,https://boxd.it/evil\n"
+	if res, err := lbParse(t, map[string]string{"../watched.csv": other, "watched.csv": good}); err != nil || len(res.Entries) != 1 || res.Entries[0].Title != "Film One" {
+		t.Fatalf("traversal plus root: res = %+v err = %v", res, err)
+	}
 	if _, err := lbParse(t, map[string]string{"../watched.csv": good, "sub/watched.csv": good, "Watched.csv": good}); !errors.Is(err, plugin.ErrBadInput) {
 		t.Fatalf("paths: err = %v", err)
 	}
@@ -160,5 +165,85 @@ func TestLetterboxdManifest(t *testing.T) {
 	}
 	if err := plugin.Validate(m); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestLetterboxdDiaryRatingFallbackUsesLatestWatch(t *testing.T) {
+	res, err := lbParse(t, map[string]string{
+		"diary.csv": "Date,Name,Year,Letterboxd URI,Rating,Rewatch,Tags,Watched Date\n" +
+			"2026-01-01,Film One,2001,https://boxd.it/e1,2,,,2026-01-01\n" +
+			"2026-03-01,Film One,2001,https://boxd.it/e2,4,Yes,,2026-02-27\n",
+	})
+	if err != nil || len(res.Entries) != 1 || res.Entries[0].Rating == nil || *res.Entries[0].Rating != 8 {
+		t.Fatalf("res = %+v err = %v", res, err)
+	}
+}
+
+func TestLetterboxdYearlessAndBadRatings(t *testing.T) {
+	res, err := lbParse(t, map[string]string{
+		"watched.csv": "Date,Name,Year,Letterboxd URI\n2026-01-01,No Year,,https://boxd.it/y\n2026-01-01,Empty,2001,https://boxd.it/e\n2026-01-01,Junk,2002,https://boxd.it/j\n",
+		"ratings.csv": "Date,Name,Year,Letterboxd URI,Rating\n2026-01-05,Empty,2001,https://boxd.it/e,\n2026-01-05,Junk,2002,https://boxd.it/j,lots\n",
+	})
+	if err != nil || len(res.Entries) != 3 {
+		t.Fatalf("res = %+v err = %v", res, err)
+	}
+	if e := lbByTitle(res, "No Year"); e == nil || e.Status != plugin.Completed {
+		t.Fatalf("no year = %+v", e)
+	} else if _, ok := e.Fields["year"]; ok {
+		t.Fatalf("year field set: %+v", e.Fields)
+	}
+	for _, title := range []string{"Empty", "Junk"} {
+		if e := lbByTitle(res, title); e == nil || e.Rating != nil || e.Status != plugin.Completed {
+			t.Fatalf("%s = %+v", title, e)
+		}
+	}
+}
+
+func TestLetterboxdStreamsAndCapsCompressibleMember(t *testing.T) {
+	// 10 MiB of "a\n" compresses to a few KiB but is 5M one-field rows.
+	lines := "Name\n" + strings.Repeat("a\n", 5<<20-4)
+	start := time.Now()
+	_, err := lbParse(t, map[string]string{"watched.csv": lines})
+	if !errors.Is(err, plugin.ErrBadInput) || !strings.Contains(err.Error(), "100,000 rows") {
+		t.Fatalf("err = %v", err)
+	}
+	if d := time.Since(start); d > 5*time.Second {
+		t.Fatalf("took %v", d)
+	}
+}
+
+func TestLetterboxdRowCapIsTotalAcrossFiles(t *testing.T) {
+	part := "Name,Year\n" + strings.Repeat("a,2000\n", 60000)
+	if _, err := lbParse(t, map[string]string{"watched.csv": part, "watchlist.csv": part}); !errors.Is(err, plugin.ErrBadInput) {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestLetterboxdRefusesWideRecords(t *testing.T) {
+	wide := "Name\n" + strings.Repeat("a,", 99) + "a\n"
+	if _, err := lbParse(t, map[string]string{"watched.csv": wide}); !errors.Is(err, plugin.ErrBadInput) {
+		t.Fatalf("err = %v", err)
+	}
+	wideHeader := strings.Repeat("h,", 99) + "Name\n"
+	if _, err := lbParse(t, map[string]string{"watched.csv": wideHeader}); !errors.Is(err, plugin.ErrBadInput) {
+		t.Fatalf("wide header: err = %v", err)
+	}
+}
+
+func TestLetterboxdCapsListedSkippedRows(t *testing.T) {
+	body := "Name,Year\n" + strings.Repeat(",2000\n", 1500)
+	res, err := lbParse(t, map[string]string{"watched.csv": body})
+	if err != nil || len(res.Entries) != 0 {
+		t.Fatalf("res entries = %d err = %v", len(res.Entries), err)
+	}
+	if len(res.Skipped) != 1001 || !strings.Contains(res.Skipped[1000].Reason, "500 more rows without a name") {
+		t.Fatalf("skipped = %d last = %+v", len(res.Skipped), res.Skipped[len(res.Skipped)-1])
+	}
+}
+
+func TestLetterboxdRefusesGiantLine(t *testing.T) {
+	body := "Name\n" + strings.Repeat(",", 10<<20-10) + "\n"
+	if _, err := lbParse(t, map[string]string{"watched.csv": body}); !errors.Is(err, plugin.ErrBadInput) {
+		t.Fatalf("err = %v", err)
 	}
 }

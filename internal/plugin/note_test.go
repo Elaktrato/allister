@@ -10,7 +10,8 @@ func TestFillUnmatchedNote(t *testing.T) {
 	}{
 		{`No match for #{id}.`, "42", "", 0, `No match for #42.`},
 		{`No unique match for "{title}" ({year}), id {id}.`, "/f/x/", "Heat", 1995, `No unique match for "Heat" (1995), id /f/x/.`},
-		{`"{title}" ({year})`, "", "Heat", 0, `"Heat" ()`},
+		{`"{title}" ({year})`, "", "Heat", 0, `"Heat"`},
+		{`"{title}" {year} x`, "", "Heat", 0, `"Heat"  x`},
 		{`{title}`, "", "{year}", 2000, `{year}`}, // a title is not filled again
 		{"", "1", "T", 1, ""},
 	} {
