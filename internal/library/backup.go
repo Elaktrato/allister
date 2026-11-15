@@ -1328,7 +1328,7 @@ func restoreSeriesLink(ctx context.Context, tx *sql.Tx, pluginID string, kind pl
 	case err != nil:
 		return 0, "", err
 	}
-	if err := checkSeriesLink(ctx, tx, pluginID, kind, id); err != nil {
+	if err := checkSeriesLink(ctx, tx, pluginID, kind, id, true); err != nil {
 		if errors.Is(err, ErrInvalid) {
 			return 0, what + " is not restored: " + err.Error(), nil
 		}
