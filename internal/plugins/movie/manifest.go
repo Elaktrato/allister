@@ -9,10 +9,11 @@ const (
 
 	SourceTMDB = "tmdb"
 
-	ImporterYamtrack = "yamtrack-movie"
-	ImporterIMDb     = "imdb-csv"
-	ExporterJSON     = "json"
-	exportFormat     = "allister.movie.export"
+	ImporterYamtrack   = "yamtrack-movie"
+	ImporterIMDb       = "imdb-csv"
+	ImporterLetterboxd = "letterboxd-zip"
+	ExporterJSON       = "json"
+	exportFormat       = "allister.movie.export"
 )
 
 func num(f float64) *float64 { return &f }
@@ -104,6 +105,13 @@ func manifest() plugin.Manifest {
 			ExternalIDType: "imdb", ExternalIDLabel: "IMDb",
 			ResolveVia:    SourceTMDB,
 			UnmatchedNote: "Imported from IMDb; TMDB had no match for {id}.",
+		}, {
+			ID: ImporterLetterboxd, Name: "Letterboxd export",
+			FileHint: "Upload the ZIP Letterboxd sends from Settings > Data > Export. Films are matched on TMDB by exact title and year; others stay as manual entries you can match.",
+			Accept:   []string{".zip"}, ManualRows: true, FallbackTitleLang: "en",
+			ExternalIDType: "letterboxd", ExternalIDLabel: "Letterboxd",
+			ResolveVia: SourceTMDB, ResolveByTitle: true,
+			UnmatchedNote: "Imported from Letterboxd; TMDB had no unique match for \"{title}\" ({year}).",
 		}},
 		Exporters: []plugin.ExporterInfo{{ID: ExporterJSON, Name: "JSON", Extension: ".json", MIME: "application/json"}},
 	}
