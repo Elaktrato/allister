@@ -1,7 +1,6 @@
 package book
 
 import (
-	"strings"
 	"time"
 
 	"github.com/allister/allister/internal/plugin"
@@ -95,8 +94,8 @@ func bookData(r bookRecord) plugin.ItemData {
 		day := plugin.DateOnly(*r.PublishedOn)
 		d.Fields["published_on"] = plugin.FieldValue{Date: &day}
 	}
-	d.Genres = cleanTerms(r.Genres, maxGenres)
-	d.Tags = cleanTags(r.Tags)
+	d.Genres = plugin.CleanTerms(r.Genres, maxTermRunes, maxGenres)
+	d.Tags = plugin.CleanTags(r.Tags, maxTermRunes, maxTags)
 	for typ, value := range r.ExternalIDs {
 		typ = plugin.SingleLine(typ, 40)
 		value = plugin.SingleLine(value, maxIDRunes)
@@ -132,41 +131,6 @@ func bookCredits(r bookRecord) []plugin.Credit {
 				URL:      plugin.HTTPSURL(c.Person.URL),
 			},
 		})
-	}
-	return out
-}
-
-func cleanTerms(in []string, limit int) []string {
-	var out []string
-	seen := map[string]bool{}
-	for _, raw := range in {
-		term := plugin.SingleLine(raw, maxTermRunes)
-		key := strings.ToLower(term)
-		if term == "" || seen[key] || len(out) == limit {
-			continue
-		}
-		seen[key] = true
-		out = append(out, term)
-	}
-	return out
-}
-
-func cleanTags(in []plugin.Tag) []plugin.Tag {
-	var out []plugin.Tag
-	seen := map[string]bool{}
-	for _, t := range in {
-		name := plugin.SingleLine(t.Name, maxTermRunes)
-		key := strings.ToLower(name)
-		if name == "" || seen[key] || len(out) == maxTags {
-			continue
-		}
-		seen[key] = true
-		tag := plugin.Tag{Name: name, Spoiler: t.Spoiler}
-		if t.Rank != nil && *t.Rank >= 0 && *t.Rank <= 100 {
-			r := *t.Rank
-			tag.Rank = &r
-		}
-		out = append(out, tag)
 	}
 	return out
 }

@@ -355,5 +355,5 @@ func gbGenres(categories []string) []string {
 			out = append(out, last)
 		}
 	}
-	return cleanTerms(out, maxGenres)
+	return plugin.CleanTerms(out, maxTermRunes, maxGenres)
 }
