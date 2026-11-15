@@ -4,6 +4,7 @@ import (
 	"context"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/allister/allister/internal/db"
@@ -395,5 +396,18 @@ func TestTimeZoneStoredWinsAndEmptyResets(t *testing.T) {
 	}
 	if got := s.TimeZoneName(ctx); got != "Asia/Tokyo" {
 		t.Errorf("after reset: %q", got)
+	}
+}
+
+func TestValidTimeZoneIsStrict(t *testing.T) {
+	for _, bad := range []string{"Local", "/etc/localtime", "../x", "Europe/../x", "a\x00/b", "Europe/Ber\tlin", "Europe/Berlin ", "Europe/" + strings.Repeat("a", 60), "Berlin", "Europe/Bérlin", "utc", "EST", "Japan"} {
+		if ValidTimeZone(bad) {
+			t.Errorf("%q should be invalid", bad)
+		}
+	}
+	for _, ok := range []string{"UTC", "Europe/Berlin", "America/Argentina/Buenos_Aires", "Etc/GMT+5", "America/Port-au-Prince"} {
+		if !ValidTimeZone(ok) {
+			t.Errorf("%q should be valid", ok)
+		}
 	}
 }

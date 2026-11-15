@@ -6,6 +6,7 @@ package web
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"strings"
 	"time"
@@ -49,6 +50,10 @@ func (s *server) postTimeZone(w http.ResponseWriter, r *http.Request) {
 	if name != "" && !settings.ValidTimeZone(name) {
 		s.renderStatus(w, r, http.StatusUnprocessableEntity, "settings",
 			s.generalView(r, s.timeZoneForm(r.Context(), truncateRunes(name, 100), "“"+truncateRunes(name, 100)+"” is not a time zone. Use an IANA name such as Europe/Berlin.")))
+		return
+	}
+	if s.deps.Settings == nil {
+		s.internalError(w, r, errors.New("no settings store"))
 		return
 	}
 	if err := s.deps.Settings.SetTimeZone(r.Context(), name); err != nil {

@@ -130,3 +130,35 @@ func TestCalendarGridWholeMonthAcrossDST(t *testing.T) {
 	b := e.get("/calendar?month=2026-03").Body.String()
 	mustContain(t, b, ">31</div>")
 }
+
+func TestTimeZoneRefusesHostileNames(t *testing.T) {
+	e := newFixtureEnv(t)
+	for _, bad := range []string{"Local", "/etc/localtime", "../x", "Europe/Ber\x01lin", "Europe/" + strings.Repeat("a", 70)} {
+		if rec := e.do("POST", "/settings/time-zone", url.Values{"time_zone": {bad}}, false); rec.Code != 422 {
+			t.Errorf("%q: %d", bad, rec.Code)
+		}
+		if e.setting(t, "time_zone") != "" {
+			t.Fatalf("%q stored", bad)
+		}
+	}
+}
+
+// November 2026 has a 25-hour day in Europe/Berlin (the 1st of November is
+// the 25 h Sunday): the grid must hold 30 days and a release at the end of
+// the month still lands on its day.
+func TestCalendarGridNovemberDST(t *testing.T) {
+	e := newFixtureEnv(t)
+	now := time.Date(2026, 11, 10, 12, 0, 0, 0, time.UTC)
+	e.now = &now
+	id := e.addFixture(t, "tv", "show", tvShow("1", "Dark"), library.Entry{Status: library.Active})
+	at := time.Date(2026, 11, 30, 22, 30, 0, 0, time.UTC) // 23:30 Berlin on the 30th
+	if err := e.lib.SaveSchedule(context.Background(), id, []library.Airing{{Number: 1, AirsAt: at}}, now); err != nil {
+		t.Fatal(err)
+	}
+	e.do("POST", "/settings/time-zone", url.Values{"time_zone": {"Europe/Berlin"}}, false)
+	b := e.get("/calendar?month=2026-11").Body.String()
+	mustContain(t, b, ">30</div>", "23:30")
+	if strings.Count(b, ">1</div>") < 2 { // Nov 1 and Dec 1 padding
+		t.Errorf("grid lost days")
+	}
+}

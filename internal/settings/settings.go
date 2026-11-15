@@ -337,10 +337,21 @@ func (s *Store) ClearSourceKey(ctx context.Context, sourceID string) error {
 const KeyTimeZone = "time_zone"
 
 // ValidTimeZone reports whether name is an IANA zone name time.LoadLocation
-// knows. "" and "Local" are not names (the server's own zone is chosen with
+// knows, in the strict form of the zone database: "UTC" or a name with a
+// slash, at most 64 characters of [A-Za-z0-9_+-/], no leading slash or "..".
+// "" and "Local" are not names (the server's own zone is chosen with
 // the TZ environment variable, which is the default).
 func ValidTimeZone(name string) bool {
-	if name == "" || name == "Local" {
+	if name == "" || len(name) > 64 || (name != "UTC" && !strings.Contains(name, "/")) {
+		return false
+	}
+	for i := 0; i < len(name); i++ {
+		c := name[i]
+		if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '_' || c == '+' || c == '-' || c == '/') {
+			return false
+		}
+	}
+	if name[0] == '/' || strings.Contains(name, "..") {
 		return false
 	}
 	_, err := time.LoadLocation(name)
