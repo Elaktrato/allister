@@ -6,6 +6,7 @@
   <a href="/" class="flex items-center gap-2 rounded-md px-1 text-lg font-semibold tracking-tight text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 lg:mb-6 lg:px-3"><span class="icon text-indigo-400" aria-hidden="true">collections_bookmark</span><span>Allister</span></a>
   <nav aria-label="Main" class="flex flex-1 flex-wrap items-center gap-1 lg:flex-col lg:flex-nowrap lg:items-stretch">
     <ul class="flex flex-wrap gap-1 lg:flex-col">
+      {{with .Home}}{{if .Label}}<li>{{template "nav_row" .}}</li>{{end}}{{end}}
       {{range .Items}}<li>{{template "nav_row" .}}</li>
       {{end}}
     </ul>

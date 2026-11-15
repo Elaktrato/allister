@@ -62,6 +62,8 @@ type rowView struct {
 	// the part badge "N · <series>" on the kind tabs (Series "" for an entry in no series)
 	Series, SeriesHref string
 	SeriesPos          int
+	// the plugin icon and kind label on a home page card ("" on the lists)
+	BadgeIcon, BadgeLabel string
 }
 
 // headView is one cell of the table head: Href ("" when the column does

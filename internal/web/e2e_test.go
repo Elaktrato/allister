@@ -417,8 +417,8 @@ func TestPluginToggleEndToEnd(t *testing.T) {
 	settings := e.page(t, "/settings")
 	mustNotContain(t, navOf(t, settings), `href="/anime"`)
 	mustNotContain(t, settings, `href="/anime/export/json"`)
-	if rec := e.get("/"); rec.Header().Get("Location") != "/book" {
-		t.Fatalf("home with anime off: %q", rec.Header().Get("Location"))
+	if rec := e.get("/"); rec.Code != http.StatusOK {
+		t.Fatalf("home with anime off: %d", rec.Code)
 	}
 	for _, p := range []string{"/anime", "/anime/search?q=death", overview, overview + "/recommendations", overview + "/edit",
 		"/anime/manual/new", "/anime/export/json", "/list/" + id + "/edit"} {

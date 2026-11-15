@@ -108,7 +108,7 @@ type server struct {
 
 // pageNames lists every page template (templates/<name>.html). Add a page by
 // dropping its file in templates/ and listing it here.
-var pageNames = []string{"calendar", "stats", "settings", "settings_appearance", "settings_plugins_page", "settings_plugin", "search", "item", "list", "series", "person", "manual_form", "details_form", "import", "error", "recommendations", "backup"}
+var pageNames = []string{"calendar", "stats", "settings", "settings_appearance", "settings_plugins_page", "settings_plugin", "search", "item", "list", "series", "person", "manual_form", "details_form", "import", "error", "recommendations", "backup", "home"}
 
 // pagePartials lists extra template files a page needs (also rendered alone
 // for htmx requests).
@@ -121,6 +121,7 @@ var pagePartials = map[string][]string{
 	"manual_form":           {"templates/item_inputs.html", "templates/progress_inputs.html"},
 	"details_form":          {"templates/item_inputs.html"},
 	"stats":                 {"templates/filter_bar.html"},
+	"home":                  {"templates/list_cards.html"},
 }
 
 // parsePages builds one template set per page, each cloned from base.html plus
@@ -168,7 +169,7 @@ func newServer(deps Deps, now func() time.Time) (*server, http.Handler) {
 	if deps.CoversDir != "" {
 		mux.Handle("GET /covers/", coversHandler(deps.CoversDir))
 	}
-	mux.HandleFunc("GET /{$}", s.index)
+	mux.HandleFunc("GET /{$}", s.getHome)
 	mux.HandleFunc("GET /settings", s.getSettings)
 	mux.HandleFunc("GET /settings/import", s.getImport)
 	mux.HandleFunc("POST /settings/import", s.postImport)
@@ -277,18 +278,6 @@ func (s *server) fillMarkers(r *http.Request, out []byte) ([]byte, error) {
 		out = bytes.Replace(out, []byte(settingsTabsMarker), tabs.Bytes(), 1)
 	}
 	return out, nil
-}
-
-// index redirects the home page to the first enabled plugin's list, or to
-// Settings > Plugins (where one is switched on) when no plugin is enabled.
-func (s *server) index(w http.ResponseWriter, r *http.Request) {
-	for _, m := range s.deps.Registry.Manifests() {
-		if s.deps.Registry.IsEnabled(m.ID) {
-			http.Redirect(w, r, "/"+m.ID, http.StatusSeeOther)
-			return
-		}
-	}
-	http.Redirect(w, r, "/settings/plugins", http.StatusSeeOther)
 }
 
 // staticHandler serves the embedded static files. A font gets its MIME type
