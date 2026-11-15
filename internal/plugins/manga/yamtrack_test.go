@@ -230,3 +230,20 @@ func hasNote(notes []string, want string) bool {
 	}
 	return false
 }
+
+// TestYamtrackMangaImporterValidatesBeforeDedupe: a first row with an unknown
+// status must not hide a later valid row with the same MAL id.
+func TestYamtrackMangaImporterValidatesBeforeDedupe(t *testing.T) {
+	c := &fakeMangaFormatClient{formats: map[int]string{7: "MANGA"}}
+	csv := "media_id,source,media_type,title,status,progress\n" +
+		"7,mal,manga,Manga Seven,Sometimes,1\n" +
+		"7,mal,manga,Manga Seven,Completed,9\n"
+	res, err := yamtrackMangaImporter{c: c}.Parse(context.Background(), strings.NewReader(csv))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Entries) != 1 || res.Entries[0].Progress["chapter"] != 9 ||
+		len(res.Skipped) != 1 || res.Skipped[0].Line != 2 || !strings.Contains(res.Skipped[0].Reason, "Sometimes") {
+		t.Fatalf("entries=%+v skipped=%+v", res.Entries, res.Skipped)
+	}
+}

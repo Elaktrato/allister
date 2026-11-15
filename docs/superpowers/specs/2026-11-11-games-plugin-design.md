@@ -359,16 +359,21 @@ keyless. The key is never sent to the store endpoints.
   `UnmatchedNote: "Imported from Yamtrack; IGDB had no match for #{id}."`.
 - Parse with `yamtrack.ParseRaw`; keep `media_type == "game"` case-insensitively;
   every other row is ignored.
-- Group by `(source, media_id)`, else `(source, title)`; duplicates are skipped.
-- `source == "igdb"` and a numeric id keep `ExternalIDs["igdb"]`; every other
-  source stays manual with a note. A numeric id with no title becomes
-  `IGDB #<id>`; no title and no id is skipped.
+- Key by `(source, media_id)`, else `(source, title)`, with the source compared
+  case-insensitively; a row is validated first and only a valid row claims its
+  key, so later duplicates of it are skipped but an invalid first row never
+  hides a valid one.
+- `source == "igdb"` and a numeric id keep `ExternalIDs["igdb"]`. A row whose
+  id had to be discarded (another source, or an IGDB id that is not numeric)
+  stays manual with a note; a row without an id stays manual without one. A
+  numeric id with no title becomes `IGDB #<id>`; no title and no id is skipped.
 - Status mapping: Completed -> Completed (Played), In progress -> Active,
   Planning -> Planned, Paused -> Paused, Dropped -> Dropped; unknown/blank is
   skipped.
 - Playtime: the shared parser gains `RawRow.ProgressRaw`; the game importer
   parses `Xh Ymin`/`Xmin` (and plain minutes) to seconds and sets
-  `Progress["playtime"]`. `0min` sets 0. The shared parser stops adding an
+  `Progress["playtime"]`. `0min` sets 0. Playtime has its own cap of
+  1,000,000 minutes (about 16,667 hours), above the 100,000 of counts. The shared parser stops adding an
   "invalid progress" note for a duration-shaped value; an integer still fills
   `Progress` for anime/TV; a truly invalid value keeps the note.
 - Rating, start/end dates, comment and cover map as in the TV/movie importers.

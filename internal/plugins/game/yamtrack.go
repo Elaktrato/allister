@@ -17,9 +17,11 @@ import (
 const steamImportNote = "Imported from Steam"
 
 // yamtrackGameImporter filters the game rows out of a Yamtrack export. Rows of
-// other media types are only counted (Ignored); a game row is grouped by its
-// source and id (or title when it has no id) so a duplicated row is reported
-// once. Only an IGDB source with a numeric id keeps an external id; every
+// other media types are only counted (Ignored); a valid game row is keyed by
+// its source (case-insensitive) and id, or title when it has no id, and a later
+// row with the same key is reported as a duplicate. A row that cannot be
+// imported (no title, unknown status) is skipped without claiming its key, so
+// it never hides a valid duplicate after it. Only an IGDB source with a numeric id keeps an external id; every
 // other game row is saved as a manual entry with a note. The playtime cell is
 // a duration ("1h 16min"), not a count.
 type yamtrackGameImporter struct{}
@@ -35,8 +37,7 @@ func (yamtrackGameImporter) Parse(ctx context.Context, r io.Reader) (plugin.Pars
 		return plugin.ParseResult{}, fmt.Errorf("%w: %w", plugin.ErrBadInput, err)
 	}
 	var res plugin.ParseResult
-	groups := map[string]*yamtrack.RawRow{}
-	order := []string{}
+	seen := map[string]bool{}
 	for _, row := range rows {
 		if !strings.EqualFold(row.MediaType, KindGame) {
 			res.Ignored++
@@ -47,34 +48,31 @@ func (yamtrackGameImporter) Parse(ctx context.Context, r io.Reader) (plugin.Pars
 			res.Skipped = append(res.Skipped, plugin.SkippedRow{Line: row.Line, Title: row.Title, Reason: "game row has no source/id or title"})
 			continue
 		}
-		if _, ok := groups[key]; ok {
+		if seen[key] {
 			res.Skipped = append(res.Skipped, plugin.SkippedRow{Line: row.Line, Title: row.Title, Reason: "duplicate game row"})
 			continue
 		}
-		kept := row
-		groups[key] = &kept
-		order = append(order, key)
-	}
-	for _, key := range order {
-		row := groups[key]
-		entry, reason := yamtrackGameEntry(*row)
+		entry, reason := yamtrackGameEntry(row)
 		if reason != "" {
 			res.Skipped = append(res.Skipped, plugin.SkippedRow{Line: row.Line, Title: row.Title, Reason: reason})
 			continue
 		}
+		seen[key] = true
 		res.Entries = append(res.Entries, entry)
 	}
 	return res, nil
 }
 
-// yamtrackGameKey groups a row by its id, or by its title when there is no id.
-// The playtime is not part of the identity.
+// yamtrackGameKey identifies a row by its source and id, or by its title when
+// there is no id. The source is compared case-insensitively, like the entry
+// mapping does. The playtime is not part of the identity.
 func yamtrackGameKey(row yamtrack.RawRow) string {
+	source := strings.ToLower(strings.TrimSpace(row.Source))
 	if id := strings.TrimSpace(row.MediaID); id != "" {
-		return row.Source + "|" + id
+		return source + "|" + id
 	}
 	if row.Title != "" {
-		return row.Source + "|title|" + row.Title
+		return source + "|title|" + row.Title
 	}
 	return ""
 }
@@ -95,7 +93,7 @@ func yamtrackGameEntry(row yamtrack.RawRow) (plugin.ParsedEntry, string) {
 		title = "IGDB #" + igdbID
 	}
 	if row.Status == "" {
-		return plugin.ParsedEntry{}, "game row has an unknown status"
+		return plugin.ParsedEntry{}, fmt.Sprintf("game row has an unknown status %q", plugin.SingleLine(row.StatusRaw, maxIDRunes))
 	}
 	comment := plugin.MultiLine(row.Comment, maxTextRunes)
 	if comment == steamImportNote {

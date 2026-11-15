@@ -77,12 +77,13 @@ func (im yamtrackMangaImporter) Parse(ctx context.Context, r io.Reader) (plugin.
 					Reason: fmt.Sprintf("duplicate media_id %d", id)})
 				continue
 			}
-			seen[id] = true
 			if row.Status == "" {
+				// Skipped before claiming the id, so a later valid duplicate is kept.
 				res.Skipped = append(res.Skipped, plugin.SkippedRow{Line: row.Line, Title: title,
 					Reason: "unknown status " + plugin.SingleLine(row.StatusRaw, maxNoteRunes)})
 				continue
 			}
+			seen[id] = true
 			kept = append(kept, yamtrackMangaCandidate{row: row, malID: id})
 			continue
 		}
