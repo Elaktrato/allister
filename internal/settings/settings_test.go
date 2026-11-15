@@ -203,6 +203,47 @@ func TestSourceKeyFields(t *testing.T) {
 	}
 }
 
+// TestClearSourceKeysScope: ClearSourceKeys removes the single-key field
+// "key" too, only the named source's own fields (never a field of a source
+// whose id merely starts with "<id>."), and refuses an id that is empty or
+// dotted, which no source can have.
+func TestClearSourceKeysScope(t *testing.T) {
+	s, _ := newStore(t)
+	ctx := context.Background()
+	for _, k := range []struct{ id, field string }{
+		{"tmdb", "key"}, {"igdb", "client_id"}, {"igdb.x", "key"}, {"igdbx", "key"},
+	} {
+		if err := s.SetSourceKeyField(ctx, k.id, k.field, "v"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := s.ClearSourceKeys(ctx, "tmdb"); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := s.SourceKey(ctx, "tmdb"); got != "" {
+		t.Fatalf("single key survived: %q", got)
+	}
+	if err := s.ClearSourceKeys(ctx, "igdb"); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := s.SourceKeyField(ctx, "igdb", "client_id"); got != "" {
+		t.Fatalf("igdb field survived: %q", got)
+	}
+	for _, id := range []string{"igdb.x", "igdbx"} {
+		if got, _ := s.SourceKey(ctx, id); got != "v" {
+			t.Fatalf("clearing igdb removed %s: %q", id, got)
+		}
+	}
+	for _, id := range []string{"", "igdb.x"} {
+		if err := s.ClearSourceKeys(ctx, id); err == nil {
+			t.Fatalf("ClearSourceKeys(%q): want error", id)
+		}
+	}
+	if got, _ := s.SourceKey(ctx, "igdb.x"); got != "v" {
+		t.Fatalf("refused clear removed igdb.x: %q", got)
+	}
+}
+
 // TestSetSourceKeyFieldsIsAllOrNothing: every field of a source is saved in
 // one transaction, trimmed; when one write fails none is stored and the old
 // values stay.

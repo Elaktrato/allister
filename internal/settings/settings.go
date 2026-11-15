@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log"
 	"maps"
 	"slices"
@@ -263,7 +264,8 @@ func sourceFieldKey(id, field string) string { return "source." + id + "." + fie
 
 // SourceKeyField returns the stored value of field of source id, "" when none
 // is set. A read failure is returned, so the caller can tell it from an unset
-// field.
+// field. Values are trimmed only when written (SetSourceKeyField,
+// SetSourceKeyFields); a read returns the stored value unchanged.
 func (s *Store) SourceKeyField(ctx context.Context, sourceID, field string) (string, error) {
 	v, _, err := s.Get(ctx, sourceFieldKey(sourceID, field))
 	return v, err
@@ -295,11 +297,19 @@ func (s *Store) SetSourceKeyFields(ctx context.Context, sourceID string, values 
 	return tx.Commit()
 }
 
-// ClearSourceKeys removes every stored field of source id; other sources are
-// untouched.
+// ClearSourceKeys removes every stored field of source id, the single-key
+// field "key" included; other sources are untouched. Only an undotted field
+// directly under the prefix is removed (field names are slugs), so clearing
+// "a" never touches the fields of a source "a.b". An empty or dotted id, which
+// no source can have, is refused.
 func (s *Store) ClearSourceKeys(ctx context.Context, sourceID string) error {
+	if sourceID == "" || strings.Contains(sourceID, ".") {
+		return fmt.Errorf("settings: clear source keys: invalid source id %q", sourceID)
+	}
 	prefix := sourceFieldKey(sourceID, "")
-	_, err := s.db.ExecContext(ctx, `DELETE FROM settings WHERE substr(key, 1, length(?)) = ?`, prefix, prefix)
+	_, err := s.db.ExecContext(ctx,
+		`DELETE FROM settings WHERE substr(key, 1, length(?1)) = ?1
+		 AND instr(substr(key, length(?1) + 1), '.') = 0`, prefix)
 	return err
 }
 
