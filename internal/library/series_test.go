@@ -768,8 +768,8 @@ func TestRestoreSeriesHostileInput(t *testing.T) {
 	seriesN, partsN := count(`SELECT count(*) FROM series`), count(`SELECT count(*) FROM series_parts`)
 	items := count(`SELECT count(*) FROM items`)
 	for name, bs := range invalidCases {
-		if created, _, err := e.lib.RestoreSeries(bg, bs); created || !errors.Is(err, ErrInvalid) {
-			t.Errorf("%s: created=%v err=%v", name, created, err)
+		if res, err := e.lib.RestoreSeries(bg, bs, RestoreOptions{}); res.Created || !errors.Is(err, ErrInvalid) {
+			t.Errorf("%s: created=%v err=%v", name, res.Created, err)
 		}
 	}
 	// nothing resolvable: not created, the rejects are counted
@@ -783,7 +783,8 @@ func TestRestoreSeriesHostileInput(t *testing.T) {
 		"unknown item":      {good("u-g", ref("books", "nope")), LeftOutMissing},
 	}
 	for name, c := range unresolvable {
-		created, left, err := e.lib.RestoreSeries(bg, c.bs)
+		res, err := e.lib.RestoreSeries(bg, c.bs, RestoreOptions{})
+		created, left := res.Created, res.LeftOut
 		if created || err != nil || len(left) != 1 || left[0].Reason != c.reason || left[0].Ref != c.bs.Parts[0] {
 			t.Errorf("%s: created=%v left=%+v err=%v", name, created, left, err)
 		}
@@ -792,8 +793,9 @@ func TestRestoreSeriesHostileInput(t *testing.T) {
 		t.Fatal("a refused series changed the store")
 	}
 	// the same part twice and a mix: only the resolvable, first occurrence stays
-	created, left, err := e.lib.RestoreSeries(bg, good("u-mix", ref("books", "2"), ref("books", "2"), ref("books", "4"),
-		BackupPartRef{PluginID: "tv", Kind: "show", Source: "tvdata", SourceID: "9"}, ref("books", "3")))
+	res, err := e.lib.RestoreSeries(bg, good("u-mix", ref("books", "2"), ref("books", "2"), ref("books", "4"),
+		BackupPartRef{PluginID: "tv", Kind: "show", Source: "tvdata", SourceID: "9"}, ref("books", "3")), RestoreOptions{})
+	created, left := res.Created, res.LeftOut
 	if err != nil || !created || len(left) != 3 {
 		t.Fatalf("mix: created=%v left=%+v err=%v", created, left, err)
 	}
