@@ -37,7 +37,7 @@ State of the project when the work moved from Claude Code to another agent. `mai
 
 ## Known follow-ups (none blocking)
 
-- After the CI workflows are first pushed: configure the GitHub settings listed at the end of `docs/ci.md`. Later releases follow `docs/ci.md#releases` (`scripts/release-check.sh vX.Y.Z`).
+- GitHub settings are applied (see the end of `docs/ci.md`); `main` and `dev` take changes only through pull requests with green CI. Later releases follow `docs/ci.md#releases` (`scripts/release-check.sh vX.Y.Z`).
 - Deferred (statistics): book series have no time or units declaration (a series is flat: volumes and cumulative chapters, no per-volume items to time); manga and books have no time, only units; the heatmap has no history before the event log (no backfill, by design).
 - Alias ids (issue #7, decided: canonicalize). When a source answers an unsaved item's Details with another valid id of its own (an IGDB slug resolving to the numeric id), the overview GET redirects to that canonical id and an add moves to it (or to the saved item that has it), like a match already stores the canonical id. Generic in `internal/web` (`canonicalAlias`); a saved item reached by an old alias keeps working.
 - Not built: model 3 (series -> volume child items; issue #1), a manga release calendar (AniList has no chapter schedule; a MangaDex source could add one), a Goodreads/StoryGraph/Calibre import beyond the Goodreads CSV, a Google Books key in the API keys card (it is an environment variable), MyAnimeList as a live source (deliberately skipped), other movie sources and imports (Letterboxd, IMDb, Trakt), GOG and HowLongToBeat (no official library API or export; deliberately out), dashboards, accounts.
@@ -49,6 +49,6 @@ State of the project when the work moved from Claude Code to another agent. `mai
 
 ## Pushing to GitHub
 
-The remote is `origin` (GitHub, `main` and `dev`). The owner pushes themselves; agents never push or tag.
+The remote is `origin` (GitHub, `main` and `dev`, both protected: pull requests with green CI, linear history). The owner pushes branches and merges the pull requests; agents never push or tag.
 
 The workflows start with that push; the first release is a pushed tag (see `docs/ci.md#releases`).

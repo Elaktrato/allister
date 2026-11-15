@@ -36,7 +36,7 @@ scripts/go.sh fmt ./...
 - Dates are calendar days; progress total <= 0 means unbounded; unrated score (NULL) and explicit 0 are different.
 - Everything is pinned: Docker images by digest, Tailwind per-arch sha256, htmx, the Material Symbols font and the bundled app fonts (Inter, Source Serif 4, JetBrains Mono) by sha256 (licences in `LICENSES/`, copied into the image), Go version in `go.mod` and `scripts/go.sh`. `PINS.md` lists them; `scripts/update-pins.sh` shows the diff (`--write` applies). Tests in `internal/guard` and `internal/web` check them.
 - The README has a hard cap of 150 lines (docs test); long reference material goes to `docs/usage.md` / `docs/plugins.md`.
-- Commit style: `feat: ...`, `fix: ...`, `docs: ...`, `test: ...`, `build: ...`, `ci: ...` (release notes group commits by this prefix; `!` before the colon marks a breaking change). Work on a branch, keep each commit green, merge locally. The owner pushes to GitHub themselves; the repo has no remote configured.
+- Commit style: `feat: ...`, `fix: ...`, `docs: ...`, `test: ...`, `build: ...`, `ci: ...` (release notes group commits by this prefix; `!` before the colon marks a breaking change). Work on a branch and keep each commit green. On GitHub (`origin`), `main` and `dev` are protected by a ruleset: changes land through a pull request with the CI checks green and linear history (squash or rebase merge, no merge commits). Agents never push; the owner pushes branches and merges the pull requests.
 
 ## CI and releases
 
