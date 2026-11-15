@@ -13,8 +13,8 @@ import (
 // ResolvedSeries is a series with each value resolved: the series' own value,
 // else the linked entry's mapped value, else the derived value, else
 // nothing. MainParts and Completed count the main parts only; PartsTotal is
-// the expected number of parts (the number of main parts when neither the
-// series nor its linked entry sets one); Status is derived from the main
+// the shown total: the expected number of parts or the number of counted
+// parts, whichever is larger; Status is derived from the main
 // parts and the set expected number.
 type ResolvedSeries struct {
 	Series                             Series
@@ -101,10 +101,8 @@ func ResolveSeries(s Series, kind plugin.KindDef, linked *Item, linkedEntry *Ent
 
 	expected := expectedParts(s, kind, linked)
 	r.ExpectedParts = expected
-	r.PartsTotal = expected
-	if r.PartsTotal == 0 {
-		r.PartsTotal = len(counted)
-	}
+	// the shown total never falls below the counted parts ("12/10")
+	r.PartsTotal = max(expected, len(counted))
 
 	for k, v := range s.Fields {
 		r.Fields[k] = v
