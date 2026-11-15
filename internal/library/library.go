@@ -249,21 +249,9 @@ func (l *Library) DeleteItem(ctx context.Context, id int64) error {
 
 // deleteItemTx is DeleteItem inside a transaction.
 func deleteItemTx(ctx context.Context, tx *sql.Tx, id int64) error {
-	var seriesID sql.NullInt64
-	err := tx.QueryRowContext(ctx, `SELECT series_id FROM series_parts WHERE item_id = ?`, id).Scan(&seriesID)
-	if err != nil && !errors.Is(err, sql.ErrNoRows) {
-		return fmt.Errorf("delete item: %w", err)
-	}
-	res, err := tx.ExecContext(ctx, `DELETE FROM items WHERE id = ?`, id)
+	seriesID, err := deleteItemRow(ctx, tx, id)
 	if err != nil {
-		return fmt.Errorf("delete item: %w", err)
-	}
-	n, err := res.RowsAffected()
-	if err != nil {
-		return fmt.Errorf("delete item: %w", err)
-	}
-	if n == 0 {
-		return ErrNoEntry
+		return err
 	}
 	if seriesID.Valid {
 		if _, err := renumberSeries(ctx, tx, seriesID.Int64); err != nil {
@@ -271,4 +259,27 @@ func deleteItemTx(ctx context.Context, tx *sql.Tx, id int64) error {
 		}
 	}
 	return nil
+}
+
+// deleteItemRow deletes the item and returns the series it belonged to (not
+// valid when none) without renumbering that series, for callers that delete
+// the whole series anyway.
+func deleteItemRow(ctx context.Context, tx *sql.Tx, id int64) (sql.NullInt64, error) {
+	var seriesID sql.NullInt64
+	err := tx.QueryRowContext(ctx, `SELECT series_id FROM series_parts WHERE item_id = ?`, id).Scan(&seriesID)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return seriesID, fmt.Errorf("delete item: %w", err)
+	}
+	res, err := tx.ExecContext(ctx, `DELETE FROM items WHERE id = ?`, id)
+	if err != nil {
+		return seriesID, fmt.Errorf("delete item: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return seriesID, fmt.Errorf("delete item: %w", err)
+	}
+	if n == 0 {
+		return seriesID, ErrNoEntry
+	}
+	return seriesID, nil
 }

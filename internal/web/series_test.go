@@ -170,16 +170,28 @@ func TestSeriesMoveRemoveDelete(t *testing.T) {
 		if rec := fe.do("POST", seriesURL("tv", s2.UID)+"/delete", url.Values{"entries": {"maybe"}}, false); rec.Code != http.StatusUnprocessableEntity {
 			t.Fatalf("bad choice: %d", rec.Code)
 		}
+		// a bad choice changes nothing: the series and its parts stay
+		if got := fe.partIDs(t, s2); len(got) != len(ids2) {
+			t.Fatalf("bad choice left %d of %d parts", len(got), len(ids2))
+		}
+		if rec := fe.get(seriesURL("tv", s2.UID)); rec.Code != http.StatusOK {
+			t.Fatalf("bad choice removed the series: %d", rec.Code)
+		}
 		rec := fe.do("POST", seriesURL("tv", s2.UID)+"/delete", url.Values{"entries": {mode}}, false)
 		if rec.Code != http.StatusSeeOther || rec.Header().Get("Location") != "/tv?tab=series" {
 			t.Fatalf("delete %s: %d %s", mode, rec.Code, rec.Header().Get("Location"))
 		}
-		it, err := fe.lib.Item(bg, ids2[0])
-		if mode == "keep" && (err != nil || it == nil) {
-			t.Fatalf("keep removed the entry: %v", err)
+		if rec := fe.get(seriesURL("tv", s2.UID)); rec.Code != http.StatusNotFound {
+			t.Fatalf("%s: series still there: %d", mode, rec.Code)
 		}
-		if mode == "remove" && err == nil && it != nil {
-			t.Fatal("remove kept the entry")
+		for _, id := range ids2 {
+			it, err := fe.lib.Item(bg, id)
+			if mode == "keep" && (err != nil || it == nil) {
+				t.Fatalf("keep removed the entry %d: %v", id, err)
+			}
+			if mode == "remove" && err == nil && it != nil {
+				t.Fatalf("remove kept the entry %d", id)
+			}
 		}
 	}
 }
