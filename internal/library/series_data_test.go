@@ -424,3 +424,29 @@ func TestSeriesDescriptionCapCountsNormalisedText(t *testing.T) {
 		t.Fatalf("over the cap: %v", err)
 	}
 }
+
+// TestSeriesStaleLinkKeepsSaving: a linked entry that left the list later
+// (removed entry) does not block saving the series with the link unchanged;
+// choosing it anew is still refused.
+func TestSeriesStaleLinkKeepsSaving(t *testing.T) {
+	e := newEnv(t)
+	k := seriesKind(t, e)
+	s := mustSeries(t, e, addBook(t, e.lib, "1", fp(1), Entry{Status: Planned}), "S")
+	linked := addBook(t, e.lib, "L", fp(1), Entry{Status: Planned})
+	if err := e.lib.UpdateSeriesDetails(bg, s.ID, k, SeriesDetails{Title: "S", LinkedItemID: linked}); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.lib.RemoveEntry(bg, linked); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.lib.UpdateSeriesDetails(bg, s.ID, k, SeriesDetails{Title: "S", Description: "New", LinkedItemID: linked}); err != nil {
+		t.Fatalf("saving with the unchanged stale link: %v", err)
+	}
+	if got := mustSeriesByUID(t, e, s.UID); got.Description != "New" || got.LinkedItemID != linked {
+		t.Fatalf("stored %+v", got)
+	}
+	other := mustSeries(t, e, addBook(t, e.lib, "2", fp(1), Entry{Status: Planned}), "Other")
+	if err := e.lib.UpdateSeriesDetails(bg, other.ID, k, SeriesDetails{Title: "Other", LinkedItemID: linked}); !errors.Is(err, ErrInvalid) || !strings.Contains(err.Error(), "not in your list") {
+		t.Fatalf("a new link to an unlisted entry: %v", err)
+	}
+}

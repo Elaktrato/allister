@@ -377,7 +377,8 @@ func (l *Library) UpdateSeriesDetails(ctx context.Context, id int64, kind plugin
 	}
 	defer tx.Rollback()
 	var sPlugin, sKind string
-	switch err := tx.QueryRowContext(ctx, `SELECT plugin_id, kind FROM series WHERE id = ?`, id).Scan(&sPlugin, &sKind); {
+	var curLink sql.NullInt64
+	switch err := tx.QueryRowContext(ctx, `SELECT plugin_id, kind, linked_item_id FROM series WHERE id = ?`, id).Scan(&sPlugin, &sKind, &curLink); {
 	case errors.Is(err, sql.ErrNoRows):
 		return ErrNoSeries
 	case err != nil:
@@ -386,7 +387,8 @@ func (l *Library) UpdateSeriesDetails(ctx context.Context, id int64, kind plugin
 	if kind.Key != sKind {
 		return invalid("kind %q is not the series' kind %q", kind.Key, sKind)
 	}
-	if err := checkSeriesLink(ctx, tx, sPlugin, kind, d.LinkedItemID); err != nil {
+	// an unchanged link stays even when its entry has left the list since
+	if err := checkSeriesLink(ctx, tx, sPlugin, kind, d.LinkedItemID, d.LinkedItemID != curLink.Int64); err != nil {
 		return err
 	}
 	if err := checkSeriesParent(ctx, tx, id, sPlugin, d.ParentID); err != nil {
@@ -434,8 +436,9 @@ func writeSeriesValues(ctx context.Context, tx *sql.Tx, id int64, d SeriesDetail
 	return nil
 }
 
-// checkSeriesLink checks a linked entry (0 = none) against the kind's link.
-func checkSeriesLink(ctx context.Context, tx *sql.Tx, pluginID string, kind plugin.KindDef, itemID int64) error {
+// checkSeriesLink checks a linked entry (0 = none) against the kind's link;
+// with listed it must also have a list entry (a newly chosen link).
+func checkSeriesLink(ctx context.Context, tx *sql.Tx, pluginID string, kind plugin.KindDef, itemID int64, listed bool) error {
 	if itemID == 0 {
 		return nil
 	}
@@ -452,11 +455,14 @@ func checkSeriesLink(ctx context.Context, tx *sql.Tx, pluginID string, kind plug
 	if iPlugin != pluginID || iKind != kind.SeriesLink.Kind {
 		return invalid("the linked entry must be of kind %q of this plugin", kind.SeriesLink.Kind)
 	}
-	var listed int
-	if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM entries WHERE item_id = ?`, itemID).Scan(&listed); err != nil {
+	if !listed {
+		return nil
+	}
+	var n int
+	if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM entries WHERE item_id = ?`, itemID).Scan(&n); err != nil {
 		return fmt.Errorf("update series: %w", err)
 	}
-	if listed == 0 {
+	if n == 0 {
 		return invalid("the linked entry is not in your list")
 	}
 	return nil

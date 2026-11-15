@@ -19,9 +19,11 @@ import (
 	"github.com/allister/allister/internal/plugin"
 )
 
-// pickItem is one choice of the link or parent picker.
+// pickItem is one choice of the link or parent picker; Unlisted marks a
+// current linked entry that is no longer in the list (kept until changed).
 type pickItem struct {
 	ID, Title, Cover string
+	Unlisted         bool
 }
 
 // seriesPickView is the result list of a picker: radio inputs called Name.
@@ -136,10 +138,15 @@ func (s *server) linkPick(r *http.Request, m plugin.Manifest, k plugin.KindDef, 
 	if k.SeriesLink == nil {
 		return v, nil
 	}
+	ctx := r.Context()
 	if current != 0 {
 		v.Current = &pickItem{ID: strconv.FormatInt(current, 10), Title: s.linkedTitle(r, m, current)}
+		en, err := s.deps.Library.Entry(ctx, current)
+		if err != nil {
+			return v, err
+		}
+		v.Current.Unlisted = en == nil
 	}
-	ctx := r.Context()
 	rows, err := s.deps.Library.Rows(ctx, library.Query{PluginID: m.ID, Kind: k.SeriesLink.Kind, Text: text, Sort: library.Sort{Kind: library.SortTitle}}, s.titleLang(ctx, m), maxCandidates+1, 0)
 	if err != nil {
 		return v, err
