@@ -181,12 +181,12 @@ func (s *source) withMagazine(ctx context.Context, d plugin.ItemData) plugin.Ite
 		return d
 	}
 	names, err := s.mal.Serialization(ctx, mal)
-	switch {
-	case err == nil:
-	case errors.Is(err, plugin.ErrUnavailable), errors.Is(err, plugin.ErrBadResponse), errors.Is(err, plugin.ErrRateLimited):
-		log.Printf("manga: magazine from MyAnimeList skipped: %v", err)
-		return d
-	default:
+	if err != nil {
+		// not found and an unset Client ID are normal and stay silent; the
+		// error strings never contain the Client ID
+		if !errors.Is(err, plugin.ErrNotFound) && !errors.Is(err, errMALNotSet) && ctx.Err() == nil {
+			log.Printf("manga: magazine from MyAnimeList skipped: %v", err)
+		}
 		return d
 	}
 	if m := plugin.SingleLine(strings.Join(names, ", "), maxNameRunes); m != "" {
