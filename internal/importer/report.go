@@ -136,9 +136,12 @@ func (r *Runner) Report(ctx context.Context, id int64) (*Report, error) {
 	return &rep, nil
 }
 
-// eta estimates the time left: the pending rows that carry an external id
-// (each may need one source request; rows already saved will not) at the
-// source's requests per minute. Without a source it is 0.
+// eta estimates the time left: the requests the pending rows may need at the
+// source's requests per minute. A pending row with an external id costs one
+// (rows already saved will not need it); for an importer that resolves by
+// title, a row without an id the source can look up is found by a search and
+// fetched by id, two requests (a row that turns out to have no year is not
+// searched, so the estimate may run high). Without a source it is 0.
 func (r *Runner) eta(ctx context.Context, rep *Report) (time.Duration, error) {
 	if rep.Remaining == 0 {
 		return 0, nil
@@ -151,6 +154,13 @@ func (r *Runner) eta(ctx context.Context, rep *Report) (time.Duration, error) {
 	if err := r.d.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM import_rows WHERE import_id=? AND outcome=? AND external_id <> ''`,
 		rep.ID, outcomePending).Scan(&n); err != nil {
 		return 0, fmt.Errorf("import report: %w", err)
+	}
+	if ref.info.ResolveByTitle {
+		lookups := 0
+		if listsIDType(ref.srcInfo, ref.info.ExternalIDType) {
+			lookups = n
+		}
+		n = lookups + 2*(rep.Remaining-lookups)
 	}
 	return time.Duration(n) * time.Minute / time.Duration(ref.srcInfo.RequestsPerMinute), nil
 }
