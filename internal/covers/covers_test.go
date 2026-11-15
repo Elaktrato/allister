@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"strings"
@@ -40,7 +41,7 @@ func TestDownloadStoresFileByHash(t *testing.T) {
 	body := []byte("fake-jpeg-bytes")
 	srv := imageServer(t, "image/jpeg", 200, body)
 	dir := filepath.Join(t.TempDir(), "sub", "covers")
-	rel, err := Download(context.Background(), nil, dir, srv.URL+"/a.png")
+	rel, err := Download(context.Background(), plain, dir, srv.URL+"/a.png")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -52,7 +53,7 @@ func TestDownloadStoresFileByHash(t *testing.T) {
 	if err != nil || !bytes.Equal(got, body) {
 		t.Fatalf("read: %v %q", err, got)
 	}
-	rel2, err := Download(context.Background(), nil, dir, srv.URL+"/other")
+	rel2, err := Download(context.Background(), plain, dir, srv.URL+"/other")
 	if err != nil || rel2 != rel {
 		t.Fatalf("second: %q %v", rel2, err)
 	}
@@ -67,13 +68,13 @@ func TestDownloadExtensions(t *testing.T) {
 		"image/gif": ".gif", "image/avif": ".avif", "image/png; charset=x": ".png",
 	} {
 		srv := imageServer(t, ctype, 200, []byte("x"+ctype))
-		rel, err := Download(context.Background(), nil, t.TempDir(), srv.URL)
+		rel, err := Download(context.Background(), plain, t.TempDir(), srv.URL)
 		if err != nil || !strings.HasSuffix(rel, ext) {
 			t.Errorf("%s: %q %v", ctype, rel, err)
 		}
 	}
 	srv := imageServer(t, "image/svg+xml", 200, []byte("<svg/>"))
-	if _, err := Download(context.Background(), nil, t.TempDir(), srv.URL); err == nil {
+	if _, err := Download(context.Background(), plain, t.TempDir(), srv.URL); err == nil {
 		t.Error("svg accepted")
 	}
 }
@@ -81,7 +82,7 @@ func TestDownloadExtensions(t *testing.T) {
 func TestDownloadRejectsNonImage(t *testing.T) {
 	srv := imageServer(t, "text/html", 200, []byte("<html>"))
 	dir := t.TempDir()
-	if _, err := Download(context.Background(), nil, dir, srv.URL); err == nil {
+	if _, err := Download(context.Background(), plain, dir, srv.URL); err == nil {
 		t.Fatal("expected error")
 	}
 	if f := files(t, dir); len(f) != 0 {
@@ -92,7 +93,7 @@ func TestDownloadRejectsNonImage(t *testing.T) {
 func TestDownloadRejectsNon2xx(t *testing.T) {
 	srv := imageServer(t, "image/png", 404, []byte("nope"))
 	dir := t.TempDir()
-	if _, err := Download(context.Background(), nil, dir, srv.URL); err == nil {
+	if _, err := Download(context.Background(), plain, dir, srv.URL); err == nil {
 		t.Fatal("expected error")
 	}
 	if f := files(t, dir); len(f) != 0 {
@@ -108,14 +109,14 @@ func TestDownloadRejectsOver2MiB(t *testing.T) {
 	}
 	dir := t.TempDir()
 	over := imageServer(t, "image/png", 200, bytes.Repeat([]byte("a"), MaxImageBytes+1))
-	if _, err := Download(context.Background(), nil, dir, over.URL); !errors.Is(err, ErrTooLarge) {
+	if _, err := Download(context.Background(), plain, dir, over.URL); !errors.Is(err, ErrTooLarge) {
 		t.Fatalf("err = %v, want ErrTooLarge", err)
 	}
 	if f := files(t, dir); len(f) != 0 {
 		t.Fatalf("files = %v", f)
 	}
 	exact := imageServer(t, "image/png", 200, bytes.Repeat([]byte("b"), MaxImageBytes))
-	name, err := Download(context.Background(), nil, dir, exact.URL)
+	name, err := Download(context.Background(), plain, dir, exact.URL)
 	if err != nil {
 		t.Fatalf("exactly 2 MiB: %v", err)
 	}
@@ -129,7 +130,7 @@ func TestDownloadRejectsOver2MiB(t *testing.T) {
 
 func TestDownloadRejectsSchemes(t *testing.T) {
 	for _, u := range []string{"file:///etc/passwd", "ftp://x/y.png", "/local/path.png", ""} {
-		if _, err := Download(context.Background(), nil, t.TempDir(), u); err == nil {
+		if _, err := Download(context.Background(), plain, t.TempDir(), u); err == nil {
 			t.Errorf("%q accepted", u)
 		}
 	}
@@ -139,7 +140,7 @@ func TestDownloadFollowsRedirect(t *testing.T) {
 	img := imageServer(t, "image/webp", 200, []byte("w"))
 	redir := httptest.NewServer(http.RedirectHandler(img.URL, http.StatusFound))
 	defer redir.Close()
-	rel, err := Download(context.Background(), nil, t.TempDir(), redir.URL)
+	rel, err := Download(context.Background(), plain, t.TempDir(), redir.URL)
 	if err != nil || !strings.HasSuffix(rel, ".webp") {
 		t.Fatalf("%q %v", rel, err)
 	}
@@ -306,5 +307,50 @@ func TestSaveRestoredAcceptsDownloadTypes(t *testing.T) {
 	// user uploads stay limited to the sniffable types
 	if _, err := Save(t.TempDir(), bytes.NewReader(cases[".avif"])); !errors.Is(err, ErrNotImage) {
 		t.Fatalf("Save accepted AVIF: %v", err)
+	}
+}
+
+// plain is a client without the public-address guard, for tests that fetch
+// from httptest servers on loopback.
+var plain = &http.Client{}
+
+func TestDownloadDefaultClientRefusesLoopback(t *testing.T) {
+	srv := imageServer(t, "image/png", 200, []byte("p"))
+	dir := t.TempDir()
+	if _, err := Download(context.Background(), nil, dir, srv.URL); !errors.Is(err, ErrNotPublic) {
+		t.Fatalf("err = %v, want ErrNotPublic", err)
+	}
+	if f := files(t, dir); len(f) != 0 {
+		t.Fatalf("files = %v", f)
+	}
+}
+
+func TestPublicIP(t *testing.T) {
+	for addr, want := range map[string]bool{
+		"93.184.216.34":        true,
+		"2606:4700::1111":      true,
+		"127.0.0.1":            false,
+		"::1":                  false,
+		"10.1.2.3":             false,
+		"172.16.0.1":           false,
+		"192.168.178.1":        false,
+		"169.254.169.254":      false,
+		"100.64.0.1":           false,
+		"0.0.0.0":              false,
+		"::":                   false,
+		"fd00::1":              false,
+		"fe80::1":              false,
+		"224.0.0.1":            false,
+		"255.255.255.255":      false,
+		"::ffff:127.0.0.1":     false,
+		"::ffff:93.184.216.34": true,
+	} {
+		ip, err := netip.ParseAddr(addr)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := publicIP(ip); got != want {
+			t.Errorf("publicIP(%s) = %v, want %v", addr, got, want)
+		}
 	}
 }
