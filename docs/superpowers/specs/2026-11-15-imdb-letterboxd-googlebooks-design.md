@@ -1,4 +1,4 @@
-# IMDb and Letterboxd imports, Google Books key (design, 2026-11-15)
+# IMDb and Letterboxd imports, Google Books key, manga magazine (design, 2026-11-15)
 
 Three features the owner asked for after the series release. A fourth, a
 manga release calendar from MangaDex, was researched and **dropped by the
@@ -6,6 +6,14 @@ owner**: MangaDex only knows chapters a scanlation group has already
 scheduled (usually none), and it would need a core change for a second
 schedule source. The reasons go into `docs/handoff.md` so it is not retried
 blindly.
+
+Magazine release calendars (Weekly Shōnen Jump issues, Shōnen Jump+,
+MANGA Plus, VIZ) were researched too and **dropped by the owner** for now:
+there is no official schedule, feed or API for Weekly Shōnen Jump or Jump+
+(only retailer/fan pages; reading Jump+ would be scraping its terms rule
+out), MANGA Plus has next-chapter dates only through an unofficial,
+undocumented API, and VIZ lists volumes only. This goes into
+`docs/handoff.md` with the sources checked.
 
 ## Intent
 
@@ -22,6 +30,10 @@ blindly.
    the owner: approach A, a core capability of the import runner).
 3. **Google Books API key in the API keys card**, optional, with
    `GOOGLE_BOOKS_API_KEY` kept as a fallback.
+4. **Manga magazine**: a "Magazine" field on manga (the serialization, e.g.
+   "Weekly Shōnen Jump"), filled from the **official MyAnimeList API v2**
+   by the MAL id AniList provides, when the owner has set a MAL Client ID
+   (decided with the owner).
 
 ## Non-goals
 
@@ -151,6 +163,36 @@ blindly.
   `Options.GoogleBooksKey` becomes a resolver func; `cmd/allister` wires
   `credential(ctx, "googlebooks", "key")` with `GOOGLE_BOOKS_API_KEY` as
   the fallback. An empty key still sends requests without `key=`.
+
+### Manga magazine (MyAnimeList API v2)
+
+- The manga kind gets a field `magazine` (text, label "Magazine"; shown,
+  editable, filterable; a list column hidden by default). Several
+  serializations are joined with ", ".
+- The manga plugin declares a second source `mal` ("MyAnimeList") with
+  `KeyLabel: "Client ID"`, `KeyHelp` pointing to the MAL API settings page
+  where a client is registered, and `KeyOptional: true` (manga keep working
+  without it). It offers no search, lookup or URL patterns (it is not a
+  library source; items stay AniList items) — validation must allow a
+  key-only source, or the key is declared on the AniList source as a named
+  key field instead; the builder picks whichever the contract supports with
+  the smaller change and records it.
+- When the AniList source builds a manga's details (add, sync, "Update from
+  source") and the item has a MAL id and a Client ID is configured, the
+  plugin calls `GET https://api.myanimelist.net/v2/manga/{id}?fields=serialization`
+  with the `X-MAL-CLIENT-ID` header and sets `magazine` from
+  `serialization[].node.name`. Failures never fail the AniList details:
+  not configured / 404 / unavailable / bad response → no magazine (logged
+  for unavailable and bad response). Paced conservatively (e.g. 1 request
+  per second; no documented limit).
+- The Client ID is a secret: never logged, never in a URL (header only),
+  stored as `source.mal.key`, environment fallback `MAL_CLIENT_ID`.
+- A hand-edited magazine is kept (fields the owner edited are not
+  overwritten by sync, as for every field today).
+- Before building, the builder reads MAL's API terms
+  (https://myanimelist.net/static/apiagreement.html) and records anything
+  that constrains this use (attribution, caching); if they forbid it, stop
+  and report.
 
 ### Docs
 
