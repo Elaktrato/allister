@@ -27,9 +27,9 @@
 // "cover": "" and "cover_missing": true.
 //
 // In backup.json "format" and "format_version" must come before "items",
-// and each of the three members appears once; a restore refuses anything
-// else (before restoring an item where it can be detected that early). One
-// item's JSON is limited to Limits.MaxItemBytes.
+// "series" after it, and each of the four members appears once; a restore
+// refuses anything else (before restoring an item where it can be detected
+// that early). One item's JSON is limited to Limits.MaxItemBytes.
 //
 // Before the archive is opened its central directory is walked the way
 // archive/zip will read it, and an archive with more entries than
@@ -485,8 +485,8 @@ func (rs *restorer) index(zr *zip.Reader) *zip.File {
 }
 
 // decode reads backup.json token by token: "format" and "format_version"
-// must come before "items" (as Write puts them) and each of the three may
-// appear once; items are decoded one by one.
+// must come before "items" and "series" after it (as Write puts them), and
+// each of the four may appear once; items are decoded one by one.
 func (rs *restorer) decode(ctx context.Context, dec *json.Decoder) error {
 	dec.UseNumber()
 	tok, err := dec.Token()

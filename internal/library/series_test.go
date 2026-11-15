@@ -9,6 +9,27 @@ import (
 	"github.com/allister/allister/internal/plugin"
 )
 
+// mustSeries starts a series with the item as its first part or fails the test.
+func mustSeries(t *testing.T, e *env, itemID int64, title string) Series {
+	t.Helper()
+	s, err := e.lib.CreateSeries(bg, itemID, title)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return s
+}
+
+// mustAddPart appends the items to the series (no position hint) or fails the
+// test.
+func mustAddPart(t *testing.T, e *env, seriesID int64, items ...int64) {
+	t.Helper()
+	for _, id := range items {
+		if err := e.lib.AddPart(bg, seriesID, id, ""); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
 func TestCreateSeries(t *testing.T) {
 	e := newEnv(t)
 	id := addBook(t, e.lib, "1", fp(300), Entry{Status: Planned})
@@ -253,8 +274,8 @@ func TestMapPartInsertErr(t *testing.T) {
 	e := newEnv(t)
 	a := addBook(t, e.lib, "a", fp(1), Entry{Status: Planned})
 	b := addBook(t, e.lib, "b", fp(1), Entry{Status: Planned})
-	sa, _ := e.lib.CreateSeries(bg, a, "A")
-	sb, _ := e.lib.CreateSeries(bg, b, "B")
+	mustSeries(t, e, a, "A")
+	sb := mustSeries(t, e, b, "B")
 	_, err := e.db.Exec(`INSERT INTO series_parts(series_id, item_id, position) VALUES (?, ?, 9)`, sb.ID, a)
 	if err == nil {
 		t.Fatal("expected a UNIQUE failure")
@@ -266,7 +287,6 @@ func TestMapPartInsertErr(t *testing.T) {
 	if got := mapPartInsertErr(other); got != other {
 		t.Fatalf("other error changed: %v", got)
 	}
-	_ = sa
 }
 
 func TestMovePart(t *testing.T) {
@@ -274,12 +294,8 @@ func TestMovePart(t *testing.T) {
 	a := addBook(t, e.lib, "a", fp(1), Entry{Status: Planned})
 	b := addBook(t, e.lib, "b", fp(1), Entry{Status: Planned})
 	c := addBook(t, e.lib, "c", fp(1), Entry{Status: Planned})
-	s, _ := e.lib.CreateSeries(bg, a, "S")
-	for _, id := range []int64{b, c} {
-		if err := e.lib.AddPart(bg, s.ID, id, ""); err != nil {
-			t.Fatal(err)
-		}
-	}
+	s := mustSeries(t, e, a, "S")
+	mustAddPart(t, e, s.ID, b, c)
 	if err := e.lib.MovePart(bg, s.ID, b, -1); err != nil {
 		t.Fatal(err)
 	}
@@ -307,17 +323,31 @@ func TestMovePart(t *testing.T) {
 	}
 }
 
+// Only a single step is allowed: any other delta is refused and moves nothing.
+func TestMovePartRefusesOtherDeltas(t *testing.T) {
+	e := newEnv(t)
+	a := addBook(t, e.lib, "a", fp(1), Entry{Status: Planned})
+	b := addBook(t, e.lib, "b", fp(1), Entry{Status: Planned})
+	c := addBook(t, e.lib, "c", fp(1), Entry{Status: Planned})
+	s := mustSeries(t, e, a, "S")
+	mustAddPart(t, e, s.ID, b, c)
+	for _, delta := range []int{0, 2, -2, 100} {
+		if err := e.lib.MovePart(bg, s.ID, b, delta); !errors.Is(err, ErrInvalid) {
+			t.Fatalf("delta %d: %v", delta, err)
+		}
+	}
+	if got := partIDs(t, e, s.ID); !sameIDs(got, []int64{a, b, c}) {
+		t.Fatalf("order changed: %v", got)
+	}
+}
+
 func TestRemovePartKeepsEntry(t *testing.T) {
 	e := newEnv(t)
 	a := addBook(t, e.lib, "a", fp(1), Entry{Status: Planned})
 	b := addBook(t, e.lib, "b", fp(1), Entry{Status: Planned})
 	c := addBook(t, e.lib, "c", fp(1), Entry{Status: Planned})
-	s, _ := e.lib.CreateSeries(bg, a, "S")
-	for _, id := range []int64{b, c} {
-		if err := e.lib.AddPart(bg, s.ID, id, ""); err != nil {
-			t.Fatal(err)
-		}
-	}
+	s := mustSeries(t, e, a, "S")
+	mustAddPart(t, e, s.ID, b, c)
 	if err := e.lib.RemovePart(bg, s.ID, b); err != nil {
 		t.Fatal(err)
 	}
@@ -348,10 +378,8 @@ func TestDeleteSeries(t *testing.T) {
 	mk := func(p string) (Series, []int64) {
 		a := addBook(t, e.lib, p+"a", fp(1), Entry{Status: Planned})
 		b := addBook(t, e.lib, p+"b", fp(1), Entry{Status: Planned})
-		s, _ := e.lib.CreateSeries(bg, a, "S"+p)
-		if err := e.lib.AddPart(bg, s.ID, b, ""); err != nil {
-			t.Fatal(err)
-		}
+		s := mustSeries(t, e, a, "S"+p)
+		mustAddPart(t, e, s.ID, b)
 		return s, []int64{a, b}
 	}
 	s, parts := mk("k")
@@ -388,12 +416,8 @@ func TestDeleteItemRenumbersAndDropsEmptySeries(t *testing.T) {
 	a := addBook(t, e.lib, "a", fp(1), Entry{Status: Planned})
 	b := addBook(t, e.lib, "b", fp(1), Entry{Status: Planned})
 	c := addBook(t, e.lib, "c", fp(1), Entry{Status: Planned})
-	s, _ := e.lib.CreateSeries(bg, a, "S")
-	for _, id := range []int64{b, c} {
-		if err := e.lib.AddPart(bg, s.ID, id, ""); err != nil {
-			t.Fatal(err)
-		}
-	}
+	s := mustSeries(t, e, a, "S")
+	mustAddPart(t, e, s.ID, b, c)
 	if err := e.lib.DeleteItem(bg, b); err != nil {
 		t.Fatal(err)
 	}
@@ -435,8 +459,7 @@ func TestDeriveSeriesStatus(t *testing.T) {
 	}
 }
 
-// seriesOf builds a series from the given books (id, status) in order and
-// renames the first book's titles so tests can match them.
+// seriesOf builds a series titled title from one new book per id, in order.
 func seriesOf(t *testing.T, e *env, plug, title string, ids ...string) *Series {
 	t.Helper()
 	var s *Series

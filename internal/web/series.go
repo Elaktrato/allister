@@ -476,7 +476,6 @@ func (s *server) getSeriesCandidates(w http.ResponseWriter, r *http.Request, m p
 		s.internalError(w, r, err)
 		return
 	}
-	w.Header().Set("Vary", "HX-Request")
 	s.renderPartial(w, "series", "series_candidates", seriesView{AddURL: seriesURL(m.ID, ser.UID) + "/parts", Candidates: cs})
 }
 

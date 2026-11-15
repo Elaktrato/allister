@@ -409,8 +409,9 @@ func (l *Library) DeleteSeries(ctx context.Context, seriesID int64, removeEntrie
 			return err
 		}
 		rows.Close()
+		// The series goes too, so the parts are not renumbered one by one.
 		for _, id := range items {
-			if err := deleteItemTx(ctx, tx, id); err != nil {
+			if _, err := deleteItemRow(ctx, tx, id); err != nil {
 				return err
 			}
 		}
@@ -660,8 +661,8 @@ func (l *Library) SeriesParts(ctx context.Context, seriesID int64, lang string) 
 	for i, id := range ids {
 		args[i] = id
 	}
-	var pluginID, kind string
-	if err := l.db.QueryRowContext(ctx, `SELECT plugin_id, kind FROM series WHERE id = ?`, seriesID).Scan(&pluginID, &kind); err != nil {
+	var pluginID string
+	if err := l.db.QueryRowContext(ctx, `SELECT plugin_id FROM series WHERE id = ?`, seriesID).Scan(&pluginID); err != nil {
 		return nil, fmt.Errorf("series parts: %w", err)
 	}
 	man, _ := l.reg.Manifest(pluginID)
