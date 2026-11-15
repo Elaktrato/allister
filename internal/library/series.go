@@ -683,3 +683,25 @@ func (l *Library) HasSeries(ctx context.Context, pluginID string) (bool, error) 
 	err := l.db.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM series WHERE plugin_id = ?)`, pluginID).Scan(&n)
 	return n == 1, err
 }
+
+// SeriesMemberIDs returns the ids of the items of the plugin and kind that
+// are a part of any series.
+func (l *Library) SeriesMemberIDs(ctx context.Context, pluginID, kind string) (map[int64]bool, error) {
+	rows, err := l.db.QueryContext(ctx, `SELECT p.item_id FROM series_parts p JOIN series s ON s.id = p.series_id WHERE s.plugin_id = ? AND s.kind = ?`, pluginID, kind)
+	if err != nil {
+		return nil, fmt.Errorf("series members: %w", err)
+	}
+	out := map[int64]bool{}
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return nil, fmt.Errorf("series members: %w", err)
+		}
+		out[id] = true
+	}
+	if err := closeRows(rows); err != nil {
+		return nil, fmt.Errorf("series members: %w", err)
+	}
+	return out, nil
+}

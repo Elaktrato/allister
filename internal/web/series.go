@@ -278,6 +278,10 @@ func (s *server) seriesCandidates(r *http.Request, m plugin.Manifest, k plugin.K
 	lang := s.titleLang(ctx, m)
 	q := library.Query{PluginID: m.ID, Kind: ser.Kind, Text: text, Sort: library.Sort{Kind: library.SortTitle}, PageSize: 200}
 	want := strings.ToLower(strings.TrimSpace(ser.Title))
+	members, err := s.deps.Library.SeriesMemberIDs(ctx, m.ID, ser.Kind)
+	if err != nil {
+		return nil, err
+	}
 	var hinted, others []candidateView
 	for page := 1; ; page++ {
 		q.Page = page
@@ -286,11 +290,7 @@ func (s *server) seriesCandidates(r *http.Request, m plugin.Manifest, k plugin.K
 			return nil, err
 		}
 		for _, row := range pg.Rows {
-			in, _, err := s.deps.Library.SeriesOfItem(ctx, row.Item.ID)
-			if err != nil {
-				return nil, err
-			}
-			if in != nil {
+			if members[row.Item.ID] {
 				continue
 			}
 			title := row.Title

@@ -48,6 +48,9 @@ func TestSeriesPageShowsParts(t *testing.T) {
 	}
 	body := rec.Body.String()
 	mustContain(t, body, "Saga", "1/3", "Watched")
+	// completed + planned + active: the header shows the active label
+	head := body[strings.Index(body, "<h1"):strings.Index(body, "<ol")]
+	mustContain(t, head, "Watching")
 	last := -1
 	for i, id := range ids {
 		href := itemPath("tv", "tvdata", strconv.Itoa(i+1)+"Saga")
@@ -220,4 +223,32 @@ func TestSeriesCandidatesPreferHint(t *testing.T) {
 	rec = fe.get(seriesURL("tv", ser.UID) + "/candidates?q=tak")
 	mustContain(t, rec.Body.String(), "Taken")
 	mustNotContain(t, rec.Body.String(), "Beta", "Zulu")
+}
+
+func TestSeriesAddForwardsPositionField(t *testing.T) {
+	fe := newFixtureEnv(t, func(_, tv *plugintest.Plugin) {
+		k := &tv.M.Kinds[0]
+		k.Fields = append(k.Fields, plugin.FieldDef{Key: "saga", Label: "Saga", Type: plugin.FieldText, Editable: true})
+		k.SeriesHint = &plugin.SeriesHintDef{TitleField: "saga", PositionField: "episodes"}
+	})
+	mk := func(id string, n float64) int64 {
+		d := tvShow(id, "Show "+id)
+		d.Fields["episodes"] = plugin.FieldValue{Num: num(n)}
+		return fe.addFixture(t, "tv", "show", d, library.Entry{Status: library.Planned})
+	}
+	one, three, two := mk("1", 1), mk("3", 3), mk("2", 2)
+	ser, err := fe.lib.CreateSeries(bg, one, "S")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := fe.lib.AddPart(bg, ser.ID, three, ""); err != nil {
+		t.Fatal(err)
+	}
+	rec := fe.do("POST", seriesURL("tv", ser.UID)+"/parts", url.Values{"item": {idStr(two)}}, false)
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("add: %d", rec.Code)
+	}
+	if _, pos, _ := fe.lib.SeriesOfItem(bg, two); pos != 2 {
+		t.Fatalf("position = %d, want 2", pos)
+	}
 }
