@@ -143,6 +143,7 @@ type listView struct {
 // seriesRowView is one series of the Series tab.
 type seriesRowView struct {
 	Title, Href, Cover, PartsURL string
+	ParentTitle, ParentHref      string // the series this one is a spin-off of
 	Progress                     string // "3/7"
 	Status, StatusKey            string // derived
 	Updated                      string
@@ -728,16 +729,23 @@ func (s *server) buildSeriesTab(r *http.Request, m plugin.Manifest, lq listQuery
 	if manual := "/" + m.ID + "/manual/new"; slices.Contains(s.pluginRoutes[m.ID], "GET "+manual) {
 		v.ManualURL = manual
 	}
+	parents, err := s.seriesParents(ctx, pg.Rows)
+	if err != nil {
+		return listView{}, err
+	}
 	for _, row := range pg.Rows {
 		sk, ok := kindDef(m, row.Series.Kind)
 		if !ok {
 			sk = k
 		}
 		rv := seriesRowView{Title: row.Series.Title, Href: seriesURL(m.ID, row.Series.UID), Cover: covers.Src(row.Cover),
-			PartsURL: seriesURL(m.ID, row.Series.UID) + "/parts", Progress: strconv.Itoa(row.Completed) + "/" + strconv.Itoa(row.Parts),
+			PartsURL: seriesURL(m.ID, row.Series.UID) + "/parts", Progress: strconv.Itoa(row.Completed) + "/" + strconv.Itoa(row.PartsTotal),
 			Status: statusLabel(sk, row.Status), StatusKey: string(row.Status), BarPct: -1}
-		if row.Parts > 0 {
-			rv.BarPct = row.Completed * 100 / row.Parts
+		if row.PartsTotal > 0 {
+			rv.BarPct = min(row.Completed*100/row.PartsTotal, 100)
+		}
+		if p, ok := parents[row.ParentID]; ok {
+			rv.ParentTitle, rv.ParentHref = p.Title, seriesURL(p.PluginID, p.UID)
 		}
 		if !row.Updated.IsZero() {
 			rv.Updated = row.Updated.Format("2006-01-02")
@@ -760,6 +768,17 @@ func (s *server) buildSeriesTab(r *http.Request, m plugin.Manifest, lq listQuery
 	}
 	v.Kinds = kindTabs(m, k, true, lq.View, true)
 	return v, nil
+}
+
+// seriesParents loads the parent series of the rows in one query.
+func (s *server) seriesParents(ctx context.Context, rows []library.SeriesRow) (map[int64]library.Series, error) {
+	var ids []int64
+	for _, row := range rows {
+		if row.ParentID != 0 {
+			ids = append(ids, row.ParentID)
+		}
+	}
+	return s.deps.Library.SeriesTitles(ctx, ids)
 }
 
 // ignoredByTab names the entry parameters q carries that the Series tab does
