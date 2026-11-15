@@ -39,9 +39,6 @@ func TestGameData(t *testing.T) {
 			{Name: "fantasy"},
 			{Name: "Open world", Spoiler: true},
 		},
-		Recommendations: []plugin.ItemSummary{
-			{Source: SourceIGDB, ID: "1029", Titles: []plugin.Title{{Lang: "en", Text: "The Elder Scrolls V: Skyrim"}}},
-		},
 	}
 	d := gameData(rec)
 	if d.Source != SourceIGDB || d.ID != "9606" || d.Kind != KindGame {
@@ -85,7 +82,9 @@ func TestGameData(t *testing.T) {
 		t.Fatalf("tags = %+v", d.Tags)
 	}
 
-	recs := gameRecommendations(rec.Recommendations)
+	recs := gameRecommendations([]plugin.ItemSummary{
+		{Source: SourceIGDB, ID: "1029", Titles: []plugin.Title{{Lang: "en", Text: "The Elder Scrolls V: Skyrim"}}},
+	})
 	if len(recs) != 1 || recs[0].Kind != KindGame || recs[0].ID != "1029" ||
 		recs[0].Titles[0].Text != "The Elder Scrolls V: Skyrim" {
 		t.Fatalf("recommendations = %+v", recs)

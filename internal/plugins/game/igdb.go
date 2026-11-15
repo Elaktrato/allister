@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/allister/allister/internal/plugin"
 )
@@ -49,6 +50,8 @@ type igdbClient struct {
 	clientID       igdbKeyFunc
 	clientSecret   igdbKeyFunc
 	hc             *http.Client
+	// now is the clock for the token expiry (time.Now when nil); tests set it.
+	now func() time.Time
 
 	mu            sync.Mutex
 	token         string
@@ -208,7 +211,7 @@ func igdbStatusError(status int) error {
 func (c *igdbClient) tokenFor(ctx context.Context, clientID, secret string) (string, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if c.token != "" && c.tokenClientID == clientID && time.Now().Before(c.expires.Add(-tokenEarlyRefresh)) {
+	if c.token != "" && c.tokenClientID == clientID && c.clock().Before(c.expires.Add(-tokenEarlyRefresh)) {
 		return c.token, nil
 	}
 	return c.fetchToken(ctx, clientID, secret)
@@ -250,6 +253,9 @@ func (c *igdbClient) fetchToken(ctx context.Context, clientID, secret string) (s
 	case resp.StatusCode >= 500, resp.StatusCode == http.StatusRequestTimeout:
 		return "", fmt.Errorf("igdb: token request: %w", plugin.ErrUnavailable)
 	default:
+		// Any other status, 404 included, means the token endpoint answered
+		// with something unusable (a moved or wrong URL), not a missing
+		// credential: ErrBadResponse, never retried.
 		return "", fmt.Errorf("%w: igdb token status %d", plugin.ErrBadResponse, resp.StatusCode)
 	}
 
@@ -278,8 +284,16 @@ func (c *igdbClient) fetchToken(ctx context.Context, clientID, secret string) (s
 	if out.ExpiresIn > 0 {
 		ttl = time.Duration(out.ExpiresIn) * time.Second
 	}
-	c.expires = time.Now().Add(ttl)
+	c.expires = c.clock().Add(ttl)
 	return c.token, nil
+}
+
+// clock is the client's current time.
+func (c *igdbClient) clock() time.Time {
+	if c.now != nil {
+		return c.now()
+	}
+	return time.Now()
 }
 
 // dropToken drops token from the cache unless another caller already replaced
@@ -348,6 +362,11 @@ func (s *igdbSource) byIDOrSlug(ctx context.Context, id string) (plugin.ItemData
 			return plugin.ItemData{}, plugin.ErrNotFound
 		}
 		return s.details(ctx, "where id = "+strconv.Itoa(n)+"; limit 1;")
+	}
+	// An over-long slug is refused rather than cut: a cut slug could name
+	// another game.
+	if utf8.RuneCountInString(id) > maxIDRunes {
+		return plugin.ItemData{}, plugin.ErrNotFound
 	}
 	slug := plugin.SingleLine(id, maxIDRunes)
 	if slug == "" {

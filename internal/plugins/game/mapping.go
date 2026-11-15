@@ -25,7 +25,6 @@ type gameRecord struct {
 	ExternalIDs           map[string]string
 	Genres                []string
 	Tags                  []plugin.Tag
-	Recommendations       []plugin.ItemSummary
 }
 
 // gameData maps a source record to the contract's Game item.
