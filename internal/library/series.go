@@ -338,10 +338,12 @@ func prepareSeriesDetails(kind plugin.KindDef, d *SeriesDetails) ([]fieldRow, er
 	if err := cleanText("description", d.Description, multiLine); err != nil {
 		return nil, err
 	}
-	if utf8.RuneCountInString(d.Description) > maxSeriesDescriptionRunes {
+	// the cap counts the text as stored: line breaks normalised, trimmed
+	desc := plugin.MultiLine(d.Description, utf8.RuneCountInString(d.Description))
+	if utf8.RuneCountInString(desc) > maxSeriesDescriptionRunes {
 		return nil, invalid("description is longer than %d characters", maxSeriesDescriptionRunes)
 	}
-	d.Description = plugin.MultiLine(d.Description, maxSeriesDescriptionRunes)
+	d.Description = desc
 	for name, t := range map[string]*time.Time{"started_on": d.StartedOn, "ended_on": d.EndedOn} {
 		if t != nil && (t.IsZero() || t.Year() < 1 || t.Year() > 9999) {
 			return nil, invalid("%s is not a valid date", name)
