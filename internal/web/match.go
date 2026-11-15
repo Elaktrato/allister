@@ -276,6 +276,12 @@ func (s *server) postMatch(w http.ResponseWriter, r *http.Request, pluginID stri
 	if d.ID == "" {
 		d.ID = id
 	}
+	// a canonical id that is no valid path id could never be opened again
+	if !validPathID(d.ID) {
+		log.Printf("match %s/%s: %s/%s answered with an unusable id (%d bytes)", t.man.ID, t.ref.ID, si.ID, id, len(d.ID))
+		fail(http.StatusUnprocessableEntity, si.Name+" answered with an id that cannot be stored, so nothing was changed.")
+		return
+	}
 
 	// 3. Convert in one transaction (entry untouched, progress clamped).
 	err = s.deps.Library.ConvertToSource(ctx, t.item.ID, d)
