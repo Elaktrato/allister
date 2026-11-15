@@ -39,8 +39,9 @@ func New(opts Options) plugin.Plugin {
 			SourceTMDB: &tmdbSource{c: tmdb.New(opts.TMDBURL, key, hc)},
 		},
 		importers: map[string]plugin.Importer{
-			ImporterYamtrack: yamtrackMovieImporter{},
-			ImporterIMDb:     imdbMovieImporter{},
+			ImporterYamtrack:   yamtrackMovieImporter{},
+			ImporterIMDb:       imdbMovieImporter{},
+			ImporterLetterboxd: letterboxdImporter{},
 		},
 		exporter: jsonexport.New(exportFormat),
 	}

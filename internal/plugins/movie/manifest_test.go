@@ -180,7 +180,7 @@ func TestManifestTMDB(t *testing.T) {
 
 func TestManifestImporterAndExporter(t *testing.T) {
 	m := manifest()
-	if len(m.Importers) != 2 {
+	if len(m.Importers) != 3 {
 		t.Fatalf("importers = %+v", m.Importers)
 	}
 	wantImporter := plugin.ImporterInfo{
