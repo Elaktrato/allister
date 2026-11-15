@@ -539,5 +539,5 @@ func olTerms(subjects []string) ([]string, []plugin.Tag) {
 		}
 		tags = append(tags, plugin.Tag{Name: s})
 	}
-	return cleanTerms(genres, maxGenres), cleanTags(tags)
+	return plugin.CleanTerms(genres, maxTermRunes, maxGenres), plugin.CleanTags(tags, maxTermRunes, maxTags)
 }

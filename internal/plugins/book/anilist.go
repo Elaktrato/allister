@@ -155,8 +155,8 @@ func novelData(m anilist.Media) plugin.ItemData {
 	if mal := plugin.SingleLine(m.MALID, maxIDRunes); mal != "" {
 		d.ExternalIDs["mal"] = mal
 	}
-	d.Genres = cleanTerms(m.Genres, maxGenres)
-	d.Tags = cleanTags(novelTags(m.Tags))
+	d.Genres = plugin.CleanTerms(m.Genres, maxTermRunes, maxGenres)
+	d.Tags = plugin.CleanTags(novelTags(m.Tags), maxTermRunes, maxTags)
 	if a := novelAuthor(m.Staff); a != "" {
 		d.Fields["author"] = plugin.FieldValue{Text: a}
 	}

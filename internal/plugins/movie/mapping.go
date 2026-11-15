@@ -1,8 +1,6 @@
 package movie
 
 import (
-	"strings"
-
 	"github.com/allister/allister/internal/plugin"
 )
 
@@ -43,8 +41,8 @@ func movieData(r movieRecord) plugin.ItemData {
 			CoverURL: plugin.HTTPSURL(r.CoverURL),
 		},
 		ExternalURL: plugin.HTTPSURL(r.ExternalURL),
-		Genres:      cleanTerms(r.Genres, maxGenres),
-		Tags:        cleanTags(r.Tags),
+		Genres:      plugin.CleanTerms(r.Genres, maxTermRunes, maxGenres),
+		Tags:        plugin.CleanTags(r.Tags, maxTermRunes, maxTags),
 	}
 	for key, value := range r.Fields {
 		if key = plugin.SingleLine(key, 40); key == "" {
@@ -131,41 +129,6 @@ func movieRecommendations(rs []plugin.ItemSummary) []plugin.ItemSummary {
 			continue
 		}
 		out = append(out, r)
-	}
-	return out
-}
-
-func cleanTerms(in []string, limit int) []string {
-	var out []string
-	seen := map[string]bool{}
-	for _, raw := range in {
-		term := plugin.SingleLine(raw, maxTermRunes)
-		key := strings.ToLower(term)
-		if term == "" || seen[key] || len(out) == limit {
-			continue
-		}
-		seen[key] = true
-		out = append(out, term)
-	}
-	return out
-}
-
-func cleanTags(in []plugin.Tag) []plugin.Tag {
-	var out []plugin.Tag
-	seen := map[string]bool{}
-	for _, t := range in {
-		name := plugin.SingleLine(t.Name, maxTermRunes)
-		key := strings.ToLower(name)
-		if name == "" || seen[key] || len(out) == maxTags {
-			continue
-		}
-		seen[key] = true
-		tag := plugin.Tag{Name: name, Spoiler: t.Spoiler}
-		if t.Rank != nil && *t.Rank >= 0 && *t.Rank <= 100 {
-			r := *t.Rank
-			tag.Rank = &r
-		}
-		out = append(out, tag)
 	}
 	return out
 }
