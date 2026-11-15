@@ -829,8 +829,8 @@ type pendingParent struct {
 // pass once every series of the array is restored (also when the restore is
 // aborted part way, for the series restored so far).
 func (rs *restorer) series(ctx context.Context, dec *json.Decoder) error {
-	var pending []pendingParent
-	err := rs.seriesList(ctx, dec, &pending)
+	var pending, empty []pendingParent
+	err := rs.seriesList(ctx, dec, &pending, &empty)
 	for _, p := range pending {
 		if err != nil && !errors.Is(err, errStopped) {
 			break
@@ -848,10 +848,31 @@ func (rs *restorer) series(ctx context.Context, dec *json.Decoder) error {
 			addRow(&rs.rep.Notes, &rs.rep.MoreNotes, row)
 		}
 	}
+	// a series archived without parts or own values stays only as the
+	// parent of a restored spin-off series
+	for _, p := range empty {
+		if err != nil && !errors.Is(err, errStopped) {
+			break
+		}
+		gone, perr := rs.opts.Library.DeleteSeriesIfEmpty(context.WithoutCancel(ctx), p.pluginID, p.uid)
+		if perr != nil {
+			if err == nil {
+				err = perr
+			}
+			break
+		}
+		if gone {
+			rs.rep.SeriesCreated--
+			rs.rep.SeriesSkipped++
+			row := p.row
+			row.Reason = "not created: it has no parts"
+			addRow(&rs.rep.Notes, &rs.rep.MoreNotes, row)
+		}
+	}
 	return err
 }
 
-func (rs *restorer) seriesList(ctx context.Context, dec *json.Decoder, pending *[]pendingParent) error {
+func (rs *restorer) seriesList(ctx context.Context, dec *json.Decoder, pending, empty *[]pendingParent) error {
 	tok, err := dec.Token()
 	if err != nil {
 		return rs.syntax(err)
@@ -922,6 +943,9 @@ func (rs *restorer) seriesList(ctx context.Context, dec *json.Decoder, pending *
 		}
 		if res.Parent != "" {
 			*pending = append(*pending, pendingParent{row: row, pluginID: bs.PluginID, uid: bs.UID, parentID: res.Parent})
+		}
+		if res.Empty {
+			*empty = append(*empty, pendingParent{row: row, pluginID: bs.PluginID, uid: bs.UID})
 		}
 	}
 	if _, err := dec.Token(); err != nil {

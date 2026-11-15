@@ -2,6 +2,7 @@ package library
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -365,7 +366,8 @@ func TestSeriesLinkAndParentClearedOnDelete(t *testing.T) {
 	if got.ParentID != 0 || got.Description != "Own" || got.Fields["publisher"].Text != "Acme" {
 		t.Fatalf("after deleting the parent: %+v", got)
 	}
-	// a parent that goes with its last part clears the link too
+	// a parent keeps its spin-off when its last part goes (R6: it has a
+	// spin-off series, so it stays without parts)
 	last := addBook(t, e.lib, "Q", fp(1), Entry{Status: Planned})
 	p2 := mustSeries(t, e, last, "Parent 2")
 	if err := e.lib.UpdateSeriesDetails(bg, s.ID, k, SeriesDetails{Title: "S", ParentID: p2.ID}); err != nil {
@@ -374,7 +376,7 @@ func TestSeriesLinkAndParentClearedOnDelete(t *testing.T) {
 	if err := e.lib.RemovePart(bg, p2.ID, last); err != nil {
 		t.Fatal(err)
 	}
-	if got := mustSeriesByUID(t, e, s.UID); got.ParentID != 0 {
+	if got := mustSeriesByUID(t, e, s.UID); got.ParentID != p2.ID {
 		t.Fatalf("after the parent's last part went: %+v", got)
 	}
 }
@@ -448,5 +450,122 @@ func TestSeriesStaleLinkKeepsSaving(t *testing.T) {
 	other := mustSeries(t, e, addBook(t, e.lib, "2", fp(1), Entry{Status: Planned}), "Other")
 	if err := e.lib.UpdateSeriesDetails(bg, other.ID, k, SeriesDetails{Title: "Other", LinkedItemID: linked}); !errors.Is(err, ErrInvalid) || !strings.Contains(err.Error(), "not in your list") {
 		t.Fatalf("a new link to an unlisted entry: %v", err)
+	}
+}
+
+// TestPartlessSeriesKeptWithOwnData (R6): removing the last part (RemovePart,
+// RemoveEntry or DeleteItem) keeps a series that holds own data or has
+// spin-off series, with zero parts; one without either goes.
+func TestPartlessSeriesKeptWithOwnData(t *testing.T) {
+	e := newEnv(t)
+	k := seriesKind(t, e)
+	removals := map[string]func(seriesID, itemID int64) error{
+		"remove part":  func(s, i int64) error { return e.lib.RemovePart(bg, s, i) },
+		"remove entry": func(_, i int64) error { return e.lib.RemoveEntry(bg, i) },
+		"delete item":  func(_, i int64) error { return e.lib.DeleteItem(bg, i) },
+	}
+	linked := addBook(t, e.lib, "L", fp(1), Entry{Status: Planned})
+	own := map[string]SeriesDetails{
+		"cover":       {CoverPath: "c.jpg"},
+		"description": {Description: "Own"},
+		"started":     {StartedOn: sday(2001, 1, 1)},
+		"ended":       {EndedOn: sday(2002, 1, 1)},
+		"finished":    {Finished: true},
+		"parts total": {PartsTotal: 5},
+		"field":       {Fields: map[string]plugin.FieldValue{"publisher": {Text: "Acme"}}},
+		"link":        {LinkedItemID: linked},
+		"spin-off":    {},
+		"nothing":     {},
+	}
+	n := 0
+	for what, d := range own {
+		for how, remove := range removals {
+			n++
+			item := addBook(t, e.lib, fmt.Sprint("p", n), fp(1), Entry{Status: Completed})
+			s := mustSeries(t, e, item, what+" "+how)
+			d.Title = s.Title
+			if err := e.lib.UpdateSeriesDetails(bg, s.ID, k, d); err != nil {
+				t.Fatal(err)
+			}
+			if what == "spin-off" {
+				kid := mustSeries(t, e, addBook(t, e.lib, fmt.Sprint("k", n), fp(1), Entry{Status: Planned}), "kid "+how)
+				if err := e.lib.UpdateSeriesDetails(bg, kid.ID, k, SeriesDetails{Title: kid.Title, ParentID: s.ID}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := remove(s.ID, item); err != nil {
+				t.Fatalf("%s, %s: %v", what, how, err)
+			}
+			got, err := e.lib.SeriesByUID(bg, "book", s.UID)
+			if what == "nothing" {
+				if !errors.Is(err, ErrNoSeries) {
+					t.Errorf("%s, %s: an empty series without own data stays: %v", what, how, err)
+				}
+				continue
+			}
+			if err != nil {
+				t.Errorf("%s, %s: the series went: %v", what, how, err)
+				continue
+			}
+			if parts, _ := e.lib.SeriesPartsOrder(bg, got.ID); len(parts) != 0 {
+				t.Errorf("%s, %s: %d parts", what, how, len(parts))
+			}
+		}
+	}
+}
+
+// TestPartlessSeriesReads: every read path takes a series without parts: it
+// is planned, 0/expected, listed, counted, backed up and resolved.
+func TestPartlessSeriesReads(t *testing.T) {
+	e := newEnv(t)
+	k := seriesKind(t, e)
+	item := addBook(t, e.lib, "1", fp(1), Entry{Status: Active})
+	s := mustSeries(t, e, item, "Empty")
+	if err := e.lib.UpdateSeriesDetails(bg, s.ID, k, SeriesDetails{Title: "Empty", Description: "Own", PartsTotal: 4}); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.lib.RemovePart(bg, s.ID, item); err != nil {
+		t.Fatal(err)
+	}
+	if got := DeriveSeriesStatus(nil, 0); got != Planned {
+		t.Errorf("no parts: %s", got)
+	}
+	if got := DeriveSeriesStatus(nil, 4); got != Planned {
+		t.Errorf("no parts, 4 expected: %s", got)
+	}
+	pg, err := e.lib.ListSeries(bg, SeriesQuery{PluginID: "book"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pg.Rows) != 1 || pg.Rows[0].Status != Planned || pg.Rows[0].Parts != 0 || pg.Rows[0].PartsTotal != 4 || pg.Rows[0].Updated.IsZero() {
+		t.Fatalf("list: %+v", pg.Rows)
+	}
+	if pg, _ := e.lib.ListSeries(bg, SeriesQuery{PluginID: "book", Status: Planned}); len(pg.Rows) != 1 {
+		t.Errorf("planned filter: %d rows", len(pg.Rows))
+	}
+	counts, err := e.lib.SeriesCounts(bg, SeriesQuery{PluginID: "book"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if counts[Planned] != 1 || counts[Active] != 0 {
+		t.Errorf("counts: %v", counts)
+	}
+	if got, err := e.lib.ActiveSeries(bg, []string{"book"}, 10); err != nil || len(got) != 0 {
+		t.Errorf("active: %v %+v", err, got)
+	}
+	res, err := e.lib.LoadResolvedSeries(bg, mustSeriesByUID(t, e, s.UID), "en")
+	if err != nil || res.Status != Planned || res.PartsTotal != 4 || res.Description != "Own" || res.MainParts != 0 {
+		t.Fatalf("resolved: %v %+v", err, res)
+	}
+	var backed []BackupSeries
+	if err := e.lib.BackupSeries(bg, func(bs BackupSeries) error { backed = append(backed, bs); return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if len(backed) != 1 || backed[0].UID != s.UID || len(backed[0].Parts) != 0 || backed[0].Parts == nil || backed[0].Description != "Own" {
+		t.Fatalf("backup: %+v", backed)
+	}
+	// a part can be added again
+	if err := e.lib.AddPart(bg, s.ID, item, ""); err != nil {
+		t.Fatal(err)
 	}
 }
