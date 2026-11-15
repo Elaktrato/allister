@@ -1,4 +1,4 @@
-{{define "title"}}{{.Heading}} list - Allister{{end}}
+{{define "title"}}{{if .Title}}{{.Title}}{{else}}{{.Heading}} list{{end}} - Allister{{end}}
 {{define "content"}}
 <div class="mb-5 flex flex-wrap items-center gap-x-4 gap-y-3">
   <h1 class="text-3xl font-semibold">{{.Heading}}</h1>
@@ -6,7 +6,7 @@
     {{template "view_toggle" .}}
     {{range .Exports}}<a href="{{.URL}}" class="inline-flex items-center gap-1.5 rounded-md px-2.5 py-2 text-sm text-slate-300 hover:bg-slate-800 hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500" download><span class="icon text-[1.125rem]" aria-hidden="true">download</span><span>Export {{.Name}}</span></a>{{end}}
     {{with .ManualURL}}<a href="{{.}}" class="inline-flex items-center gap-1.5 rounded-md px-2.5 py-2 text-sm text-slate-300 hover:bg-slate-800 hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"><span class="icon text-[1.125rem]" aria-hidden="true">edit_note</span><span>Add manually</span></a>{{end}}
-    <a href="{{.SearchURL}}" class="inline-flex items-center gap-1.5 rounded-md bg-indigo-600 py-2 pl-2.5 pr-3.5 text-sm font-medium text-white hover:bg-indigo-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400"><span class="icon text-[1.125rem]" aria-hidden="true">add</span><span>{{.AddLabel}}</span></a>
+    {{if .AddLabel}}<a href="{{.SearchURL}}" class="inline-flex items-center gap-1.5 rounded-md bg-indigo-600 py-2 pl-2.5 pr-3.5 text-sm font-medium text-white hover:bg-indigo-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400"><span class="icon text-[1.125rem]" aria-hidden="true">add</span><span>{{.AddLabel}}</span></a>{{end}}
   </div>
 </div>
 {{if .Kinds}}

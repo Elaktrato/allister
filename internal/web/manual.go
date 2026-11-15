@@ -79,13 +79,17 @@ func (s *server) newManualForm(r *http.Request, m plugin.Manifest, k plugin.Kind
 		f.TitleLang = pref
 	}
 	f.Heading, f.Submit = "Add "+lowerFirst(k.Label)+" manually", "Add"
-	f.Action, f.CancelURL = manualPath(m, k.Key), "/"+url.PathEscape(m.ID)
+	uid := seriesParam(r)
+	f.Action, f.CancelURL = withSeriesParam(manualPath(m, k.Key), uid), "/"+url.PathEscape(m.ID)
+	if uid != "" {
+		f.CancelURL = seriesURL(m.ID, uid)
+	}
 	if f.Status == "" {
 		f.Status = string(library.Planned)
 	}
 	if len(m.Kinds) > 1 {
 		for _, x := range m.Kinds {
-			f.Kinds = append(f.Kinds, choice{Value: manualPath(m, x.Key), Label: x.Label, Selected: x.Key == k.Key})
+			f.Kinds = append(f.Kinds, choice{Value: withSeriesParam(manualPath(m, x.Key), uid), Label: x.Label, Selected: x.Key == k.Key})
 		}
 	}
 	return f
@@ -124,6 +128,11 @@ func (s *server) postManualNew(w http.ResponseWriter, r *http.Request, pluginID 
 	}
 	defer cleanupForm(r)
 	ctx := r.Context()
+	// the target series is checked before anything is saved
+	ser, ok := s.targetSeries(w, r, m.ID, k)
+	if !ok {
+		return
+	}
 	vals, fields, msg := parseFields(k, r, nil)
 	ev, entry, emsg := s.parseEntryForm(k, k.Progress.Defaults, r)
 	f := s.newManualForm(r, m, k, vals, ev)
@@ -198,13 +207,20 @@ func (s *server) postManualNew(w http.ResponseWriter, r *http.Request, pluginID 
 	}
 	d.ID = id
 	// No sync job: manual items have nothing to sync.
-	if _, err := s.deps.Library.AddToList(ctx, m.ID, k.Key, d, entry, library.WithSyncState("done")); err != nil {
+	item, err := s.deps.Library.AddToList(ctx, m.ID, k.Key, d, entry, library.WithSyncState("done"))
+	if err != nil {
 		s.cleanupCover(ctx, d.CoverURL)
 		if errors.Is(err, library.ErrInvalid) {
 			fail(invalidMessage(err))
 			return
 		}
 		s.internalError(w, r, err)
+		return
+	}
+	if ser != nil {
+		if s.addPart(w, r, m, ser, item) {
+			http.Redirect(w, r, seriesURL(m.ID, ser.UID), http.StatusSeeOther)
+		}
 		return
 	}
 	http.Redirect(w, r, itemURL(m, manualSource, id, k.Key), http.StatusSeeOther)

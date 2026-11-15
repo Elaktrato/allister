@@ -25,7 +25,9 @@
   </ol>
 
   <section class="space-y-2">
-    <h2 class="text-lg font-semibold">Add from your list</h2>
+    <h2 class="text-lg font-semibold">Add a part</h2>
+    {{with .SearchURL}}<p><a href="{{.}}" class="inline-flex items-center gap-1.5 text-indigo-300 hover:underline"><span class="icon text-[1.125rem]" aria-hidden="true">search</span><span>{{$.SearchLabel}}</span></a></p>{{end}}
+    <h3 class="pt-2 text-sm font-medium text-slate-300">From your list</h3>
     <input type="search" name="q" placeholder="Search your {{.KindLabel}} list" autocomplete="off"
       hx-get="{{.CandidatesURL}}" hx-trigger="input changed delay:300ms, search" hx-target="#series-candidates" hx-swap="innerHTML"
       class="w-full rounded border border-slate-700 bg-slate-900 px-3 py-2 text-sm">
@@ -44,7 +46,7 @@
     <h2 class="text-lg font-semibold">Delete series</h2>
     <form method="post" action="{{.DeleteURL}}" class="space-y-2 rounded border border-slate-800 bg-slate-900 p-3 text-sm">
       <label class="flex items-center gap-2"><input type="radio" name="entries" value="keep" checked> Delete the series, keep the entries</label>
-      <label class="flex items-center gap-2"><input type="radio" name="entries" value="remove"> Delete the series and remove all its entries from your list</label>
+      <label class="flex items-center gap-2"><input type="radio" name="entries" value="remove"> {{.DeleteNote}}</label>
       <button type="submit" class="rounded border border-slate-700 px-4 py-2 text-red-300 hover:bg-slate-800">Delete series</button>
     </form>
   </section>

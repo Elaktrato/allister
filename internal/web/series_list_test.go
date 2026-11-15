@@ -124,3 +124,27 @@ func TestIncrementKeepsSeriesBadge(t *testing.T) {
 		mustContain(t, rec.Body.String(), "2 · Saga")
 	}
 }
+
+func TestSeriesTabNamesIgnoredEntryParameters(t *testing.T) {
+	fe := newFixtureEnv(t)
+	fe.tvSeries(t, "Saga")
+	body := fe.get("/tv?tab=series&view=table&genre=x&f.year=2019&sort=updated&rmin=3").Body.String()
+	got := strings.Join(noticeKeysOf(body), ",")
+	for _, k := range []string{"genre", "f.year", "sort", "rmin"} {
+		if !strings.Contains(","+got+",", ","+k+",") {
+			t.Errorf("notice %q misses %s", got, k)
+		}
+	}
+	// what the tab does use is not a notice
+	if n := noticeOf(fe.get("/tv?tab=series&view=table&sort=title&q=saga&status=planned").Body.String()); n != "" {
+		t.Errorf("unexpected notice %q", n)
+	}
+}
+
+func TestSeriesTabHasItsOwnLabels(t *testing.T) {
+	fe := newFixtureEnv(t)
+	fe.tvSeries(t, "Saga")
+	body := fe.get("/tv?tab=series&view=table").Body.String()
+	mustContain(t, body, "<title>TV series - Allister</title>", `<h1 class="text-3xl font-semibold">Series</h1>`)
+	mustNotContain(t, body, "Add show")
+}
