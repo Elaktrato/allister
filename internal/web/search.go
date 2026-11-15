@@ -147,10 +147,10 @@ func (s *server) sourceChoiceLabel(ctx context.Context, si plugin.SourceInfo) st
 	return si.Name + " (needs key)"
 }
 
-// defaultSourceForKind is the manifest's first source serving kind that
-// supports lookup, else the first one serving it. It ignores credentials: the
-// server's method of the same name prefers a configured source on top.
-func defaultSourceForKind(m plugin.Manifest, kind string) plugin.SourceInfo {
+// manifestDefaultSourceForKind is the manifest's first source serving kind
+// that supports lookup, else the first one serving it. It ignores credentials:
+// the server's defaultSourceForKind prefers a configured source on top.
+func manifestDefaultSourceForKind(m plugin.Manifest, kind string) plugin.SourceInfo {
 	valid := sourcesForKind(m, kind)
 	for _, si := range valid {
 		if si.SupportsLookup {
@@ -164,9 +164,9 @@ func defaultSourceForKind(m plugin.Manifest, kind string) plugin.SourceInfo {
 }
 
 // defaultSourceForKind is the first source serving kind that is configured and
-// supports lookup, else the first configured one, else the manifest's first
-// (defaultSourceForKind). A plugin whose sources need no credentials keeps the
-// old default.
+// supports lookup, else the first configured one, else the manifest's default
+// (manifestDefaultSourceForKind). A plugin whose sources need no credentials
+// keeps the old default.
 func (s *server) defaultSourceForKind(ctx context.Context, m plugin.Manifest, kind string) plugin.SourceInfo {
 	valid := sourcesForKind(m, kind)
 	for _, si := range valid {
@@ -179,7 +179,7 @@ func (s *server) defaultSourceForKind(ctx context.Context, m plugin.Manifest, ki
 			return si
 		}
 	}
-	return defaultSourceForKind(m, kind)
+	return manifestDefaultSourceForKind(m, kind)
 }
 
 // chooseSourceForKind is the source a request names. An empty or non-serving
