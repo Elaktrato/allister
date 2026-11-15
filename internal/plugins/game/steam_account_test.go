@@ -25,6 +25,7 @@ func TestSteamAccountRejectsInvalidIDs(t *testing.T) {
 		"765611980000000000", // 18 digits
 		"7656119800000000a",
 		"7656 1198000000000",
+		"7656119 800000000", // 17 bytes with an interior space: the character check
 		"-7656119800000000",
 		"７６５６１１９８０００００００００", // full-width digits are not ASCII
 	} {
@@ -65,6 +66,10 @@ func TestSteamAccountKeyProblems(t *testing.T) {
 			}, nil, "secret-key")
 			_, err := steamAccountImporter{c: c}.ImportAccount(context.Background(), "76561198000000000")
 			assertSteamKeyError(t, err)
+			// the refusal came from the server, not from a local key check
+			if got := rec.count(); got != 1 {
+				t.Errorf("requests = %d, want 1", got)
+			}
 			if strings.Contains(err.Error(), "secret-key") {
 				t.Errorf("error leaks the key: %v", err)
 			}
@@ -109,8 +114,9 @@ func TestSteamAccountLibrary(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ImportAccount: %v", err)
 	}
-	if len(res.Entries) != 2 || res.Ignored != 1 {
-		t.Fatalf("entries = %d, ignored = %d: %+v", len(res.Entries), res.Ignored, res.Entries)
+	// the appid-0 game is a skipped row with a reason, not silently ignored
+	if len(res.Entries) != 2 || res.Ignored != 0 || len(res.Skipped) != 1 || res.Skipped[0].Title != "Broken" {
+		t.Fatalf("entries = %d, ignored = %d, skipped = %+v: %+v", len(res.Entries), res.Ignored, res.Skipped, res.Entries)
 	}
 
 	played := res.Entries[0]
@@ -206,5 +212,31 @@ func TestSteamAccountParseRefusesFile(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "takes a SteamID64, not a file") {
 		t.Errorf("error is not actionable: %v", err)
+	}
+}
+
+// TestSteamAccountBrokenGames: an owned game without a positive appid cannot
+// be identified, so it is reported as a skipped row with a reason; a negative
+// playtime (the Web API never sends one) is clamped to 0, so the game counts
+// as unplayed.
+func TestSteamAccountBrokenGames(t *testing.T) {
+	rec := &steamTestRecorder{}
+	c, _ := newSteamTestClient(t, rec, func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `{"response":{"games":[{"appid":0,"name":"No Id"},{"appid":-3,"name":"Negative Id"},{"appid":440,"name":"Team Fortress 2","playtime_forever":-5}]}}`)
+	}, nil, "secret-key")
+	res, err := steamAccountImporter{c: c}.ImportAccount(context.Background(), "76561198000000000")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Ignored != 0 || len(res.Skipped) != 2 || len(res.Entries) != 1 {
+		t.Fatalf("res = %+v", res)
+	}
+	for i, s := range res.Skipped {
+		if s.Reason == "" || s.Title == "" {
+			t.Errorf("skipped %d = %+v, want a title and a reason", i, s)
+		}
+	}
+	if e := res.Entries[0]; e.Progress["playtime"] != 0 || e.Status != plugin.Planned {
+		t.Fatalf("negative playtime entry = %+v", e)
 	}
 }
