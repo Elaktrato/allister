@@ -55,8 +55,6 @@ type SkippedRow struct {
 	Ignored       bool
 }
 
-var requiredColumns = []string{"media_id", "media_type", "status", "title"}
-
 var statusMap = map[string]plugin.StatusClass{
 	"completed":   plugin.Completed,
 	"planning":    plugin.Planned,

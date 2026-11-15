@@ -3,7 +3,6 @@ package web
 import (
 	"context"
 	"database/sql"
-	"github.com/allister/allister/internal/plugin"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -18,6 +17,7 @@ import (
 	"github.com/allister/allister/internal/importer"
 	"github.com/allister/allister/internal/jobs"
 	"github.com/allister/allister/internal/library"
+	"github.com/allister/allister/internal/plugin"
 	"github.com/allister/allister/internal/plugins/anilist"
 	"github.com/allister/allister/internal/settings"
 )

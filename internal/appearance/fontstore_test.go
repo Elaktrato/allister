@@ -68,7 +68,7 @@ func TestCheckFontName(t *testing.T) {
 			t.Errorf("%q: %q %v", in, got, err)
 		}
 	}
-	for _, bad := range []string{"", "   ", strings.Repeat("x", 41), "a\nb", "tab\there", "nul\x00", "bidi‮evil", "\xff\xfe", "zero​width"} {
+	for _, bad := range []string{"", "   ", strings.Repeat("x", 41), "a\nb", "tab\there", "nul\x00", "bidi\u202eevil", "\xff\xfe", "zero\u200bwidth"} {
 		if got, err := CheckFontName(bad); err == nil {
 			t.Errorf("%q accepted as %q", bad, got)
 		}

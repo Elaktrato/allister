@@ -79,7 +79,7 @@ func writeFonts(ctx context.Context, zw *zip.Writer, app *appearance.Service, fo
 			log.Printf("backup: font %s skipped: not a regular file (%v)", f.File, err)
 			continue
 		}
-		file, err := os.Open(p)
+		file, err := os.Open(p) //nolint:gosec // G304: Path accepts only a plain stored font file name inside the fonts directory
 		if err != nil {
 			log.Printf("backup: font %s skipped: %v", f.File, err)
 			continue

@@ -292,7 +292,7 @@ func (c *steamClient) getBody(req *http.Request, keyed bool) ([]byte, error) {
 	defer resp.Body.Close()
 
 	if err := steamStatusError(resp.StatusCode, keyed); err != nil {
-		io.Copy(io.Discard, io.LimitReader(resp.Body, 64<<10))
+		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 64<<10)) // best-effort drain so the connection can be reused
 		return nil, err
 	}
 	body, err := io.ReadAll(io.LimitReader(resp.Body, maxSteamBody+1))

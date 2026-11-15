@@ -97,14 +97,6 @@ func defaultSource(m plugin.Manifest) plugin.SourceInfo {
 	return m.Sources[0]
 }
 
-// chooseSource is the source a request names ("" means the default).
-func chooseSource(m plugin.Manifest, id string) (plugin.SourceInfo, bool) {
-	if id == "" {
-		return defaultSource(m), true
-	}
-	return sourceInfo(m, id)
-}
-
 func (s *server) newMatchView(r *http.Request, t *matchTarget, si plugin.SourceInfo) matchView {
 	m := t.man
 	var extra url.Values

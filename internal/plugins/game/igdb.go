@@ -19,7 +19,7 @@ import (
 // Default endpoints of the IGDB API and its Twitch OAuth token endpoint.
 const (
 	DefaultIGDBBase     = "https://api.igdb.com/v4"
-	DefaultIGDBTokenURL = "https://id.twitch.tv/oauth2/token"
+	DefaultIGDBTokenURL = "https://id.twitch.tv/oauth2/token" //nolint:gosec // G101: an endpoint URL, not a credential
 )
 
 const (
@@ -172,7 +172,7 @@ func (c *igdbClient) send(ctx context.Context, clientID, token, endpoint, query 
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		io.Copy(io.Discard, io.LimitReader(resp.Body, 64<<10))
+		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 64<<10)) // best-effort drain so the connection can be reused
 		return resp.StatusCode, nil, nil
 	}
 	body, err := io.ReadAll(io.LimitReader(resp.Body, maxIGDBBody+1))
