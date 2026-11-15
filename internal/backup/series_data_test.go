@@ -326,3 +326,38 @@ func TestBackupRoundTripPartlessSeries(t *testing.T) {
 		t.Fatal("an empty series nothing names as parent was restored")
 	}
 }
+
+// TestRestoreSeriesParentChainDepthTwo: an archive with a chain A -> B -> C
+// (A a spin-off of B, B of C) restores at most one level of it; the refused
+// link is left empty with a note.
+func TestRestoreSeriesParentChainDepthTwo(t *testing.T) {
+	b := newEnv(t)
+	for _, id := range []string{"1", "2", "3"} {
+		b.book(id, "", &library.Entry{Status: library.Planned})
+	}
+	body := `{"format":"allister.backup","format_version":1,"items":[],"series":[` +
+		seriesWith("u-a", "A", `"parent":"u-b"`, "1") + `,` +
+		seriesWith("u-b", "B", `"parent":"u-c"`, "2") + `,` +
+		seriesJSON("u-c", "C", "3") + `]}`
+	rep := mustRestore(t, b, zipOf(t, entry{name: "backup.json", body: []byte(body)}))
+	if rep.SeriesCreated != 3 {
+		t.Fatalf("report = %+v", rep)
+	}
+	sa, sb, sc := b.seriesByUID("u-a"), b.seriesByUID("u-b"), b.seriesByUID("u-c")
+	set := 0
+	if sa.ParentID == sb.ID {
+		set++
+	}
+	if sb.ParentID == sc.ID {
+		set++
+	}
+	if set != 1 || sc.ParentID != 0 || (sa.ParentID != 0 && sa.ParentID != sb.ID) {
+		t.Fatalf("parents a=%d b=%d c=%d (ids %d %d %d), want exactly one level", sa.ParentID, sb.ParentID, sc.ParentID, sa.ID, sb.ID, sc.ID)
+	}
+	if sa.ParentID != 0 && sb.ParentID != 0 {
+		t.Fatal("a two-level chain was restored")
+	}
+	if len(rep.Notes) != 1 || !strings.Contains(rep.Notes[0].Reason, "parent series") || strings.Contains(rep.Notes[0].Reason, "invalid: ") {
+		t.Fatalf("notes = %+v", rep.Notes)
+	}
+}
