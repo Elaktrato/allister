@@ -426,41 +426,23 @@ func (s *server) postSeriesDelete(w http.ResponseWriter, r *http.Request, m plug
 // equals the series title (trimmed, case-insensitive) come first.
 func (s *server) seriesCandidates(r *http.Request, m plugin.Manifest, k plugin.KindDef, ser *library.Series, text string) ([]candidateView, error) {
 	ctx := r.Context()
-	lang := s.titleLang(ctx, m)
-	q := library.Query{PluginID: m.ID, Kind: ser.Kind, Text: text, Sort: library.Sort{Kind: library.SortTitle}, PageSize: 200}
-	want := strings.ToLower(strings.TrimSpace(ser.Title))
-	members, err := s.deps.Library.SeriesMemberIDs(ctx, m.ID, ser.Kind)
+	hint := ""
+	if k.SeriesHint != nil {
+		hint = k.SeriesHint.TitleField
+	}
+	rows, err := s.deps.Library.SeriesCandidates(ctx, m.ID, ser.Kind, text, hint, ser.Title, s.titleLang(ctx, m), maxCandidates)
 	if err != nil {
 		return nil, err
 	}
-	var hinted, others []candidateView
-	for page := 1; ; page++ {
-		q.Page = page
-		pg, err := s.deps.Library.List(ctx, q, lang)
-		if err != nil {
-			return nil, err
+	out := make([]candidateView, 0, len(rows))
+	for _, row := range rows {
+		title := row.Title
+		if title == "" {
+			title = "(untitled)"
 		}
-		for _, row := range pg.Rows {
-			if members[row.Item.ID] {
-				continue
-			}
-			title := row.Title
-			if title == "" {
-				title = "(untitled)"
-			}
-			c := candidateView{ID: strconv.FormatInt(row.Item.ID, 10), Title: title, Cover: covers.Src(row.Item.CoverPath)}
-			if h := k.SeriesHint; h != nil && want != "" &&
-				strings.ToLower(strings.TrimSpace(row.Item.Fields[h.TitleField].Text)) == want {
-				hinted = append(hinted, c)
-			} else {
-				others = append(others, c)
-			}
-		}
-		if page >= pg.Pages {
-			break
-		}
+		out = append(out, candidateView{ID: strconv.FormatInt(row.Item.ID, 10), Title: title, Cover: covers.Src(row.Item.CoverPath)})
 	}
-	return append(hinted, others...)[:min(maxCandidates, len(hinted)+len(others))], nil
+	return out, nil
 }
 
 func (s *server) getSeriesCandidates(w http.ResponseWriter, r *http.Request, m plugin.Manifest, ser *library.Series) {

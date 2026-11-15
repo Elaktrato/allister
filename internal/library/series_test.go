@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/allister/allister/internal/plugin"
 )
 
 func TestCreateSeries(t *testing.T) {
@@ -590,25 +592,69 @@ func TestSeriesPartsAndHasSeries(t *testing.T) {
 	}
 }
 
-func TestSeriesMemberIDs(t *testing.T) {
+func TestSeriesCandidates(t *testing.T) {
 	e := newEnv(t)
-	a := addBook(t, e.lib, "1", fp(1), Entry{Status: Planned})
-	b := addBook(t, e.lib, "2", fp(1), Entry{Status: Planned})
-	free := addBook(t, e.lib, "3", fp(1), Entry{Status: Planned})
-	s, err := e.lib.CreateSeries(bg, a, "S")
+	titles := func(rows []Row) []string {
+		var out []string
+		for _, r := range rows {
+			out = append(out, r.Title)
+		}
+		return out
+	}
+	mk := func(id, title, author string) int64 {
+		d := bookData(id)
+		d.Titles = []plugin.Title{{Lang: "en", Text: title}}
+		d.Fields = map[string]plugin.FieldValue{"author": {Text: author}}
+		itemID, err := e.lib.AddToList(bg, "book", "book", d, Entry{Status: Planned})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return itemID
+	}
+	taken := mk("1", "Taken", "Le Guin")
+	mk("2", "Zeta", "Other")
+	mk("3", "Alpha", "Other")
+	mk("4", "Mid", "  LE GUIN ")
+	mk("5", "Beta%", "Other")
+	s, err := e.lib.CreateSeries(bg, taken, "Earthsea")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := e.lib.AddPart(bg, s.ID, b, ""); err != nil {
+	// hint match first (trimmed, case-insensitive), then by title; members out
+	got, err := e.lib.SeriesCandidates(bg, "book", "book", "", "author", "le guin", "en", 20)
+	if err != nil || strings.Join(titles(got), ",") != "Mid,Alpha,Beta%,Zeta" {
+		t.Fatalf("hinted = %v %v", titles(got), err)
+	}
+	// no hint field or empty series title: plain title order
+	got, _ = e.lib.SeriesCandidates(bg, "book", "book", "", "", "le guin", "en", 20)
+	if strings.Join(titles(got), ",") != "Alpha,Beta%,Mid,Zeta" {
+		t.Fatalf("plain = %v", titles(got))
+	}
+	// the limit cuts after the ordering
+	got, _ = e.lib.SeriesCandidates(bg, "book", "book", "", "author", "le guin", "en", 2)
+	if strings.Join(titles(got), ",") != "Mid,Alpha" {
+		t.Fatalf("limit = %v", titles(got))
+	}
+	// the text filter is the list's: contains, case-insensitive, LIKE-escaped
+	got, _ = e.lib.SeriesCandidates(bg, "book", "book", "ET", "author", "x", "en", 20)
+	if strings.Join(titles(got), ",") != "Beta%,Zeta" {
+		t.Fatalf("text = %v", titles(got))
+	}
+	if got, _ = e.lib.SeriesCandidates(bg, "book", "book", "%", "", "", "en", 20); strings.Join(titles(got), ",") != "Beta%" {
+		t.Fatalf("escaped = %v", titles(got))
+	}
+	// parts of the series leave the candidates as they join
+	if err := e.lib.AddPart(bg, s.ID, got[0].Item.ID, ""); err != nil {
 		t.Fatal(err)
 	}
-	got, err := e.lib.SeriesMemberIDs(bg, "book", "book")
-	if err != nil || len(got) != 2 || !got[a] || !got[b] || got[free] {
-		t.Fatalf("members = %v %v", got, err)
+	if got, _ = e.lib.SeriesCandidates(bg, "book", "book", "beta", "", "", "en", 20); len(got) != 0 {
+		t.Fatalf("member offered: %v", titles(got))
 	}
-	other, err := e.lib.SeriesMemberIDs(bg, "tv", "show")
-	if err != nil || len(other) != 0 {
+	if other, err := e.lib.SeriesCandidates(bg, "tv", "show", "", "", "", "en", 20); err != nil || len(other) != 0 {
 		t.Fatalf("other kind = %v %v", other, err)
+	}
+	if none, err := e.lib.SeriesCandidates(bg, "book", "book", "", "", "", "en", 0); err != nil || none != nil {
+		t.Fatalf("limit 0 = %v %v", none, err)
 	}
 }
 
@@ -631,5 +677,103 @@ func TestSeriesOfItems(t *testing.T) {
 	}
 	if m, err := e.lib.SeriesOfItems(bg, nil); err != nil || len(m) != 0 {
 		t.Fatalf("empty: %v %v", m, err)
+	}
+}
+
+func TestRemoveEntryLeavesTheSeries(t *testing.T) {
+	e := newEnv(t)
+	s := seriesOf(t, e, "book", "Saga", "1", "2", "3")
+	ids := partIDs(t, e, s.ID)
+	if err := e.lib.RemoveEntry(bg, ids[0]); err != nil {
+		t.Fatal(err)
+	}
+	if got, _, err := e.lib.SeriesOfItem(bg, ids[0]); err != nil || got != nil {
+		t.Fatalf("removed entry still a part: %+v %v", got, err)
+	}
+	for i, id := range ids[1:] {
+		if _, pos, err := e.lib.SeriesOfItem(bg, id); err != nil || pos != i+1 {
+			t.Fatalf("part %d at %d (%v)", id, pos, err)
+		}
+	}
+	// the last part takes the series with it
+	for _, id := range ids[1:] {
+		if err := e.lib.RemoveEntry(bg, id); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := e.lib.SeriesByUID(bg, "book", s.UID); !errors.Is(err, ErrNoSeries) {
+		t.Fatalf("series kept: %v", err)
+	}
+}
+
+func TestRestoreSeriesHostileInput(t *testing.T) {
+	e := newEnv(t)
+	a := addBook(t, e.lib, "1", fp(1), Entry{Status: Planned})
+	addBook(t, e.lib, "2", fp(1), Entry{Status: Planned})
+	addBook(t, e.lib, "3", fp(1), Entry{Status: Planned})
+	taken := addBook(t, e.lib, "4", fp(1), Entry{Status: Planned})
+	if _, err := e.lib.CreateSeries(bg, taken, "Taken"); err != nil {
+		t.Fatal(err)
+	}
+	addShow(t, e.lib, "9", fp(1), Entry{Status: Planned})
+	_ = a
+	ref := func(source, id string) BackupPartRef {
+		return BackupPartRef{PluginID: "book", Kind: "book", Source: source, SourceID: id}
+	}
+	count := func(q string) (n int) {
+		if err := e.db.QueryRow(q).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	good := func(uid string, parts ...BackupPartRef) BackupSeries {
+		return BackupSeries{UID: uid, PluginID: "book", Kind: "book", Title: "T " + uid, Parts: parts}
+	}
+	bad := func(mod func(*BackupSeries)) BackupSeries {
+		bs := good("u-x", ref("books", "1"))
+		mod(&bs)
+		return bs
+	}
+	invalidCases := map[string]BackupSeries{
+		"control title": bad(func(s *BackupSeries) { s.Title = "a\x07b" }),
+		"empty title":   bad(func(s *BackupSeries) { s.Title = " \t " }),
+		"empty uid":     bad(func(s *BackupSeries) { s.UID = "" }),
+		"long uid":      bad(func(s *BackupSeries) { s.UID = strings.Repeat("u", 101) }),
+		"control uid":   bad(func(s *BackupSeries) { s.UID = "u\nx" }),
+		"empty kind":    bad(func(s *BackupSeries) { s.Kind = "" }),
+	}
+	seriesN, partsN := count(`SELECT count(*) FROM series`), count(`SELECT count(*) FROM series_parts`)
+	items := count(`SELECT count(*) FROM items`)
+	for name, bs := range invalidCases {
+		if created, _, err := e.lib.RestoreSeries(bg, bs); created || !errors.Is(err, ErrInvalid) {
+			t.Errorf("%s: created=%v err=%v", name, created, err)
+		}
+	}
+	// nothing resolvable: not created, the rejects are counted
+	unresolvable := map[string]BackupSeries{
+		"other plugin":      good("u-p", BackupPartRef{PluginID: "tv", Kind: "show", Source: "tvdata", SourceID: "9"}),
+		"other kind":        good("u-k", BackupPartRef{PluginID: "book", Kind: "show", Source: "books", SourceID: "1"}),
+		"in another series": good("u-t", ref("books", "4")),
+		"unknown item":      good("u-g", ref("books", "nope")),
+	}
+	for name, bs := range unresolvable {
+		if created, left, err := e.lib.RestoreSeries(bg, bs); created || left != 1 || err != nil {
+			t.Errorf("%s: created=%v left=%d err=%v", name, created, left, err)
+		}
+	}
+	if count(`SELECT count(*) FROM series`) != seriesN || count(`SELECT count(*) FROM series_parts`) != partsN || count(`SELECT count(*) FROM items`) != items {
+		t.Fatal("a refused series changed the store")
+	}
+	// the same part twice and a mix: only the resolvable, first occurrence stays
+	created, left, err := e.lib.RestoreSeries(bg, good("u-mix", ref("books", "2"), ref("books", "2"), ref("books", "4"),
+		BackupPartRef{PluginID: "tv", Kind: "show", Source: "tvdata", SourceID: "9"}, ref("books", "3")))
+	if err != nil || !created || left != 3 {
+		t.Fatalf("mix: created=%v left=%d err=%v", created, left, err)
+	}
+	if n := count(`SELECT count(*) FROM series_parts p JOIN series s ON s.id = p.series_id WHERE s.uid = 'u-mix'`); n != 2 {
+		t.Fatalf("parts of the mix = %d", n)
+	}
+	if count(`SELECT count(*) FROM series`) != seriesN+1 || count(`SELECT count(*) FROM items`) != items {
+		t.Fatal("unexpected series or item count")
 	}
 }
