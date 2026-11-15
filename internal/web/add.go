@@ -398,7 +398,8 @@ func (s *server) resolveAdd(ctx context.Context, m plugin.Manifest, ref itemRef)
 }
 
 // setData sets the live data; the identity comes from the URL (matched
-// against the manifest), not from what the source returned.
+// against the manifest), not from what the source returned, so an alias id
+// (a slug) is what an add saves (see loadItem).
 func (t *addTarget) setData(d plugin.ItemData) {
 	t.data, t.haveData = d, true
 	t.data.Source, t.data.ID, t.data.Kind = t.ref.Source, t.ref.ID, t.ref.Kind

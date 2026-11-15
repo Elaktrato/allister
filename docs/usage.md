@@ -111,7 +111,7 @@ The universal backup includes these settings and the uploaded fonts. A restore s
 | `/movie/export/json` | The movies JSON export |
 | `/game` | Your games list (same search, filter and view parameters) |
 | `/game/search?q=...&source=igdb` | Search IGDB (needs Twitch app credentials); Steam (`source=steam`) is available too (needs a Steam Web API key) |
-| `/game/{source}/{id}` | Overview of a game; `/edit` edits its details |
+| `/game/{source}/{id}` | Overview of a game; `/edit` edits its details. An IGDB id may also be its slug (`/game/igdb/celeste`): the overview shows the game, but the URL's id stays the item's identity, so adding from that page saves the slug as the IGDB id, and a later add of the same game by its numeric id (from search) is a second item. Search, matching and imports always use the numeric id. |
 | `/game/manual/new`, `/game/manual/{id}` | Create and open manual games; `/edit` edits details, `/match` matches a source |
 | `/game/export/json` | The games JSON export |
 | `POST /settings/plugins/{source}/key` | Save a source's API key (`key`, or `field.<name>` for each named field) or remove the stored values (`remove=1`) and redirect back (see [API keys](#api-keys)) |
