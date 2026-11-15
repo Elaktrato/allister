@@ -120,15 +120,16 @@ func ParseRaw(r io.Reader) ([]RawRow, error) {
 
 // ParsePlaytime reads a playtime cell as seconds. It accepts hours and minutes
 // with or without a space between the parts ("1h 16min", "1h16min", "2h",
-// "16min") and plain minutes ("45"). An empty, negative or over-large cell is
-// not a playtime.
+// "16min") and plain minutes ("45"), each unit at most once and hours first.
+// An empty, negative or over-large (above maxPlaytimeMinutes) cell is not a
+// playtime.
 func ParsePlaytime(s string) (seconds int, ok bool) {
 	s = strings.ToLower(strings.TrimSpace(s))
 	if s == "" {
 		return 0, false
 	}
 	if n, err := strconv.Atoi(s); err == nil {
-		if n < 0 || n > maxProgress {
+		if n < 0 || n > maxPlaytimeMinutes {
 			return 0, false
 		}
 		return n * 60, true
@@ -148,7 +149,7 @@ func ParsePlaytime(s string) (seconds int, ok bool) {
 			return 0, false
 		}
 		n, err := strconv.Atoi(rest[:i])
-		if err != nil || n > maxProgress {
+		if err != nil || n > maxPlaytimeMinutes {
 			return 0, false
 		}
 		rest = rest[i:]
@@ -171,7 +172,7 @@ func ParsePlaytime(s string) (seconds int, ok bool) {
 			return 0, false
 		}
 	}
-	if !hoursSeen && !minutesSeen || minutes > maxProgress {
+	if !hoursSeen && !minutesSeen || minutes > maxPlaytimeMinutes {
 		return 0, false
 	}
 	return minutes * 60, true

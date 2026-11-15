@@ -44,6 +44,16 @@ func TestParsePlaytime(t *testing.T) {
 		{"0min", 0, true}, {"1min", 60, true}, {"16min", 960, true},
 		{"1h 16min", 4560, true}, {"2h", 7200, true}, {"45", 2700, true},
 		{"1h16min", 4560, true}, {"", 0, false}, {"abc", 0, false},
+		// a long playtime is above the generic progress cap but still valid
+		{"2000h", 2000 * 3600, true}, {"150000", 150000 * 60, true},
+		// above the playtime cap (1,000,000 minutes)
+		{"20000h", 0, false}, {"1000001", 0, false}, {"16666h 41min", 0, false},
+		{"16666h 40min", 1000000 * 60, true},
+		// repeated, out of order, overflowing, negative, a unit without a number
+		{"1h 2h", 0, false}, {"16min 5min", 0, false}, {"16min 1h", 0, false},
+		{"99999999999999999999", 0, false}, {"99999999999999999999h", 0, false},
+		{"-5", 0, false}, {"-1h", 0, false}, {"min", 0, false}, {"h", 0, false},
+		{"1h min", 0, false}, {"1x", 0, false},
 	} {
 		sec, ok := ParsePlaytime(c.in)
 		if sec != c.sec || ok != c.ok {

@@ -23,6 +23,11 @@ const (
 	dateLayout      = "2006-01-02 15:04:05-07:00"
 )
 
+// maxPlaytimeMinutes caps a playtime cell (about 16,667 hours). It is separate
+// from maxProgress: a long-played game easily passes 100,000 minutes, while an
+// episode or chapter count does not.
+const maxPlaytimeMinutes = 1000000
+
 // ErrBadFormat means the input is not a usable Yamtrack export (unreadable
 // CSV or a required column is missing).
 var ErrBadFormat = errors.New("not a Yamtrack CSV export")
