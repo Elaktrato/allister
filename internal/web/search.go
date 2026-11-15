@@ -300,15 +300,15 @@ func (s *server) runSearch(r *http.Request, m plugin.Manifest, si plugin.SourceI
 	case err == nil, errors.Is(err, plugin.ErrNotFound):
 	case errors.Is(err, plugin.ErrNotConfigured):
 		// the page itself carries the status: the user must set a key
-		log.Printf("search %q: %v", q, err)
+		log.Printf("search %q: %s", q, logSafe(err))
 		v.Message, v.Retry, v.Status = sourceMessage(m, si.ID, err), true, http.StatusServiceUnavailable
 		return
 	case errors.Is(err, plugin.ErrRateLimited):
-		log.Printf("search %q: %v", q, err)
+		log.Printf("search %q: %s", q, logSafe(err))
 		v.Message, v.Retry = sourceMessage(m, si.ID, err), true
 		return
 	default:
-		log.Printf("search %q: %v", q, err)
+		log.Printf("search %q: %s", q, logSafe(err))
 		v.Message, v.Retry = "Search is unavailable right now, please try again", true
 		return
 	}

@@ -819,7 +819,7 @@ func (s *server) statsTermOptions(ctx context.Context, scope []statsKind, q stat
 		if sk.Kind.Genres.Enabled && sk.Kind.Genres.Filterable {
 			counts, err := s.deps.Library.Terms(ctx, statsQueryFor(sk, q), "genre")
 			if err != nil {
-				log.Printf("stats: genre options: %v", err)
+				log.Printf("stats: genre options: %s", logSafe(err))
 			} else {
 				genres = mergeTermCounts(genres, counts)
 			}
@@ -827,7 +827,7 @@ func (s *server) statsTermOptions(ctx context.Context, scope []statsKind, q stat
 		if sk.Kind.Tags.Enabled && sk.Kind.Tags.Filterable {
 			counts, err := s.deps.Library.Terms(ctx, statsQueryFor(sk, q), "tag")
 			if err != nil {
-				log.Printf("stats: tag options: %v", err)
+				log.Printf("stats: tag options: %s", logSafe(err))
 			} else {
 				tags = mergeTermCounts(tags, counts)
 			}

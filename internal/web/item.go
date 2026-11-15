@@ -270,16 +270,16 @@ func (s *server) itemFail(w http.ResponseWriter, r *http.Request, m plugin.Manif
 	case errors.Is(err, errNoSuchItem), errors.Is(err, plugin.ErrNotFound):
 		s.errorPage(w, r, http.StatusNotFound, "Not found", "There is no such item.", "")
 	case errors.Is(err, plugin.ErrNotConfigured):
-		log.Printf("%s %s: %v", r.Method, r.URL.Path, err)
+		log.Printf("%s %q: %s", logSafe(r.Method), r.URL.Path, logSafe(err))
 		s.errorPage(w, r, http.StatusServiceUnavailable, "Not configured", sourceMessage(m, source, err), retry)
 	case errors.Is(err, plugin.ErrBadResponse):
-		log.Printf("%s %q: %v", r.Method, r.URL.Path, err)
+		log.Printf("%s %q: %s", logSafe(r.Method), r.URL.Path, logSafe(err))
 		s.errorPage(w, r, http.StatusBadGateway, "Unusable answer", sourceMessage(m, source, err), retry)
 	case errors.Is(err, plugin.ErrRateLimited), errors.Is(err, plugin.ErrUnavailable):
-		log.Printf("%s %q: %v", r.Method, r.URL.Path, err)
+		log.Printf("%s %q: %s", logSafe(r.Method), r.URL.Path, logSafe(err))
 		s.errorPage(w, r, http.StatusServiceUnavailable, "Temporarily unavailable", sourceMessage(m, source, err), retry)
 	default:
-		log.Printf("%s %q: %v", r.Method, r.URL.Path, err)
+		log.Printf("%s %q: %s", logSafe(r.Method), r.URL.Path, logSafe(err))
 		http.Error(w, "internal error", http.StatusInternalServerError)
 	}
 }
@@ -432,7 +432,7 @@ func (s *server) loadLive(ctx context.Context, m plugin.Manifest, ref itemRef, u
 		c = cachedDetail{Data: d}
 		if hasSection(k, plugin.SectionPeople) {
 			if c.Credits, err = src.People(ctx, kindKey, ref.ID); err != nil {
-				log.Printf("people %s: %v", key, err)
+				log.Printf("people %s: %s", logSafe(key), logSafe(err))
 				c.Credits, c.CreditsFailed = nil, true
 			}
 		}
