@@ -108,7 +108,12 @@ func (s *server) postIncrement(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	rv := s.rowView(t.man, *t.row, ret, s.visibleColumns(r.Context(), t.man, t.kind))
+	rvs := []rowView{s.rowView(t.man, *t.row, ret, s.visibleColumns(r.Context(), t.man, t.kind))}
+	if err := s.markSeries(r.Context(), t.man, rvs, []library.Row{*t.row}); err != nil {
+		s.internalError(w, r, err)
+		return
+	}
+	rv := rvs[0]
 	// a +1 from a card answers the card, one from the table the row
 	partial := "list_row"
 	if r.PostFormValue("view") == "cards" {

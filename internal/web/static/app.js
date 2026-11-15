@@ -33,6 +33,39 @@
     }
   });
 
+  // The Series tab's expand control: htmx loads the parts into the series'
+  // own tbody (a plain link to the series page without it); once they are
+  // shown, a click empties the tbody again. Collapsed is the default.
+  function seriesToggle(open, on) {
+    open.setAttribute("aria-expanded", on ? "true" : "false");
+    open.setAttribute("aria-label", open.getAttribute(on ? "data-label-open" : "data-label-closed"));
+    var icon = open.querySelector(".icon");
+    if (icon) {
+      icon.textContent = on ? "expand_less" : "expand_more";
+    }
+  }
+  document.addEventListener("click", function (event) {
+    var toggle = event.target.closest("[data-series-toggle]");
+    if (!toggle || toggle.getAttribute("aria-expanded") !== "true") {
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation(); // no second htmx request
+    var row = toggle.closest("tbody");
+    if (row && row.nextElementSibling) {
+      row.nextElementSibling.replaceChildren();
+    }
+    seriesToggle(toggle, false);
+  }, true);
+  document.addEventListener("htmx:afterSwap", function (event) {
+    var body = event.detail.target;
+    var prev = body && body.previousElementSibling;
+    var toggle = prev && prev.querySelector("[data-series-toggle]");
+    if (toggle) {
+      seriesToggle(toggle, true);
+    }
+  });
+
   // Appearance editor (progressive enhancement; the form works without
   // it): the colour picker and the #rrggbb field of a token follow each
   // other, and the page previews the colour at once through the token's

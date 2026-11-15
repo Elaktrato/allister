@@ -2,6 +2,7 @@ package web
 
 import (
 	"net/http"
+	"net/url"
 	"strings"
 	"testing"
 
@@ -97,5 +98,29 @@ func TestPartBadgeOnEntryTab(t *testing.T) {
 		if n := strings.Count(body, "· Saga"); n != 3 {
 			t.Fatalf("%s: %d badges, want 3", view, n)
 		}
+	}
+}
+
+func TestSeriesTabExpandOffersCollapse(t *testing.T) {
+	fe := newFixtureEnv(t)
+	fe.tvSeries(t, "Saga")
+	body := fe.get("/tv?tab=series&view=table").Body.String()
+	mustContain(t, body, `data-series-toggle aria-expanded="false"`, `data-label-open="Hide the parts of Saga"`)
+	js, err := staticFS.ReadFile("static/app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	mustContain(t, string(js), "[data-series-toggle]", `"aria-expanded"`, "replaceChildren")
+}
+
+func TestIncrementKeepsSeriesBadge(t *testing.T) {
+	fe := newFixtureEnv(t)
+	_, ids := fe.tvSeries(t, "Saga")
+	for _, view := range []string{"", "cards"} {
+		rec := fe.do("POST", "/list/"+idStr(ids[1])+"/increment", url.Values{"return": {"/tv"}, "view": {view}}, true)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("%q: code %d", view, rec.Code)
+		}
+		mustContain(t, rec.Body.String(), "2 · Saga")
 	}
 }
