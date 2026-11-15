@@ -107,16 +107,18 @@ func (c *googleBooksClient) get(ctx context.Context, path string, values url.Val
 	case keySent && (resp.StatusCode == http.StatusBadRequest || resp.StatusCode == http.StatusForbidden):
 		reasons := gbErrorReasons(resp.Body)
 		switch {
-		case resp.StatusCode == http.StatusBadRequest && reasons["keyInvalid"], reasons["API_KEY_INVALID"]:
+		// a refused key: "keyInvalid" comes with a 400, "API_KEY_INVALID" in
+		// the error details (any status)
+		case (resp.StatusCode == http.StatusBadRequest && reasons["keyInvalid"]) || reasons["API_KEY_INVALID"]:
 			return fmt.Errorf("googlebooks: the API key was refused: %w", plugin.ErrNotConfigured)
 		case resp.StatusCode == http.StatusForbidden && gbQuotaReason(reasons):
 			return plugin.ErrRateLimited
 		case resp.StatusCode == http.StatusForbidden && (reasons["accessNotConfigured"] || reasons["SERVICE_DISABLED"] ||
 			reasons["API_KEY_SERVICE_BLOCKED"] || reasons["forbidden"]):
 			return fmt.Errorf("googlebooks: the API key has no access to the Books API: %w", plugin.ErrNotConfigured)
-		case resp.StatusCode == http.StatusForbidden:
-			return plugin.ErrRateLimited
 		}
+		// With a key, a 400 or 403 without a known reason (an unreadable body,
+		// "unknownLocation", ...) is not retried: it would only repeat.
 		return fmt.Errorf("%w: googlebooks status %d", plugin.ErrBadResponse, resp.StatusCode)
 	case resp.StatusCode == http.StatusTooManyRequests, resp.StatusCode == http.StatusForbidden:
 		return plugin.ErrRateLimited

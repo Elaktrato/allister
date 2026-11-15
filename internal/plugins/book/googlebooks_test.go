@@ -184,9 +184,19 @@ func TestGoogleBooksKeyResolvedPerRequest(t *testing.T) {
 
 func TestGoogleBooksKeyResolverErrorIsReturned(t *testing.T) {
 	boom := errors.New("settings store unavailable")
-	s := &googleBooksSource{c: newGoogleBooksClient("http://127.0.0.1:1", func(context.Context) (string, error) { return "", boom }, nil)}
+	requests := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	t.Cleanup(srv.Close)
+	s := &googleBooksSource{c: newGoogleBooksClient(srv.URL, func(context.Context) (string, error) { return "", boom }, srv.Client())}
 	if _, err := s.Search(context.Background(), KindBook, "dune"); !errors.Is(err, boom) {
 		t.Fatalf("err = %v", err)
+	}
+	// an unreadable key is never taken for "no key": nothing is sent
+	if requests != 0 {
+		t.Fatalf("%d request(s) reached the server", requests)
 	}
 }
 
@@ -208,7 +218,9 @@ func TestGoogleBooksKeyErrors(t *testing.T) {
 		{"quota daily", "sekret", 403, `{"error":{"errors":[{"reason":"dailyLimitExceeded"}]}}`, plugin.ErrRateLimited},
 		{"quota user", "sekret", 403, `{"error":{"errors":[{"reason":"userRateLimitExceeded"}]}}`, plugin.ErrRateLimited},
 		{"quota detail", "sekret", 403, `{"error":{"details":[{"reason":"RATE_LIMIT_EXCEEDED"}]}}`, plugin.ErrRateLimited},
-		{"unknown 403 with key", "sekret", 403, `not json`, plugin.ErrRateLimited},
+		{"unparseable 403 with key", "sekret", 403, `not json`, plugin.ErrBadResponse},
+		{"unknown location 403 with key", "sekret", 403, `{"error":{"errors":[{"reason":"unknownLocation"}]}}`, plugin.ErrBadResponse},
+		{"empty 403 with key", "sekret", 403, `{}`, plugin.ErrBadResponse},
 		{"400 other reason", "sekret", 400, `{"error":{"errors":[{"reason":"invalid"}]}}`, plugin.ErrBadResponse},
 		{"no key 400", "", 400, `{"error":{"errors":[{"reason":"keyInvalid"}]}}`, plugin.ErrBadResponse},
 		{"no key 403", "", 403, `{"error":{"errors":[{"reason":"accessNotConfigured"}]}}`, plugin.ErrRateLimited},
