@@ -32,7 +32,7 @@ Pull request runs are cancelled when the branch gets a newer push; runs on `main
 The test job does not use `-race`. The project builds with `CGO_ENABLED=0` (pure-Go SQLite, a static binary), and the race detector needs cgo. With cgo switched on it does work in the pinned golang image (it has gcc) together with the pure-Go SQLite driver; this was tried locally (`CGO_ENABLED=1 go test -race`, results under "Measured" below). It is not part of CI because it would test a different build than the one shipped and roughly triples the suite's run time; run it by hand after concurrency changes:
 
 ```
-docker run --rm -v "$PWD":/src -w /src -e CGO_ENABLED=1 <the golang image of scripts/go.sh> go test -race ./...
+docker run --rm -v "$PWD":/src -w /src -e CGO_ENABLED=1 <the golang image of scripts/go.sh> go test -race -timeout 30m ./...
 ```
 
 ### Mutation testing
@@ -153,7 +153,7 @@ Other checks on the code base at the time (all green):
 - govulncheck: no vulnerability in called code. One in a required module that the code does not reach: GO-2026-5024 (`golang.org/x/sys` v0.30.0, Windows only, fixed in v0.44.0); Dependabot will propose the bump.
 - Trivy on the image: no fixable HIGH or CRITICAL. Without the filters it lists Debian advisories of unknown severity for `ca-certificates` and `tzdata` in the distroless base (fixed upstream, not yet in the pinned `latest` digest) and the same `golang.org/x/sys` advisory.
 - gitleaks: no leaks in the history.
-- RACE_RESULT
+- Race detector (2026-11-15, `CGO_ENABLED=1 go test -race ./...`, Go 1.27.3): no data race in any package. It is slow: `internal/backup` about 7 minutes, `internal/library` about 5.5 minutes (over the default 10-minute `go test` timeout when run alongside the other packages on a busy machine, so pass `-timeout 30m`), `internal/importer` about 5 minutes.
 
 ## GitHub settings to configure
 
