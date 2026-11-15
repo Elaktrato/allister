@@ -754,12 +754,13 @@ func (l *Library) SeriesOfItems(ctx context.Context, itemIDs []int64) (map[int64
 // the same rules as DeriveSeriesStatus (a test compares them on every
 // combination of up to three part statuses): not all dropped, not (some
 // completed and the rest dropped), not all planned, and not (paused without
-// any active). A series without parts derives as active, like there.
+// any active). A series without parts is not returned (it cannot exist:
+// a series is deleted with its last part).
 func (l *Library) ActiveSeries(ctx context.Context, pluginIDs []string, limit int) ([]SeriesRow, error) {
 	if len(pluginIDs) == 0 || limit <= 0 {
 		return nil, nil
 	}
-	args := make([]any, 0, len(pluginIDs)+1)
+	var args []any
 	for _, id := range pluginIDs {
 		args = append(args, id)
 	}
