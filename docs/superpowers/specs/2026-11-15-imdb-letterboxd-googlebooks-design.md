@@ -112,18 +112,26 @@ undocumented API, and VIZ lists volumes only. This goes into
 - One importer per plugin, both named "IMDb CSV", accepting `.csv`: the
   owner uploads the same file to Movies and to TV; each keeps its own
   types and counts the rest as ignored.
-- Columns are read by name, case-insensitive, with aliases for the two
-  export layouts (ratings: `Const`, `Your Rating`, `Date Rated`, `Title`,
-  `Title Type`, `Year`, `URL`, ...; list/watchlist: `Const`, `Created`,
-  `Title`, `Title Type`, `Year`, ...). The exact current names are
-  confirmed against the owner's export before the parser is finalised.
-- `Title Type`, normalised (lower case, spaces removed): movies take
-  `movie`, `tvmovie`, `short`, `video`, `tvspecial`; TV takes `tvseries`,
-  `tvminiseries`. Everything else (`tvepisode`, `videogame`, `podcast...`)
-  is ignored.
-- Status: a row with `Your Rating` → completed (Seen / Watched); without
-  (watchlist) → planned. Rating: 1–10 as is. Finished date: `Date Rated`
-  (builder's call: the closest thing IMDb has to a watch date; documented).
+- Columns are read by name, case-insensitive. **Confirmed against the
+  owner's watchlist export (2026-11-15)**: both the watchlist and the
+  ratings export use one layout — `Position, Const, Created, Modified,
+  Description, Title, Original Title, URL, Title Type, IMDb Rating,
+  Runtime (mins), Year, Genres, Num Votes, Release Date, Directors,
+  Your Rating, Date Rated` (no BOM; dates `YYYY-MM-DD`; `Const` is `tt` +
+  7–8 digits). The ratings export is re-checked when the owner's arrives.
+- **`Title Type` is localised** (the account language): the owner's export
+  has `Film`, `Fernsehserie`, `Miniserie`. Values are compared normalised
+  (lower case, spaces and hyphens removed) against an alias table covering
+  English and German at least: movies take `movie`/`film`, `tvmovie`/
+  `fernsehfilm`, `short`/`kurzfilm`, `video`, `tvspecial`/`fernsehspecial`;
+  TV takes `tvseries`/`fernsehserie`, `tvminiseries`/`miniserie`. Known
+  non-matching types (`tvepisode`/`fernsehepisode`, `videogame`/
+  `videospiel`, `podcastseries`, `musicvideo`/`musikvideo`) are ignored by
+  both importers; an **unknown** value is a skipped row whose reason names
+  it, so a new language shows up instead of vanishing.
+- Status per row (not per file): `Your Rating` set → completed (Seen /
+  Watched) with that rating (1–10) and finished date `Date Rated`; empty →
+  planned. `Created` (date added) is not mapped.
 - External id `imdb` = `Const` (`tt` + digits, validated). Movies:
   `ResolveVia: tmdb` (its lookup handles `imdb` via `/find`). TV:
   `ResolveVia: tvmaze`, `ResolveViaFallback: [tmdb]` (both look up `imdb`;
