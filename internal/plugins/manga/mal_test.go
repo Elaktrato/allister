@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"reflect"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -274,24 +275,47 @@ func TestMALPacingCancelWhileQueued(t *testing.T) {
 		w.Write([]byte(`{"serialization":[]}`))
 	}))
 	defer srv.Close()
-	c := newMALClient(srv.URL+"/v2", srv.Client(), idFn("x"), 600*time.Millisecond)
+	// long enough that a waiter still blocked on its slot is told apart from
+	// one that left at once
+	c := newMALClient(srv.URL+"/v2", srv.Client(), idFn("x"), 2*time.Second)
 	if _, err := c.Serialization(context.Background(), "1"); err != nil {
 		t.Fatal(err)
 	}
+	// lastSlot is the newest reserved request slot; a goroutine that has
+	// reserved one moves it, which orders the goroutines without sleeping
+	// for a guessed time.
+	lastSlot := func() time.Time {
+		c.mu.Lock()
+		defer c.mu.Unlock()
+		return c.last
+	}
+	reserved := func(after time.Time) {
+		t.Helper()
+		deadline := time.Now().Add(10 * time.Second)
+		for !lastSlot().After(after) {
+			if time.Now().After(deadline) {
+				t.Fatal("the waiter never reserved a slot")
+			}
+			runtime.Gosched()
+		}
+	}
+	first := lastSlot()
 	go c.Serialization(context.Background(), "1") // queued behind the first
-	time.Sleep(50 * time.Millisecond)
+	reserved(first)
+	second := lastSlot()
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() { _, err := c.Serialization(ctx, "1"); done <- err }()
-	time.Sleep(50 * time.Millisecond)
+	reserved(second)
 	start := time.Now()
 	cancel()
 	select {
 	case err := <-done:
-		if !errors.Is(err, context.Canceled) || time.Since(start) > 200*time.Millisecond {
+		// its own slot is two intervals away; leaving within one is prompt
+		if !errors.Is(err, context.Canceled) || time.Since(start) > time.Second {
 			t.Fatalf("err %v after %v", err, time.Since(start))
 		}
-	case <-time.After(2 * time.Second):
+	case <-time.After(10 * time.Second):
 		t.Fatal("cancelled waiter still blocked")
 	}
 }

@@ -116,7 +116,7 @@ func (letterboxdImporter) Parse(ctx context.Context, r io.Reader) (plugin.ParseR
 			return nil
 		})
 		if errors.Is(err, errTooManyRows) {
-			return plugin.ParseResult{}, fmt.Errorf("%w: the export has more than 100,000 rows", plugin.ErrBadInput)
+			return plugin.ParseResult{}, fmt.Errorf("%w: the export has more than %s rows", plugin.ErrBadInput, groupThousands(letterboxdMaxRows))
 		}
 		if err != nil {
 			return plugin.ParseResult{}, fmt.Errorf("%w: %s: %w", plugin.ErrBadInput, name, err)
@@ -132,6 +132,20 @@ func (letterboxdImporter) Parse(ctx context.Context, r io.Reader) (plugin.ParseR
 }
 
 var errTooManyRows = errors.New("too many rows")
+
+// groupThousands formats n with a comma between each group of three digits
+// (100000 is "100,000").
+func groupThousands(n int) string {
+	digits := strconv.Itoa(n)
+	var b strings.Builder
+	for i, r := range digits {
+		if i > 0 && (len(digits)-i)%3 == 0 {
+			b.WriteByte(',')
+		}
+		b.WriteRune(r)
+	}
+	return b.String()
+}
 
 func (f *lbFilm) apply(file string, row lbRow) {
 	uri := letterboxdPath(row.uri)

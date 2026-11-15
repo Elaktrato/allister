@@ -161,7 +161,8 @@ func (r *Runner) finishSubmit(ctx context.Context, ref *importerRef, filename st
 // storedRows turns a parse result into the rows to store, entries first (in
 // file order), then the importer's skipped rows. An entry of an unknown kind
 // or without the importer's external id is stored as skipped with the
-// reason (unless the importer keeps manual rows or resolves by title). entries counts the rows that will be processed.
+// reason (unless the importer keeps manual rows or resolves by title). entries
+// counts the rows that will be processed.
 func (r *Runner) storedRows(ref *importerRef, res plugin.ParseResult) (rows []storedRow, entries int, err error) {
 	idType := ref.info.ExternalIDType
 	for _, e := range res.Entries {

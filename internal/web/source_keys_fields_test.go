@@ -295,9 +295,9 @@ func TestSourceCredentialReadErrorAnswers500(t *testing.T) {
 }
 
 // TestOptionalKeySourceNeverNeedsKey: a source whose key is optional counts as
-// configured without one (no "(needs key)" label, no plugin notice, still the
-// default source), while the API keys card still lists it as optional and
-// shows no key as configured until one is saved.
+// configured without one (no "(needs key)" label, no plugin notice), while the
+// API keys card still lists it as optional and shows no key as configured
+// until one is saved.
 func TestOptionalKeySourceNeverNeedsKey(t *testing.T) {
 	e := newFixtureEnv(t, func(_, tv *plugintest.Plugin) {
 		tv.M.Sources[0].KeyOptional = true
@@ -317,4 +317,22 @@ func TestOptionalKeySourceNeverNeedsKey(t *testing.T) {
 	block = sourceKeyBlock(t, e.get("/settings/plugins").Body.String(), "tvdata")
 	mustContain(t, block, "A key is configured.", "Remove")
 	mustNotContain(t, block, "secret")
+}
+
+// TestOptionalKeySourceIsTheDefault: with a second, keyed source listed first
+// and without credentials, the optional-key source (no key saved) is the
+// default source, and it is the one searched.
+func TestOptionalKeySourceIsTheDefault(t *testing.T) {
+	meta := &plugintest.FakeSource{Summaries: []plugin.ItemSummary{{
+		Source: "tvmeta", ID: "9", Kind: "show", Titles: ttl("Meta Show")}}}
+	e := newFixtureEnv(t, keyedDefaultSources(meta), func(_, tv *plugintest.Plugin) {
+		tv.M.Sources[1].KeyOptional = true // tvdata, after tvmeta
+	})
+	e.tv.Summaries = []plugin.ItemSummary{{Source: "tvdata", ID: "77", Kind: "show", Titles: ttl("TV Show")}}
+	b := e.get("/tv/search?q=x").Body.String()
+	mustContain(t, b, `value="tvdata" selected`, "TV Meta (needs key)", "TV Show")
+	mustNotContain(t, b, `value="tvmeta" selected`, "Meta Show")
+	if e.tv.Calls(plugintest.OpSearch) != 1 || meta.Calls(plugintest.OpSearch) != 0 {
+		t.Fatalf("searches: tvdata %d tvmeta %d", e.tv.Calls(plugintest.OpSearch), meta.Calls(plugintest.OpSearch))
+	}
 }
