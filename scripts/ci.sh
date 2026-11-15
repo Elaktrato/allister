@@ -124,8 +124,9 @@ test)
 vuln)
 	# the source (only vulnerabilities in code that is actually called fail)
 	# and the built binary (the exact module versions and Go standard library
-	# linked into it)
-	in_go "$build_tools && .ci/bin/govulncheck ./... && go build -trimpath -o .ci/allister ./cmd/allister && .ci/bin/govulncheck -mode=binary .ci/allister"
+	# linked into it; built without VCS stamping, which needs a git the
+	# container may not trust, and the scan reads only the modules)
+	in_go "$build_tools && .ci/bin/govulncheck ./... && go build -trimpath -buildvcs=false -o .ci/allister ./cmd/allister && .ci/bin/govulncheck -mode=binary .ci/allister"
 	;;
 mutation)
 	entries=("$@")
