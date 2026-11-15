@@ -1,10 +1,12 @@
 package library
 
 import (
+	"cmp"
 	"context"
 	"database/sql"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -417,4 +419,267 @@ func (l *Library) DeleteSeries(ctx context.Context, seriesID int64, removeEntrie
 		return err
 	}
 	return tx.Commit()
+}
+
+// DeriveSeriesStatus is the status of a series from its parts' statuses, the
+// first rule that applies: all dropped is dropped; every non-dropped part
+// completed is completed; all planned is planned; any active is active; any
+// paused is paused; otherwise (completed and planned parts) active.
+func DeriveSeriesStatus(parts []Status) Status {
+	var dropped, completed, planned, active, paused int
+	for _, s := range parts {
+		switch s {
+		case Dropped:
+			dropped++
+		case Completed:
+			completed++
+		case Planned:
+			planned++
+		case Active:
+			active++
+		case Paused:
+			paused++
+		}
+	}
+	switch {
+	case len(parts) > 0 && dropped == len(parts):
+		return Dropped
+	case completed > 0 && completed+dropped == len(parts):
+		return Completed
+	case len(parts) > 0 && planned == len(parts):
+		return Planned
+	case active > 0:
+		return Active
+	case paused > 0:
+		return Paused
+	}
+	return Active
+}
+
+// SeriesRow is one row of the series list with its derived values.
+type SeriesRow struct {
+	Series           Series
+	Parts, Completed int
+	Status           Status
+	Cover            string
+	Updated          time.Time
+}
+
+// SeriesQuery selects series of one plugin. Text is a case-insensitive
+// substring of the series title or of any part's titles; Status filters on
+// the derived status; Sort is "" (newest update first) or "title".
+type SeriesQuery struct {
+	PluginID string
+	Text     string
+	Status   Status
+	Sort     string
+	Page     int
+	PageSize int
+}
+
+// SeriesPage is one page of series rows; Page is the page actually returned.
+type SeriesPage struct {
+	Rows               []SeriesRow
+	Total, Page, Pages int
+}
+
+// seriesRows loads every series of the plugin with derived values and applies
+// the text filter, in newest-update order. The status filter is not applied.
+func (l *Library) seriesRows(ctx context.Context, q SeriesQuery) ([]SeriesRow, error) {
+	rows, err := l.db.QueryContext(ctx, `SELECT `+seriesCols+` FROM series s WHERE s.plugin_id = ?`, q.PluginID)
+	if err != nil {
+		return nil, fmt.Errorf("list series: %w", err)
+	}
+	var out []SeriesRow
+	byID := map[int64]*SeriesRow{}
+	for rows.Next() {
+		s, err := scanSeries(rows)
+		if err != nil {
+			rows.Close()
+			return nil, fmt.Errorf("list series: %w", err)
+		}
+		out = append(out, SeriesRow{Series: *s})
+	}
+	if err := closeRows(rows); err != nil {
+		return nil, fmt.Errorf("list series: %w", err)
+	}
+	for i := range out {
+		byID[out[i].Series.ID] = &out[i]
+	}
+	statuses := map[int64][]Status{}
+	pr, err := l.db.QueryContext(ctx, `SELECT sp.series_id, e.status, e.updated_at, i.cover_path
+		FROM series_parts sp JOIN series s ON s.id = sp.series_id
+		JOIN `+tableEntries+` e ON e.item_id = sp.item_id JOIN items i ON i.id = sp.item_id
+		WHERE s.plugin_id = ? ORDER BY sp.series_id, sp.position`, q.PluginID)
+	if err != nil {
+		return nil, fmt.Errorf("list series parts: %w", err)
+	}
+	for pr.Next() {
+		var id int64
+		var status, updated, cover string
+		if err := pr.Scan(&id, &status, &updated, &cover); err != nil {
+			pr.Close()
+			return nil, fmt.Errorf("list series parts: %w", err)
+		}
+		at, err := time.Parse(time.RFC3339, updated)
+		if err != nil {
+			pr.Close()
+			return nil, fmt.Errorf("list series parts: entry updated_at: %w", err)
+		}
+		r := byID[id]
+		if r.Parts == 0 {
+			r.Cover = cover
+		}
+		r.Parts++
+		if Status(status) == Completed {
+			r.Completed++
+		}
+		if at.After(r.Updated) {
+			r.Updated = at
+		}
+		statuses[id] = append(statuses[id], Status(status))
+	}
+	if err := closeRows(pr); err != nil {
+		return nil, fmt.Errorf("list series parts: %w", err)
+	}
+	for i := range out {
+		out[i].Status = DeriveSeriesStatus(statuses[out[i].Series.ID])
+	}
+	if text := strings.TrimSpace(truncateRunes(q.Text, maxFilterRunes)); text != "" {
+		keep, err := l.seriesMatching(ctx, q.PluginID, text)
+		if err != nil {
+			return nil, err
+		}
+		out = slices.DeleteFunc(out, func(r SeriesRow) bool { return !keep[r.Series.ID] })
+	}
+	slices.SortStableFunc(out, func(a, b SeriesRow) int {
+		if c := b.Updated.Compare(a.Updated); c != 0 {
+			return c
+		}
+		return cmp.Compare(b.Series.ID, a.Series.ID)
+	})
+	return out, nil
+}
+
+// seriesMatching returns the ids of the plugin's series whose title or any
+// part's titles contain text (ASCII case-insensitive, like the list's text
+// filter).
+func (l *Library) seriesMatching(ctx context.Context, pluginID, text string) (map[int64]bool, error) {
+	if strings.ContainsRune(text, 0) {
+		return nil, nil
+	}
+	pat := containsPattern(text)
+	rows, err := l.db.QueryContext(ctx, `SELECT s.id FROM series s WHERE s.plugin_id = ? AND (lower(s.title) LIKE ? ESCAPE '\'
+		OR EXISTS (SELECT 1 FROM series_parts sp JOIN item_titles t ON t.item_id = sp.item_id
+			WHERE sp.series_id = s.id AND lower(t.text) LIKE ? ESCAPE '\'))`, pluginID, pat, pat)
+	if err != nil {
+		return nil, fmt.Errorf("list series text: %w", err)
+	}
+	keep := map[int64]bool{}
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return nil, fmt.Errorf("list series text: %w", err)
+		}
+		keep[id] = true
+	}
+	if err := closeRows(rows); err != nil {
+		return nil, fmt.Errorf("list series text: %w", err)
+	}
+	return keep, nil
+}
+
+// ListSeries returns a page of the plugin's series (every kind). Pages past
+// the end return the last page.
+func (l *Library) ListSeries(ctx context.Context, q SeriesQuery) (SeriesPage, error) {
+	rows, err := l.seriesRows(ctx, q)
+	if err != nil {
+		return SeriesPage{}, err
+	}
+	if q.Status != "" {
+		rows = slices.DeleteFunc(rows, func(r SeriesRow) bool { return r.Status != q.Status })
+	}
+	if q.Sort == "title" {
+		slices.SortStableFunc(rows, func(a, b SeriesRow) int {
+			return cmp.Or(cmp.Compare(strings.ToLower(a.Series.Title), strings.ToLower(b.Series.Title)), cmp.Compare(a.Series.ID, b.Series.ID))
+		})
+	}
+	size := q.PageSize
+	if size <= 0 {
+		size = defaultPageSize
+	}
+	size = min(size, maxPageSize)
+	total := len(rows)
+	pages := max(1, (total+size-1)/size)
+	pg := SeriesPage{Total: total, Pages: pages, Page: min(max(q.Page, 1), pages)}
+	from := min((pg.Page-1)*size, total)
+	pg.Rows = rows[from:min(from+size, total)]
+	return pg, nil
+}
+
+// SeriesCounts returns the number of matching series per derived status (all
+// five present); q.Status is ignored.
+func (l *Library) SeriesCounts(ctx context.Context, q SeriesQuery) (map[Status]int, error) {
+	rows, err := l.seriesRows(ctx, q)
+	if err != nil {
+		return nil, err
+	}
+	out := map[Status]int{}
+	for _, s := range Statuses() {
+		out[s] = 0
+	}
+	for _, r := range rows {
+		out[r.Status]++
+	}
+	return out, nil
+}
+
+// SeriesParts returns the series' parts as list rows in position order.
+func (l *Library) SeriesParts(ctx context.Context, seriesID int64, lang string) ([]Row, error) {
+	rows, err := l.db.QueryContext(ctx, `SELECT item_id FROM series_parts WHERE series_id = ? ORDER BY position`, seriesID)
+	if err != nil {
+		return nil, fmt.Errorf("series parts: %w", err)
+	}
+	var ids []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return nil, fmt.Errorf("series parts: %w", err)
+		}
+		ids = append(ids, id)
+	}
+	if err := closeRows(rows); err != nil {
+		return nil, fmt.Errorf("series parts: %w", err)
+	}
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	args := make([]any, len(ids))
+	for i, id := range ids {
+		args[i] = id
+	}
+	var pluginID, kind string
+	if err := l.db.QueryRowContext(ctx, `SELECT plugin_id, kind FROM series WHERE id = ?`, seriesID).Scan(&pluginID, &kind); err != nil {
+		return nil, fmt.Errorf("series parts: %w", err)
+	}
+	man, _ := l.reg.Manifest(pluginID)
+	loaded, err := l.loadRows(ctx, unmatchedClause(man), ` WHERE items.id IN (`+placeholders(len(ids))+`)`, args, "", nil, len(ids), 0, lang)
+	if err != nil {
+		return nil, err
+	}
+	pos := map[int64]int{}
+	for i, id := range ids {
+		pos[id] = i
+	}
+	slices.SortFunc(loaded, func(a, b Row) int { return cmp.Compare(pos[a.Item.ID], pos[b.Item.ID]) })
+	return loaded, nil
+}
+
+// HasSeries reports whether the plugin has any series.
+func (l *Library) HasSeries(ctx context.Context, pluginID string) (bool, error) {
+	var n int
+	err := l.db.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM series WHERE plugin_id = ?)`, pluginID).Scan(&n)
+	return n == 1, err
 }

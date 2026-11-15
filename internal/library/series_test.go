@@ -414,3 +414,178 @@ func TestDeleteItemRenumbersAndDropsEmptySeries(t *testing.T) {
 		t.Fatalf("unknown: %v", err)
 	}
 }
+
+func TestDeriveSeriesStatus(t *testing.T) {
+	for _, c := range []struct {
+		parts []Status
+		want  Status
+	}{
+		{[]Status{Dropped, Dropped}, Dropped},
+		{[]Status{Completed, Completed, Dropped}, Completed},
+		{[]Status{Planned, Planned}, Planned},
+		{[]Status{Completed, Active, Planned}, Active},
+		{[]Status{Completed, Paused}, Paused},
+		{[]Status{Completed, Planned}, Active},
+	} {
+		if got := DeriveSeriesStatus(c.parts); got != c.want {
+			t.Errorf("%v = %s, want %s", c.parts, got, c.want)
+		}
+	}
+}
+
+// seriesOf builds a series from the given books (id, status) in order and
+// renames the first book's titles so tests can match them.
+func seriesOf(t *testing.T, e *env, plug, title string, ids ...string) *Series {
+	t.Helper()
+	var s *Series
+	for i, id := range ids {
+		item := addBook(t, e.lib, id, fp(100), Entry{Status: Planned})
+		if i == 0 {
+			sv, err := e.lib.CreateSeries(bg, item, title)
+			if err != nil {
+				t.Fatal(err)
+			}
+			s = &sv
+			continue
+		}
+		if err := e.lib.AddPart(bg, s.ID, item, ""); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return s
+}
+
+func setStatus(t *testing.T, e *env, series int64, pos int, st Status, updated string) {
+	t.Helper()
+	if _, err := e.db.Exec(`UPDATE entries SET status = ?, updated_at = ? WHERE item_id = (SELECT item_id FROM series_parts WHERE series_id = ? AND position = ?)`, string(st), updated, series, pos); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestListSeries(t *testing.T) {
+	e := newEnv(t)
+	a := seriesOf(t, e, "book", "Alpha", "a1", "a2", "a3")
+	b := seriesOf(t, e, "book", "Beta", "b1")
+	setStatus(t, e, a.ID, 1, Completed, "2026-01-01T00:00:00Z")
+	setStatus(t, e, a.ID, 2, Completed, "2026-03-01T00:00:00Z")
+	setStatus(t, e, a.ID, 3, Planned, "2026-02-01T00:00:00Z")
+	setStatus(t, e, b.ID, 1, Paused, "2026-05-01T00:00:00Z")
+	if _, err := e.db.Exec(`UPDATE items SET cover_path = 'covers/a1.jpg' WHERE source_id = 'a1'`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.db.Exec(`UPDATE items SET cover_path = '' WHERE source_id = 'b1'`); err != nil {
+		t.Fatal(err)
+	}
+	// a series of another plugin must not show up
+	other, err := e.lib.AddToList(bg, "book2", "book", bookWith("o1", fp(1)), Entry{Status: Planned})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.lib.CreateSeries(bg, other, "Other"); err != nil {
+		t.Fatal(err)
+	}
+
+	pg, err := e.lib.ListSeries(bg, SeriesQuery{PluginID: "book"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pg.Total != 2 || pg.Page != 1 || pg.Pages != 1 || len(pg.Rows) != 2 {
+		t.Fatalf("page = %+v", pg)
+	}
+	if pg.Rows[0].Series.Title != "Beta" || pg.Rows[1].Series.Title != "Alpha" {
+		t.Fatalf("newest first: %q, %q", pg.Rows[0].Series.Title, pg.Rows[1].Series.Title)
+	}
+	ra := pg.Rows[1]
+	want := time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC)
+	if ra.Parts != 3 || ra.Completed != 2 || ra.Status != Active || ra.Cover != "covers/a1.jpg" || !ra.Updated.Equal(want) {
+		t.Fatalf("alpha row = %+v", ra)
+	}
+	if rb := pg.Rows[0]; rb.Parts != 1 || rb.Completed != 0 || rb.Status != Paused || rb.Cover != "" {
+		t.Fatalf("beta row = %+v", rb)
+	}
+	pg, err = e.lib.ListSeries(bg, SeriesQuery{PluginID: "book", Sort: "title"})
+	if err != nil || pg.Rows[0].Series.Title != "Alpha" || pg.Rows[1].Series.Title != "Beta" {
+		t.Fatalf("title sort: %+v %v", pg, err)
+	}
+	pg, err = e.lib.ListSeries(bg, SeriesQuery{PluginID: "book", PageSize: 1, Page: 9})
+	if err != nil || pg.Page != 2 || pg.Pages != 2 || pg.Total != 2 || len(pg.Rows) != 1 {
+		t.Fatalf("clamped page: %+v %v", pg, err)
+	}
+}
+
+func TestListSeriesText(t *testing.T) {
+	e := newEnv(t)
+	s := seriesOf(t, e, "book", "The Expanse", "x1", "x2")
+	seriesOf(t, e, "book", "Other", "y1")
+	if _, err := e.db.Exec(`UPDATE item_titles SET text = 'Leviathan Wakes' WHERE lang = 'en' AND item_id = (SELECT item_id FROM series_parts WHERE series_id = ? AND position = 2)`, s.ID); err != nil {
+		t.Fatal(err)
+	}
+	for text, want := range map[string]int{"EXPANSE": 1, "leviathan": 1, "  wakes ": 1, "dune": 2, "zzz": 0, "100%": 0} {
+		pg, err := e.lib.ListSeries(bg, SeriesQuery{PluginID: "book", Text: text})
+		if err != nil || pg.Total != want || len(pg.Rows) != want || pg.Pages != 1 {
+			t.Errorf("text %q: %+v %v, want %d", text, pg, err, want)
+		}
+	}
+}
+
+func TestListSeriesStatusAndCounts(t *testing.T) {
+	e := newEnv(t)
+	a := seriesOf(t, e, "book", "A", "a1", "a2")
+	b := seriesOf(t, e, "book", "B", "b1")
+	seriesOf(t, e, "book", "C", "c1")
+	setStatus(t, e, a.ID, 1, Completed, "2026-01-01T00:00:00Z")
+	setStatus(t, e, a.ID, 2, Dropped, "2026-01-01T00:00:00Z")
+	setStatus(t, e, b.ID, 1, Active, "2026-01-01T00:00:00Z")
+	pg, err := e.lib.ListSeries(bg, SeriesQuery{PluginID: "book", Status: Completed})
+	if err != nil || pg.Total != 1 || pg.Rows[0].Series.Title != "A" {
+		t.Fatalf("completed: %+v %v", pg, err)
+	}
+	counts, err := e.lib.SeriesCounts(bg, SeriesQuery{PluginID: "book", Status: Completed})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if counts[Completed] != 1 || counts[Active] != 1 || counts[Planned] != 1 || counts[Paused] != 0 || counts[Dropped] != 0 || len(counts) != 5 {
+		t.Fatalf("counts = %v", counts)
+	}
+	all, _ := e.lib.ListSeries(bg, SeriesQuery{PluginID: "book"})
+	sum := 0
+	for _, n := range counts {
+		sum += n
+	}
+	if sum != all.Total {
+		t.Fatalf("sum %d != total %d", sum, all.Total)
+	}
+}
+
+func TestSeriesPartsAndHasSeries(t *testing.T) {
+	e := newEnv(t)
+	if ok, err := e.lib.HasSeries(bg, "book"); err != nil || ok {
+		t.Fatalf("empty: %v %v", ok, err)
+	}
+	s := seriesOf(t, e, "book", "S", "p1", "p2", "p3")
+	last := partIDs(t, e, s.ID)[2]
+	for range 2 {
+		if err := e.lib.MovePart(bg, s.ID, last, -1); err != nil {
+			t.Fatal(err)
+		}
+	}
+	rows, err := e.lib.SeriesParts(bg, s.ID, "en")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ids := partIDs(t, e, s.ID)
+	if len(rows) != 3 {
+		t.Fatalf("rows = %d", len(rows))
+	}
+	for i, r := range rows {
+		if r.Item.ID != ids[i] || r.Title != "Dune" || r.Entry.ItemID != ids[i] {
+			t.Fatalf("row %d = %+v want item %d", i, r, ids[i])
+		}
+	}
+	if ok, err := e.lib.HasSeries(bg, "book"); err != nil || !ok {
+		t.Fatalf("has: %v %v", ok, err)
+	}
+	if ok, _ := e.lib.HasSeries(bg, "book2"); ok {
+		t.Fatal("book2 has none")
+	}
+}
