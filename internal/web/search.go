@@ -46,8 +46,10 @@ type searchView struct {
 	// EmptyHint and ManualURL are fixed per plugin, source and kind.
 	Heading, Action, Placeholder, EmptyHint, ManualURL string
 	Query                                              string
-	Searched                                           bool
-	Results                                            []searchCard
+	// Series is the uid of the series results are added into ("" for none).
+	Series   string
+	Searched bool
+	Results  []searchCard
 	// Message is a user-facing error; Retry says whether to offer a retry
 	// button requesting RetryURL. Status is the answer's status when the
 	// search fails for a reason the page itself should carry (a missing
@@ -232,7 +234,8 @@ func (s *server) search(w http.ResponseWriter, r *http.Request, pluginID string)
 		return
 	}
 	q := cleanQuery(qs.Get("q"))
-	v := searchView{
+	uid := seriesParam(r)
+	v := searchView{Series: uid,
 		Heading:     "Search " + lowerFirst(k.LabelPlural),
 		Action:      "/" + url.PathEscape(m.ID) + "/search",
 		Placeholder: "Search " + si.Name + "…",
@@ -241,6 +244,9 @@ func (s *server) search(w http.ResponseWriter, r *http.Request, pluginID string)
 		Query:       q,
 	}
 	v.RetryURL = v.Action + "?q=" + url.QueryEscape(q)
+	if uid != "" {
+		v.RetryURL += "&series=" + url.QueryEscape(uid)
+	}
 	validSources := sourcesForKind(m, k.Key)
 	if len(validSources) > 1 {
 		for _, x := range validSources {
@@ -327,7 +333,7 @@ func (s *server) runSearch(r *http.Request, m plugin.Manifest, si plugin.SourceI
 			Cover: covers.Src(httpURL(it.CoverURL)),
 			// the source that was asked (matched against the manifest), not
 			// what the result claims
-			Href: itemURL(m, si.ID, it.ID, k.Key),
+			Href: withSeriesParam(itemURL(m, si.ID, it.ID, k.Key), v.Series),
 		}
 		var meta []string
 		for _, fd := range k.Fields {

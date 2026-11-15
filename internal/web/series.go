@@ -159,26 +159,139 @@ func (s *server) postSeriesAddPart(w http.ResponseWriter, r *http.Request, m plu
 		s.errorPage(w, r, http.StatusNotFound, "Not found", "There is no such entry.", "")
 		return
 	}
+	if !s.addPart(w, r, m, ser, id) {
+		return
+	}
+	http.Redirect(w, r, seriesURL(m.ID, ser.UID), http.StatusSeeOther)
+}
+
+// addPart appends the entry of item as the series' last part (ordered by the
+// kind's hint position field when it has one). On failure it writes the error
+// page and returns false.
+func (s *server) addPart(w http.ResponseWriter, r *http.Request, m plugin.Manifest, ser *library.Series, item int64) bool {
 	field := ""
 	if k, ok := kindDef(m, ser.Kind); ok && k.SeriesHint != nil {
 		field = k.SeriesHint.PositionField
 	}
-	err := s.deps.Library.AddPart(r.Context(), ser.ID, id, field)
+	err := s.deps.Library.AddPart(r.Context(), ser.ID, item, field)
 	switch {
+	case err == nil:
+		return true
 	case errors.Is(err, library.ErrAlreadyInSeries):
 		s.errorPage(w, r, http.StatusConflict, "Series", "This entry is already in a series.", "")
-		return
 	case errors.Is(err, library.ErrNoEntry), errors.Is(err, library.ErrInvalid):
 		s.errorPage(w, r, http.StatusNotFound, "Not found", "There is no such entry.", "")
-		return
 	case errors.Is(err, library.ErrNoSeries):
 		s.seriesNotFound(w, r)
+	default:
+		s.internalError(w, r, err)
+	}
+	return false
+}
+
+// seriesParam is the ?series= uid a search, an overview or an add carries
+// ("" when absent or malformed).
+func seriesParam(r *http.Request) string {
+	if uid := r.URL.Query().Get("series"); validPathID(uid) {
+		return uid
+	}
+	return ""
+}
+
+// withSeriesParam adds ?series=uid (or &series=) to u; u is returned as is
+// for an empty uid.
+func withSeriesParam(u, uid string) string {
+	if uid == "" {
+		return u
+	}
+	sep := "?"
+	if strings.Contains(u, "?") {
+		sep = "&"
+	}
+	return u + sep + url.Values{"series": {uid}}.Encode()
+}
+
+// addSeries resolves the series an add request targets, before anything is
+// saved: none is (nil, true); a malformed or unknown uid is a 404, a series of
+// another kind than the item a 422 (false: the page is written).
+func (s *server) addSeries(w http.ResponseWriter, r *http.Request, t *addTarget) (*library.Series, bool) {
+	raw := r.URL.Query().Get("series")
+	if raw == "" {
+		return nil, true
+	}
+	if !validPathID(raw) {
+		s.seriesNotFound(w, r)
+		return nil, false
+	}
+	ser, err := s.deps.Library.SeriesByUID(r.Context(), t.man.ID, raw)
+	switch {
+	case errors.Is(err, library.ErrNoSeries):
+		s.seriesNotFound(w, r)
+		return nil, false
+	case err != nil:
+		s.internalError(w, r, err)
+		return nil, false
+	}
+	if ser.Kind != t.kind.Key {
+		s.errorPage(w, r, http.StatusUnprocessableEntity, "Series",
+			"This series holds "+lowerFirst(t.kind.LabelPlural)+" of another kind; it cannot take this entry.", "")
+		return nil, false
+	}
+	return ser, true
+}
+
+// attachToSeries puts an entry that is already in the list into the series.
+func (s *server) attachToSeries(w http.ResponseWriter, r *http.Request, t *addTarget, ser *library.Series) {
+	if s.addPart(w, r, t.man, ser, t.saved.ID) {
+		s.redirectAfterAdd(w, r, seriesURL(t.man.ID, ser.UID))
+	}
+}
+
+// addFinished ends a successful add of item: to the series when the add
+// targeted one (attached now, after the add has its final item), else to the
+// plugin's list.
+func (s *server) addFinished(w http.ResponseWriter, r *http.Request, t *addTarget, item int64, ser *library.Series) {
+	if ser == nil {
+		s.redirectAfterAdd(w, r, "/"+url.PathEscape(t.man.ID))
+		return
+	}
+	if s.addPart(w, r, t.man, ser, item) {
+		s.redirectAfterAdd(w, r, seriesURL(t.man.ID, ser.UID))
+	}
+}
+
+// postMakeSeries is "Make this a series": a new series titled by the form,
+// with the saved entry as its first part.
+func (s *server) postMakeSeries(w http.ResponseWriter, r *http.Request, pluginID string) {
+	m, ref, ok := s.addRef(w, r, pluginID)
+	if !ok || !parseForm(w, r) {
+		return
+	}
+	it, _, err := s.findSaved(r.Context(), m, ref)
+	switch {
+	case errors.Is(err, errAmbiguousKind):
+		s.itemFail(w, r, m, ref.Source, err, "")
 		return
 	case err != nil:
 		s.internalError(w, r, err)
 		return
+	case it == nil:
+		s.errorPage(w, r, http.StatusNotFound, "Not found", "There is no such entry.", "")
+		return
 	}
-	http.Redirect(w, r, seriesURL(m.ID, ser.UID), http.StatusSeeOther)
+	ser, err := s.deps.Library.CreateSeries(r.Context(), it.ID, r.PostFormValue("title"))
+	switch {
+	case errors.Is(err, library.ErrNoEntry):
+		s.errorPage(w, r, http.StatusNotFound, "Not found", "There is no such entry.", "")
+	case errors.Is(err, library.ErrAlreadyInSeries):
+		s.errorPage(w, r, http.StatusConflict, "Series", "This entry is already in a series.", "")
+	case errors.Is(err, library.ErrInvalid):
+		s.errorPage(w, r, http.StatusUnprocessableEntity, "Series", invalidMessage(err), "")
+	case err != nil:
+		s.internalError(w, r, err)
+	default:
+		http.Redirect(w, r, seriesURL(m.ID, ser.UID), http.StatusSeeOther)
+	}
 }
 
 // formItemID parses an item id from a path or form value.

@@ -494,6 +494,7 @@ func (s *server) getAdd(w http.ResponseWriter, r *http.Request, pluginID string)
 	if !ok {
 		return
 	}
+	uid := seriesParam(r)
 	v := entryValues{Status: string(library.Planned)}
 	if !isPartialRequest(r) {
 		s.showItem(w, r, ref, itemExtras{Dialog: &entryForm{entryValues: v}, UseCache: true}, http.StatusOK)
@@ -512,6 +513,7 @@ func (s *server) getAdd(w http.ResponseWriter, r *http.Request, pluginID string)
 		return
 	}
 	f := t.form(v)
+	f.Action = withSeriesParam(f.Action, uid)
 	if t.entry != nil {
 		f.Error, f.ExistingURL = alreadyInList(t.kind), itemURL(m, t.ref.Source, t.ref.ID, t.kind.Key)
 		s.renderPartialStatus(w, http.StatusConflict, "item", "add_dialog", f)
@@ -535,7 +537,16 @@ func (s *server) postAdd(w http.ResponseWriter, r *http.Request, pluginID string
 		s.addFailure(w, r, m, ref, readEntryValues(kindFor(m, ref), r), err)
 		return
 	}
+	// the target series is checked before anything is saved
+	ser, ok := s.addSeries(w, r, t)
+	if !ok {
+		return
+	}
 	if t.entry != nil {
+		if ser != nil {
+			s.attachToSeries(w, r, t, ser)
+			return
+		}
 		s.addConflict(w, r, t, readEntryValues(t.kind, r))
 		return
 	}
@@ -550,6 +561,10 @@ func (s *server) postAdd(w http.ResponseWriter, r *http.Request, pluginID string
 			return
 		}
 		if t.entry != nil {
+			if ser != nil {
+				s.attachToSeries(w, r, t, ser)
+				return
+			}
 			s.addConflict(w, r, t, v)
 			return
 		}
@@ -566,7 +581,7 @@ func (s *server) postAdd(w http.ResponseWriter, r *http.Request, pluginID string
 		switch {
 		case err == nil:
 			s.enqueueSync(ctx, m.ID, id)
-			s.addDone(w, r, m.ID)
+			s.addFinished(w, r, t, id, ser)
 			return
 		case errors.Is(err, library.ErrInvalid):
 			f := t.form(v)
@@ -585,18 +600,18 @@ func (s *server) postAdd(w http.ResponseWriter, r *http.Request, pluginID string
 			return
 		}
 	}
-	s.attachEntry(w, r, t, v, entry)
+	s.attachEntry(w, r, t, v, entry, ser)
 }
 
 // attachEntry gives an already saved item its list entry (no re-save, no
 // job) with library.CreateEntry, which inserts only when the item has no
 // entry yet: an entry that appeared meanwhile is the same 409 as before.
-func (s *server) attachEntry(w http.ResponseWriter, r *http.Request, t *addTarget, v entryValues, entry library.Entry) {
+func (s *server) attachEntry(w http.ResponseWriter, r *http.Request, t *addTarget, v entryValues, entry library.Entry, ser *library.Series) {
 	entry.ItemID = t.saved.ID
 	err := s.deps.Library.CreateEntry(r.Context(), entry)
 	switch {
 	case err == nil:
-		s.addDone(w, r, t.man.ID)
+		s.addFinished(w, r, t, t.saved.ID, ser)
 	case errors.Is(err, library.ErrEntryExists):
 		s.addConflict(w, r, t, v)
 	case errors.Is(err, library.ErrInvalid):
@@ -633,10 +648,9 @@ func (s *server) enqueueSync(ctx context.Context, pluginID string, itemID int64)
 	}
 }
 
-// addDone redirects to the plugin's list: htmx would swap a 303 target into
+// redirectAfterAdd redirects to target (the plugin's list or the series): htmx would swap a 303 target into
 // the dialog, so it gets HX-Redirect with 204.
-func (s *server) addDone(w http.ResponseWriter, r *http.Request, pluginID string) {
-	target := "/" + url.PathEscape(pluginID)
+func (s *server) redirectAfterAdd(w http.ResponseWriter, r *http.Request, target string) {
 	if isPartialRequest(r) {
 		w.Header().Set("HX-Redirect", target)
 		w.WriteHeader(http.StatusNoContent)

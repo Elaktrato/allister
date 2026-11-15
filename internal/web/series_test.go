@@ -252,3 +252,159 @@ func TestSeriesAddForwardsPositionField(t *testing.T) {
 		t.Fatalf("position = %d, want 2", pos)
 	}
 }
+
+func hintBook(book, _ *plugintest.Plugin) {
+	book.M.Kinds[0].SeriesHint = &plugin.SeriesHintDef{TitleField: "author"}
+}
+
+func TestMakeSeriesFromOverview(t *testing.T) {
+	fe := newFixtureEnv(t)
+	id := fe.addFixture(t, "tv", "show", tvShow("5", "Solo"), library.Entry{Status: library.Planned})
+	body := fe.get("/tv/tvdata/5").Body.String()
+	mustContain(t, body, "Make this a series", `action="/tv/tvdata/5/series"`, `value="Solo"`)
+	rec := fe.do("POST", "/tv/tvdata/5/series", url.Values{"title": {" Solo Saga "}}, false)
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("post: %d %s", rec.Code, rec.Body.String())
+	}
+	ser, n, err := fe.lib.SeriesOfItem(bg, id)
+	if err != nil || ser == nil || n != 1 || ser.Title != "Solo Saga" {
+		t.Fatalf("series = %+v %d %v", ser, n, err)
+	}
+	if loc := rec.Header().Get("Location"); loc != seriesURL("tv", ser.UID) {
+		t.Fatalf("location %q", loc)
+	}
+	if body := fe.get("/tv/tvdata/5").Body.String(); strings.Contains(body, "Make this a series") {
+		t.Fatal("offered for a part")
+	}
+	if rec := fe.do("POST", "/tv/tvdata/5/series", url.Values{"title": {"Again"}}, false); rec.Code != http.StatusConflict {
+		t.Fatalf("again: %d", rec.Code)
+	}
+	// an entry that is not in the list: no form, no series
+	fe.saveFixture(t, "tv", "show", tvShow("6", "Unlisted"))
+	mustNotContain(t, fe.get("/tv/tvdata/6").Body.String(), "Make this a series")
+	if rec := fe.do("POST", "/tv/tvdata/6/series", url.Values{"title": {"X"}}, false); rec.Code != http.StatusNotFound {
+		t.Fatalf("unlisted: %d", rec.Code)
+	}
+	// live (unsaved) overview
+	fe.tv.Data = tvShow("7", "Live")
+	mustNotContain(t, fe.get("/tv/tvdata/7").Body.String(), "Make this a series")
+	fe.addFixture(t, "tv", "show", tvShow("8", "Blank"), library.Entry{Status: library.Planned})
+	if rec := fe.do("POST", "/tv/tvdata/8/series", url.Values{"title": {" "}}, false); rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("blank: %d", rec.Code)
+	}
+}
+
+func TestMakeSeriesPrefillsFromHint(t *testing.T) {
+	fe := newFixtureEnv(t, hintBook)
+	fe.addFixture(t, "book", "book", bookItem("1", "Earthsea 1"), library.Entry{Status: library.Planned})
+	mustContain(t, fe.get("/book/books/1").Body.String(), `value="Ursula K. Le Guin"`)
+	fe.addFixture(t, "book", "book", plugin.ItemData{ItemSummary: plugin.ItemSummary{Source: "books", ID: "2", Kind: "book", Titles: ttl("Plain")}},
+		library.Entry{Status: library.Planned})
+	mustContain(t, fe.get("/book/books/2").Body.String(), `value="Plain"`)
+}
+
+func TestPartOverviewShowsSeriesNav(t *testing.T) {
+	fe := newFixtureEnv(t)
+	ser, ids := fe.tvSeries(t, "Saga")
+	body := fe.get("/tv/tvdata/2Saga").Body.String()
+	mustContain(t, body, "Part 2 of", "Saga", `href="`+seriesURL("tv", ser.UID)+`"`,
+		`href="`+itemPath("tv", "tvdata", "1Saga")+`"`, `href="`+itemPath("tv", "tvdata", "3Saga")+`"`,
+		"Remove from series", `action="`+seriesURL("tv", ser.UID)+"/parts/"+idStr(ids[1])+`/remove"`)
+	mustNotContain(t, body, "Make this a series")
+	first := fe.get("/tv/tvdata/1Saga").Body.String()
+	mustContain(t, first, "Part 1 of")
+	mustNotContain(t, first, "Previous part")
+}
+
+func TestSearchAddIntoSeries(t *testing.T) {
+	fe := newFixtureEnv(t)
+	ser, _ := fe.tvSeries(t, "Saga")
+	fe.tv.Data = tvShow("5", "Fresh")
+	form := url.Values{"status": {"planned"}}
+	if rec := fe.do("POST", "/tv/tvdata/5/add?series=nope", form, false); rec.Code != http.StatusNotFound {
+		t.Fatalf("unknown: %d", rec.Code)
+	}
+	if items, _ := fe.lib.ItemByPluginSource(bg, "tv", "tvdata", "5"); len(items) != 0 {
+		t.Fatal("saved despite unknown series")
+	}
+	base := seriesURL("tv", ser.UID)
+	rec := fe.do("POST", "/tv/tvdata/5/add?series="+ser.UID, form, false)
+	if rec.Code != http.StatusSeeOther || rec.Header().Get("Location") != base {
+		t.Fatalf("add: %d %s", rec.Code, rec.Header().Get("Location"))
+	}
+	items, _ := fe.lib.ItemByPluginSource(bg, "tv", "tvdata", "5")
+	if len(items) != 1 {
+		t.Fatal("not saved")
+	}
+	if s, n, _ := fe.lib.SeriesOfItem(bg, items[0].ID); s == nil || s.ID != ser.ID || n != 4 {
+		t.Fatalf("not attached: %+v %d", s, n)
+	}
+	// an item already in the list is attached without a second add
+	listed := fe.addFixture(t, "tv", "show", tvShow("6", "Listed"), library.Entry{Status: library.Planned})
+	rec = fe.do("POST", "/tv/tvdata/6/add?series="+ser.UID, form, false)
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("listed: %d", rec.Code)
+	}
+	if _, n, _ := fe.lib.SeriesOfItem(bg, listed); n != 5 {
+		t.Fatalf("listed position %d", n)
+	}
+	// in another series: 409
+	other, _ := fe.tvSeries(t, "Other")
+	rec = fe.do("POST", "/tv/tvdata/1Other/add?series="+ser.UID, form, false)
+	if rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), "This entry is already in a series.") {
+		t.Fatalf("other series: %d", rec.Code)
+	}
+	_ = other
+	// the parameter rides on the search results, the overview and the dialog
+	fe.tv.Summaries = []plugin.ItemSummary{tvShow("9", "Found").ItemSummary}
+	mustContain(t, fe.get("/tv/search?q=x&series="+ser.UID).Body.String(), "series="+ser.UID)
+	fe.tv.Data = tvShow("9", "Found")
+	mustContain(t, fe.get("/tv/tvdata/9?series="+ser.UID).Body.String(), "series="+ser.UID)
+	mustContain(t, fe.get("/tv/tvdata/9/add?series="+ser.UID).Body.String(), `action="/tv/tvdata/9/add?series=`+ser.UID+`"`)
+	// a listed entry in no series is offered to join; one in a series is not
+	fe.addFixture(t, "tv", "show", tvShow("10", "Solo"), library.Entry{Status: library.Planned})
+	mustContain(t, fe.get("/tv/tvdata/10?series="+ser.UID).Body.String(), "Add to series", `/tv/tvdata/10/add?series=`+ser.UID)
+	mustNotContain(t, fe.get("/tv/tvdata/1Saga?series="+ser.UID).Body.String(), "Add to series")
+	mustNotContain(t, fe.get("/tv/tvdata/10?series=nope").Body.String(), "Add to series")
+}
+
+func TestSearchAddIntoSeriesOfOtherKindRefused(t *testing.T) {
+	fe := newFixtureEnv(t, func(_, tv *plugintest.Plugin) {
+		k := tv.M.Kinds[0]
+		k.Key, k.Label, k.LabelPlural = "film", "Film", "Films"
+		tv.M.Kinds = append(tv.M.Kinds, k)
+	})
+	ser, _ := fe.tvSeries(t, "Saga")
+	fe.tv.Data = tvShow("5", "A Film")
+	rec := fe.do("POST", "/tv/tvdata/5/add?kind=film&series="+ser.UID, url.Values{"status": {"planned"}}, false)
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("other kind: %d %s", rec.Code, rec.Body.String())
+	}
+	if items, _ := fe.lib.ItemByPluginSource(bg, "tv", "tvdata", "5"); len(items) != 0 {
+		t.Fatal("saved despite the refusal")
+	}
+	// a series of another plugin is unknown under this one
+	fe.book.Data = bookItem("1", "B")
+	if rec := fe.do("POST", "/book/books/1/add?series="+ser.UID, url.Values{"status": {"planned"}}, false); rec.Code != http.StatusNotFound {
+		t.Fatalf("other plugin: %d", rec.Code)
+	}
+}
+
+func TestSeriesRoutesAreGuarded(t *testing.T) {
+	fe := newFixtureEnv(t)
+	ser, _ := fe.tvSeries(t, "Saga")
+	fe.disable(t, "tv")
+	other := fe.get("/tv/tvdata/1Saga")
+	got := fe.get(seriesURL("tv", ser.UID))
+	if other.Code != http.StatusNotFound || got.Code != other.Code || got.Body.String() != other.Body.String() {
+		t.Fatalf("series %d vs other %d", got.Code, other.Code)
+	}
+	for _, p := range []string{"/rename", "/delete", "/parts"} {
+		if rec := fe.do("POST", seriesURL("tv", ser.UID)+p, url.Values{"title": {"x"}}, false); rec.Code != http.StatusNotFound {
+			t.Fatalf("POST %s: %d", p, rec.Code)
+		}
+	}
+	if rec := fe.do("POST", "/tv/tvdata/1Saga/series", url.Values{"title": {"x"}}, false); rec.Code != http.StatusNotFound {
+		t.Fatalf("make series: %d", rec.Code)
+	}
+}
