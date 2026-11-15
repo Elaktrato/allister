@@ -457,20 +457,20 @@ func (s *server) getSeriesCandidates(w http.ResponseWriter, r *http.Request, m p
 }
 
 // getSeriesParts answers the Series tab's expand control: the parts as
-// table rows (the normal row template), in position order.
+// table rows that fit the tab's head, in position order.
 func (s *server) getSeriesParts(w http.ResponseWriter, r *http.Request, m plugin.Manifest, ser *library.Series) {
 	ctx := r.Context()
-	k, _ := kindDef(m, ser.Kind)
 	rows, err := s.deps.Library.SeriesParts(ctx, ser.ID, s.titleLang(ctx, m))
 	if err != nil {
 		s.internalError(w, r, err)
 		return
 	}
-	cols := s.visibleColumns(ctx, m, k)
 	ret := seriesListURL(m.ID)
 	var v struct{ Rows []rowView }
-	for _, row := range rows {
-		v.Rows = append(v.Rows, s.rowView(m, row, ret, cols))
+	for i, row := range rows {
+		rv := s.rowView(m, row, ret, nil)
+		rv.SeriesPos = i + 1
+		v.Rows = append(v.Rows, rv)
 	}
 	s.renderPartial(w, "list", "series_parts", v)
 }
