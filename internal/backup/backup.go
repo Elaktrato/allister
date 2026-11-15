@@ -908,7 +908,7 @@ func (rs *restorer) seriesList(ctx context.Context, dec *json.Decoder, pending, 
 		res, err := rs.opts.Library.RestoreSeries(ctx, bs, library.RestoreOptions{ResolveCover: rs.resolver(), ReleaseCover: rs.release})
 		switch {
 		case errors.Is(err, library.ErrInvalid):
-			row.Reason = clip("the series is not valid: "+err.Error(), 300)
+			row.Reason = clip("the series is not valid: "+strings.TrimPrefix(err.Error(), library.ErrInvalid.Error()+": "), 300)
 			rs.seriesSkipped(row)
 			continue
 		case errors.Is(err, errTotalTooLarge):

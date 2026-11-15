@@ -1525,6 +1525,14 @@ func (l *Library) RestoreSeries(ctx context.Context, bs BackupSeries, opts Resto
 	if parentNote != "" {
 		notes = append(notes, parentNote)
 	}
+	// an existing uid is skipped before anything is stored
+	var n int
+	if err := l.db.QueryRowContext(ctx, `SELECT count(*) FROM series WHERE uid = ?`, bs.UID).Scan(&n); err != nil {
+		return res, err
+	}
+	if n > 0 {
+		return res, nil
+	}
 	stored := ""
 	committed := false
 	defer func() {
@@ -1532,12 +1540,23 @@ func (l *Library) RestoreSeries(ctx context.Context, bs BackupSeries, opts Resto
 			l.releaseCover(ctx, opts, stored)
 		}
 	}()
+	// the cover is stored before the write transaction, like RestoreItem
+	if kindErr == nil && bs.Cover != "" {
+		var note string
+		if stored, note, err = restoreSeriesCover(ctx, opts, bs.Cover); err != nil {
+			return res, err
+		}
+		if stored != "" {
+			d.CoverPath = stored
+		} else if note != "" {
+			notes = append(notes, note)
+		}
+	}
 	tx, err := l.db.BeginTx(ctx, nil)
 	if err != nil {
 		return res, err
 	}
 	defer tx.Rollback()
-	var n int
 	if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM series WHERE uid = ?`, bs.UID).Scan(&n); err != nil {
 		return res, err
 	}
@@ -1585,17 +1604,6 @@ func (l *Library) RestoreSeries(ctx context.Context, bs BackupSeries, opts Resto
 			notes = append(notes, note)
 		}
 	}
-	if kindErr == nil && bs.Cover != "" {
-		var note string
-		if stored, note, err = restoreSeriesCover(ctx, opts, bs.Cover); err != nil {
-			return res, err
-		}
-		if stored != "" {
-			d.CoverPath = stored
-		} else if note != "" {
-			notes = append(notes, note)
-		}
-	}
 	// a series whose parts all failed is kept only for its own data (R6); one
 	// archived without parts was kept for its data or its spin-offs (Empty)
 	if len(parts) == 0 && len(bs.Parts) > 0 && !d.holdsOwn() {
@@ -1640,7 +1648,7 @@ func restoreSeriesValues(kind plugin.KindDef, kindErr error, title string, bs Ba
 	if kindErr != nil {
 		if bs.Cover != "" || bs.CoverURL != "" || bs.Description != "" || bs.StartedOn != "" || bs.EndedOn != "" ||
 			bs.PartsTotal != 0 || len(bs.Fields) > 0 || bs.Linked != nil {
-			notes = append(notes, "the series data is not restored: "+kindErr.Error())
+			notes = append(notes, "the series data is not restored: "+noteReason(kindErr))
 		}
 		return d, nil, notes
 	}
@@ -1648,7 +1656,7 @@ func restoreSeriesValues(kind plugin.KindDef, kindErr error, title string, bs Ba
 		t := d
 		set(&t)
 		if _, err := prepareSeriesDetails(kind, &t); err != nil {
-			notes = append(notes, what+" is not restored: "+err.Error())
+			notes = append(notes, what+" is not restored: "+noteReason(err))
 			return
 		}
 		d = t
@@ -1689,7 +1697,7 @@ func restoreSeriesValues(kind plugin.KindDef, kindErr error, title string, bs Ba
 		t := d
 		t.Fields = map[string]plugin.FieldValue{k: bs.Fields[k]}
 		if _, err := prepareSeriesDetails(kind, &t); err != nil {
-			notes = append(notes, fmt.Sprintf("the field %q is not restored: %v", k, err))
+			notes = append(notes, fmt.Sprintf("the field %q is not restored: %s", k, noteReason(err)))
 			continue
 		}
 		accepted[k] = bs.Fields[k]
@@ -1699,13 +1707,19 @@ func restoreSeriesValues(kind plugin.KindDef, kindErr error, title string, bs Ba
 	}
 	rows, err := prepareSeriesDetails(kind, &d)
 	if err != nil { // the accepted fields together fail
-		notes = append(notes, "the fields are not restored: "+err.Error())
+		notes = append(notes, "the fields are not restored: "+noteReason(err))
 		d.Fields = nil
 		if rows, err = prepareSeriesDetails(kind, &d); err != nil {
-			return SeriesDetails{Title: title, Finished: bs.Finished}, nil, append(notes, "the series data is not restored: "+err.Error())
+			return SeriesDetails{Title: title, Finished: bs.Finished}, nil, append(notes, "the series data is not restored: "+noteReason(err))
 		}
 	}
 	return d, rows, notes
+}
+
+// noteReason is err as the reason of a restore note: without the "invalid: "
+// prefix of ErrInvalid, like the web's messages.
+func noteReason(err error) string {
+	return strings.TrimPrefix(err.Error(), ErrInvalid.Error()+": ")
 }
 
 // restoreParentUID returns the parent uid to resolve later, or a note when
@@ -1735,7 +1749,7 @@ func restoreSeriesLink(ctx context.Context, tx *sql.Tx, pluginID string, kind pl
 	}
 	if err := checkSeriesLink(ctx, tx, pluginID, kind, id, true); err != nil {
 		if errors.Is(err, ErrInvalid) {
-			return 0, what + " is not restored: " + err.Error(), nil
+			return 0, what + " is not restored: " + noteReason(err), nil
 		}
 		return 0, "", err
 	}
@@ -1817,7 +1831,7 @@ func (l *Library) RestoreSeriesParent(ctx context.Context, pluginID, uid, parent
 	}
 	if err := checkSeriesParent(ctx, tx, id, pluginID, pid); err != nil {
 		if errors.Is(err, ErrInvalid) {
-			return what + " is not restored: " + err.Error(), nil
+			return what + " is not restored: " + noteReason(err), nil
 		}
 		return "", err
 	}
