@@ -797,9 +797,10 @@ func (l *Library) DeleteSeries(ctx context.Context, seriesID int64, removeEntrie
 // DeriveSeriesStatus is the status of a series from its main parts'
 // statuses and the expected number of parts (0 = not set), the first rule
 // that applies: all dropped is dropped; every non-dropped part completed,
-// and at least expected parts completed, is completed; all planned is
+// with at least expected parts completed or dropped, is completed; all planned is
 // planned; any active is active; any paused is paused; otherwise (completed
-// and planned parts, or fewer completed parts than expected) active.
+// and planned parts, or fewer completed and dropped parts than expected)
+// active.
 func DeriveSeriesStatus(parts []Status, expected int) Status {
 	var dropped, completed, planned, active, paused int
 	for _, s := range parts {
@@ -819,7 +820,7 @@ func DeriveSeriesStatus(parts []Status, expected int) Status {
 	switch {
 	case len(parts) > 0 && dropped == len(parts):
 		return Dropped
-	case completed > 0 && completed+dropped == len(parts) && completed >= expected:
+	case completed > 0 && completed+dropped == len(parts) && completed+dropped >= expected:
 		return Completed
 	case len(parts) > 0 && planned == len(parts):
 		return Planned
@@ -832,7 +833,8 @@ func DeriveSeriesStatus(parts []Status, expected int) Status {
 }
 
 // SeriesRow is one row of the series list with its resolved values (see
-// ResolveSeries): Parts and Completed count the main parts, PartsTotal is
+// ResolveSeries): Parts and Completed count the main parts (the spin-off
+// parts when there is no main part), PartsTotal is
 // the expected number of parts, Cover the resolved cover; Updated is the
 // newest update of any part.
 type SeriesRow struct {
@@ -889,7 +891,7 @@ func (l *Library) seriesRows(ctx context.Context, q SeriesQuery) ([]SeriesRow, e
 	}
 	// Only what SeriesRow shows is loaded: the parts' status, update and
 	// cover, the linked item's kind, cover and number fields.
-	main := map[int64][]Row{}
+	main, spinOffs := map[int64][]Row{}, map[int64][]Row{}
 	pr, err := l.db.QueryContext(ctx, `SELECT sp.series_id, sp.spin_off, e.status, e.updated_at, i.cover_path
 		FROM series_parts sp JOIN series s ON s.id = sp.series_id
 		JOIN `+tableEntries+` e ON e.item_id = sp.item_id JOIN items i ON i.id = sp.item_id
@@ -913,8 +915,11 @@ func (l *Library) seriesRows(ctx context.Context, q SeriesQuery) ([]SeriesRow, e
 		if r := byID[id]; at.After(r.Updated) {
 			r.Updated = at
 		}
-		if !spinOff {
-			main[id] = append(main[id], Row{Item: Item{CoverPath: cover}, Entry: Entry{Status: Status(status)}})
+		row := Row{Item: Item{CoverPath: cover}, Entry: Entry{Status: Status(status)}}
+		if spinOff {
+			spinOffs[id] = append(spinOffs[id], row)
+		} else {
+			main[id] = append(main[id], row)
 		}
 	}
 	if err := closeRows(pr); err != nil {
@@ -932,8 +937,14 @@ func (l *Library) seriesRows(ctx context.Context, q SeriesQuery) ([]SeriesRow, e
 	}
 	for i := range out {
 		r := &out[i]
-		res := ResolveSeries(r.Series, kinds[r.Series.Kind], linked[r.Series.ID], nil, main[r.Series.ID])
-		r.Parts, r.Completed, r.PartsTotal, r.Status, r.Cover = res.MainParts, res.Completed, res.PartsTotal, res.Status, res.Cover
+		// The part rows and the linked item are partial (see above and
+		// seriesLinkedItems): only the outputs copied here are complete.
+		res := ResolveSeries(r.Series, kinds[r.Series.Kind], linked[r.Series.ID], nil, main[r.Series.ID], spinOffs[r.Series.ID])
+		parts := res.MainParts
+		if parts == 0 {
+			parts = res.SpinOffParts
+		}
+		r.Parts, r.Completed, r.PartsTotal, r.Status, r.Cover = parts, res.Completed, res.PartsTotal, res.Status, res.Cover
 	}
 	if text := strings.TrimSpace(truncateRunes(q.Text, maxFilterRunes)); text != "" {
 		keep, err := l.seriesMatching(ctx, q.PluginID, text)
@@ -952,7 +963,9 @@ func (l *Library) seriesRows(ctx context.Context, q SeriesQuery) ([]SeriesRow, e
 }
 
 // seriesLinkedItems returns, per series of the plugin with a linked item,
-// that item with only its kind, cover and number fields.
+// that item with only its kind, cover and number fields: a partial item,
+// enough for the cover, the expected parts and the status that SeriesRow
+// shows, not for the description, dates or other fields.
 func (l *Library) seriesLinkedItems(ctx context.Context, pluginID string) (map[int64]*Item, error) {
 	rows, err := l.db.QueryContext(ctx, `SELECT s.id, li.kind, li.cover_path, f.key, f.num
 		FROM series s JOIN items li ON li.id = s.linked_item_id
@@ -1202,11 +1215,12 @@ func (l *Library) SeriesOfItems(ctx context.Context, itemIDs []int64) (map[int64
 // ActiveSeries is the bounded query behind the home page: the series of the
 // listed plugins whose derived status is active, newest part update first,
 // at most limit. The status is computed in SQL from per-series counts of
-// the main parts and the set expected number of parts by the same rules as
+// the main parts (all parts when there is no main part) and the set
+// expected number of parts by the same rules as
 // DeriveSeriesStatus and expectedParts (a test compares them on every
 // combination of up to three part statuses, with own and linked expected
 // parts and spin-off parts): not all dropped, not (some completed, the rest
-// dropped and at least the expected number completed), not all planned, and
+// dropped and at least the expected number completed or dropped), not all planned, and
 // not (paused without any active). The cover and the expected parts are
 // resolved like ResolveSeries does.
 func (l *Library) ActiveSeries(ctx context.Context, pluginIDs []string, limit int) ([]SeriesRow, error) {
@@ -1241,6 +1255,9 @@ func (l *Library) ActiveSeries(ctx context.Context, pluginIDs []string, limit in
 	if len(keyWhen) > 0 {
 		partsKey = `CASE ` + strings.Join(keyWhen, " ") + ` END`
 	}
+	// counted: a main part, or any part of a series without main parts (the
+	// first part in block order is then the cover fallback either way).
+	const counted = `(sp.spin_off = 0 OR hm.series_id IS NULL)`
 	var args []any
 	args = append(args, linkArgs...)
 	args = append(args, partsArgs...)
@@ -1251,29 +1268,30 @@ func (l *Library) ActiveSeries(ctx context.Context, pluginIDs []string, limit in
 	args = append(args, limit)
 	//nolint:gosec // G202: constant SQL and placeholders; values are bound
 	rows, err := l.db.QueryContext(ctx, `SELECT `+seriesCols+`,
-			COALESCE(SUM(sp.spin_off = 0 AND e.item_id IS NOT NULL), 0) AS n,
-			COALESCE(SUM(sp.spin_off = 0 AND e.status = 'completed'), 0) AS done,
+			COALESCE(SUM(`+counted+` AND e.item_id IS NOT NULL), 0) AS n,
+			COALESCE(SUM(`+counted+` AND e.status = 'completed'), 0) AS done,
 			COALESCE(MAX(e.updated_at), '') AS updated,
 			COALESCE(NULLIF(s.cover_path, ''),
 				CASE WHEN `+linkOK+` = 1 THEN NULLIF(li.cover_path, '') END,
 				(SELECT i2.cover_path FROM series_parts sp2 JOIN `+tableEntries+` e2 ON e2.item_id = sp2.item_id
-					JOIN items i2 ON i2.id = sp2.item_id WHERE sp2.series_id = s.id AND sp2.spin_off = 0 ORDER BY sp2.position LIMIT 1),
+					JOIN items i2 ON i2.id = sp2.item_id WHERE sp2.series_id = s.id ORDER BY sp2.spin_off, sp2.position LIMIT 1),
 				'') AS cover,
 			COALESCE(NULLIF(s.parts_total, 0),
 				MIN(MAX(CAST((SELECT lf.num FROM item_fields lf WHERE lf.item_id = li.id AND lf.key = `+partsKey+`) AS INTEGER), 0), ?),
 				0) AS expected,
-			COALESCE(SUM(sp.spin_off = 0 AND e.status = 'dropped'), 0) AS dropped,
-			COALESCE(SUM(sp.spin_off = 0 AND e.status = 'planned'), 0) AS planned,
-			COALESCE(SUM(sp.spin_off = 0 AND e.status = 'active'), 0) AS active,
-			COALESCE(SUM(sp.spin_off = 0 AND e.status = 'paused'), 0) AS paused
+			COALESCE(SUM(`+counted+` AND e.status = 'dropped'), 0) AS dropped,
+			COALESCE(SUM(`+counted+` AND e.status = 'planned'), 0) AS planned,
+			COALESCE(SUM(`+counted+` AND e.status = 'active'), 0) AS active,
+			COALESCE(SUM(`+counted+` AND e.status = 'paused'), 0) AS paused
 		FROM series s
 		LEFT JOIN series_parts sp ON sp.series_id = s.id
 		LEFT JOIN `+tableEntries+` e ON e.item_id = sp.item_id
 		LEFT JOIN items li ON li.id = s.linked_item_id
+		LEFT JOIN (SELECT DISTINCT series_id FROM series_parts WHERE spin_off = 0) hm ON hm.series_id = s.id
 		WHERE s.plugin_id IN (`+placeholders(len(pluginIDs))+`)
 		GROUP BY s.id
 		HAVING NOT (n > 0 AND dropped = n)
-		   AND NOT (done > 0 AND done + dropped = n AND done >= expected)
+		   AND NOT (done > 0 AND done + dropped = n AND done + dropped >= expected)
 		   AND NOT (n > 0 AND planned = n)
 		   AND NOT (active = 0 AND paused > 0)
 		ORDER BY updated DESC, s.id DESC

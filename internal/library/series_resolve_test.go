@@ -2,6 +2,7 @@ package library
 
 import (
 	"fmt"
+	"slices"
 	"testing"
 	"time"
 
@@ -27,6 +28,12 @@ func sagaPlugin() *plugintest.Plugin {
 	}
 	k.SeriesLink = &plugin.SeriesLinkDef{Kind: "book", DescriptionField: "isbn", StartField: "released", EndField: "ended", PartsField: "volumes"}
 	k.SeriesHint = &plugin.SeriesHintDef{ReleaseField: "released"}
+	// a second kind with the same fields, which a book series cannot link to
+	other := *k
+	other.Key, other.Label, other.LabelPlural = "comic", "Comic", "Comics"
+	other.Fields = slices.Clone(k.Fields)
+	other.SeriesFields, other.SeriesLink, other.SeriesHint = nil, nil, nil
+	p.M.Kinds = append(p.M.Kinds, other)
 	return p
 }
 
@@ -76,7 +83,7 @@ func TestResolveOrder(t *testing.T) {
 		Fields: map[string]plugin.FieldValue{"publisher": {Text: "Own Press"}}}
 
 	// own beats linked
-	r := ResolveSeries(own, k, linked, &Entry{Status: Active}, main)
+	r := ResolveSeries(own, k, linked, &Entry{Status: Active}, main, nil)
 	if r.Cover != "own.jpg" || r.Description != "Own text" || !sameDay(r.StartedOn, own.StartedOn) ||
 		!sameDay(r.EndedOn, own.EndedOn) || !r.Finished || r.PartsTotal != 4 || r.Fields["publisher"].Text != "Own Press" {
 		t.Fatalf("own: %+v", r)
@@ -87,7 +94,7 @@ func TestResolveOrder(t *testing.T) {
 
 	// linked beats derived
 	bare := Series{ID: 1, PluginID: "saga", Kind: "book", Title: "S"}
-	r = ResolveSeries(bare, k, linked, &Entry{Status: Active}, main)
+	r = ResolveSeries(bare, k, linked, &Entry{Status: Active}, main, nil)
 	if r.Cover != "linked.jpg" || r.Description != "Linked text" || !sameDay(r.StartedOn, sday(1999, 5, 5)) ||
 		!sameDay(r.EndedOn, sday(2009, 9, 9)) || r.PartsTotal != 7 || r.Fields["publisher"].Text != "Linked Press" {
 		t.Fatalf("linked: %+v", r)
@@ -103,7 +110,7 @@ func TestResolveOrder(t *testing.T) {
 
 	// derived when nothing else is there
 	bare.Finished = true
-	r = ResolveSeries(bare, k, nil, nil, main)
+	r = ResolveSeries(bare, k, nil, nil, main, nil)
 	if r.Cover != "p1.jpg" || r.Description != "" || !sameDay(r.StartedOn, sday(2001, 1, 1)) ||
 		!sameDay(r.EndedOn, sday(2003, 1, 1)) || !r.Finished || r.PartsTotal != 2 || len(r.Fields) != 0 {
 		t.Fatalf("derived: %+v", r)
@@ -112,13 +119,13 @@ func TestResolveOrder(t *testing.T) {
 	// a kind without a link ignores a linked item
 	noLink := k
 	noLink.SeriesLink = nil
-	r = ResolveSeries(Series{Title: "S"}, noLink, linked, nil, main)
+	r = ResolveSeries(Series{Title: "S"}, noLink, linked, nil, main, nil)
 	if r.Cover != "p1.jpg" || r.Description != "" || r.PartsTotal != 2 || r.Finished {
 		t.Fatalf("no link: %+v", r)
 	}
 	// a negative linked number does not count
 	linked.Fields["volumes"] = plugin.FieldValue{Num: fp(-3)}
-	if r = ResolveSeries(Series{Title: "S"}, k, linked, nil, main); r.PartsTotal != 2 {
+	if r = ResolveSeries(Series{Title: "S"}, k, linked, nil, main, nil); r.PartsTotal != 2 {
 		t.Fatalf("negative volumes: %d", r.PartsTotal)
 	}
 }
@@ -131,22 +138,22 @@ func TestResolveDerivedDates(t *testing.T) {
 		partRow("", Completed, sday(2001, 2, 3)),
 		partRow("", Completed, sday(2010, 12, 31)),
 	}
-	r := ResolveSeries(Series{Title: "S"}, k, nil, nil, main)
+	r := ResolveSeries(Series{Title: "S"}, k, nil, nil, main, nil)
 	if !sameDay(r.StartedOn, sday(2001, 2, 3)) || r.EndedOn != nil || r.Finished {
 		t.Fatalf("not finished: start %v end %v", r.StartedOn, r.EndedOn)
 	}
-	r = ResolveSeries(Series{Title: "S", Finished: true}, k, nil, nil, main)
+	r = ResolveSeries(Series{Title: "S", Finished: true}, k, nil, nil, main, nil)
 	if !sameDay(r.StartedOn, sday(2001, 2, 3)) || !sameDay(r.EndedOn, sday(2010, 12, 31)) {
 		t.Fatalf("finished: start %v end %v", r.StartedOn, r.EndedOn)
 	}
 	// no release field: no derived dates
 	noHint := k
 	noHint.SeriesHint = &plugin.SeriesHintDef{PositionField: "pages"}
-	if r = ResolveSeries(Series{Title: "S", Finished: true}, noHint, nil, nil, main); r.StartedOn != nil || r.EndedOn != nil {
+	if r = ResolveSeries(Series{Title: "S", Finished: true}, noHint, nil, nil, main, nil); r.StartedOn != nil || r.EndedOn != nil {
 		t.Fatalf("no release field: %v %v", r.StartedOn, r.EndedOn)
 	}
 	noHint.SeriesHint = nil
-	if r = ResolveSeries(Series{Title: "S", Finished: true}, noHint, nil, nil, main); r.StartedOn != nil || r.EndedOn != nil {
+	if r = ResolveSeries(Series{Title: "S", Finished: true}, noHint, nil, nil, main, nil); r.StartedOn != nil || r.EndedOn != nil {
 		t.Fatalf("no hint: %v %v", r.StartedOn, r.EndedOn)
 	}
 }
@@ -162,13 +169,13 @@ func TestResolveFallsBackWhenLinkedBlank(t *testing.T) {
 			"isbn": {Text: "  "}, "volumes": {Num: fp(0)}, "publisher": {Text: ""}, "released": {}, "ended": {},
 		}},
 	} {
-		r := ResolveSeries(Series{Title: "S", Finished: true, LinkedItemID: 9}, k, linked, &Entry{Status: Active}, main)
+		r := ResolveSeries(Series{Title: "S", Finished: true, LinkedItemID: 9}, k, linked, &Entry{Status: Active}, main, nil)
 		if r.Cover != "p1.jpg" || r.Description != "" || r.PartsTotal != 3 || !sameDay(r.StartedOn, sday(2002, 1, 1)) ||
 			!sameDay(r.EndedOn, sday(2004, 1, 1)) || len(r.Fields) != 0 {
 			t.Errorf("%s: %+v", name, r)
 		}
 		// not finished, and the linked entry has no end date: not finished
-		if r = ResolveSeries(Series{Title: "S", LinkedItemID: 9}, k, linked, nil, main); r.Finished || r.EndedOn != nil {
+		if r = ResolveSeries(Series{Title: "S", LinkedItemID: 9}, k, linked, nil, main, nil); r.Finished || r.EndedOn != nil {
 			t.Errorf("%s: finished %v end %v", name, r.Finished, r.EndedOn)
 		}
 	}
@@ -180,20 +187,36 @@ func TestResolveStatusUsesExpectedParts(t *testing.T) {
 	for range 5 {
 		five = append(five, partRow("", Completed, nil))
 	}
-	if r := ResolveSeries(Series{Title: "S", PartsTotal: 12}, k, nil, nil, five); r.Status != Active || r.Completed != 5 || r.PartsTotal != 12 {
+	if r := ResolveSeries(Series{Title: "S", PartsTotal: 12}, k, nil, nil, five, nil); r.Status != Active || r.Completed != 5 || r.PartsTotal != 12 {
 		t.Fatalf("5/12: %+v", r)
 	}
 	linked := &Item{Kind: "book", Fields: map[string]plugin.FieldValue{"volumes": {Num: fp(12)}}}
-	if r := ResolveSeries(Series{Title: "S"}, k, linked, nil, five); r.Status != Active {
+	if r := ResolveSeries(Series{Title: "S"}, k, linked, nil, five, nil); r.Status != Active {
 		t.Fatalf("5/12 linked: %s", r.Status)
 	}
-	if r := ResolveSeries(Series{Title: "S", PartsTotal: 5}, k, nil, nil, five); r.Status != Completed {
+	if r := ResolveSeries(Series{Title: "S", PartsTotal: 5}, k, nil, nil, five, nil); r.Status != Completed {
 		t.Fatalf("5/5: %s", r.Status)
 	}
 	// derived expected parts keep the dropped rule: completed and dropped is completed
 	withDropped := []Row{partRow("", Completed, nil), partRow("", Dropped, nil)}
-	if r := ResolveSeries(Series{Title: "S"}, k, nil, nil, withDropped); r.Status != Completed || r.PartsTotal != 2 {
+	if r := ResolveSeries(Series{Title: "S"}, k, nil, nil, withDropped, nil); r.Status != Completed || r.PartsTotal != 2 {
 		t.Fatalf("derived: %+v", r)
+	}
+}
+
+// TestResolveNoMainParts: without main parts the spin-off parts give the
+// status, the counts and the cover fallback; with a main part they do not.
+func TestResolveNoMainParts(t *testing.T) {
+	k := sagaKind()
+	spins := []Row{partRow("s1.jpg", Completed, nil), partRow("s2.jpg", Completed, nil)}
+	r := ResolveSeries(Series{Title: "S"}, k, nil, nil, nil, spins)
+	if r.Status != Completed || r.Completed != 2 || r.PartsTotal != 2 || r.Cover != "s1.jpg" || r.MainParts != 0 || r.SpinOffParts != 2 {
+		t.Fatalf("no main: %+v", r)
+	}
+	main := []Row{partRow("", Planned, nil)}
+	r = ResolveSeries(Series{Title: "S"}, k, nil, nil, main, spins)
+	if r.Status != Planned || r.Completed != 0 || r.PartsTotal != 1 || r.Cover != "" || r.MainParts != 1 || r.SpinOffParts != 2 {
+		t.Fatalf("with main: %+v", r)
 	}
 }
 
@@ -213,8 +236,11 @@ func TestDeriveSeriesStatusExpected(t *testing.T) {
 		{n(Completed, 5), 12, Active},
 		{n(Completed, 12), 12, Completed},
 		{n(Completed, 13), 12, Completed},
-		{append(n(Completed, 2), Dropped), 3, Active},
+		{append(n(Completed, 2), Dropped), 3, Completed},
 		{append(n(Completed, 3), Dropped), 3, Completed},
+		{append(n(Completed, 11), Dropped), 12, Completed},
+		{append(n(Completed, 10), Dropped), 12, Active},
+		{n(Dropped, 12), 12, Dropped},
 		{n(Dropped, 2), 12, Dropped},
 		{n(Planned, 2), 12, Planned},
 		{[]Status{Completed, Paused}, 12, Paused},
@@ -349,7 +375,9 @@ type sagaVariant struct {
 	name       string
 	own        func(n int) int
 	linked     func(n int) float64
+	linkedKind string // "" is the link kind
 	spinOff    Status
+	extraMain  Status // an extra main part after the combination
 	wantExpect func(n int) int
 }
 
@@ -374,6 +402,11 @@ func TestActiveSeriesMatchesDerivedStatusExpected(t *testing.T) {
 		{name: "linked 0", linked: func(int) float64 { return 0 }, wantExpect: func(int) int { return 0 }},
 		{name: "spin-off completed", spinOff: Completed, wantExpect: func(int) int { return 0 }},
 		{name: "spin-off active", spinOff: Active, wantExpect: func(int) int { return 0 }},
+		{name: "extra dropped, own n", own: func(n int) int { return n }, extraMain: Dropped, wantExpect: func(n int) int { return n }},
+		{name: "extra dropped, linked n+1", linked: func(n int) float64 { return float64(n + 1) }, extraMain: Dropped, wantExpect: func(n int) int { return n + 1 }},
+		{name: "own n+1 and linked n", own: func(n int) int { return n + 1 }, linked: func(n int) float64 { return float64(n) },
+			wantExpect: func(n int) int { return n + 1 }},
+		{name: "linked other kind n+1", linked: func(n int) float64 { return float64(n + 1) }, linkedKind: "comic", wantExpect: func(int) int { return 0 }},
 	}
 	n := 0
 	add := func(st Status, fields map[string]plugin.FieldValue) int64 {
@@ -384,6 +417,9 @@ func TestActiveSeriesMatchesDerivedStatusExpected(t *testing.T) {
 	wantTotal := map[int64]int{}
 	for _, v := range variants {
 		for _, c := range combos {
+			if v.extraMain != "" {
+				c = append(slices.Clone(c), v.extraMain)
+			}
 			ids := make([]int64, len(c))
 			for i, st := range c {
 				ids[i] = add(st, nil)
@@ -396,7 +432,19 @@ func TestActiveSeriesMatchesDerivedStatusExpected(t *testing.T) {
 				}
 			}
 			if v.linked != nil {
-				l := add(Planned, map[string]plugin.FieldValue{"volumes": {Num: fp(v.linked(len(c)))}})
+				fields := map[string]plugin.FieldValue{"volumes": {Num: fp(v.linked(len(c)))}}
+				var l int64
+				if v.linkedKind == "" {
+					l = add(Planned, fields)
+				} else {
+					n++
+					d := bookWith("v"+fmt.Sprint(n), fp(100))
+					d.Kind, d.Fields["volumes"] = v.linkedKind, fields["volumes"]
+					var err error
+					if l, err = e.lib.AddToList(bg, "saga", v.linkedKind, d, Entry{Status: Planned}); err != nil {
+						t.Fatal(err)
+					}
+				}
 				if _, err := e.db.Exec(`UPDATE series SET linked_item_id = ? WHERE id = ?`, l, s.ID); err != nil {
 					t.Fatal(err)
 				}
@@ -416,13 +464,33 @@ func TestActiveSeriesMatchesDerivedStatusExpected(t *testing.T) {
 			}
 		}
 	}
-	// a series whose parts are all spin-offs: no main part
-	only := add(Completed, nil)
-	so := mustSeries(t, e, only, "only spin-offs")
-	if err := e.lib.SetPartSpinOff(bg, so.ID, only, true); err != nil {
-		t.Fatal(err)
+	// series whose parts are all spin-offs: their status, counts and cover
+	// come from the spin-off parts
+	wantStatus := map[int64]Status{}
+	wantCounts := map[int64][2]int{}
+	for _, c := range [][]Status{{Completed}, {Completed, Completed}, {Completed, Active, Planned}, {Paused, Completed}, {Dropped, Dropped}, {Planned}} {
+		ids := make([]int64, len(c))
+		for i, st := range c {
+			ids[i] = add(st, nil)
+		}
+		so := mustSeries(t, e, ids[0], "only spin-offs"+fmt.Sprint(c))
+		mustAddPart(t, e, so.ID, ids[1:]...)
+		for _, id := range ids {
+			if err := e.lib.SetPartSpinOff(bg, so.ID, id, true); err != nil {
+				t.Fatal(err)
+			}
+		}
+		done := 0
+		for _, st := range c {
+			if st == Completed {
+				done++
+			}
+		}
+		wantStatus[so.ID] = DeriveSeriesStatus(c, 0)
+		wantCounts[so.ID] = [2]int{len(c), done}
+		want[so.ID] = wantStatus[so.ID] == Active
+		wantTotal[so.ID] = len(c)
 	}
-	want[so.ID] = DeriveSeriesStatus(nil, 0) == Active
 
 	got, err := e.lib.ActiveSeries(bg, []string{"saga"}, 10000)
 	if err != nil {
@@ -460,6 +528,12 @@ func TestActiveSeriesMatchesDerivedStatusExpected(t *testing.T) {
 		lr := byID[id]
 		if (lr.Status == Active) != w {
 			t.Errorf("%s: list status %s, want active=%v", lr.Series.Title, lr.Status, w)
+		}
+		if st, ok := wantStatus[id]; ok && lr.Status != st {
+			t.Errorf("%s: list status %s, want %s", lr.Series.Title, lr.Status, st)
+		}
+		if c, ok := wantCounts[id]; ok && (lr.Parts != c[0] || lr.Completed != c[1]) {
+			t.Errorf("%s: list parts %d/%d, want %d/%d", lr.Series.Title, lr.Completed, lr.Parts, c[1], c[0])
 		}
 		if total, ok := wantTotal[id]; ok && lr.PartsTotal != total {
 			t.Errorf("%s: list parts total %d, want %d", lr.Series.Title, lr.PartsTotal, total)
