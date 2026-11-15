@@ -705,3 +705,39 @@ func (l *Library) SeriesMemberIDs(ctx context.Context, pluginID, kind string) (m
 	}
 	return out, nil
 }
+
+// ItemSeries is the series an item belongs to and its 1-based position.
+type ItemSeries struct {
+	UID, Title string
+	Position   int
+}
+
+// SeriesOfItems returns the series membership of the given items in one
+// query; items in no series are absent from the map.
+func (l *Library) SeriesOfItems(ctx context.Context, itemIDs []int64) (map[int64]ItemSeries, error) {
+	out := map[int64]ItemSeries{}
+	if len(itemIDs) == 0 {
+		return out, nil
+	}
+	args := make([]any, len(itemIDs))
+	for i, id := range itemIDs {
+		args[i] = id
+	}
+	rows, err := l.db.QueryContext(ctx, `SELECT p.item_id, s.uid, s.title, p.position FROM series_parts p JOIN series s ON s.id = p.series_id WHERE p.item_id IN (`+placeholders(len(args))+`)`, args...) //nolint:gosec // G202: constant SQL and placeholders; values are bound
+	if err != nil {
+		return nil, fmt.Errorf("series of items: %w", err)
+	}
+	for rows.Next() {
+		var id int64
+		var is ItemSeries
+		if err := rows.Scan(&id, &is.UID, &is.Title, &is.Position); err != nil {
+			rows.Close()
+			return nil, fmt.Errorf("series of items: %w", err)
+		}
+		out[id] = is
+	}
+	if err := closeRows(rows); err != nil {
+		return nil, fmt.Errorf("series of items: %w", err)
+	}
+	return out, nil
+}

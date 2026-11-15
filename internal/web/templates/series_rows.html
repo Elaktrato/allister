@@ -1,0 +1,89 @@
+{{/* The Series tab: one row (or card) per series with the derived progress and
+      status. The expand control loads the parts below the row with htmx and is
+      a plain link to the series page otherwise. */}}
+{{define "series_search"}}
+<form method="get" action="{{.Action}}" class="mb-4 flex flex-wrap items-center gap-2">
+  <input type="hidden" name="tab" value="series">
+  {{with .Status}}<input type="hidden" name="status" value="{{.}}">{{end}}
+  {{with .View}}<input type="hidden" name="view" value="{{.}}">{{end}}
+  <label class="sr-only" for="series-q">Search series</label>
+  <input id="series-q" type="search" name="q" value="{{.Q}}" placeholder="Search series" class="rounded border border-slate-700 bg-slate-900 px-3 py-1.5 text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500">
+  <label class="sr-only" for="series-sort">Sort</label>
+  <select id="series-sort" name="sort" class="rounded border border-slate-700 bg-slate-900 px-2 py-1.5 text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500">
+    <option value=""{{if eq .Sort ""}} selected{{end}}>Recently updated</option>
+    <option value="title"{{if eq .Sort "title"}} selected{{end}}>Title</option>
+  </select>
+  <button type="submit" class="rounded bg-slate-800 px-3 py-1.5 text-sm hover:bg-slate-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500">Search</button>
+</form>
+{{end}}
+
+{{define "series_rows"}}
+{{if not .SeriesRows}}
+{{if .Filtered}}<p class="rounded border border-slate-800 bg-slate-900 p-4 text-slate-300">No series match this search.</p>
+{{else}}<p class="rounded border border-slate-800 bg-slate-900 p-4 text-slate-300">No series here yet.</p>{{end}}
+{{else}}
+{{if eq .View "cards"}}
+<div data-cards class="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
+  {{range .SeriesRows}}{{template "series_card" .}}{{end}}
+</div>
+{{else}}
+<div class="overflow-x-auto">
+  <table class="w-full text-left text-sm">
+    <thead class="text-slate-400">
+      <tr class="border-b border-slate-800">
+        <th scope="col" class="py-2 pr-3"><span class="sr-only">Cover</span></th>
+        <th scope="col" class="py-2 pr-3 font-medium">Series</th>
+        <th scope="col" class="py-2 pr-3 font-medium">Progress</th>
+        <th scope="col" class="py-2 pr-3 font-medium">Status</th>
+        <th scope="col" class="py-2 pr-3 font-medium">Updated</th>
+        <th scope="col" class="py-2 text-right font-medium"><span class="sr-only">Parts</span></th>
+      </tr>
+    </thead>
+    {{range .SeriesRows}}{{template "series_row" .}}{{end}}
+  </table>
+</div>
+{{end}}
+<div class="mt-4 flex items-center justify-between text-sm text-slate-400">
+  <p>Showing {{.From}}–{{.To}} of {{.Total}}</p>
+  <p class="flex gap-4">
+    {{if .PrevURL}}<a href="{{.PrevURL}}" class="text-indigo-300 hover:underline">Previous</a>{{end}}
+    {{if .NextURL}}<a href="{{.NextURL}}" class="text-indigo-300 hover:underline">Next</a>{{end}}
+  </p>
+</div>
+{{end}}
+{{end}}
+
+{{/* a series row, then its own tbody that the expand control fills with the parts */}}
+{{define "series_row"}}
+<tbody>
+<tr data-series-row class="border-b border-slate-800 align-middle">
+  <td class="w-14 py-2 pr-3">
+    {{if .Cover}}<img src="{{.Cover}}" alt="" loading="lazy" class="h-20 w-14 rounded object-cover">
+    {{else}}<span class="block h-20 w-14 rounded bg-slate-800" aria-hidden="true"></span>{{end}}
+  </td>
+  <td class="min-w-40 py-2 pr-3"><a href="{{.Href}}" class="font-medium text-indigo-300 hover:underline">{{.Title}}</a></td>
+  <td class="py-2 pr-3 whitespace-nowrap">{{.Progress}}</td>
+  <td class="py-2 pr-3 whitespace-nowrap">{{.Status}}</td>
+  <td class="py-2 pr-3 whitespace-nowrap text-slate-400">{{with .Updated}}<time datetime="{{.}}">{{.}}</time>{{end}}</td>
+  <td class="py-2 text-right whitespace-nowrap">
+    <a href="{{.Href}}" hx-get="{{.PartsURL}}" hx-target="next tbody" hx-swap="innerHTML" aria-label="Show the parts of {{.Title}}" title="Show the parts" class="inline-flex rounded p-1 text-indigo-300 hover:bg-slate-800 hover:text-indigo-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"><span class="icon text-[1.125rem]" aria-hidden="true">expand_more</span></a>
+  </td>
+</tr>
+</tbody>
+<tbody></tbody>
+{{end}}
+
+{{define "series_card"}}
+<div data-card class="relative aspect-[2/3] overflow-hidden rounded-lg bg-slate-800">
+  {{if .Cover}}<img src="{{.Cover}}" alt="" loading="lazy" class="absolute inset-0 h-full w-full object-cover">
+  {{else}}<span class="absolute inset-0 flex items-center justify-center bg-slate-800" aria-hidden="true"><span class="icon text-[2rem] text-slate-500" aria-hidden="true">image</span></span>{{end}}
+  <span class="absolute right-0 top-0 h-0 w-0 border-l-[1.5rem] border-t-[1.5rem] border-l-transparent{{template "status_corner" .StatusKey}}" title="{{.Status}}"><span class="sr-only">{{.Status}}</span></span>
+  <div class="absolute inset-x-0 bottom-0 bg-slate-950/90 p-2.5">
+    <a href="{{.Href}}" class="line-clamp-2 text-sm font-medium leading-snug text-white hover:underline">{{.Title}}</a>
+    <p class="mt-1 text-xs text-slate-300">{{.Progress}}</p>
+  </div>
+</div>
+{{end}}
+
+{{/* the expanded parts: normal table rows, filled into the series' tbody */}}
+{{define "series_parts"}}{{range .Rows}}{{template "list_row" .}}{{end}}{{end}}

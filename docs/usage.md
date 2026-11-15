@@ -94,6 +94,7 @@ The universal backup includes these settings and the uploaded fonts. A restore s
 | `/manga/anilist/{id}` | Overview of an AniList manga; `/manga/anilist/{id}/edit` edits its details |
 | `/manga/manual/new`, `/manga/manual/{id}` | Create and open manual manga entries; `/manga/manual/{id}/edit` edits details, `/manga/manual/{id}/match` matches to AniList |
 | `/manga/export/json` | The manga JSON export |
+| `/{plugin}?tab=series` | The Series tab (shown once the plugin has a series): series rows with derived progress and status; `status`, `q`, `sort=title`, `view`, `page`; `/{plugin}/series/{uid}/parts` returns the expanded parts |
 | `/book` | Your books list (same search, filter and view parameters; `kind=series` shows light novels) |
 | `/book/search?q=...&kind=book&source=openlibrary` | Search Open Library or Google Books for books, or AniList for light novels (`kind=series&source=anilist`) |
 | `/book/{source}/{id}` | Overview of a book or light novel; add `?kind=book` or `?kind=series` when needed; `/edit` edits its details |

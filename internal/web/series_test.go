@@ -154,7 +154,7 @@ func TestSeriesMoveRemoveDelete(t *testing.T) {
 		t.Fatalf("remove again: %d", rec.Code)
 	}
 	rm(ids[1])
-	if rec := rm(ids[0]); rec.Code != http.StatusSeeOther || rec.Header().Get("Location") != "/tv/?tab=series" {
+	if rec := rm(ids[0]); rec.Code != http.StatusSeeOther || rec.Header().Get("Location") != "/tv?tab=series" {
 		t.Fatalf("last: %d %s", rec.Code, rec.Header().Get("Location"))
 	}
 	if rec := fe.get(base); rec.Code != http.StatusNotFound {
@@ -167,7 +167,7 @@ func TestSeriesMoveRemoveDelete(t *testing.T) {
 			t.Fatalf("bad choice: %d", rec.Code)
 		}
 		rec := fe.do("POST", seriesURL("tv", s2.UID)+"/delete", url.Values{"entries": {mode}}, false)
-		if rec.Code != http.StatusSeeOther || rec.Header().Get("Location") != "/tv/?tab=series" {
+		if rec.Code != http.StatusSeeOther || rec.Header().Get("Location") != "/tv?tab=series" {
 			t.Fatalf("delete %s: %d %s", mode, rec.Code, rec.Header().Get("Location"))
 		}
 		it, err := fe.lib.Item(bg, ids2[0])
