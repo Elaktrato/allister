@@ -8,6 +8,7 @@ package web
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/url"
 	"testing"
@@ -208,4 +209,46 @@ func TestSourceKeyFieldsMessage(t *testing.T) {
 	mustContain(t, rec.Body.String(),
 		"Fake TV needs valid API key. Add or replace them in Settings &gt; Plugins.")
 	mustNotContain(t, rec.Body.String(), "needs a valid")
+}
+
+// TestSourceCredentialReadErrorAnswers500: a failing credential read is never
+// taken for a missing credential. Every page that asks whether a keyed source
+// is configured (the plugins card, the plugin settings notice, the search and
+// its source default, the overview's "Match to" label and the match dialog)
+// answers 500, for a single-key and a multi-field source alike, and no source
+// is called.
+func TestSourceCredentialReadErrorAnswers500(t *testing.T) {
+	boom := errors.New("settings store unavailable")
+	cases := map[string]func(t *testing.T) *fixtureEnv{
+		"single key": func(t *testing.T) *fixtureEnv {
+			e := newFixtureEnv(t)
+			e.withSourceKey(func(context.Context, string) (string, error) { return "", boom })
+			return e
+		},
+		"named fields": func(t *testing.T) *fixtureEnv {
+			e := newFieldFixtureEnv(t)
+			e.withSourceKeyField(func(context.Context, string, string) (string, error) { return "", boom })
+			return e
+		},
+	}
+	for name, setup := range cases {
+		t.Run(name, func(t *testing.T) {
+			e := setup(t)
+			tvManual(t, e.env)
+			for _, path := range []string{
+				"/settings/plugins", "/settings/plugins/tv", "/tv/search?q=x",
+				"/tv/manual/m1", "/tv/manual/m1/match", "/tv/manual/m1/match/search?q=x",
+			} {
+				if rec := e.get(path); rec.Code != http.StatusInternalServerError {
+					t.Errorf("GET %s: got %d, want 500", path, rec.Code)
+				}
+			}
+			if rec := e.do("POST", "/tv/manual/m1/match", url.Values{"pick": {"77"}}, false); rec.Code != http.StatusInternalServerError {
+				t.Errorf("POST match: got %d, want 500", rec.Code)
+			}
+			if n := e.tv.Calls(plugintest.OpSearch) + e.tv.Calls(plugintest.OpDetails); n != 0 {
+				t.Errorf("source called %d times", n)
+			}
+		})
+	}
 }

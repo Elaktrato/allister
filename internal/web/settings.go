@@ -2,8 +2,8 @@ package web
 
 import (
 	"context"
+	"fmt"
 	"html/template"
-	"log"
 	"net/http"
 	"net/url"
 	"strings"
@@ -87,33 +87,25 @@ func (s *server) sourceKeyViews(ctx context.Context) ([]sourceKeyView, error) {
 			seen[src.ID] = true
 			v := sourceKeyView{ID: src.ID, Name: src.Name, Label: src.KeyLabel, Help: src.KeyHelp,
 				Action: sourceKeyURL(src.ID)}
+			configured, err := s.sourceConfigured(ctx, src)
+			if err != nil {
+				return nil, err
+			}
+			v.Configured = configured
+			stored := []string{"key"}
 			if len(src.KeyFields) > 0 {
-				v.Configured = true
+				stored = nil
 				for _, f := range src.KeyFields {
 					v.Fields = append(v.Fields, sourceKeyFieldView{Name: f.Name, Label: f.Label, Secret: f.Secret})
-					effective, err := s.sourceKeyField(ctx, src.ID, f.Name)
-					if err != nil {
-						return nil, err
-					}
-					if effective == "" {
-						v.Configured = false
-					}
-					stored, err := s.storedSourceKeyField(ctx, src.ID, f.Name)
-					if err != nil {
-						return nil, err
-					}
-					v.Stored = v.Stored || stored != ""
+					stored = append(stored, f.Name)
 				}
-			} else {
-				key, err := s.sourceKey(ctx, src.ID)
+			}
+			for _, field := range stored {
+				value, err := s.storedSourceKeyField(ctx, src.ID, field)
 				if err != nil {
 					return nil, err
 				}
-				stored, err := s.storedSourceKeyField(ctx, src.ID, "key")
-				if err != nil {
-					return nil, err
-				}
-				v.Configured, v.Stored = key != "", stored != ""
+				v.Stored = v.Stored || value != ""
 			}
 			out = append(out, v)
 		}
@@ -154,29 +146,31 @@ func (s *server) storedSourceKeyField(ctx context.Context, id, field string) (st
 // sourceConfigured reports whether si has everything it needs: a source that
 // declares no key label is always configured, a single-key source needs a
 // non-empty effective key, and a multi-field source needs every effective
-// field.
-func (s *server) sourceConfigured(ctx context.Context, si plugin.SourceInfo) bool {
+// field. It is the one configured predicate of the web layer. A failing read
+// is returned, never taken for a missing credential: the caller answers 500
+// (as the plugins card always did), so a broken settings store is not shown
+// as "needs key" or steer the default source elsewhere.
+func (s *server) sourceConfigured(ctx context.Context, si plugin.SourceInfo) (bool, error) {
 	if si.KeyLabel == "" {
-		return true
+		return true, nil
 	}
 	if len(si.KeyFields) == 0 {
 		key, err := s.sourceKey(ctx, si.ID)
 		if err != nil {
-			log.Printf("source %s: read key: %v", si.ID, err)
+			return false, fmt.Errorf("source %s: read key: %w", si.ID, err)
 		}
-		return key != ""
+		return key != "", nil
 	}
 	for _, f := range si.KeyFields {
 		value, err := s.sourceKeyField(ctx, si.ID, f.Name)
 		if err != nil {
-			log.Printf("source %s: read %s: %v", si.ID, f.Name, err)
-			return false
+			return false, fmt.Errorf("source %s: read %s: %w", si.ID, f.Name, err)
 		}
 		if value == "" {
-			return false
+			return false, nil
 		}
 	}
-	return true
+	return true, nil
 }
 
 // sourceKeyURL is the form action that saves the key of source id.

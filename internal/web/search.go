@@ -139,12 +139,14 @@ func sourcesForKind(m plugin.Manifest, kind string) []plugin.SourceInfo {
 // sourceChoiceLabel is a source's name in a source switch, marked with
 // " (needs key)" while the source is not configured (a key label with no
 // effective key, or a multi-field source with a field missing). It never
-// changes the heading or the result badges.
-func (s *server) sourceChoiceLabel(ctx context.Context, si plugin.SourceInfo) string {
-	if s.sourceConfigured(ctx, si) {
-		return si.Name
+// changes the heading or the result badges. A failing credential read is
+// returned (sourceConfigured).
+func (s *server) sourceChoiceLabel(ctx context.Context, si plugin.SourceInfo) (string, error) {
+	ok, err := s.sourceConfigured(ctx, si)
+	if err != nil || ok {
+		return si.Name, err
 	}
-	return si.Name + " (needs key)"
+	return si.Name + " (needs key)", nil
 }
 
 // manifestDefaultSourceForKind is the manifest's first source serving kind
@@ -166,39 +168,46 @@ func manifestDefaultSourceForKind(m plugin.Manifest, kind string) plugin.SourceI
 // defaultSourceForKind is the first source serving kind that is configured and
 // supports lookup, else the first configured one, else the manifest's default
 // (manifestDefaultSourceForKind). A plugin whose sources need no credentials
-// keeps the old default.
-func (s *server) defaultSourceForKind(ctx context.Context, m plugin.Manifest, kind string) plugin.SourceInfo {
+// keeps the old default. A failing credential read is returned
+// (sourceConfigured).
+func (s *server) defaultSourceForKind(ctx context.Context, m plugin.Manifest, kind string) (plugin.SourceInfo, error) {
 	valid := sourcesForKind(m, kind)
+	var configured []plugin.SourceInfo
 	for _, si := range valid {
-		if si.SupportsLookup && s.sourceConfigured(ctx, si) {
-			return si
+		ok, err := s.sourceConfigured(ctx, si)
+		if err != nil {
+			return plugin.SourceInfo{}, err
+		}
+		if ok {
+			configured = append(configured, si)
 		}
 	}
-	for _, si := range valid {
-		if s.sourceConfigured(ctx, si) {
-			return si
+	for _, si := range configured {
+		if si.SupportsLookup {
+			return si, nil
 		}
 	}
-	return manifestDefaultSourceForKind(m, kind)
+	if len(configured) > 0 {
+		return configured[0], nil
+	}
+	return manifestDefaultSourceForKind(m, kind), nil
 }
 
 // chooseSourceForKind is the source a request names. An empty or non-serving
 // id falls back to the kind's configured default; an unknown id is not a
-// source at all.
-func (s *server) chooseSourceForKind(ctx context.Context, m plugin.Manifest, kind, id string) (plugin.SourceInfo, bool) {
-	if id == "" {
-		si := s.defaultSourceForKind(ctx, m, kind)
-		return si, si.ID != ""
+// source at all. A failing credential read is returned (sourceConfigured).
+func (s *server) chooseSourceForKind(ctx context.Context, m plugin.Manifest, kind, id string) (plugin.SourceInfo, bool, error) {
+	if id != "" {
+		si, ok := sourceInfo(m, id)
+		if !ok {
+			return plugin.SourceInfo{}, false, nil
+		}
+		if sourceServesKind(si, kind) {
+			return si, true, nil
+		}
 	}
-	si, ok := sourceInfo(m, id)
-	if !ok {
-		return plugin.SourceInfo{}, false
-	}
-	if !sourceServesKind(si, kind) {
-		si = s.defaultSourceForKind(ctx, m, kind)
-		return si, si.ID != ""
-	}
-	return si, true
+	si, err := s.defaultSourceForKind(ctx, m, kind)
+	return si, si.ID != "", err
 }
 
 func (s *server) search(w http.ResponseWriter, r *http.Request, pluginID string) {
@@ -213,7 +222,11 @@ func (s *server) search(w http.ResponseWriter, r *http.Request, pluginID string)
 		s.errorPage(w, r, http.StatusNotFound, "Not found", "There is no such search.", "")
 		return
 	}
-	si, okSrc := s.chooseSourceForKind(r.Context(), m, k.Key, qs.Get("source"))
+	si, okSrc, err := s.chooseSourceForKind(r.Context(), m, k.Key, qs.Get("source"))
+	if err != nil {
+		s.internalError(w, r, err)
+		return
+	}
 	if !okSrc {
 		s.errorPage(w, r, http.StatusNotFound, "Not found", "There is no such search.", "")
 		return
@@ -231,7 +244,12 @@ func (s *server) search(w http.ResponseWriter, r *http.Request, pluginID string)
 	validSources := sourcesForKind(m, k.Key)
 	if len(validSources) > 1 {
 		for _, x := range validSources {
-			v.Sources = append(v.Sources, choice{Value: x.ID, Label: s.sourceChoiceLabel(r.Context(), x), Selected: x.ID == si.ID})
+			label, err := s.sourceChoiceLabel(r.Context(), x)
+			if err != nil {
+				s.internalError(w, r, err)
+				return
+			}
+			v.Sources = append(v.Sources, choice{Value: x.ID, Label: label, Selected: x.ID == si.ID})
 		}
 		if si.ID != validSources[0].ID {
 			v.RetryURL += "&source=" + url.QueryEscape(si.ID)
