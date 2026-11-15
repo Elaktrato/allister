@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Self-hosted, single-user media tracker (Go + htmx + Tailwind, SQLite, Docker). The core is a generic, media-agnostic engine; media types are **data-only plugins** (anime is the first and default one). Read `docs/handoff.md` for the current state and open follow-ups, `README.md` for users, `docs/plugins.md` for the plugin contract and `docs/usage.md` for routes and URL parameters.
+Self-hosted, single-user media tracker (Go + htmx + Tailwind, SQLite, Docker). The core is a generic, media-agnostic engine; media types are **data-only plugins** (anime is the first and default one). Read `docs/handoff.md` for the current state and open follow-ups, `README.md` for users, `docs/plugins.md` for the plugin contract, `docs/usage.md` for routes and URL parameters and `docs/ci.md` for CI and releases.
 
 ## Commands
 
@@ -36,7 +36,16 @@ scripts/go.sh fmt ./...
 - Dates are calendar days; progress total <= 0 means unbounded; unrated score (NULL) and explicit 0 are different.
 - Everything is pinned: Docker images by digest, Tailwind per-arch sha256, htmx, the Material Symbols font and the bundled app fonts (Inter, Source Serif 4, JetBrains Mono) by sha256 (licences in `LICENSES/`, copied into the image), Go version in `go.mod` and `scripts/go.sh`. `PINS.md` lists them; `scripts/update-pins.sh` shows the diff (`--write` applies). Tests in `internal/guard` and `internal/web` check them.
 - The README has a hard cap of 150 lines (docs test); long reference material goes to `docs/usage.md` / `docs/plugins.md`.
-- Commit style: `feat: ...`, `fix: ...`, `docs: ...`, `test: ...`, `build: ...`. Work on a branch, keep each commit green, merge locally. The owner pushes to GitHub themselves; the repo has no remote configured.
+- Commit style: `feat: ...`, `fix: ...`, `docs: ...`, `test: ...`, `build: ...`, `ci: ...` (release notes group commits by this prefix; `!` before the colon marks a breaking change). Work on a branch, keep each commit green, merge locally. The owner pushes to GitHub themselves; the repo has no remote configured.
+
+## CI and releases
+
+- `docs/ci.md` describes every workflow. Each workflow step calls `scripts/ci.sh <check>`; run `scripts/ci.sh all` (fmt, tidy, vet, golangci-lint, tests, govulncheck, hadolint, actionlint, shellcheck, gitleaks) before committing CI-relevant changes. New checks go into `scripts/ci.sh`, not inline `docker run` in a workflow (a guard test enforces it).
+- golangci-lint (`.golangci.yml`) must stay at 0 issues: fix findings; for a real false positive use a narrow `//nolint:<linter> // <reason>`, never a broad exclusion without a reason.
+- Workflows: actions pinned by full commit SHA with `# vX.Y.Z` and a row in `PINS.md`; least-privilege `permissions:`; `timeout-minutes` on every job; `persist-credentials: false` on checkouts (all enforced by `internal/guard`). Lint them with `scripts/ci.sh actionlint`. Tool images live in `scripts/ci.sh` (pinned by digest, refreshed by `scripts/update-pins.sh`); govulncheck and gremlins in `tools/go.mod`.
+- Mutation testing (gremlins) runs on `main`/`dev` pushes only; per-package thresholds in `scripts/ci.sh` (`MUTATION_PACKAGES`) are a ratchet: raise, never lower.
+- Branches: `main` (releases) and `dev` (integration; not created yet). Releases: semantic version tags `vX.Y.Z` / `vX.Y.Z-rc.N` on `main`. Cut one with `scripts/release-check.sh vX.Y.Z` (dry run, never pushes), then the owner runs `git tag -a vX.Y.Z -m "Allister vX.Y.Z"` and `git push origin vX.Y.Z`. Never create or push tags yourself. Update `CHANGELOG.md` (Unreleased) with user-visible changes.
+- The version is linked in via `-ldflags -X` (`internal/version`, Docker build args `VERSION`/`COMMIT`/`DATE`); `/healthz` must keep answering exactly `ok`.
 
 ## Working agreement with the owner
 
