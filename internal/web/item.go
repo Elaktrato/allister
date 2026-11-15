@@ -141,7 +141,7 @@ func (s *server) getItem(w http.ResponseWriter, r *http.Request, pluginID string
 		s.errorPage(w, r, http.StatusNotFound, "Not found", "There is no such item.", "")
 		return
 	}
-	s.showItem(w, r, ref, itemExtras{Updated: updatedCount(r)}, http.StatusOK)
+	s.showItem(w, r, ref, itemExtras{Updated: updatedCount(r), CanonicalRedirect: true}, http.StatusOK)
 }
 
 // updatedCount reads ?updated=N of the overview after "Update from source";
@@ -221,6 +221,9 @@ type itemExtras struct {
 	Match    *matchView
 	UseCache bool
 	Updated  *int
+	// CanonicalRedirect sends an unsaved item opened by an alias to its
+	// canonical URL (the plain overview GET only).
+	CanonicalRedirect bool
 }
 
 // showItem renders the overview of ref (with a dialog open when x says so).
@@ -229,6 +232,10 @@ func (s *server) showItem(w http.ResponseWriter, r *http.Request, ref itemRef, x
 	li, err := s.loadItem(r.Context(), m, ref, x.UseCache)
 	if err != nil {
 		s.itemFail(w, r, m, ref.Source, err, itemURL(m, ref.Source, ref.ID, ref.Kind))
+		return
+	}
+	if x.CanonicalRedirect && li.saved == nil && li.canonicalID != "" {
+		http.Redirect(w, r, itemURL(m, ref.Source, li.canonicalID, ref.Kind), http.StatusFound)
 		return
 	}
 	v, err := s.itemView(r.Context(), li)
@@ -313,6 +320,19 @@ type loadedItem struct {
 	entry         *library.Entry  // nil when not in the list
 	credits       []creditView
 	creditsFailed bool
+	// canonicalID is the source's own id for a live item opened by an alias
+	// (see canonicalAlias); "" otherwise.
+	canonicalID string
+}
+
+// canonicalAlias returns the source's canonical id when ref named the item by
+// an alias (a slug the source also resolves): the answer's id differs from
+// ref.ID, is a valid path id and belongs to the same source. "" otherwise.
+func canonicalAlias(ref itemRef, d plugin.ItemData) string {
+	if d.ID == "" || d.ID == ref.ID || !validPathID(d.ID) || (d.Source != "" && d.Source != ref.Source) {
+		return ""
+	}
+	return d.ID
 }
 
 // loadItem finds the saved item of ref, else fetches it live. Unsaved manual
@@ -420,10 +440,9 @@ func (s *server) loadLive(ctx context.Context, m plugin.Manifest, ref itemRef, u
 	}
 	li := &loadedItem{man: m, kind: k, data: c.Data, creditsFailed: c.CreditsFailed}
 	// the identity comes from the URL (matched against the manifest), not
-	// from what the source returned: a source that also resolves an alias
-	// (a slug) answers with its canonical id, but the live item and an add
-	// from it keep the alias (unlike a match, which stores the canonical
-	// id). Kept as is until the owner decides; see docs/usage.md.
+	// from what the source returned; an alias is remembered so the overview
+	// can redirect to the canonical id (getItem), like a match stores it.
+	li.canonicalID = canonicalAlias(itemRef{Source: ref.Source, ID: ref.ID}, c.Data)
 	li.data.Source, li.data.ID, li.data.Kind = ref.Source, ref.ID, kindKey
 	for _, cr := range c.Credits {
 		cv := creditView{Role: cr.Role, Person: livePersonView(cr.Person), Detail: cr.Detail, WithRole: cr.WithRole}

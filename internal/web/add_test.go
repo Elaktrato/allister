@@ -670,7 +670,9 @@ func TestAddDialogThenPostCostsOneDetailsCall(t *testing.T) {
 	if n := e.book.Calls(plugintest.OpDetails); n != 1 {
 		t.Fatalf("%d Details calls, want 1", n)
 	}
-	// the dialog's cache entry does not stand in for the full overview
+	// the dialog's cache entry does not stand in for the full overview (the
+	// fake answers with the requested id, so 43 is not an alias of 42)
+	e.book.Data.ID = "43"
 	if b := e.get("/book/books/43").Body.String(); !strings.Contains(b, "Earthsea") {
 		t.Fatal("overview broken")
 	}
@@ -765,4 +767,55 @@ func TestAddBadSourceAnswerIs502AndSavesNothing(t *testing.T) {
 	}
 	mustContain(t, rec.Body.String(), "Fake Books returned an answer we could not use", `href="/book/books/42"`)
 	e.assertNothingSavedFor(t, "book", "books", "42")
+}
+
+// An unsaved overview opened by an alias (a slug the source also resolves)
+// redirects to the source's canonical id, so an add from it saves that id.
+func TestAliasOverviewRedirectsToCanonicalID(t *testing.T) {
+	e := newAddEnv(t)
+	e.tv.Data = tvShow("42", "Found")
+	rec := e.do("GET", "/tv/tvdata/found-slug", nil, false)
+	if rec.Code != 302 || rec.Header().Get("Location") != "/tv/tvdata/42" {
+		t.Fatalf("%d %q", rec.Code, rec.Header().Get("Location"))
+	}
+	// the canonical URL itself renders
+	if rec := e.do("GET", "/tv/tvdata/42", nil, false); rec.Code != 200 {
+		t.Fatalf("canonical: %d", rec.Code)
+	}
+	// an invalid canonical id is ignored: the alias page renders as before
+	e.tv.Data = tvShow("bad\nid", "Found")
+	if rec := e.do("GET", "/tv/tvdata/other-slug", nil, false); rec.Code != 200 {
+		t.Fatalf("invalid canonical: %d", rec.Code)
+	}
+}
+
+// A direct add POST to an alias saves the canonical id.
+func TestAliasAddSavesCanonicalID(t *testing.T) {
+	e := newAddEnv(t)
+	e.tv.Data = tvShow("42", "Found")
+	if rec := e.do("POST", "/tv/tvdata/found-slug/add", url.Values{"status": {"planned"}}, false); rec.Code != 303 {
+		t.Fatalf("%d %v", rec.Code, rec.Header())
+	}
+	if got := e.savedItems(t, "tv", "tvdata", "found-slug"); len(got) != 0 {
+		t.Fatalf("saved under the alias: %+v", got)
+	}
+	if got := e.savedItems(t, "tv", "tvdata", "42"); len(got) != 1 {
+		t.Fatalf("canonical saved items = %d", len(got))
+	}
+}
+
+// An alias whose canonical item is already saved does not add a second one.
+func TestAliasAddOfSavedCanonicalIsAlreadyInList(t *testing.T) {
+	e := newAddEnv(t)
+	e.tv.Data = tvShow("42", "Found")
+	if rec := e.do("POST", "/tv/tvdata/42/add", url.Values{"status": {"planned"}}, false); rec.Code != 303 {
+		t.Fatalf("first add: %d", rec.Code)
+	}
+	rec := e.do("POST", "/tv/tvdata/found-slug/add", url.Values{"status": {"planned"}}, false)
+	if got := e.savedItems(t, "tv", "tvdata", "found-slug"); len(got) != 0 {
+		t.Fatalf("saved under the alias (%d): %+v", rec.Code, got)
+	}
+	if got := e.savedItems(t, "tv", "tvdata", "42"); len(got) != 1 {
+		t.Fatalf("canonical saved items = %d", len(got))
+	}
 }

@@ -322,6 +322,8 @@ type addTarget struct {
 	entry    *library.Entry
 	data     plugin.ItemData // live data, unsaved only
 	haveData bool            // data is set (from the cache or the source)
+	// canonical is the source's id when ref is an alias (see setData)
+	canonical string
 }
 
 // keys are the item's active progress keys.
@@ -398,11 +400,37 @@ func (s *server) resolveAdd(ctx context.Context, m plugin.Manifest, ref itemRef)
 }
 
 // setData sets the live data; the identity comes from the URL (matched
-// against the manifest), not from what the source returned, so an alias id
-// (a slug) is what an add saves (see loadItem).
+// against the manifest), not from what the source returned. An alias id (a
+// slug the source also resolves) is remembered, and adoptCanonical moves the
+// target to the canonical id before anything is saved.
 func (t *addTarget) setData(d plugin.ItemData) {
+	t.canonical = canonicalAlias(t.ref, d)
 	t.data, t.haveData = d, true
 	t.data.Source, t.data.ID, t.data.Kind = t.ref.Source, t.ref.ID, t.ref.Kind
+}
+
+// adoptCanonical moves an unsaved target opened by an alias to the source's
+// canonical id: to the saved item of that id when there is one (so an add
+// cannot create a second item of the same thing), else to the canonical id
+// for the add.
+func (s *server) adoptCanonical(ctx context.Context, t *addTarget) error {
+	if t.saved != nil || t.canonical == "" {
+		return nil
+	}
+	cref := t.ref
+	cref.ID, t.canonical = t.canonical, ""
+	saved, k, err := s.findSaved(ctx, t.man, cref)
+	if err != nil {
+		return err
+	}
+	t.ref = cref
+	t.data.ID = cref.ID
+	if saved != nil {
+		t.saved, t.kind = saved, k
+		t.entry, err = s.deps.Library.Entry(ctx, saved.ID)
+		return err
+	}
+	return nil
 }
 
 // fetchLive makes sure an unsaved target has its live data: one Details
@@ -476,6 +504,9 @@ func (s *server) getAdd(w http.ResponseWriter, r *http.Request, pluginID string)
 	if err == nil {
 		err = s.fetchLive(ctx, t)
 	}
+	if err == nil {
+		err = s.adoptCanonical(ctx, t)
+	}
 	if err != nil {
 		s.addFailure(w, r, m, ref, v, err)
 		return
@@ -512,6 +543,14 @@ func (s *server) postAdd(w http.ResponseWriter, r *http.Request, pluginID string
 	if msg == "" {
 		if err := s.fetchLive(ctx, t); err != nil {
 			s.addFailure(w, r, m, t.ref, v, err)
+			return
+		}
+		if err := s.adoptCanonical(ctx, t); err != nil {
+			s.internalError(w, r, err)
+			return
+		}
+		if t.entry != nil {
+			s.addConflict(w, r, t, v)
 			return
 		}
 		msg = s.validateAgainstItem(t.kind, t.progress(), entry)
