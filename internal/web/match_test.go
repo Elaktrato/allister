@@ -620,6 +620,34 @@ func TestMatchStoresCanonicalSourceID(t *testing.T) {
 	}
 }
 
+// A canonical id the source answers with that is not a valid path id (a
+// control character, longer than maxPathIDBytes) is refused: 422, the item
+// stays manual, nothing is queued.
+func TestMatchRefusesInvalidCanonicalSourceID(t *testing.T) {
+	for name, bad := range map[string]string{
+		"control character": "bad\nid",
+		"too long":          strings.Repeat("9", maxPathIDBytes+1),
+	} {
+		t.Run(name, func(t *testing.T) {
+			e := newFixtureEnv(t)
+			id := tvManual(t, e.env)
+			before, enB := e.snapshot(t, id)
+			e.tv.Data = tvShow(bad, "Found")
+			rec := e.do("POST", "/tv/manual/m1/match", url.Values{"pick": {"input-id"}}, false)
+			if rec.Code != 422 {
+				t.Fatalf("%d %q %s", rec.Code, rec.Header().Get("Location"), rec.Body.String())
+			}
+			after, enA := e.snapshot(t, id)
+			if after.Source != "manual" || after.SourceID != "m1" || !reflect.DeepEqual(before, after) || !reflect.DeepEqual(enB, enA) {
+				t.Fatalf("changed: %+v %+v", after, enA)
+			}
+			if len(e.jobs.got) != 0 {
+				t.Fatalf("queued: %+v", e.jobs.got)
+			}
+		})
+	}
+}
+
 // Without a canonical id from the source the matched input is kept.
 func TestMatchCanonicalIDFallsBackToInput(t *testing.T) {
 	e := newFixtureEnv(t)
