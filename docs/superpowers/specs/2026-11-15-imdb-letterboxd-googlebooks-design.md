@@ -112,15 +112,21 @@ undocumented API, and VIZ lists volumes only. This goes into
 - One importer per plugin, both named "IMDb CSV", accepting `.csv`: the
   owner uploads the same file to Movies and to TV; each keeps its own
   types and counts the rest as ignored.
-- Columns are read by name, case-insensitive. **Confirmed against the
-  owner's watchlist export (2026-11-15)**: both the watchlist and the
-  ratings export use one layout — `Position, Const, Created, Modified,
-  Description, Title, Original Title, URL, Title Type, IMDb Rating,
-  Runtime (mins), Year, Genres, Num Votes, Release Date, Directors,
-  Your Rating, Date Rated` (no BOM; dates `YYYY-MM-DD`; `Const` is `tt` +
-  7–8 digits). The ratings export is re-checked when the owner's arrives.
-- **`Title Type` is localised** (the account language): the owner's export
-  has `Film`, `Fernsehserie`, `Miniserie`. Values are compared normalised
+- Columns are read **by name**, case-insensitive, never by position.
+  **Confirmed against the owner's exports (2026-11-15)**, no BOM, dates
+  `YYYY-MM-DD`, `Const` = `tt` + 7–8 digits:
+  - watchlist: `Position, Const, Created, Modified, Description, Title,
+    Original Title, URL, Title Type, IMDb Rating, Runtime (mins), Year,
+    Genres, Num Votes, Release Date, Directors, Your Rating, Date Rated`
+    (`Your Rating`/`Date Rated` present but empty);
+  - ratings: `Const, Your Rating, Date Rated, Title, Original Title, URL,
+    Title Type, IMDb Rating, Runtime (mins), Year, Genres, Num Votes,
+    Release Date, Directors` (whole ratings 1–10, every row dated).
+  Required: `Const`, `Title`, `Title Type`; `Year`, `Your Rating`,
+  `Date Rated` optional. A file missing a required column is
+  `ErrBadInput`.
+- **`Title Type` is localised** (the account language): the owner's exports
+  have `Film`, `Fernsehserie`, `Miniserie`, `Video`, `Fernsehepisode`. Values are compared normalised
   (lower case, spaces and hyphens removed) against an alias table covering
   English and German at least: movies take `movie`/`film`, `tvmovie`/
   `fernsehfilm`, `short`/`kurzfilm`, `video`, `tvspecial`/`fernsehspecial`;
