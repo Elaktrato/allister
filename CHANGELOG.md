@@ -6,6 +6,27 @@ How a release is cut: move the entries under "Unreleased" to a new `## vX.Y.Z - 
 
 ## Unreleased
 
+## v0.3.0 - 2026-11-15
+
+### Added
+
+- **Series groups in every list.** Make any entry a series, add parts from your list or straight from a search (or as a manual entry), reorder them, take parts out, rename or delete the series (keeping or removing its entries). A **Series** tab shows each series with progress over its parts ("3/7"), a status derived from them, and expand/collapse; the other tabs mark parts with "2 · <series>". Books suggest the series name and place new parts by the series number. Series are kept in backups and the JSON export.
+- **IMDb CSV import** in Movies and TV: the ratings and watchlist exports (English or German title types). Rated titles become Seen/Watched with their rating and date, watchlist titles Want to watch; episodes and games are ignored. Matched by IMDb id through TMDB (movies) and TVmaze, then TMDB (TV).
+- **Letterboxd export import** in Movies: upload the ZIP from Letterboxd. Watched films, diary dates and rewatches, ratings, reviews and the watchlist are merged per film and matched on TMDB by exact title and year; anything ambiguous stays a manual entry you can match.
+- **Google Books API key** in Settings > Plugins > API keys (optional; `GOOGLE_BOOKS_API_KEY` still works as a fallback).
+- **Magazine** field for manga, filled from the official MyAnimeList API when a MyAnimeList Client ID is set (data courtesy of MyAnimeList).
+- Imports can match rows without an id by an exact title and year search (`resolve_by_title` in the plugin contract); sources can declare an optional key (`key_optional`).
+
+### Changed
+
+- The books plugin's light-novel kind is labelled **Light novels** (only the label; entries, links and backups are unchanged).
+
+### Fixed
+
+- A refused Google Books key is reported as a key problem instead of an unusable answer or endless retries.
+- A failed attach after adding into a series lands on the new entry with a notice instead of an error page.
+- Restore notes name the series parts that were left out and why.
+
 ## v0.2.0 - 2026-11-15
 
 ### Added
