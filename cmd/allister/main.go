@@ -74,7 +74,7 @@ func run() error {
 	}
 	tmdbKey := func(ctx context.Context) (string, error) { return credential(ctx, "tmdb", "key") }
 	registry := plugin.NewRegistry(settingsStore)
-	if err := registry.Register(manga.New(manga.Options{})); err != nil {
+	if err := registry.Register(manga.New(manga.Options{Credential: credential})); err != nil {
 		log.Printf("startup: %v", err)
 	}
 	if err := registry.Register(book.New(book.Options{GoogleBooksKey: func(ctx context.Context) (string, error) {
@@ -183,6 +183,7 @@ func sourceKeyFallback(cfg config.Config) map[string]map[string]string {
 		"igdb":        {"client_id": cfg.IGDBClientID, "client_secret": cfg.IGDBClientSecret},
 		"steam":       {"key": cfg.SteamAPIKey},
 		"googlebooks": {"key": cfg.GoogleBooksKey},
+		"anilist":     {"mal_client_id": cfg.MALClientID},
 	}
 }
 

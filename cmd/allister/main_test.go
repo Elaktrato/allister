@@ -229,3 +229,20 @@ func TestGoogleBooksKeyFallback(t *testing.T) {
 		t.Fatalf("env: %q %v", got, err)
 	}
 }
+
+// TestMALClientIDFallback: a stored MyAnimeList Client ID wins over
+// MAL_CLIENT_ID; the environment applies when nothing is stored.
+func TestMALClientIDFallback(t *testing.T) {
+	t.Setenv("MAL_CLIENT_ID", "env-id")
+	fallback := sourceKeyFallback(config.Load())
+	ctx := context.Background()
+	stored := func(v string) func(context.Context, string, string) (string, error) {
+		return func(context.Context, string, string) (string, error) { return v, nil }
+	}
+	if got, err := resolveSourceKeyField(ctx, stored("stored-id"), fallback, "anilist", "mal_client_id"); err != nil || got != "stored-id" {
+		t.Fatalf("stored: %q %v", got, err)
+	}
+	if got, err := resolveSourceKeyField(ctx, stored(""), fallback, "anilist", "mal_client_id"); err != nil || got != "env-id" {
+		t.Fatalf("env: %q %v", got, err)
+	}
+}

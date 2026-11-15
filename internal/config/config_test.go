@@ -51,3 +51,10 @@ func TestLoadGameSourceKeysDefaultToEmpty(t *testing.T) {
 		t.Fatalf("got %+v", c)
 	}
 }
+
+func TestLoadMALClientID(t *testing.T) {
+	t.Setenv("MAL_CLIENT_ID", "mal")
+	if c := Load(); c.MALClientID != "mal" {
+		t.Fatalf("got %+v", c)
+	}
+}

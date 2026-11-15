@@ -11,6 +11,7 @@ type Config struct {
 	IGDBClientID     string
 	IGDBClientSecret string
 	SteamAPIKey      string
+	MALClientID      string
 }
 
 func Load() Config {
@@ -22,6 +23,7 @@ func Load() Config {
 		IGDBClientID:     env("IGDB_CLIENT_ID", ""),
 		IGDBClientSecret: env("IGDB_CLIENT_SECRET", ""),
 		SteamAPIKey:      env("STEAM_API_KEY", ""),
+		MALClientID:      env("MAL_CLIENT_ID", ""),
 	}
 }
 

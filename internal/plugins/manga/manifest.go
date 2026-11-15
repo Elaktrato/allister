@@ -5,6 +5,10 @@ import (
 )
 
 // Plugin, source, importer and exporter ids and the one kind key.
+// MALClientIDField is the named credential field (of the AniList source)
+// holding the optional MyAnimeList Client ID.
+const MALClientIDField = "mal_client_id"
+
 const (
 	PluginID         = "manga"
 	KindManga        = "manga"
@@ -43,6 +47,7 @@ func manifest() plugin.Manifest {
 				{Key: "volumes", Label: "Volumes", Type: plugin.FieldNumber, Min: num(1), Max: num(10000), Show: true, Editable: true},
 				{Key: "year", Label: "Year", Type: plugin.FieldNumber, Min: num(1900), Max: num(2100), Show: true, Editable: true, Filterable: true, Sortable: true},
 				{Key: "author", Label: "Author", Type: plugin.FieldText, Show: true, Editable: true, Filterable: true},
+				{Key: "magazine", Label: "Magazine", Type: plugin.FieldText, Show: true, Editable: true, Filterable: true},
 				{Key: "synopsis", Label: "Synopsis", Type: plugin.FieldText, Editable: true},
 				{Key: "started_on", Label: "Started", Type: plugin.FieldDate, Show: true, Editable: true},
 				{Key: "ended_on", Label: "Ended", Type: plugin.FieldDate, Show: true, Editable: true},
@@ -84,6 +89,7 @@ func manifest() plugin.Manifest {
 				{Key: "chapters", Hide: "md"},
 				{Key: "volumes", Hide: "md"},
 				{Key: "author", Hide: "lg"},
+				{Key: "magazine", Hide: "lg"},
 				{Key: "started_on", Hide: "lg"},
 				{Key: "ended_on", Hide: "lg"},
 			},
@@ -97,6 +103,13 @@ func manifest() plugin.Manifest {
 			SupportsLookup:    true,
 			LinkLabel:         "View on AniList",
 			URLPatterns:       []string{"anilist.co/manga/{id}"},
+			// The MyAnimeList Client ID is declared here as a named field,
+			// not as a key-only source: a source without search or lookup
+			// would appear in every source switch and match dialog.
+			KeyLabel:    "MyAnimeList",
+			KeyFields:   []plugin.KeyField{{Name: MALClientIDField, Label: "Client ID"}},
+			KeyOptional: true,
+			KeyHelp:     "Optional: fills the Magazine field from MyAnimeList (data courtesy of MyAnimeList). Register a client at https://myanimelist.net/apiconfig and paste its Client ID.",
 		}},
 		Importers: []plugin.ImporterInfo{{
 			ID:                AccountImp,

@@ -63,7 +63,10 @@ var allowed = map[string][]string{
 		`"github.com/allister/allister/internal/plugins/manga"`,
 		// ... and their registrations
 		`if err := registry.Register(anime.New(anime.Options{})); err != nil {`,
-		`if err := registry.Register(manga.New(manga.Options{})); err != nil {`,
+		`if err := registry.Register(manga.New(manga.Options{Credential: credential})); err != nil {`,
+		// the environment fallback of the source that carries the optional
+		// MyAnimeList Client ID
+		`"anilist":     {"mal_client_id": cfg.MALClientID},`,
 	},
 }
 
