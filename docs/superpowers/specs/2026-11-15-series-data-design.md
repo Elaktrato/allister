@@ -126,11 +126,18 @@ The owner's rules, in their words:
   collide with the base keys (`cover`, `description`, `started_on`,
   `ended_on`, `finished`, `parts_total`).
 - `KindDef.SeriesLink *SeriesLinkDef` (`json:"series_link,omitempty"`):
-  `{Kind string; DescriptionField, StartField, EndField string}` — the kind
-  whose entries can be linked and which of its fields fill the base
-  description and dates. A series field with the same key as a field of the
+  `{Kind string; DescriptionField, StartField, EndField, PartsField string}`
+  — the kind whose entries can be linked and which of its fields fill the
+  base description, dates and expected number of parts (builder's call:
+  books map `PartsField: "volumes"`, so a series linked to a Light novel
+  with 12 volumes reads "5/12" at once). A series field with the same key as a field of the
   link kind is filled from it too. Validated: the kind exists in the
-  manifest; the named fields exist with the right types (text, date, date).
+  manifest; the named fields exist with the right types (text, date, date,
+  number).
+- `SeriesHintDef.TitleField` becomes **optional** (builder's call: most
+  kinds have no series-name field but do have a release date); when empty,
+  the title prefill and the "same series first" ordering in "Add from your
+  list" are simply skipped. Validation: a hint must name at least one field.
 
 ### Plugins
 
@@ -152,7 +159,12 @@ linked entry's mapped value → the derived value (dates, expected parts) →
 nothing. The cover: own cover → linked entry's cover → first main part's
 cover. Progress: completed main parts / (expected parts if set, else main
 parts). Derived status (the six rules of the series groups design) uses main
-parts only. "Finished" is the owner's marker; when the series is linked and
+parts only, with one change (builder's call): rule 2 (completed) also
+requires the expected number of parts to be reached when it is set — "5/12,
+all five read" is **active** (waiting for more), not completed.
+`DeriveSeriesStatus` takes the expected number (0 = not set) and the SQL
+behind the home page's `ActiveSeries`, `SeriesCounts` and `ListSeries`
+follow it; the existing equivalence test is extended to cover it. "Finished" is the owner's marker; when the series is linked and
 the marker is not set, an ended date on the linked entry counts as finished.
 
 ### Pages
@@ -172,18 +184,25 @@ the marker is not set, an ended date on the linked entry counts as finished.
   plugin, or none).
 - **Parts list**: each part gets a "Mark as spin-off" / "Mark as main part"
   toggle (a form, like move/remove).
+- **Numbering** (builder's call): main parts and spin-off parts keep
+  **separate** dense sequences (1..n and 1..m). "Part N of <series>", the
+  "N · <series>" badge, previous/next and placement by the position field
+  use the main sequence; a spin-off part reads "Spin-off N of <series>" and
+  its badge "Spin-off · <series>". Up/down moves stay inside a part's own
+  block; flipping the flag moves the part to the end of the other block and
+  renumbers both. Backup stores each block in order with the flag.
 - **Series tab and home page**: use the resolved cover and expected parts;
   a spin-off series shows a small "Spin-off of <parent>" line.
 
 ### Backup and export
 
-- The `series` member's objects gain: `cover` (archived like item covers),
+- The `series` member's objects gain: `cover` (archived like item covers — the backup's cover collection must
+  include series covers, which today it does not),
   `description`, `started_on`, `ended_on`, `finished`, `parts_total`,
   `fields`, `linked` (item identity `plugin_id, kind, source, source_id`),
   `parent` (uid), and each part reference gains `spin_off`.
 - Restore: unknown members inside a series object are ignored by older
-  versions (verify the decoder; if it rejects unknown fields, keep the new
-  data in a way an older reader skips). A parent is resolved after all
+  versions (checked: no decoder uses `DisallowUnknownFields`). A parent is resolved after all
   series are restored (two passes); a missing linked item or parent leaves
   the link empty with a note.
 - Per-plugin JSON export: unchanged (entries already carry their series and
