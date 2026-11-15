@@ -1,0 +1,14 @@
+{{define "series_candidates"}}
+{{if .Candidates}}
+<ul class="space-y-1">
+  {{range .Candidates}}
+  <li class="flex items-center gap-3 rounded border border-slate-800 bg-slate-900 p-2">
+    {{if .Cover}}<img src="{{.Cover}}" alt="" loading="lazy" class="h-12 w-8 rounded object-cover">
+    {{else}}<span class="block h-12 w-8 rounded bg-slate-800" aria-hidden="true"></span>{{end}}
+    <span class="min-w-0 flex-1 break-words">{{.Title}}</span>
+    <form method="post" action="{{$.AddURL}}"><input type="hidden" name="item" value="{{.ID}}"><button type="submit" class="rounded bg-indigo-600 px-3 py-1 text-sm font-medium hover:bg-indigo-500">Add</button></form>
+  </li>
+  {{end}}
+</ul>
+{{else}}<p class="text-sm text-slate-400">No matching entries outside a series.</p>{{end}}
+{{end}}
