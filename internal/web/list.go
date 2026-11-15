@@ -58,6 +58,9 @@ type rowView struct {
 	IncrementURL       string
 	EditURL, RemoveURL string
 	RemoveConfirm      string
+	// the part badge "N · <series>" on the kind tabs (Series "" for an entry in no series)
+	Series, SeriesHref string
+	SeriesPos          int
 }
 
 // headView is one cell of the table head: Href ("" when the column does
@@ -99,6 +102,25 @@ type listView struct {
 	Dialog               *entryDialog
 	// Exports links the plugin's exporters (the whole list of the plugin).
 	Exports []exportLink
+	// the Series tab (tab=series): one row per series instead of entries
+	SeriesTab  bool
+	SeriesRows []seriesRowView
+	Search     seriesSearch
+}
+
+// seriesRowView is one series of the Series tab.
+type seriesRowView struct {
+	Title, Href, Cover, PartsURL string
+	Progress                     string // "3/7"
+	Status, StatusKey            string // derived
+	Updated                      string
+	BarPct                       int
+}
+
+// seriesSearch is the Series tab's search form: the text and sort it
+// shows, and the parameters it keeps.
+type seriesSearch struct {
+	Action, Q, Sort, Status, View string
 }
 
 // listQuery is a parsed list request: Kind is the kind key shown, Status ""
@@ -107,6 +129,7 @@ type listView struct {
 // were ignored.
 type listQuery struct {
 	Kind, Status, View string
+	Tab                string // "series" for the Series tab, else ""
 	Page               int
 	Filters            listFilters
 	Rejected           []string
@@ -164,6 +187,12 @@ func parseListQuery(m plugin.Manifest, q url.Values) listQuery {
 			lq.Rejected = append(lq.Rejected, "status")
 		}
 		lq.Status = ""
+	}
+	switch t := q.Get("tab"); t {
+	case "", "series":
+		lq.Tab = t
+	default:
+		lq.Rejected = append(lq.Rejected, "tab")
 	}
 	switch v := q.Get("view"); v {
 	case "", "cards", "table":
@@ -334,6 +363,16 @@ func unmatchedRowHint(m plugin.Manifest) string {
 func (s *server) buildList(r *http.Request, m plugin.Manifest, lq listQuery) (listView, error) {
 	ctx := r.Context()
 	k, _ := kindDef(m, lq.Kind)
+	if lq.Tab == "series" {
+		has, err := s.deps.Library.HasSeries(ctx, m.ID)
+		if err != nil {
+			return listView{}, err
+		}
+		if has {
+			return s.buildSeriesTab(r, m, lq)
+		}
+		lq.Tab = "" // no series: the normal list
+	}
 	f := lq.Filters
 	q := library.Query{PluginID: m.ID, Kind: k.Key, Page: lq.Page, PageSize: listPageSize}
 	f.apply(k, &q)
@@ -403,8 +442,20 @@ func (s *server) buildList(r *http.Request, m plugin.Manifest, lq listQuery) (li
 		h.Hide = c.Hide
 		v.Head.Columns = append(v.Head.Columns, h)
 	}
+	ids := make([]int64, 0, len(pg.Rows))
 	for _, row := range pg.Rows {
-		v.Rows = append(v.Rows, s.rowView(m, row, ret, cols))
+		ids = append(ids, row.Item.ID)
+	}
+	member, err := s.deps.Library.SeriesOfItems(ctx, ids)
+	if err != nil {
+		return listView{}, err
+	}
+	for _, row := range pg.Rows {
+		rv := s.rowView(m, row, ret, cols)
+		if ms, ok := member[row.Item.ID]; ok {
+			rv.Series, rv.SeriesPos, rv.SeriesHref = ms.Title, ms.Position, seriesURL(m.ID, ms.UID)
+		}
+		v.Rows = append(v.Rows, rv)
 	}
 	if pg.Total > 0 {
 		v.From, v.To = (pg.PageNo-1)*listPageSize+1, (pg.PageNo-1)*listPageSize+len(pg.Rows)
@@ -425,11 +476,8 @@ func (s *server) buildList(r *http.Request, m plugin.Manifest, lq listQuery) (li
 			Href:    filteredListURL(m, k.Key, string(st), lq.View, 1, f),
 			Current: string(st) == lq.Status, Status: string(st)})
 	}
-	// another kind has another schema: its link starts without filters
-	if len(m.Kinds) > 1 {
-		for _, mk := range m.Kinds {
-			v.Kinds = append(v.Kinds, tabView{Label: mk.LabelPlural, Href: listURL(m, mk.Key, "", lq.View, 1), Current: mk.Key == k.Key})
-		}
+	if v.Kinds, err = s.kindTabs(ctx, m, k, lq.View, false); err != nil {
+		return listView{}, err
 	}
 	return v, nil
 }
@@ -473,7 +521,7 @@ func (s *server) getList(w http.ResponseWriter, r *http.Request, pluginID string
 	// the plugin's home settings fill what the URL does not name: the view
 	// (cards by default) and, when no status is given at all, the status
 	lq.View = s.resolveView(r.Context(), m, lq.View)
-	if !vals.Has("status") {
+	if !vals.Has("status") && lq.Tab != "series" {
 		if st := s.homeStatus(r.Context(), m); st != "" {
 			lq.Status = st
 		}
@@ -510,4 +558,118 @@ func (s *server) showList(w http.ResponseWriter, r *http.Request, m plugin.Manif
 	}
 	v.Dialog = dialog
 	s.renderStatus(w, r, code, "list", v)
+}
+
+// kindTabs is the tab bar above the status tabs: the kinds of a plugin with
+// several, plus the Series tab once the plugin has a series (a one-kind
+// plugin then shows "All | Series").
+func (s *server) kindTabs(ctx context.Context, m plugin.Manifest, cur plugin.KindDef, view string, onSeries bool) ([]tabView, error) {
+	has, err := s.deps.Library.HasSeries(ctx, m.ID)
+	if err != nil {
+		return nil, err
+	}
+	var tabs []tabView
+	// another kind has another schema: its link starts without filters
+	switch {
+	case len(m.Kinds) > 1:
+		for _, mk := range m.Kinds {
+			tabs = append(tabs, tabView{Label: mk.LabelPlural, Href: listURL(m, mk.Key, "", view, 1), Current: !onSeries && mk.Key == cur.Key})
+		}
+	case has:
+		tabs = append(tabs, tabView{Label: "All", Href: listURL(m, "", "", view, 1), Current: !onSeries})
+	}
+	if has {
+		tabs = append(tabs, tabView{Label: "Series", Href: seriesTabURL(m.ID, "", view, "", "", 1), Current: onSeries})
+	}
+	return tabs, nil
+}
+
+// seriesTabURL is the Series tab of a plugin (defaults omitted).
+func seriesTabURL(pluginID, status, view, q, sort string, page int) string {
+	v := url.Values{"tab": {"series"}}
+	for k, val := range map[string]string{"status": status, "view": view, "q": q, "sort": sort} {
+		if val != "" {
+			v.Set(k, val)
+		}
+	}
+	if page > 1 {
+		v.Set("page", strconv.Itoa(page))
+	}
+	return "/" + url.PathEscape(pluginID) + "?" + v.Encode()
+}
+
+// buildSeriesTab loads the Series tab: the plugin's series with derived
+// progress and status, status tabs by the derived status, text search and
+// sort by title or last update. Entry filters do not apply to series.
+func (s *server) buildSeriesTab(r *http.Request, m plugin.Manifest, lq listQuery) (listView, error) {
+	ctx := r.Context()
+	k, _ := kindDef(m, lq.Kind)
+	sort := ""
+	if lq.Filters.Sort == string(library.SortTitle) {
+		sort = "title"
+	}
+	sq := library.SeriesQuery{PluginID: m.ID, Text: lq.Filters.Q, Sort: sort, Page: lq.Page, PageSize: listPageSize}
+	counts, err := s.deps.Library.SeriesCounts(ctx, sq)
+	if err != nil {
+		return listView{}, err
+	}
+	all := 0
+	for _, n := range counts {
+		all += n
+	}
+	if lq.Status != "" && lq.Status != "all" {
+		sq.Status = library.Status(lq.Status)
+	}
+	pg, err := s.deps.Library.ListSeries(ctx, sq)
+	if err != nil {
+		return listView{}, err
+	}
+	at := func(status string, page int) string {
+		return seriesTabURL(m.ID, status, lq.View, sq.Text, sort, page)
+	}
+	v := listView{Heading: k.LabelPlural, SeriesTab: true, AnyEntries: all > 0, Total: pg.Total, View: lq.View,
+		Filtered: sq.Text != "", PushURL: at(lq.Status, pg.Page),
+		SearchURL: "/" + url.PathEscape(m.ID) + "/search", EmptyNoun: "series", Exports: s.exportLinks(m),
+		AddLabel:     "Add " + lowerFirst(k.Label),
+		ViewCardsURL: seriesTabURL(m.ID, lq.Status, "cards", sq.Text, sort, pg.Page),
+		ViewTableURL: seriesTabURL(m.ID, lq.Status, "table", sq.Text, sort, pg.Page),
+		Search:       seriesSearch{Action: "/" + url.PathEscape(m.ID), Q: sq.Text, Sort: sort, Status: lq.Status, View: lq.View}}
+	v.Notice, v.NoticeMore = noticeKeys(lq.Rejected)
+	if manual := "/" + m.ID + "/manual/new"; slices.Contains(s.pluginRoutes[m.ID], "GET "+manual) {
+		v.ManualURL = manual
+	}
+	for _, row := range pg.Rows {
+		sk, ok := kindDef(m, row.Series.Kind)
+		if !ok {
+			sk = k
+		}
+		rv := seriesRowView{Title: row.Series.Title, Href: seriesURL(m.ID, row.Series.UID), Cover: covers.Src(row.Cover),
+			PartsURL: seriesURL(m.ID, row.Series.UID) + "/parts", Progress: strconv.Itoa(row.Completed) + "/" + strconv.Itoa(row.Parts),
+			Status: statusLabel(sk, row.Status), StatusKey: string(row.Status), BarPct: -1}
+		if row.Parts > 0 {
+			rv.BarPct = row.Completed * 100 / row.Parts
+		}
+		if !row.Updated.IsZero() {
+			rv.Updated = row.Updated.Format("2006-01-02")
+		}
+		v.SeriesRows = append(v.SeriesRows, rv)
+	}
+	if pg.Total > 0 {
+		v.From, v.To = (pg.Page-1)*listPageSize+1, (pg.Page-1)*listPageSize+len(pg.Rows)
+	}
+	if pg.Page > 1 {
+		v.PrevURL = at(lq.Status, pg.Page-1)
+	}
+	if pg.Page < pg.Pages {
+		v.NextURL = at(lq.Status, pg.Page+1)
+	}
+	v.Tabs = append(v.Tabs, tabView{Label: "All", Count: all, Href: at("all", 1), Current: lq.Status == "" || lq.Status == "all"})
+	for _, st := range listTabOrder {
+		v.Tabs = append(v.Tabs, tabView{Label: statusLabel(k, st), Count: counts[st], Href: at(string(st), 1),
+			Current: string(st) == lq.Status, Status: string(st)})
+	}
+	if v.Kinds, err = s.kindTabs(ctx, m, k, lq.View, true); err != nil {
+		return listView{}, err
+	}
+	return v, nil
 }

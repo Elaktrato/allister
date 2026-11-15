@@ -29,7 +29,7 @@ func seriesURL(pluginID, uid string) string {
 
 // seriesListURL is the plugin's list on its series tab.
 func seriesListURL(pluginID string) string {
-	return "/" + url.PathEscape(pluginID) + "/?tab=series"
+	return "/" + url.PathEscape(pluginID) + "?tab=series"
 }
 
 func (s *server) seriesRoutes(reg routeRegistrar, pluginID string) {
@@ -42,6 +42,7 @@ func (s *server) seriesRoutes(reg routeRegistrar, pluginID string) {
 	reg.Handle("POST /series/{uid}/parts/{item}/move", h(s.postSeriesMove))
 	reg.Handle("POST /series/{uid}/parts/{item}/remove", h(s.postSeriesRemove))
 	reg.Handle("POST /series/{uid}/delete", h(s.postSeriesDelete))
+	reg.Handle("GET /series/{uid}/parts", h(s.getSeriesParts))
 	reg.Handle("GET /series/{uid}/candidates", h(s.getSeriesCandidates))
 }
 
@@ -434,4 +435,23 @@ func (s *server) getSeriesCandidates(w http.ResponseWriter, r *http.Request, m p
 	}
 	w.Header().Set("Vary", "HX-Request")
 	s.renderPartial(w, "series", "series_candidates", seriesView{AddURL: seriesURL(m.ID, ser.UID) + "/parts", Candidates: cs})
+}
+
+// getSeriesParts answers the Series tab's expand control: the parts as
+// table rows (the normal row template), in position order.
+func (s *server) getSeriesParts(w http.ResponseWriter, r *http.Request, m plugin.Manifest, ser *library.Series) {
+	ctx := r.Context()
+	k, _ := kindDef(m, ser.Kind)
+	rows, err := s.deps.Library.SeriesParts(ctx, ser.ID, s.titleLang(ctx, m))
+	if err != nil {
+		s.internalError(w, r, err)
+		return
+	}
+	cols := s.visibleColumns(ctx, m, k)
+	ret := seriesListURL(m.ID)
+	var v struct{ Rows []rowView }
+	for _, row := range rows {
+		v.Rows = append(v.Rows, s.rowView(m, row, ret, cols))
+	}
+	s.renderPartial(w, "list", "series_parts", v)
 }

@@ -611,3 +611,25 @@ func TestSeriesMemberIDs(t *testing.T) {
 		t.Fatalf("other kind = %v %v", other, err)
 	}
 }
+
+func TestSeriesOfItems(t *testing.T) {
+	e := newEnv(t)
+	s := seriesOf(t, e, "book", "Saga", "1", "2")
+	free := addBook(t, e.lib, "9", fp(1), Entry{Status: Planned})
+	ids := partIDs(t, e, s.ID)
+	got, err := e.lib.SeriesOfItems(bg, append([]int64{free}, ids...))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("got %+v", got)
+	}
+	for i, id := range ids {
+		if g := got[id]; g.UID != s.UID || g.Title != "Saga" || g.Position != i+1 {
+			t.Fatalf("part %d = %+v", i, g)
+		}
+	}
+	if m, err := e.lib.SeriesOfItems(bg, nil); err != nil || len(m) != 0 {
+		t.Fatalf("empty: %v %v", m, err)
+	}
+}

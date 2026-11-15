@@ -17,7 +17,7 @@
 </nav>
 {{end}}
 {{template "list_tabs" .}}
-{{if .AnyEntries}}{{template "filter_bar" .Filters}}{{end}}
+{{if .SeriesTab}}{{template "series_search" .Search}}{{else if .AnyEntries}}{{template "filter_bar" .Filters}}{{end}}
 {{/* hx-history="false": htmx never snapshots this page (a snapshot keeps attributes, not typed values), so Back refetches it in full */}}
 <div id="list-rows" hx-history="false">{{template "list_rows" .}}</div>
 <div id="dialog-slot" data-swap-statuses="{{dialogStatuses}}">{{with .Dialog}}{{template "entry_dialog" .}}{{end}}</div>
@@ -45,10 +45,14 @@
 {{define "status_tone"}}{{if eq . "active"}}text-indigo-300{{else if eq . "completed"}}text-emerald-400{{else if eq . "paused"}}text-amber-300{{else if eq . "dropped"}}text-red-300{{else if eq . "planned"}}text-slate-400{{else}}text-slate-300{{end}}{{end}}
 
 {{/* list_partial answers the filter bar and the sort links of the table head: the rows region (with the head) plus, out of band, the tabs, the Clear link, the sort control's options, the Filters badge and the genre/tag option lists (never a visible input or a select, which keep focus) */}}
-{{define "list_partial"}}{{template "list_rows" .}}{{template "list_tabs" .}}{{with .Filters}}{{template "filter_clear" .}}{{template "filter_sort_oob" .}}{{template "filter_count" .}}{{with .Genres}}{{template "filter_term_options_oob" .}}{{end}}{{with .Tags}}{{template "filter_term_options_oob" .}}{{end}}{{end}}{{end}}
+{{define "list_partial"}}{{template "list_rows" .}}{{template "list_tabs" .}}{{if not .SeriesTab}}{{with .Filters}}{{template "filter_clear" .}}{{template "filter_sort_oob" .}}{{template "filter_count" .}}{{with .Genres}}{{template "filter_term_options_oob" .}}{{end}}{{with .Tags}}{{template "filter_term_options_oob" .}}{{end}}{{end}}{{end}}{{end}}
 
 {{define "list_rows"}}
 {{if .Notice}}<p data-filter-notice role="status" class="mb-4 rounded border border-amber-800 bg-slate-900 p-3 text-sm text-amber-200">Ignored unknown or invalid parameters: {{range $i, $k := .Notice}}{{if $i}}, {{end}}<code>{{$k}}</code>{{end}}{{if .NoticeMore}} and {{.NoticeMore}} more{{end}}.</p>{{end}}
+{{if .SeriesTab}}{{template "series_rows" .}}{{else}}{{template "kind_rows" .}}{{end}}
+{{end}}
+
+{{define "kind_rows"}}
 {{if not .AnyEntries}}
 <p class="rounded border border-slate-800 bg-slate-900 p-4 text-slate-300"><strong class="font-medium text-slate-100">No {{.EmptyNoun}} in your list yet.</strong> Your list is empty: <a href="{{.SearchURL}}" class="text-indigo-300 underline">search for {{.EmptyNoun}} to add</a>{{if .ManualURL}} or <a href="{{.ManualURL}}" class="text-indigo-300 underline">add one manually</a>{{end}}.</p>
 {{else if not .Rows}}
