@@ -14,6 +14,9 @@ func TestNormaliseTitle(t *testing.T) {
 		{"ก\u0e34น", "กน", false},         // a Thai vowel sign is kept
 		{"Se7en", "se7en", true},
 		{"Alien", "Aliens", false},
+		{"Alien\u00b3", "Alien", false},
+		{"Alien\u00b3", "alien\u00b3", true},
+		{"Rocky \u2163", "Rocky", false},
 	} {
 		if got := normaliseTitle(c.a) == normaliseTitle(c.b); got != c.same {
 			t.Errorf("normaliseTitle(%q) == normaliseTitle(%q) is %v, want %v (%q, %q)",
