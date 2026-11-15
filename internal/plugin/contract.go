@@ -343,7 +343,7 @@ type ImporterInfo struct {
 	ResolveViaFallback []string `json:"resolve_via_fallback,omitempty"`
 	// ResolveByTitle makes the import runner resolve rows without an id of
 	// ExternalIDType by an exact title and year search on the ResolveVia
-	// source (and its fallbacks). It requires ResolveVia; a source that does
+	// source only (the fallbacks are not searched). It requires ResolveVia; a source that does
 	// not list ExternalIDType (or an importer without one) needs no
 	// SupportsLookup, because it is only searched and the id is kept on the
 	// entry. A listed ExternalIDType is still looked up and needs it.

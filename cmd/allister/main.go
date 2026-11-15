@@ -170,11 +170,6 @@ func run() error {
 	return err
 }
 
-// resolveSourceKeyField returns the stored value of one named credential field
-// of sourceID, or fallback[sourceID][field] when none is saved (a single-key
-// source uses the field "key"). An unknown source or field resolves to "",
-// and a lookup failure is returned instead of falling back, so a broken
-// settings store stays visible.
 // sourceKeyFallback maps source id and credential field to the environment
 // value used when nothing is stored in the settings.
 func sourceKeyFallback(cfg config.Config) map[string]map[string]string {
@@ -187,6 +182,11 @@ func sourceKeyFallback(cfg config.Config) map[string]map[string]string {
 	}
 }
 
+// resolveSourceKeyField returns the stored value of one named credential field
+// of sourceID, or fallback[sourceID][field] when none is saved (a single-key
+// source uses the field "key"). An unknown source or field resolves to "",
+// and a lookup failure is returned instead of falling back, so a broken
+// settings store stays visible.
 func resolveSourceKeyField(ctx context.Context, stored func(context.Context, string, string) (string, error), fallback map[string]map[string]string, sourceID, field string) (string, error) {
 	value, err := stored(ctx, sourceID, field)
 	if err != nil || value != "" {

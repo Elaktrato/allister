@@ -7,8 +7,8 @@ import (
 
 // FillUnmatchedNote fills an ImporterInfo.UnmatchedNote for one unmatched
 // item: every "{id}" becomes id (the item's id of ExternalIDType), every
-// "{title}" title and every "{year}" year (empty when year is 0). The
-// placeholders are replaced in one pass, so a title containing one is not
+// "{title}" title and every "{year}" year. When year is 0 an " ({year})" in the note is dropped
+// (a bare "{year}" becomes empty). The placeholders are replaced in one pass, so a title containing one is not
 // filled again.
 func FillUnmatchedNote(note, id, title string, year int) string {
 	if note == "" {
