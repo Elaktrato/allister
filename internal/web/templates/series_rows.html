@@ -85,5 +85,29 @@
 </div>
 {{end}}
 
-{{/* the expanded parts: normal table rows, filled into the series' tbody */}}
-{{define "series_parts"}}{{range .Rows}}{{template "list_row" .}}{{end}}{{end}}
+{{/* the expanded parts, filled into the series' tbody */}}
+{{define "series_parts"}}{{range .Rows}}{{template "series_part_row" .}}{{end}}{{end}}
+
+{{/* one part: the same six cells as the Series tab's head */}}
+{{define "series_part_row"}}
+<tr data-row class="border-b border-slate-800 align-middle">
+  <td class="w-14 py-2 pr-3">
+    {{if .Cover}}<img src="{{.Cover}}" alt="" loading="lazy" class="h-20 w-14 rounded object-cover">
+    {{else}}<span class="block h-20 w-14 rounded bg-slate-800" aria-hidden="true"></span>{{end}}
+  </td>
+  <td class="min-w-40 py-2 pr-3">
+    <a href="{{.Href}}" class="font-medium text-indigo-300 hover:underline">{{.Title}}</a>
+    <div class="mt-1 text-xs text-slate-400">Part {{.SeriesPos}}</div>
+  </td>
+  <td class="py-2 pr-3 whitespace-nowrap">
+    <span class="inline-flex flex-wrap items-center gap-2">
+      {{range .Progress}}<span>{{if $.ShowLabels}}<span class="text-slate-400">{{.Label}}</span> {{else}}<span class="sr-only">{{.Label}}</span>{{end}}<span>{{.Value}}</span></span>{{end}}
+    </span>
+  </td>
+  <td class="py-2 pr-3 whitespace-nowrap">{{.Status}}</td>
+  <td class="py-2 pr-3 whitespace-nowrap text-slate-400">{{with .Updated}}<time datetime="{{.}}">{{.}}</time>{{end}}</td>
+  <td class="py-2 text-right whitespace-nowrap">
+    <a href="{{.EditURL}}" hx-get="{{.EditURL}}" hx-target="#dialog-slot" hx-swap="innerHTML" aria-label="Edit list entry" title="Edit list entry" class="inline-flex rounded p-1 text-indigo-300 hover:bg-slate-800 hover:text-indigo-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"><span class="icon text-[1.125rem]" aria-hidden="true">edit</span></a>
+  </td>
+</tr>
+{{end}}

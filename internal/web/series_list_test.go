@@ -12,12 +12,11 @@ import (
 func TestSeriesTabListsSeries(t *testing.T) {
 	fe := newFixtureEnv(t)
 	fe.tvSeries(t, "Saga") // completed + planned + active: Watching, 1/3
-	id := fe.addFixture(t, "tv", "show", tvShow("solo", "Solo Show"), library.Entry{Status: library.Planned})
+	fe.addFixture(t, "tv", "show", tvShow("solo", "Solo Show"), library.Entry{Status: library.Planned})
 	other := fe.addFixture(t, "tv", "show", tvShow("o1", "Other One"), library.Entry{Status: library.Completed})
 	if _, err := fe.lib.CreateSeries(bg, other, "Done Set"); err != nil {
 		t.Fatal(err)
 	}
-	_ = id
 
 	rec := fe.get("/tv?tab=series&view=table")
 	if rec.Code != http.StatusOK {
@@ -78,6 +77,15 @@ func TestSeriesTabExpandFragment(t *testing.T) {
 		t.Fatalf("parts out of order: %d %d %d", i1, i2, i3)
 	}
 	mustContain(t, b, "data-row")
+	// the rows fit the Series tab's head: one cell per head column
+	head := rec.Body.String()
+	heads := strings.Count(head[strings.Index(head, "<thead"):strings.Index(head, "</thead>")], "<th ")
+	for _, tr := range strings.Split(b, "<tr")[1:] {
+		if n := strings.Count(tr, "<td"); n != heads {
+			t.Fatalf("part row has %d cells, head %d: %s", n, heads, tr)
+		}
+	}
+	mustContain(t, b, `href="/tv/`)
 	if rec := fe.get(seriesURL("tv", "nope") + "/parts"); rec.Code != http.StatusNotFound {
 		t.Fatalf("unknown: %d", rec.Code)
 	}
