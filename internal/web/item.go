@@ -127,6 +127,19 @@ func updatedURL(overview string, n int) string {
 	return overview + sep + url.Values{"updated": {strconv.Itoa(n)}}.Encode()
 }
 
+// noticeSeriesAttach is the ?notice= value of an overview reached after an
+// add whose entry could not be put into its series.
+const noticeSeriesAttach = "series"
+
+// noticeURL is the overview plus ?notice=key, keeping a ?kind= parameter.
+func noticeURL(overview, key string) string {
+	sep := "?"
+	if strings.Contains(overview, "?") {
+		sep = "&"
+	}
+	return overview + sep + url.Values{"notice": {key}}.Encode()
+}
+
 // source returns the plugin's source implementation, or nil.
 func (s *server) source(pluginID, sourceID string) plugin.Source {
 	p, ok := s.deps.Registry.Get(pluginID)
@@ -247,6 +260,9 @@ func (s *server) showItem(w http.ResponseWriter, r *http.Request, ref itemRef, x
 	}
 	if x.Updated != nil && li.saved != nil {
 		v.UpdateNotice = updateNotice(*x.Updated, sourceName(m, li.data.Source))
+	}
+	if li.saved != nil && r.URL.Query().Get("notice") == noticeSeriesAttach {
+		v.UpdateNotice = "The entry was added to your list, but could not be put into the series."
 	}
 	if x.Dialog != nil {
 		pc := progressContext{Keys: li.kind.Progress.Defaults, Fields: li.data.Fields}

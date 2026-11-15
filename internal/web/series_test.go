@@ -496,3 +496,60 @@ func TestSeriesDeleteWordingNamesPartCount(t *testing.T) {
 	ser, _ := fe.tvSeries(t, "Saga")
 	mustContain(t, fe.get(seriesURL("tv", ser.UID)).Body.String(), "Delete the series and remove its 3 entries from your list")
 }
+
+// The add succeeded but the attach failed (the series is gone, the item
+// already belongs to another series): the entry is in the list, so the answer
+// is its overview with a notice, not an error page. A real race cannot be
+// scheduled in a test, so the shared handling is driven directly.
+func TestAttachAfterAddFailureGoesToOverview(t *testing.T) {
+	fe := newFixtureEnv(t)
+	m, _ := fe.reg.Manifest("tv")
+	ser, ids := fe.tvSeries(t, "Saga")
+	fresh := fe.addFixture(t, "tv", "show", tvShow("7", "Fresh"), library.Entry{Status: library.Planned})
+	overview := itemURL(m, "tvdata", "7", "show")
+	run := func(ser *library.Series, item int64) *httptest.ResponseRecorder {
+		rec := httptest.NewRecorder()
+		fe.srv.attachAfterAdd(rec, httptest.NewRequest("POST", "/tv/tvdata/7/add", nil), m, ser, item, overview)
+		return rec
+	}
+	noticeURL := overview + "?notice=series"
+
+	// success: the series page
+	if rec := run(ser, fresh); rec.Code != http.StatusSeeOther || rec.Header().Get("Location") != seriesURL("tv", ser.UID) {
+		t.Fatalf("ok: %d %q", rec.Code, rec.Header().Get("Location"))
+	}
+	// already in a series
+	if rec := run(ser, ids[0]); rec.Code != http.StatusSeeOther || rec.Header().Get("Location") != noticeURL {
+		t.Fatalf("already: %d %q", rec.Code, rec.Header().Get("Location"))
+	}
+	// the series was deleted meanwhile
+	removed, err := fe.lib.CreateSeries(bg, fe.addFixture(t, "tv", "show", tvShow("8", "Eight"), library.Entry{Status: library.Planned}), "Removed")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := fe.lib.DeleteSeries(bg, removed.ID, false); err != nil {
+		t.Fatal(err)
+	}
+	other := fe.addFixture(t, "tv", "show", tvShow("9", "Nine"), library.Entry{Status: library.Planned})
+	rec := run(&removed, other)
+	if rec.Code != http.StatusSeeOther || rec.Header().Get("Location") != noticeURL {
+		t.Fatalf("removed: %d %q", rec.Code, rec.Header().Get("Location"))
+	}
+	// htmx adds redirect through the header
+	hx := httptest.NewRequest("POST", "/tv/tvdata/7/add", nil)
+	hx.Header.Set("HX-Request", "true")
+	hrec := httptest.NewRecorder()
+	fe.srv.attachAfterAdd(hrec, hx, m, &removed, other, overview)
+	if hrec.Header().Get("HX-Redirect") != noticeURL {
+		t.Fatalf("htmx: %v", hrec.Header())
+	}
+}
+
+func TestOverviewShowsSeriesAttachNotice(t *testing.T) {
+	fe := newFixtureEnv(t)
+	fe.addFixture(t, "tv", "show", tvShow("7", "Fresh"), library.Entry{Status: library.Planned})
+	const notice = "was added to your list, but could not be put into the series"
+	mustContain(t, fe.get("/tv/tvdata/7?notice=series").Body.String(), notice)
+	mustNotContain(t, fe.get("/tv/tvdata/7").Body.String(), notice)
+	mustNotContain(t, fe.get("/tv/tvdata/7?notice=bogus").Body.String(), notice)
+}
