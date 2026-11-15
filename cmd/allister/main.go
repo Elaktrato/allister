@@ -70,11 +70,11 @@ func run() error {
 	credential := func(ctx context.Context, sourceID, field string) (string, error) {
 		return resolveSourceKeyField(ctx, settingsStore.SourceKeyField, fallback, sourceID, field)
 	}
-	// Single-key sources keep the older resolver shape over the stored "key"
-	// field (web.Deps.SourceKey).
-	singleFallback := map[string]string{"tmdb": cfg.TMDBKey, "steam": cfg.SteamAPIKey}
+	// Single-key sources keep the older resolver shape (web.Deps.SourceKey)
+	// over the same per-field resolution of the "key" field, so the two
+	// cannot drift.
 	sourceKey := func(ctx context.Context, sourceID string) (string, error) {
-		return resolveSourceKey(ctx, settingsStore.SourceKey, singleFallback, sourceID)
+		return credential(ctx, sourceID, "key")
 	}
 	tmdbKey := func(ctx context.Context) (string, error) { return credential(ctx, "tmdb", "key") }
 	registry := plugin.NewRegistry(settingsStore)
@@ -172,21 +172,11 @@ func run() error {
 	return err
 }
 
-// resolveSourceKey returns the stored key of sourceID, or fallback[sourceID]
-// when none is saved. A lookup failure is returned (never replaced by the
-// fallback), so a broken settings store stays visible.
-func resolveSourceKey(ctx context.Context, stored func(context.Context, string) (string, error), fallback map[string]string, sourceID string) (string, error) {
-	key, err := stored(ctx, sourceID)
-	if err != nil || key != "" {
-		return key, err
-	}
-	return fallback[sourceID], nil
-}
-
 // resolveSourceKeyField returns the stored value of one named credential field
-// of sourceID, or fallback[sourceID][field] when none is saved. It follows the
-// same rules as resolveSourceKey: an unknown source or field resolves to "",
-// and a lookup failure is returned instead of falling back.
+// of sourceID, or fallback[sourceID][field] when none is saved (a single-key
+// source uses the field "key"). An unknown source or field resolves to "",
+// and a lookup failure is returned instead of falling back, so a broken
+// settings store stays visible.
 func resolveSourceKeyField(ctx context.Context, stored func(context.Context, string, string) (string, error), fallback map[string]map[string]string, sourceID, field string) (string, error) {
 	value, err := stored(ctx, sourceID, field)
 	if err != nil || value != "" {
