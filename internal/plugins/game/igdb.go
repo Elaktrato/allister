@@ -579,7 +579,7 @@ func igdbGameRecord(g igdbGame, tb igdbTimeToBeat) gameRecord {
 	for _, p := range g.Platforms {
 		platforms = append(platforms, p.Name)
 	}
-	if joined := igdbJoinNames(platforms, 0); joined != "" {
+	if joined := joinNames(platforms, 0); joined != "" {
 		fields["platforms"] = plugin.FieldValue{Text: joined}
 	}
 	var developers, publishers []string
@@ -595,10 +595,10 @@ func igdbGameRecord(g igdbGame, tb igdbTimeToBeat) gameRecord {
 			publishers = append(publishers, name)
 		}
 	}
-	if joined := igdbJoinNames(developers, 3); joined != "" {
+	if joined := joinNames(developers, 3); joined != "" {
 		fields["developer"] = plugin.FieldValue{Text: joined}
 	}
-	if joined := igdbJoinNames(publishers, 3); joined != "" {
+	if joined := joinNames(publishers, 3); joined != "" {
 		fields["publisher"] = plugin.FieldValue{Text: joined}
 	}
 	if g.Summary != "" {
@@ -650,21 +650,6 @@ func igdbYear(released int64) int {
 		return 0
 	}
 	return time.Unix(released, 0).UTC().Year()
-}
-
-// igdbJoinNames sanitises names and joins them with ", ". limit <= 0 means no
-// limit.
-func igdbJoinNames(names []string, limit int) string {
-	clean := make([]string, 0, len(names))
-	for _, raw := range names {
-		if limit > 0 && len(clean) == limit {
-			break
-		}
-		if name := plugin.SingleLine(raw, maxTermRunes); name != "" {
-			clean = append(clean, name)
-		}
-	}
-	return strings.Join(clean, ", ")
 }
 
 // igdbSetMinutes maps IGDB's seconds to whole minutes, omitting zero values.

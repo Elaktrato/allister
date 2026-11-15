@@ -98,7 +98,9 @@ type steamGame struct {
 	Name            string `json:"name"`
 	PlaytimeForever int    `json:"playtime_forever"`
 	Playtime2Weeks  int    `json:"playtime_2weeks"`
-	IconURL         string `json:"img_icon_url"`
+	// IconHash is the icon's file hash (Steam names the field img_icon_url,
+	// but it is not a URL); unused, kept for the record.
+	IconHash string `json:"img_icon_url"`
 }
 
 // ownedGames fetches the account's library through the official Web API. The
@@ -124,7 +126,7 @@ func (c *steamClient) ownedGames(ctx context.Context, steamID string) ([]steamGa
 	if err != nil {
 		return nil, err
 	}
-	body, err := c.getBody(req)
+	body, err := c.getBody(req, true)
 	if err != nil {
 		return nil, err
 	}
@@ -161,7 +163,7 @@ func (c *steamClient) search(ctx context.Context, q string) ([]plugin.ItemSummar
 	if err != nil {
 		return nil, err
 	}
-	body, err := c.getBody(req)
+	body, err := c.getBody(req, false)
 	if err != nil {
 		return nil, err
 	}
@@ -244,7 +246,7 @@ func (c *steamClient) details(ctx context.Context, appid string) (gameRecord, er
 	if err != nil {
 		return gameRecord{}, err
 	}
-	body, err := c.getBody(req)
+	body, err := c.getBody(req, false)
 	if err != nil {
 		return gameRecord{}, err
 	}
@@ -276,7 +278,10 @@ func (c *steamClient) request(ctx context.Context, base, path string, query url.
 // getBody performs one request and returns its body. Transport errors are
 // deliberately not wrapped (a key can be part of the request URL); the caller
 // maps the status through steamStatusError.
-func (c *steamClient) getBody(req *http.Request) ([]byte, error) {
+// getBody sends req and returns the body. keyed says whether the request
+// carries the key (the Web API): only then is a 401/403 a refused credential;
+// the store endpoints take no key, so their refusal is ErrUnavailable.
+func (c *steamClient) getBody(req *http.Request, keyed bool) ([]byte, error) {
 	resp, err := c.hc.Do(req)
 	if err != nil {
 		if ctxErr := req.Context().Err(); ctxErr != nil {
@@ -286,7 +291,7 @@ func (c *steamClient) getBody(req *http.Request) ([]byte, error) {
 	}
 	defer resp.Body.Close()
 
-	if err := steamStatusError(resp.StatusCode); err != nil {
+	if err := steamStatusError(resp.StatusCode, keyed); err != nil {
 		io.Copy(io.Discard, io.LimitReader(resp.Body, 64<<10))
 		return nil, err
 	}
@@ -301,13 +306,16 @@ func (c *steamClient) getBody(req *http.Request) ([]byte, error) {
 }
 
 // steamStatusError maps a Steam status code. 401/403 mean the credential was
-// refused; 404 means the item is unknown; 429 and 5xx/timeout are retryable.
-func steamStatusError(status int) error {
+// refused when the request carried one (keyed) and a store refusal otherwise;
+// 404 means the item is unknown; 429 and 5xx/timeout are retryable.
+func steamStatusError(status int, keyed bool) error {
 	switch {
 	case status == http.StatusOK:
 		return nil
-	case status == http.StatusUnauthorized, status == http.StatusForbidden:
+	case (status == http.StatusUnauthorized || status == http.StatusForbidden) && keyed:
 		return fmt.Errorf("steam: %w", plugin.ErrNotConfigured)
+	case status == http.StatusUnauthorized, status == http.StatusForbidden:
+		return fmt.Errorf("steam: store refused the request: %w", plugin.ErrUnavailable)
 	case status == http.StatusNotFound:
 		return fmt.Errorf("steam: %w", plugin.ErrNotFound)
 	case status == http.StatusTooManyRequests:
@@ -356,10 +364,10 @@ func steamGameRecord(appID string, d steamAppData) gameRecord {
 	if platforms := steamPlatformNames(d.Platforms); platforms != "" {
 		fields["platforms"] = plugin.FieldValue{Text: platforms}
 	}
-	if developer := steamJoinNames(d.Developers, 3); developer != "" {
+	if developer := joinNames(d.Developers, 3); developer != "" {
 		fields["developer"] = plugin.FieldValue{Text: developer}
 	}
-	if publisher := steamJoinNames(d.Publishers, 3); publisher != "" {
+	if publisher := joinNames(d.Publishers, 3); publisher != "" {
 		fields["publisher"] = plugin.FieldValue{Text: publisher}
 	}
 	if summary := steamSummary(d); summary != "" {
@@ -418,21 +426,6 @@ func steamPlatformNames(p steamPlatforms) string {
 	return strings.Join(names, ", ")
 }
 
-// steamJoinNames sanitises names and joins them with ", ". limit <= 0 means no
-// limit.
-func steamJoinNames(names []string, limit int) string {
-	clean := make([]string, 0, len(names))
-	for _, raw := range names {
-		if limit > 0 && len(clean) == limit {
-			break
-		}
-		if name := plugin.SingleLine(raw, maxTermRunes); name != "" {
-			clean = append(clean, name)
-		}
-	}
-	return strings.Join(clean, ", ")
-}
-
 // steamHeaderURL is the store header image of an app, which the account import
 // uses as an entry cover.
 func steamHeaderURL(appID int) string {
@@ -469,6 +462,11 @@ func (s *steamSource) Search(ctx context.Context, kind, q string) ([]plugin.Item
 func (s *steamSource) Details(ctx context.Context, kind, id string) (plugin.ItemData, error) {
 	if kind != KindGame {
 		return plugin.ItemData{}, plugin.ErrNotFound
+	}
+	// The id is checked before the key gate: a bogus id is not found
+	// whether or not the source is configured.
+	if _, err := steamAppID(id); err != nil {
+		return plugin.ItemData{}, err
 	}
 	if _, err := s.c.requireKey(ctx); err != nil {
 		return plugin.ItemData{}, err
