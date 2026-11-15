@@ -49,6 +49,24 @@ Unknown or invalid parameters are ignored, and a notice names them.
 
 **Backups.** The universal backup carries each entry's change log, newest first, up to 5,000 events per entry. Older events stay in the database; the archive marks an entry whose log was cut (`events_truncated`). A restore accepts no more than 5,000 events per entry.
 
+## Series
+
+A series is a named, ordered group of list entries of one plugin and kind (see the routes below). It can carry its own data and have spin-offs.
+
+**The series page** (`/{plugin}/series/{uid}`) has a header like an entry overview: cover, title, description, an info block (run dates, finished, expected parts, and the plugin's own series fields, for example Volumes, Chapters and Author for books) and the progress over the main parts. Below it come the parts in order, then a **Spin-offs** block with the spin-off parts and the spin-off series, each with its progress. A spin-off series shows "Spin-off of <parent>" under its title. The Series tab and the home page use the same cover and expected number of parts.
+
+**Edit details** (the button on the series page) opens a dialog with the title, the cover (upload a file or give an https URL), the description, started and ended dates, **Finished**, **Expected parts**, the plugin's series fields, **Linked entry** and **Spin-off of**. Linked entry picks one entry of the kind the plugin names for this (books: a Light novel); clear it to unlink. Spin-off of picks another series of the same plugin, or none. Input is checked like entry details; an invalid value is rejected.
+
+**How values are filled.** For each value the first of these that exists wins: your own value, then the linked entry's value (read live, so an AniList update of that entry shows through), then a value worked out from the main parts. Worked out means: the start date is the earliest release date of the main parts, the end date is the latest one and only when the series is marked finished, and the expected parts are the number of main parts. The cover falls back the same way (own, linked entry, first main part). Your own values are never overwritten. A linked entry that has an end date counts as finished unless you set the marker yourself. Light novels have an **Ended** date, filled from AniList's end date.
+
+**Progress and status.** Progress is completed main parts out of the expected parts, or out of the main parts when none is set. Dropped parts count towards the expected number. When expected parts are set, the series is not completed until that many parts are done: "5/12" with all five attached parts finished stays in progress.
+
+**Spin-off parts.** Each part has a "Mark as spin-off" / "Mark as main part" button. Spin-off parts have their own numbering ("Spin-off 2 of <series>", badge "Spin-off · <series>"), up and down moves stay inside a block, and they are not counted in progress, status or derived dates. The exception is a series that has only spin-off parts, which counts them so it is not empty. Flipping the flag moves the part to the end of the other block.
+
+**Spin-off series.** A series can be the spin-off of one other series of the same plugin (set in Edit details). This is one level: a spin-off series has no spin-offs of its own, and a series that already has spin-offs cannot become one. The parent's page lists its spin-off series. Deleting a series leaves its spin-offs as ordinary series.
+
+Backup, restore and export are described under "Series in backups and exports" below. In an older Allister, a new backup's spin-off parts restore as ordinary parts at the end of their series.
+
 ## Settings > General
 
 **Time zone** (stored as the setting `time_zone`, an IANA name such as `Europe/Berlin`). The home page's Coming up and the calendar page group their days and show their times in this zone, on the server, so a heading and its times always agree (a 23:30 UTC release is under Tuesday at 00:30 for Europe/Berlin). Empty means the default: the `TZ` environment variable when it names a valid zone, else UTC. An unknown name is refused with a message. "Use this browser's zone" fills the field with the browser's zone (it still needs Save). The `/calendar.ics` feed always uses UTC; calendar apps convert. The zone database is built into the binary. The universal backup carries the setting; a restore applies it only when this installation has none of its own.
@@ -102,7 +120,7 @@ The universal backup includes these settings and the uploaded fonts. A restore s
 | `/manga/manual/new`, `/manga/manual/{id}` | Create and open manual manga entries; `/manga/manual/{id}/edit` edits details, `/manga/manual/{id}/match` matches to AniList |
 | `/manga/export/json` | The manga JSON export |
 | `/{plugin}?tab=series` | The Series tab (shown once the plugin has a series): series rows with derived progress and status; `status`, `q`, `sort=title`, `view`, `page`; `/{plugin}/series/{uid}/parts` returns the expanded parts |
-| `/{plugin}/series/{uid}` | A series page: the parts in order with derived progress and status, add (from your list or by search), rename, move, remove, delete. POST routes: `/rename` (`title`), `/parts` (`item`), `/parts/{item}/move` (`dir=up\|down`), `/parts/{item}/remove`, `/delete` (`entries=keep\|remove`); `GET /parts` returns the expanded rows, `GET /candidates?q=` the entries of your list that can join |
+| `/{plugin}/series/{uid}` | A series page: the parts in order with derived progress and status, add (from your list or by search), rename, move, remove, delete. POST routes: `/rename` (`title`), `/parts` (`item`), `/parts/{item}/move` (`dir=up\|down`), `/parts/{item}/remove`, `/delete` (`entries=keep\|remove`); `GET /parts` returns the expanded rows, `GET /candidates?q=` the entries of your list that can join. Series data and spin-offs: `GET`/`POST /{plugin}/series/{uid}/edit` (the details dialog and its save), `POST /parts/{item}/spinoff` (`spin_off=1\|0`: flip a part between spin-off and main), `GET /link-candidates?q=` (entries that can be linked) and `GET /parent-candidates?q=` (series that can be the parent) |
 | `/{plugin}/search?series={uid}`, `/{plugin}/manual/new?series={uid}` | Search or manual create that adds the result into the series (`?kind=` names the kind when the plugin has several); `POST /{plugin}/{source}/{id}/add?series={uid}` does the same from the add dialog |
 | `POST /{plugin}/{source}/{id}/series` | Make a saved entry a series (`title`), with the entry as its first part |
 | `/book` | Your books list (same search, filter and view parameters; `kind=series` shows light novels) |
