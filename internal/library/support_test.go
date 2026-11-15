@@ -207,3 +207,56 @@ func TestAcceptsImageRef(t *testing.T) {
 		}
 	}
 }
+
+// TestImageReferencedCountsSeriesCovers: a file only a series cover names is
+// still referenced.
+func TestImageReferencedCountsSeriesCovers(t *testing.T) {
+	e := newEnv(t)
+	k := seriesKind(t, e)
+	s := mustSeries(t, e, addBook(t, e.lib, "1", fp(1), Entry{Status: Planned}), "S")
+	if err := e.lib.UpdateSeriesDetails(bg, s.ID, k, SeriesDetails{Title: "S", CoverPath: "series.png"}); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := e.lib.ImageReferenced(bg, "series.png"); err != nil || !got {
+		t.Fatalf("series cover: %v, %v", got, err)
+	}
+	if got, _ := e.lib.ImageReferenced(bg, "other.png"); got {
+		t.Fatal("other.png referenced")
+	}
+}
+
+func TestParentCandidates(t *testing.T) {
+	e := newEnv(t)
+	k := seriesKind(t, e)
+	a := mustSeries(t, e, addBook(t, e.lib, "1", fp(1), Entry{Status: Planned}), "Alpha")
+	b := mustSeries(t, e, addBook(t, e.lib, "2", fp(1), Entry{Status: Planned}), "Beta")
+	c := mustSeries(t, e, addBook(t, e.lib, "3", fp(1), Entry{Status: Planned}), "Gamma Beta")
+	d := mustSeries(t, e, addBook(t, e.lib, "4", fp(1), Entry{Status: Planned}), "Delta")
+	if err := e.lib.UpdateSeriesDetails(bg, d.ID, k, SeriesDetails{Title: "Delta", ParentID: a.ID}); err != nil {
+		t.Fatal(err)
+	}
+	titles := func(text string, exclude ...int64) []string {
+		got, err := e.lib.ParentCandidates(bg, "book", text, 10, exclude...)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var out []string
+		for _, s := range got {
+			out = append(out, s.Title)
+		}
+		return out
+	}
+	// spin-offs (Delta) are never candidates; order by title
+	if got := titles("", b.ID); len(got) != 2 || got[0] != "Alpha" || got[1] != "Gamma Beta" {
+		t.Fatalf("all: %v", got)
+	}
+	if got := titles("beta", c.ID); len(got) != 1 || got[0] != "Beta" {
+		t.Fatalf("text: %v", got)
+	}
+	if got, _ := e.lib.ParentCandidates(bg, "book", "", 1); len(got) != 1 {
+		t.Fatalf("limit: %v", got)
+	}
+	if got, _ := e.lib.ParentCandidates(bg, "book2", "", 10); len(got) != 0 {
+		t.Fatalf("other plugin: %v", got)
+	}
+}

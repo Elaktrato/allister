@@ -29,6 +29,9 @@ type pickView struct {
 	Name  string
 	Items []pickItem
 	Note  string
+	// Current is the choice kept checked in every result list, so a search
+	// never loses it
+	Current *pickItem
 }
 
 // seriesDialog is the data of series_dialog.
@@ -38,14 +41,13 @@ type seriesDialog struct {
 	CoverURL                                           string
 	Finished                                           bool
 	// the link picker (ShowLink: the kind declares a link) and the parent picker
-	ShowLink                  bool
-	LinkLabel                 string
-	LinkedID                  int64
-	LinkedTitle               string
-	LinkURL, ParentURL        string
-	LinkPick, ParentPick      pickView
-	ParentID                  int64
-	ParentTitle, ParentLocked string
+	ShowLink             bool
+	LinkLabel            string
+	LinkedID             int64
+	LinkURL, ParentURL   string
+	LinkPick, ParentPick pickView
+	ParentID             int64
+	ParentLocked         string
 }
 
 // seriesFieldKind is the kind whose editable Fields are the series fields of
@@ -67,20 +69,12 @@ func (s *server) linkedTitle(r *http.Request, m plugin.Manifest, id int64) strin
 	if err != nil || it == nil {
 		return "(unknown entry)"
 	}
-	return s.itemDisplayTitle(r, m, it)
-}
-
-func (s *server) itemDisplayTitle(r *http.Request, m plugin.Manifest, it *library.Item) string {
-	lang := s.titleLang(r.Context(), m)
-	for _, t := range it.Titles {
-		if t.Lang == lang && t.Text != "" {
-			return t.Text
-		}
+	var fallback []string
+	if k, ok := kindDef(m, it.Kind); ok {
+		fallback = k.TitleFallback
 	}
-	for _, t := range it.Titles {
-		if t.Text != "" {
-			return t.Text
-		}
+	if t := library.ResolveTitle(it.Titles, s.titleLang(r.Context(), m), fallback); t != "" {
+		return t
 	}
 	return "(untitled)"
 }
@@ -111,33 +105,39 @@ func (s *server) newSeriesDialog(r *http.Request, m plugin.Manifest, k plugin.Ki
 		if lk, ok := kindDef(m, k.SeriesLink.Kind); ok {
 			d.LinkLabel = lk.Label
 		}
-		d.LinkedTitle = s.linkedTitle(r, m, ser.LinkedItemID)
-		pick, err := s.linkPick(r, m, k, ser, "")
-		if err != nil {
-			return d, err
+	}
+	return d, nil
+}
+
+// fillPicks loads the pickers of the dialog: the first results and the
+// current choice (the dialog's LinkedID and ParentID) pinned in each.
+func (s *server) fillPicks(r *http.Request, m plugin.Manifest, k plugin.KindDef, ser *library.Series, d *seriesDialog) error {
+	var err error
+	if d.ShowLink {
+		if d.LinkPick, err = s.linkPick(r, m, k, ser, "", d.LinkedID); err != nil {
+			return err
 		}
-		d.LinkPick = pick
 	}
-	if ser.ParentID != 0 {
-		if p, err := s.deps.Library.SeriesByID(r.Context(), ser.ParentID); err == nil && p != nil {
-			d.ParentTitle = p.Title
-		}
+	if d.ParentPick, err = s.parentPick(r, m, ser, "", d.ParentID); err != nil {
+		return err
 	}
-	pp, err := s.parentPick(r, m, ser, "")
-	d.ParentPick = pp
-	if pp.Note != "" && pp.Note == noteHasSpinOffs {
-		d.ParentLocked = pp.Note
+	if d.ParentPick.Note == noteHasSpinOffs {
+		d.ParentLocked = d.ParentPick.Note
 	}
-	return d, err
+	return nil
 }
 
 const noteHasSpinOffs = "This series has spin-offs, so it cannot be a spin-off itself."
 
-// linkPick lists the entries of the link kind of this plugin that match text.
-func (s *server) linkPick(r *http.Request, m plugin.Manifest, k plugin.KindDef, ser *library.Series, text string) (pickView, error) {
+// linkPick lists the entries of the link kind of this plugin that match text,
+// with the entry current pinned first.
+func (s *server) linkPick(r *http.Request, m plugin.Manifest, k plugin.KindDef, ser *library.Series, text string, current int64) (pickView, error) {
 	v := pickView{Name: "linked"}
 	if k.SeriesLink == nil {
 		return v, nil
+	}
+	if current != 0 {
+		v.Current = &pickItem{ID: strconv.FormatInt(current, 10), Title: s.linkedTitle(r, m, current)}
 	}
 	ctx := r.Context()
 	rows, err := s.deps.Library.Rows(ctx, library.Query{PluginID: m.ID, Kind: k.SeriesLink.Kind, Text: text, Sort: library.Sort{Kind: library.SortTitle}}, s.titleLang(ctx, m), maxCandidates+1, 0)
@@ -145,7 +145,7 @@ func (s *server) linkPick(r *http.Request, m plugin.Manifest, k plugin.KindDef, 
 		return v, err
 	}
 	for _, row := range rows {
-		if row.Item.ID == ser.LinkedItemID || len(v.Items) >= maxCandidates {
+		if row.Item.ID == current || len(v.Items) >= maxCandidates {
 			continue
 		}
 		title := row.Title
@@ -158,8 +158,9 @@ func (s *server) linkPick(r *http.Request, m plugin.Manifest, k plugin.KindDef, 
 }
 
 // parentPick lists the series of the plugin that can be the parent of ser:
-// not itself, no spin-off itself; none when ser has spin-offs.
-func (s *server) parentPick(r *http.Request, m plugin.Manifest, ser *library.Series, text string) (pickView, error) {
+// not itself, no spin-off itself; none when ser has spin-offs. The series
+// current is pinned first.
+func (s *server) parentPick(r *http.Request, m plugin.Manifest, ser *library.Series, text string, current int64) (pickView, error) {
 	v := pickView{Name: "parent"}
 	ctx := r.Context()
 	kids, err := s.deps.Library.SpinOffsOf(ctx, ser.ID)
@@ -170,16 +171,21 @@ func (s *server) parentPick(r *http.Request, m plugin.Manifest, ser *library.Ser
 		v.Note = noteHasSpinOffs
 		return v, nil
 	}
-	page, err := s.deps.Library.ListSeries(ctx, library.SeriesQuery{PluginID: m.ID, Text: text, Sort: "title", PageSize: 100})
+	if current != 0 {
+		p, err := s.deps.Library.SeriesByID(ctx, current)
+		switch {
+		case err == nil:
+			v.Current = &pickItem{ID: strconv.FormatInt(p.ID, 10), Title: p.Title}
+		case !errors.Is(err, library.ErrNoSeries):
+			return v, err
+		}
+	}
+	rows, err := s.deps.Library.ParentCandidates(ctx, m.ID, text, maxCandidates, ser.ID, current)
 	if err != nil {
 		return v, err
 	}
-	for _, row := range page.Rows {
-		c := row.Series
-		if c.ID == ser.ID || c.ID == ser.ParentID || row.ParentID != 0 || len(v.Items) >= maxCandidates {
-			continue
-		}
-		v.Items = append(v.Items, pickItem{ID: strconv.FormatInt(c.ID, 10), Title: c.Title, Cover: covers.Src(row.Cover)})
+	for _, c := range rows {
+		v.Items = append(v.Items, pickItem{ID: strconv.FormatInt(c.ID, 10), Title: c.Title, Cover: covers.Src(c.CoverPath)})
 	}
 	return v, nil
 }
@@ -203,6 +209,9 @@ func (s *server) seriesDialogResponse(w http.ResponseWriter, r *http.Request, m 
 func (s *server) getSeriesEdit(w http.ResponseWriter, r *http.Request, m plugin.Manifest, ser *library.Series) {
 	k, _ := kindDef(m, ser.Kind)
 	d, err := s.newSeriesDialog(r, m, k, ser)
+	if err == nil {
+		err = s.fillPicks(r, m, k, ser, &d)
+	}
 	if err != nil {
 		s.internalError(w, r, err)
 		return
@@ -212,7 +221,7 @@ func (s *server) getSeriesEdit(w http.ResponseWriter, r *http.Request, m plugin.
 
 func (s *server) getSeriesLinkCandidates(w http.ResponseWriter, r *http.Request, m plugin.Manifest, ser *library.Series) {
 	k, _ := kindDef(m, ser.Kind)
-	v, err := s.linkPick(r, m, k, ser, strings.TrimSpace(r.URL.Query().Get("q")))
+	v, err := s.linkPick(r, m, k, ser, strings.TrimSpace(r.URL.Query().Get("q")), ser.LinkedItemID)
 	if err != nil {
 		s.internalError(w, r, err)
 		return
@@ -221,7 +230,7 @@ func (s *server) getSeriesLinkCandidates(w http.ResponseWriter, r *http.Request,
 }
 
 func (s *server) getSeriesParentCandidates(w http.ResponseWriter, r *http.Request, m plugin.Manifest, ser *library.Series) {
-	v, err := s.parentPick(r, m, ser, strings.TrimSpace(r.URL.Query().Get("q")))
+	v, err := s.parentPick(r, m, ser, strings.TrimSpace(r.URL.Query().Get("q")), ser.ParentID)
 	if err != nil {
 		s.internalError(w, r, err)
 		return
@@ -231,7 +240,7 @@ func (s *server) getSeriesParentCandidates(w http.ResponseWriter, r *http.Reques
 
 // pickID reads a picker's posted id: an absent value keeps current, "" or "0"
 // clears it.
-func pickID(r *http.Request, name string, current int64) (int64, string) {
+func pickID(r *http.Request, name, label string, current int64) (int64, string) {
 	vs, ok := r.PostForm[name]
 	if !ok || len(vs) == 0 {
 		return current, ""
@@ -242,7 +251,7 @@ func pickID(r *http.Request, name string, current int64) (int64, string) {
 	}
 	id, ok := formItemID(raw)
 	if !ok {
-		return 0, "Please choose from the list."
+		return 0, "Please choose the " + label + " from the list."
 	}
 	return id, ""
 }
@@ -289,8 +298,8 @@ func (s *server) postSeriesEdit(w http.ResponseWriter, r *http.Request, m plugin
 	d.itemForm = s.newItemForm(sk, vals, &library.Item{Fields: ser.Fields})
 	d.Heading, d.Submit, d.CancelURL, d.Action = "Edit series details", "Save", seriesURL(m.ID, ser.UID), seriesURL(m.ID, ser.UID)+"/edit"
 	var m5, m6 string
-	det.LinkedItemID, m5 = pickID(r, "linked", ser.LinkedItemID)
-	det.ParentID, m6 = pickID(r, "parent", ser.ParentID)
+	det.LinkedItemID, m5 = pickID(r, "linked", "linked entry", ser.LinkedItemID)
+	det.ParentID, m6 = pickID(r, "parent", "parent series", ser.ParentID)
 	d.LinkedID, d.ParentID = det.LinkedItemID, det.ParentID
 
 	// the cover: an upload, else a URL, else removal, else unchanged
@@ -319,7 +328,7 @@ func (s *server) postSeriesEdit(w http.ResponseWriter, r *http.Request, m plugin
 		det.CoverPath = ""
 	}
 	if msg := first(m1, m2, m3, m4, m5, m6, m7); msg != "" {
-		s.seriesFail(w, r, m, ser, d, msg)
+		s.seriesFail(w, r, m, k, ser, d, msg)
 		return
 	}
 	stored := ""
@@ -327,7 +336,7 @@ func (s *server) postSeriesEdit(w http.ResponseWriter, r *http.Request, m plugin
 		name, err := s.storeCover(fh)
 		var rej errCoverRejected
 		if errors.As(err, &rej) {
-			s.seriesFail(w, r, m, ser, d, rej.msg)
+			s.seriesFail(w, r, m, k, ser, d, rej.msg)
 			return
 		}
 		if err != nil {
@@ -339,7 +348,7 @@ func (s *server) postSeriesEdit(w http.ResponseWriter, r *http.Request, m plugin
 	switch err := s.deps.Library.UpdateSeriesDetails(ctx, ser.ID, k, det); {
 	case errors.Is(err, library.ErrInvalid):
 		s.cleanupCover(ctx, stored)
-		s.seriesFail(w, r, m, ser, d, invalidMessage(err))
+		s.seriesFail(w, r, m, k, ser, d, seriesInvalidMessage(err))
 		return
 	case errors.Is(err, library.ErrNoSeries):
 		s.cleanupCover(ctx, stored)
@@ -357,7 +366,11 @@ func (s *server) postSeriesEdit(w http.ResponseWriter, r *http.Request, m plugin
 }
 
 // seriesFail re-renders the dialog with the message (422).
-func (s *server) seriesFail(w http.ResponseWriter, r *http.Request, m plugin.Manifest, ser *library.Series, d seriesDialog, msg string) {
+func (s *server) seriesFail(w http.ResponseWriter, r *http.Request, m plugin.Manifest, k plugin.KindDef, ser *library.Series, d seriesDialog, msg string) {
+	if err := s.fillPicks(r, m, k, ser, &d); err != nil {
+		s.internalError(w, r, err)
+		return
+	}
 	if d.FileDropped && !strings.Contains(msg, "choose the cover file again") {
 		msg += " Please choose the cover file again, browsers cannot keep it."
 	}
@@ -393,4 +406,11 @@ func (s *server) postSeriesSpinOff(w http.ResponseWriter, r *http.Request, m plu
 		return
 	}
 	http.Redirect(w, r, seriesURL(m.ID, ser.UID), http.StatusSeeOther)
+}
+
+// seriesInvalidMessage is a library message with the column names replaced by
+// the labels of the form.
+func seriesInvalidMessage(err error) string {
+	msg := strings.NewReplacer("parts_total", "expected parts", "started_on", "started", "ended_on", "ended").Replace(err.Error())
+	return invalidMessage(errors.New(msg))
 }

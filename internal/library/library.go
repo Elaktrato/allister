@@ -155,7 +155,7 @@ func (l *Library) SetPersonImagePath(ctx context.Context, personID int64, path s
 	return l.setOne(ctx, "set person image", `UPDATE `+tablePeople+` SET image_path = ? WHERE id = ?`, path, personID)
 }
 
-// ImageReferenced reports whether any item cover or person image holds the
+// ImageReferenced reports whether any item cover, series cover or person image holds the
 // stored value name (for example a downloaded file's base name). Content-hash
 // file names are shared, so callers check this before deleting a file. The
 // empty name is never referenced.
@@ -165,6 +165,7 @@ func (l *Library) ImageReferenced(ctx context.Context, name string) (bool, error
 	}
 	var ok bool
 	err := l.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM items WHERE cover_path = ?1)
+		OR EXISTS(SELECT 1 FROM series WHERE cover_path = ?1)
 		OR EXISTS(SELECT 1 FROM `+tablePeople+` WHERE image_path = ?1)`, name).Scan(&ok)
 	if err != nil {
 		return false, fmt.Errorf("image referenced: %w", err)

@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -153,7 +154,7 @@ func TestSeriesPartLabels(t *testing.T) {
 func TestSeriesEditDialog(t *testing.T) {
 	fe := newFixtureEnv(t, withSeriesData)
 	ser, _ := fe.bookSeries(t, "Saga")
-	linked := fe.comic(t, "c1", "Comic One")
+	fe.comic(t, "c1", "Comic One")
 	fe.comic(t, "c2", "Another")
 	other, _ := fe.bookSeries(t, "Other")
 	base := seriesURL("book", ser.UID)
@@ -176,7 +177,6 @@ func TestSeriesEditDialog(t *testing.T) {
 	parents := fe.get(base + "/parent-candidates").Body.String()
 	mustContain(t, parents, "Other", `value="`+idStr(other.ID)+`"`)
 	mustNotContain(t, parents, ">Saga<")
-	_ = linked
 }
 
 func TestSeriesEditRoundTrip(t *testing.T) {
@@ -239,6 +239,8 @@ func mustSeriesWeb(t *testing.T, fe *fixtureEnv, uid string) *library.Series {
 	return s
 }
 
+var alertRe = regexp.MustCompile(`(?s)role="alert"><p>(.*?)</p>`)
+
 func TestSeriesEditRefusesInvalid(t *testing.T) {
 	fe := newFixtureEnv(t, withSeriesData)
 	ser, _ := fe.bookSeries(t, "Saga")
@@ -259,12 +261,12 @@ func TestSeriesEditRefusesInvalid(t *testing.T) {
 		"url field":        {func(v url.Values) { v.Set("field.site", "ftp://x") }, "Website"},
 		"unknown field":    {func(v url.Values) { v.Set("field.nope", "x") }, "nope"},
 		"parts":            {func(v url.Values) { v.Set("parts_total", "many") }, "Expected parts"},
-		"parts huge":       {func(v url.Values) { v.Set("parts_total", "999999") }, "parts_total"},
-		"description":      {func(v url.Values) { v.Set("description", strings.Repeat("é", 20001)) }, "description"},
+		"parts huge":       {func(v url.Values) { v.Set("parts_total", "999999") }, "expected parts"},
+		"description":      {func(v url.Values) { v.Set("description", strings.Repeat("é", 20001)) }, "Description"},
 		"empty title":      {func(v url.Values) { v.Set("title", " ") }, "title"},
 		"link not listed":  {func(v url.Values) { v.Set("linked", idStr(unlisted)) }, "not in your list"},
 		"link wrong kind":  {func(v url.Values) { v.Set("linked", idStr(book)) }, "link"},
-		"link garbage":     {func(v url.Values) { v.Set("linked", "x") }, "choose"},
+		"link garbage":     {func(v url.Values) { v.Set("linked", "x") }, "linked entry"},
 		"parent self":      {func(v url.Values) { v.Set("parent", idStr(ser.ID)) }, "parent"},
 		"parent unknown":   {func(v url.Values) { v.Set("parent", "99999") }, "parent"},
 	}
@@ -278,8 +280,9 @@ func TestSeriesEditRefusesInvalid(t *testing.T) {
 				continue
 			}
 			body := rec.Body.String()
-			if !strings.Contains(strings.ToLower(body), strings.ToLower(c.want)) || !strings.Contains(body, `role="alert"`) {
-				t.Errorf("%s: message does not name %q", name, c.want)
+			alert := alertRe.FindStringSubmatch(body)
+			if alert == nil || !strings.Contains(strings.ToLower(alert[1]), strings.ToLower(c.want)) {
+				t.Errorf("%s: message %q does not name %q", name, alert, c.want)
 			}
 			// the dialog keeps what was typed
 			if v.Get("description") != "" && name != "description" && !strings.Contains(body, "keep out") {
@@ -364,4 +367,115 @@ func countFiles(t *testing.T, e *env) int {
 		t.Fatal(err)
 	}
 	return len(ents)
+}
+
+// TestSeriesCoverSharedBetweenSeries: two series with the same image share
+// the file; replacing one's cover keeps the file for the other, and a failed
+// save keeps it too.
+func TestSeriesCoverSharedBetweenSeries(t *testing.T) {
+	fe := newFixtureEnv(t, withSeriesData)
+	a, _ := fe.bookSeries(t, "A")
+	b, _ := fe.bookSeries(t, "B")
+	up := func(ser *library.Series) {
+		t.Helper()
+		rec := fe.postMultipart(t, seriesURL("book", ser.UID)+"/edit", url.Values{"title": {ser.Title}}, &upload{"cover", "c.png", "image/png", png1("same")})
+		if rec.Code != http.StatusSeeOther {
+			t.Fatalf("upload: %d", rec.Code)
+		}
+	}
+	up(a)
+	up(b)
+	name := mustSeriesWeb(t, fe, a.UID).CoverPath
+	if name == "" || mustSeriesWeb(t, fe, b.UID).CoverPath != name {
+		t.Fatalf("not shared: %q", name)
+	}
+	// B's failed save with the same image (invalid field) must not delete it
+	bad := url.Values{"title": {"B"}, "field.volumes": {"abc"}}
+	if rec := fe.postMultipart(t, seriesURL("book", b.UID)+"/edit", bad, &upload{"cover", "c.png", "image/png", png1("same")}); rec.Code != 422 {
+		t.Fatalf("bad: %d", rec.Code)
+	}
+	if !hasFile(fe.env, name) {
+		t.Fatal("failed save removed the shared file")
+	}
+	// A replaces its cover with a URL: B keeps the file
+	if rec := fe.do("POST", seriesURL("book", a.UID)+"/edit", url.Values{"title": {"A"}, "cover_url": {"https://img.example/a.jpg"}}, false); rec.Code != 303 {
+		t.Fatalf("replace: %d", rec.Code)
+	}
+	if !hasFile(fe.env, name) {
+		t.Fatal("A replacing its cover deleted B's file")
+	}
+	// B removes it: now nothing references the file
+	if rec := fe.do("POST", seriesURL("book", b.UID)+"/edit", url.Values{"title": {"B"}, "remove_cover": {"1"}}, false); rec.Code != 303 {
+		t.Fatalf("remove: %d", rec.Code)
+	}
+	if hasFile(fe.env, name) {
+		t.Fatal("unreferenced file kept")
+	}
+}
+
+func TestSeriesPickersKeepCurrentChoice(t *testing.T) {
+	fe := newFixtureEnv(t, withSeriesData)
+	ser, _ := fe.bookSeries(t, "Saga")
+	linked := fe.comic(t, "c1", "Comic One")
+	fe.comic(t, "c2", "Another")
+	parent, _ := fe.bookSeries(t, "Parent")
+	k := bookKind(t, fe)
+	if err := fe.lib.UpdateSeriesDetails(bg, ser.ID, k, library.SeriesDetails{Title: "Saga", LinkedItemID: linked, ParentID: parent.ID}); err != nil {
+		t.Fatal(err)
+	}
+	base := seriesURL("book", ser.UID)
+	for _, c := range []struct{ path, name, id, title string }{
+		{"/link-candidates?q=another", "linked", idStr(linked), "Comic One"},
+		{"/parent-candidates?q=zzz", "parent", idStr(parent.ID), "Parent"},
+	} {
+		b := fe.get(base + c.path).Body.String()
+		mustContain(t, b, `name="`+c.name+`" value="`+c.id+`" checked`, c.title)
+	}
+	// the dialog itself shows the current choice once
+	d := fe.get(base + "/edit").Body.String()
+	if n := strings.Count(d, `value="`+idStr(linked)+`" checked`); n != 1 {
+		t.Fatalf("current link shown %d times", n)
+	}
+}
+
+func TestSeriesEditLinkedTitleUsesFallback(t *testing.T) {
+	fe := newFixtureEnv(t, withSeriesData, func(book, _ *plugintest.Plugin) {
+		book.M.Kinds[1].TitleLanguages = []string{"en", "de", "fr"}
+		book.M.Kinds[1].TitleFallback = []string{"fr"}
+	})
+	ser, _ := fe.bookSeries(t, "Saga")
+	d := bookItem("c9", "x")
+	d.Kind = "comic"
+	d.Titles = []plugin.Title{{Lang: "de", Text: "Deutsch"}, {Lang: "fr", Text: "Francais"}}
+	id := fe.addFixture(t, "book", "comic", d, library.Entry{Status: library.Planned})
+	k := bookKind(t, fe)
+	if err := fe.lib.UpdateSeriesDetails(bg, ser.ID, k, library.SeriesDetails{Title: "Saga", LinkedItemID: id}); err != nil {
+		t.Fatal(err)
+	}
+	b := fe.get(seriesURL("book", ser.UID) + "/edit").Body.String()
+	mustContain(t, b, "Francais")
+	mustNotContain(t, b, "Deutsch")
+}
+
+func TestSeriesSpinOffToggleOtherSeriesPart(t *testing.T) {
+	fe := newFixtureEnv(t, withSeriesData)
+	a, _ := fe.bookSeries(t, "A")
+	_, bIDs := fe.bookSeries(t, "B")
+	rec := fe.do("POST", seriesURL("book", a.UID)+"/parts/"+idStr(bIDs[0])+"/spinoff", url.Values{"spin_off": {"1"}}, false)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("%d", rec.Code)
+	}
+	if _, _, spin, _ := fe.lib.SeriesOfItem(bg, bIDs[0]); spin {
+		t.Fatal("part of another series changed")
+	}
+}
+
+func TestSeriesInfoShowsSetExpectedParts(t *testing.T) {
+	fe := newFixtureEnv(t, withSeriesData)
+	ser, _ := fe.bookSeries(t, "Saga")
+	k := bookKind(t, fe)
+	if err := fe.lib.UpdateSeriesDetails(bg, ser.ID, k, library.SeriesDetails{Title: "Saga", PartsTotal: 2}); err != nil {
+		t.Fatal(err)
+	}
+	mustContain(t, fe.get(seriesURL("book", ser.UID)).Body.String(), "Expected parts")
 }

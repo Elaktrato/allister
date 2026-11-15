@@ -261,13 +261,16 @@ func (l *Library) SeriesByUID(ctx context.Context, pluginID, uid string) (*Serie
 	return s, nil
 }
 
-// SeriesByID returns the series with the id, or ErrNoSeries.
+// SeriesByID returns the series with the id (with its fields), or ErrNoSeries.
 func (l *Library) SeriesByID(ctx context.Context, id int64) (*Series, error) {
 	s, err := scanSeries(l.db.QueryRowContext(ctx, `SELECT `+seriesCols+` FROM series s WHERE s.id = ?`, id))
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNoSeries
 	}
 	if err != nil {
+		return nil, err
+	}
+	if err := attachSeriesFields(ctx, l.db, s); err != nil {
 		return nil, err
 	}
 	return s, nil
@@ -1344,4 +1347,35 @@ func (l *Library) ActiveSeries(ctx context.Context, pluginIDs []string, limit in
 		return nil, fmt.Errorf("active series: %w", err)
 	}
 	return out, nil
+}
+
+// ParentCandidates returns up to limit series of the plugin that can be a
+// parent: no spin-off itself, none of exclude, whose title contains text
+// (case-insensitive), ordered by title.
+func (l *Library) ParentCandidates(ctx context.Context, pluginID, text string, limit int, exclude ...int64) ([]Series, error) {
+	if limit <= 0 {
+		return nil, nil
+	}
+	q := `SELECT ` + seriesCols + ` FROM series s WHERE s.plugin_id = ? AND s.parent_id IS NULL AND instr(lower(s.title), lower(?)) > 0`
+	args := []any{pluginID, text}
+	for _, id := range exclude {
+		q += ` AND s.id <> ?`
+		args = append(args, id)
+	}
+	q += ` ORDER BY lower(s.title), s.id LIMIT ?`
+	args = append(args, limit)
+	rows, err := l.db.QueryContext(ctx, q, args...) //nolint:gosec // G202: constant SQL; values are bound
+	if err != nil {
+		return nil, fmt.Errorf("parent candidates: %w", err)
+	}
+	defer rows.Close()
+	var out []Series
+	for rows.Next() {
+		s, err := scanSeries(rows)
+		if err != nil {
+			return nil, fmt.Errorf("parent candidates: %w", err)
+		}
+		out = append(out, *s)
+	}
+	return out, rows.Err()
 }
