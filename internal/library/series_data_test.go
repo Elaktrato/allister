@@ -1,6 +1,7 @@
 package library
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strings"
@@ -567,5 +568,65 @@ func TestPartlessSeriesReads(t *testing.T) {
 	// a part can be added again
 	if err := e.lib.AddPart(bg, s.ID, item, ""); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// TestRestoreSeriesCoverOutsideWriteLock: the series cover is resolved (and
+// stored) before the write transaction starts, so the database stays
+// writable meanwhile, like RestoreItem; an existing uid resolves nothing.
+func TestRestoreSeriesCoverOutsideWriteLock(t *testing.T) {
+	e := newEnv(t)
+	addBook(t, e.lib, "1", fp(1), Entry{Status: Planned})
+	calls := 0
+	blocked := false
+	opts := RestoreOptions{ResolveCover: func(ctx context.Context, name string) (string, string, error) {
+		calls++
+		done := make(chan error, 1)
+		go func() {
+			_, err := e.db.ExecContext(context.Background(), `UPDATE items SET updated_at = updated_at WHERE id < 0`)
+			done <- err
+		}()
+		select {
+		case err := <-done:
+			if err != nil {
+				return "", "", err
+			}
+		case <-time.After(300 * time.Millisecond):
+			blocked = true
+		}
+		return name, "", nil
+	}}
+	bs := BackupSeries{UID: "u-c", PluginID: "book", Kind: "book", Title: "C", Cover: "c.png",
+		Parts: []BackupPartRef{{PluginID: "book", Kind: "book", Source: "books", SourceID: "1"}}}
+	res, err := e.lib.RestoreSeries(bg, bs, opts)
+	if err != nil || !res.Created {
+		t.Fatalf("restore: %v %+v", err, res)
+	}
+	if blocked {
+		t.Error("the cover was resolved while the write transaction held the database")
+	}
+	if got := mustSeriesByUID(t, e, "u-c"); got.CoverPath != "c.png" {
+		t.Errorf("cover %q", got.CoverPath)
+	}
+	if _, err := e.lib.RestoreSeries(bg, bs, opts); err != nil || calls != 1 {
+		t.Errorf("existing uid: %v, %d cover calls", err, calls)
+	}
+}
+
+// TestRestoreSeriesNotesHaveNoErrorPrefix: a value left out is explained
+// without the library's raw "invalid: " prefix.
+func TestRestoreSeriesNotesHaveNoErrorPrefix(t *testing.T) {
+	e := newEnv(t)
+	addBook(t, e.lib, "1", fp(1), Entry{Status: Planned})
+	bs := BackupSeries{UID: "u-n", PluginID: "book", Kind: "book", Title: "N", PartsTotal: -3, Description: "a\x01b",
+		Parts: []BackupPartRef{{PluginID: "book", Kind: "book", Source: "books", SourceID: "1"}}}
+	res, err := e.lib.RestoreSeries(bg, bs, RestoreOptions{})
+	if err != nil || !res.Created || len(res.Notes) != 2 {
+		t.Fatalf("restore: %v %+v", err, res)
+	}
+	for _, n := range res.Notes {
+		if strings.Contains(n, "invalid: ") {
+			t.Errorf("note with the raw prefix: %q", n)
+		}
 	}
 }
