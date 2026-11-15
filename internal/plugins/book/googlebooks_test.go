@@ -29,10 +29,14 @@ func gbServer(t *testing.T, routes map[string]string, key *string) *httptest.Ser
 	return srv
 }
 
+func staticKey(k string) func(context.Context) (string, error) {
+	return func(context.Context) (string, error) { return k, nil }
+}
+
 func gbSource(t *testing.T, routes map[string]string, key string) plugin.Source {
 	t.Helper()
 	srv := gbServer(t, routes, nil)
-	return &googleBooksSource{c: newGoogleBooksClient(srv.URL, key, srv.Client())}
+	return &googleBooksSource{c: newGoogleBooksClient(srv.URL, staticKey(key), srv.Client())}
 }
 
 func TestGoogleBooksSearchMapsSummaries(t *testing.T) {
@@ -106,7 +110,7 @@ func TestGoogleBooksKeyIsSentAndRedacted(t *testing.T) {
 		gotKey = r.URL.Query().Get("key")
 		http.Error(w, "server says secret", http.StatusInternalServerError)
 	})
-	s := &googleBooksSource{c: newGoogleBooksClient(srv.URL, "sekret", srv.Client())}
+	s := &googleBooksSource{c: newGoogleBooksClient(srv.URL, staticKey("sekret"), srv.Client())}
 	_, err := s.Search(context.Background(), KindBook, "dune")
 	if err == nil || !errors.Is(err, plugin.ErrUnavailable) || strings.Contains(err.Error(), "sekret") {
 		t.Fatalf("err = %v", err)
@@ -135,7 +139,7 @@ func TestGoogleBooksErrors(t *testing.T) {
 				_, _ = w.Write([]byte(c.body))
 			}))
 			defer srv.Close()
-			s := &googleBooksSource{c: newGoogleBooksClient(srv.URL, "", srv.Client())}
+			s := &googleBooksSource{c: newGoogleBooksClient(srv.URL, nil, srv.Client())}
 			_, err := s.Search(context.Background(), KindBook, "dune")
 			if !errors.Is(err, c.want) {
 				t.Fatalf("err = %v, want %v", err, c.want)
@@ -151,5 +155,37 @@ func TestGoogleBooksLookupByISBN10(t *testing.T) {
 	d, err := s.Lookup(context.Background(), KindBook, "isbn", "9780441013593")
 	if err != nil || d.ID != "gb1" || d.ExternalIDs["isbn"] != "9780441013593" {
 		t.Fatalf("%+v %v", d, err)
+	}
+}
+
+func TestGoogleBooksKeyResolvedPerRequest(t *testing.T) {
+	var got []string
+	var hasKey []bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = append(got, r.URL.Query().Get("key"))
+		hasKey = append(hasKey, r.URL.Query().Has("key"))
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	t.Cleanup(srv.Close)
+	keys := []string{"k1", "k2", ""}
+	i := 0
+	resolver := func(context.Context) (string, error) { k := keys[i]; i++; return k, nil }
+	s := &googleBooksSource{c: newGoogleBooksClient(srv.URL, resolver, srv.Client())}
+	for range keys {
+		if _, err := s.Search(context.Background(), KindBook, "dune"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if len(got) != 3 || got[0] != "k1" || got[1] != "k2" || hasKey[2] {
+		t.Fatalf("keys = %v, has = %v", got, hasKey)
+	}
+}
+
+func TestGoogleBooksKeyResolverErrorIsReturned(t *testing.T) {
+	boom := errors.New("settings store unavailable")
+	s := &googleBooksSource{c: newGoogleBooksClient("http://127.0.0.1:1", func(context.Context) (string, error) { return "", boom }, nil)}
+	if _, err := s.Search(context.Background(), KindBook, "dune"); !errors.Is(err, boom) {
+		t.Fatalf("err = %v", err)
 	}
 }

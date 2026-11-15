@@ -62,11 +62,7 @@ func run() error {
 	// the environment still supplies one. Resolved per request, so a key saved
 	// in the settings takes effect without a restart. A lookup failure is
 	// returned, never replaced by the environment value.
-	fallback := map[string]map[string]string{
-		"tmdb":  {"key": cfg.TMDBKey},
-		"igdb":  {"client_id": cfg.IGDBClientID, "client_secret": cfg.IGDBClientSecret},
-		"steam": {"key": cfg.SteamAPIKey},
-	}
+	fallback := sourceKeyFallback(cfg)
 	credential := func(ctx context.Context, sourceID, field string) (string, error) {
 		return resolveSourceKeyField(ctx, settingsStore.SourceKeyField, fallback, sourceID, field)
 	}
@@ -81,7 +77,9 @@ func run() error {
 	if err := registry.Register(manga.New(manga.Options{})); err != nil {
 		log.Printf("startup: %v", err)
 	}
-	if err := registry.Register(book.New(book.Options{GoogleBooksKey: cfg.GoogleBooksKey})); err != nil {
+	if err := registry.Register(book.New(book.Options{GoogleBooksKey: func(ctx context.Context) (string, error) {
+		return credential(ctx, "googlebooks", "key")
+	}})); err != nil {
 		log.Printf("startup: %v", err)
 	}
 	if err := registry.Register(tv.New(tv.Options{TMDBKey: tmdbKey})); err != nil {
@@ -177,6 +175,17 @@ func run() error {
 // source uses the field "key"). An unknown source or field resolves to "",
 // and a lookup failure is returned instead of falling back, so a broken
 // settings store stays visible.
+// sourceKeyFallback maps source id and credential field to the environment
+// value used when nothing is stored in the settings.
+func sourceKeyFallback(cfg config.Config) map[string]map[string]string {
+	return map[string]map[string]string{
+		"tmdb":        {"key": cfg.TMDBKey},
+		"igdb":        {"client_id": cfg.IGDBClientID, "client_secret": cfg.IGDBClientSecret},
+		"steam":       {"key": cfg.SteamAPIKey},
+		"googlebooks": {"key": cfg.GoogleBooksKey},
+	}
+}
+
 func resolveSourceKeyField(ctx context.Context, stored func(context.Context, string, string) (string, error), fallback map[string]map[string]string, sourceID, field string) (string, error) {
 	value, err := stored(ctx, sourceID, field)
 	if err != nil || value != "" {

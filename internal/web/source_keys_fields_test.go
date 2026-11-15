@@ -293,3 +293,28 @@ func TestSourceCredentialReadErrorAnswers500(t *testing.T) {
 		})
 	}
 }
+
+// TestOptionalKeySourceNeverNeedsKey: a source whose key is optional counts as
+// configured without one (no "(needs key)" label, no plugin notice, still the
+// default source), while the API keys card still lists it as optional and
+// shows no key as configured until one is saved.
+func TestOptionalKeySourceNeverNeedsKey(t *testing.T) {
+	e := newFixtureEnv(t, func(_, tv *plugintest.Plugin) {
+		tv.M.Sources[0].KeyOptional = true
+	})
+	b := e.get("/tv/search?q=x").Body.String()
+	mustNotContain(t, b, "(needs key)")
+	b = e.get("/settings/plugins/tv").Body.String()
+	mustNotContain(t, b, `href="/settings/plugins#source-keys"`, "needs key")
+
+	block := sourceKeyBlock(t, e.get("/settings/plugins").Body.String(), "tvdata")
+	mustContain(t, block, "optional", `name="key"`)
+	mustNotContain(t, block, "A key is configured.", "Remove")
+
+	if err := e.set.SetSourceKey(context.Background(), "tvdata", "secret"); err != nil {
+		t.Fatal(err)
+	}
+	block = sourceKeyBlock(t, e.get("/settings/plugins").Body.String(), "tvdata")
+	mustContain(t, block, "A key is configured.", "Remove")
+	mustNotContain(t, block, "secret")
+}

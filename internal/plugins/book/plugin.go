@@ -1,6 +1,7 @@
 package book
 
 import (
+	"context"
 	"net/http"
 	"time"
 
@@ -16,7 +17,9 @@ type Options struct {
 	OpenLibraryURL string
 	GoogleBooksURL string
 	AniListURL     string
-	GoogleBooksKey string
+	// GoogleBooksKey resolves the optional API key per request; nil or an
+	// empty answer means no key.
+	GoogleBooksKey func(context.Context) (string, error)
 }
 
 type booksPlugin struct {

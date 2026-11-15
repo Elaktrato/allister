@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/allister/allister/internal/config"
 	"github.com/allister/allister/internal/jobs"
 	"github.com/allister/allister/internal/plugin"
 	"github.com/allister/allister/internal/plugin/plugintest"
@@ -209,5 +210,22 @@ func TestResolveSourceKeyField(t *testing.T) {
 				t.Fatalf("resolveSourceKeyField = %q, %v; want %q, %v", got, err, c.want, c.wantErr)
 			}
 		})
+	}
+}
+
+// TestGoogleBooksKeyFallback: a stored Google Books key wins over
+// GOOGLE_BOOKS_API_KEY; the environment applies when nothing is stored.
+func TestGoogleBooksKeyFallback(t *testing.T) {
+	t.Setenv("GOOGLE_BOOKS_API_KEY", "env-key")
+	fallback := sourceKeyFallback(config.Load())
+	ctx := context.Background()
+	stored := func(v string) func(context.Context, string, string) (string, error) {
+		return func(context.Context, string, string) (string, error) { return v, nil }
+	}
+	if got, err := resolveSourceKeyField(ctx, stored("stored-key"), fallback, "googlebooks", "key"); err != nil || got != "stored-key" {
+		t.Fatalf("stored: %q %v", got, err)
+	}
+	if got, err := resolveSourceKeyField(ctx, stored(""), fallback, "googlebooks", "key"); err != nil || got != "env-key" {
+		t.Fatalf("env: %q %v", got, err)
 	}
 }
