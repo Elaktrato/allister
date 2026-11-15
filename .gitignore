@@ -3,3 +3,5 @@ yamtrack_*.csv
 *:Zone.Identifier
 internal/web/static/app.css
 .ci/
+imdb_*.csv
+letterboxd_*.zip
