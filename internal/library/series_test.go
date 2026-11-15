@@ -589,3 +589,25 @@ func TestSeriesPartsAndHasSeries(t *testing.T) {
 		t.Fatal("book2 has none")
 	}
 }
+
+func TestSeriesMemberIDs(t *testing.T) {
+	e := newEnv(t)
+	a := addBook(t, e.lib, "1", fp(1), Entry{Status: Planned})
+	b := addBook(t, e.lib, "2", fp(1), Entry{Status: Planned})
+	free := addBook(t, e.lib, "3", fp(1), Entry{Status: Planned})
+	s, err := e.lib.CreateSeries(bg, a, "S")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := e.lib.AddPart(bg, s.ID, b, ""); err != nil {
+		t.Fatal(err)
+	}
+	got, err := e.lib.SeriesMemberIDs(bg, "book", "book")
+	if err != nil || len(got) != 2 || !got[a] || !got[b] || got[free] {
+		t.Fatalf("members = %v %v", got, err)
+	}
+	other, err := e.lib.SeriesMemberIDs(bg, "tv", "show")
+	if err != nil || len(other) != 0 {
+		t.Fatalf("other kind = %v %v", other, err)
+	}
+}
