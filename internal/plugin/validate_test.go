@@ -679,6 +679,21 @@ func TestValidateResolveByTitle(t *testing.T) {
 			m.Importers[0].ResolveByTitle, m.Importers[0].ExternalIDType = true, ""
 			m.Sources[0].SupportsLookup = false
 		}, ""},
+		"listed id type, source without lookup": {func(m *plugin.Manifest) {
+			m.Importers[0].ResolveByTitle = true
+			m.Sources[0].SupportsLookup = false
+		}, `importers[0].resolve_via: source "books" does not support lookup`},
+		"unknown fallback": {func(m *plugin.Manifest) {
+			m.Importers[0].ResolveByTitle = true
+			m.Importers[0].ResolveViaFallback = []string{"ghost"}
+		}, `importers[0].resolve_via_fallback[0]: unknown source "ghost"`},
+		"fallback lists the id type, no lookup": {func(m *plugin.Manifest) {
+			m.Importers[0].ResolveByTitle = true
+			fb := m.Sources[0]
+			fb.ID, fb.SupportsLookup = "books2", false
+			m.Sources = append(m.Sources, fb)
+			m.Importers[0].ResolveViaFallback = []string{"books2"}
+		}, `importers[0].resolve_via_fallback[0]: source "books2" does not support lookup`},
 		"unknown source still refused": {func(m *plugin.Manifest) {
 			m.Importers[0].ResolveByTitle, m.Importers[0].ResolveVia = true, "ghost"
 		}, `unknown source "ghost"`},
