@@ -454,7 +454,7 @@ func TestDeriveSeriesStatus(t *testing.T) {
 		{[]Status{Completed, Paused}, Paused},
 		{[]Status{Completed, Planned}, Active},
 	} {
-		if got := DeriveSeriesStatus(c.parts); got != c.want {
+		if got := DeriveSeriesStatus(c.parts, 0); got != c.want {
 			t.Errorf("%v = %s, want %s", c.parts, got, c.want)
 		}
 	}
@@ -843,7 +843,7 @@ func TestActiveSeriesMatchesDerivedStatus(t *testing.T) {
 			}
 		}
 		titleOf[s.ID] = title
-		want[title] = DeriveSeriesStatus(c) == Active
+		want[title] = DeriveSeriesStatus(c, 0) == Active
 	}
 	got, err := e.lib.ActiveSeries(bg, []string{"tv"}, 1000)
 	if err != nil {

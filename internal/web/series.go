@@ -117,7 +117,7 @@ func (s *server) buildSeries(r *http.Request, m plugin.Manifest, ser *library.Se
 			CanMoveUp: i > 0, CanMoveDown: i < len(rows)-1,
 			MoveURL: base + "/parts/" + id + "/move", RemoveURL: base + "/parts/" + id + "/remove"})
 	}
-	st := library.DeriveSeriesStatus(sts)
+	st := library.DeriveSeriesStatus(sts, 0)
 	v.Status, v.StatusKey = statusLabel(k, st), string(st)
 	v.Candidates, err = s.seriesCandidates(r, m, k, ser, "")
 	return v, err

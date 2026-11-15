@@ -794,11 +794,13 @@ func (l *Library) DeleteSeries(ctx context.Context, seriesID int64, removeEntrie
 	return tx.Commit()
 }
 
-// DeriveSeriesStatus is the status of a series from its parts' statuses, the
-// first rule that applies: all dropped is dropped; every non-dropped part
-// completed is completed; all planned is planned; any active is active; any
-// paused is paused; otherwise (completed and planned parts) active.
-func DeriveSeriesStatus(parts []Status) Status {
+// DeriveSeriesStatus is the status of a series from its main parts'
+// statuses and the expected number of parts (0 = not set), the first rule
+// that applies: all dropped is dropped; every non-dropped part completed,
+// and at least expected parts completed, is completed; all planned is
+// planned; any active is active; any paused is paused; otherwise (completed
+// and planned parts, or fewer completed parts than expected) active.
+func DeriveSeriesStatus(parts []Status, expected int) Status {
 	var dropped, completed, planned, active, paused int
 	for _, s := range parts {
 		switch s {
@@ -817,7 +819,7 @@ func DeriveSeriesStatus(parts []Status) Status {
 	switch {
 	case len(parts) > 0 && dropped == len(parts):
 		return Dropped
-	case completed > 0 && completed+dropped == len(parts):
+	case completed > 0 && completed+dropped == len(parts) && completed >= expected:
 		return Completed
 	case len(parts) > 0 && planned == len(parts):
 		return Planned
@@ -829,10 +831,15 @@ func DeriveSeriesStatus(parts []Status) Status {
 	return Active
 }
 
-// SeriesRow is one row of the series list with its derived values.
+// SeriesRow is one row of the series list with its resolved values (see
+// ResolveSeries): Parts and Completed count the main parts, PartsTotal is
+// the expected number of parts, Cover the resolved cover; Updated is the
+// newest update of any part.
 type SeriesRow struct {
 	Series           Series
 	Parts, Completed int
+	PartsTotal       int
+	ParentID         int64
 	Status           Status
 	Cover            string
 	Updated          time.Time
@@ -856,31 +863,34 @@ type SeriesPage struct {
 	Total, Page, Pages int
 }
 
-// seriesRows loads every series of the plugin with derived values and applies
-// the text filter, in newest-update order. The status filter is not applied.
+// seriesRows loads every series of the plugin with resolved values and
+// applies the text filter, in newest-update order. The status filter is not
+// applied.
 func (l *Library) seriesRows(ctx context.Context, q SeriesQuery) ([]SeriesRow, error) {
 	rows, err := l.db.QueryContext(ctx, `SELECT `+seriesCols+` FROM series s WHERE s.plugin_id = ?`, q.PluginID)
 	if err != nil {
 		return nil, fmt.Errorf("list series: %w", err)
 	}
 	var out []SeriesRow
-	byID := map[int64]*SeriesRow{}
 	for rows.Next() {
 		s, err := scanSeries(rows)
 		if err != nil {
 			rows.Close()
 			return nil, fmt.Errorf("list series: %w", err)
 		}
-		out = append(out, SeriesRow{Series: *s})
+		out = append(out, SeriesRow{Series: *s, ParentID: s.ParentID})
 	}
 	if err := closeRows(rows); err != nil {
 		return nil, fmt.Errorf("list series: %w", err)
 	}
+	byID := make(map[int64]*SeriesRow, len(out))
 	for i := range out {
 		byID[out[i].Series.ID] = &out[i]
 	}
-	statuses := map[int64][]Status{}
-	pr, err := l.db.QueryContext(ctx, `SELECT sp.series_id, e.status, e.updated_at, i.cover_path
+	// Only what SeriesRow shows is loaded: the parts' status, update and
+	// cover, the linked item's kind, cover and number fields.
+	main := map[int64][]Row{}
+	pr, err := l.db.QueryContext(ctx, `SELECT sp.series_id, sp.spin_off, e.status, e.updated_at, i.cover_path
 		FROM series_parts sp JOIN series s ON s.id = sp.series_id
 		JOIN `+tableEntries+` e ON e.item_id = sp.item_id JOIN items i ON i.id = sp.item_id
 		WHERE s.plugin_id = ? ORDER BY sp.series_id, sp.spin_off, sp.position`, q.PluginID)
@@ -889,8 +899,9 @@ func (l *Library) seriesRows(ctx context.Context, q SeriesQuery) ([]SeriesRow, e
 	}
 	for pr.Next() {
 		var id int64
+		var spinOff bool
 		var status, updated, cover string
-		if err := pr.Scan(&id, &status, &updated, &cover); err != nil {
+		if err := pr.Scan(&id, &spinOff, &status, &updated, &cover); err != nil {
 			pr.Close()
 			return nil, fmt.Errorf("list series parts: %w", err)
 		}
@@ -899,24 +910,30 @@ func (l *Library) seriesRows(ctx context.Context, q SeriesQuery) ([]SeriesRow, e
 			pr.Close()
 			return nil, fmt.Errorf("list series parts: entry updated_at: %w", err)
 		}
-		r := byID[id]
-		if r.Parts == 0 {
-			r.Cover = cover
-		}
-		r.Parts++
-		if Status(status) == Completed {
-			r.Completed++
-		}
-		if at.After(r.Updated) {
+		if r := byID[id]; at.After(r.Updated) {
 			r.Updated = at
 		}
-		statuses[id] = append(statuses[id], Status(status))
+		if !spinOff {
+			main[id] = append(main[id], Row{Item: Item{CoverPath: cover}, Entry: Entry{Status: Status(status)}})
+		}
 	}
 	if err := closeRows(pr); err != nil {
 		return nil, fmt.Errorf("list series parts: %w", err)
 	}
+	linked, err := l.seriesLinkedItems(ctx, q.PluginID)
+	if err != nil {
+		return nil, err
+	}
+	kinds := map[string]plugin.KindDef{}
+	if m, ok := l.reg.Manifest(q.PluginID); ok {
+		for _, k := range m.Kinds {
+			kinds[k.Key] = k
+		}
+	}
 	for i := range out {
-		out[i].Status = DeriveSeriesStatus(statuses[out[i].Series.ID])
+		r := &out[i]
+		res := ResolveSeries(r.Series, kinds[r.Series.Kind], linked[r.Series.ID], nil, main[r.Series.ID])
+		r.Parts, r.Completed, r.PartsTotal, r.Status, r.Cover = res.MainParts, res.Completed, res.PartsTotal, res.Status, res.Cover
 	}
 	if text := strings.TrimSpace(truncateRunes(q.Text, maxFilterRunes)); text != "" {
 		keep, err := l.seriesMatching(ctx, q.PluginID, text)
@@ -931,6 +948,42 @@ func (l *Library) seriesRows(ctx context.Context, q SeriesQuery) ([]SeriesRow, e
 		}
 		return cmp.Compare(b.Series.ID, a.Series.ID)
 	})
+	return out, nil
+}
+
+// seriesLinkedItems returns, per series of the plugin with a linked item,
+// that item with only its kind, cover and number fields.
+func (l *Library) seriesLinkedItems(ctx context.Context, pluginID string) (map[int64]*Item, error) {
+	rows, err := l.db.QueryContext(ctx, `SELECT s.id, li.kind, li.cover_path, f.key, f.num
+		FROM series s JOIN items li ON li.id = s.linked_item_id
+		LEFT JOIN item_fields f ON f.item_id = li.id AND f.num IS NOT NULL
+		WHERE s.plugin_id = ?`, pluginID)
+	if err != nil {
+		return nil, fmt.Errorf("list series links: %w", err)
+	}
+	out := map[int64]*Item{}
+	for rows.Next() {
+		var id int64
+		var kind, cover string
+		var key sql.NullString
+		var num sql.NullFloat64
+		if err := rows.Scan(&id, &kind, &cover, &key, &num); err != nil {
+			rows.Close()
+			return nil, fmt.Errorf("list series links: %w", err)
+		}
+		it := out[id]
+		if it == nil {
+			it = &Item{Kind: kind, CoverPath: cover, Fields: map[string]plugin.FieldValue{}}
+			out[id] = it
+		}
+		if key.Valid && num.Valid {
+			n := num.Float64
+			it.Fields[key.String] = plugin.FieldValue{Num: &n}
+		}
+	}
+	if err := closeRows(rows); err != nil {
+		return nil, fmt.Errorf("list series links: %w", err)
+	}
 	return out, nil
 }
 
@@ -1148,36 +1201,82 @@ func (l *Library) SeriesOfItems(ctx context.Context, itemIDs []int64) (map[int64
 
 // ActiveSeries is the bounded query behind the home page: the series of the
 // listed plugins whose derived status is active, newest part update first,
-// at most limit. The status is computed in SQL from per-series counts by
-// the same rules as DeriveSeriesStatus (a test compares them on every
-// combination of up to three part statuses): not all dropped, not (some
-// completed and the rest dropped), not all planned, and not (paused without
-// any active). A series without parts is not returned (it cannot exist:
-// a series is deleted with its last part).
+// at most limit. The status is computed in SQL from per-series counts of
+// the main parts and the set expected number of parts by the same rules as
+// DeriveSeriesStatus and expectedParts (a test compares them on every
+// combination of up to three part statuses, with own and linked expected
+// parts and spin-off parts): not all dropped, not (some completed, the rest
+// dropped and at least the expected number completed), not all planned, and
+// not (paused without any active). The cover and the expected parts are
+// resolved like ResolveSeries does.
 func (l *Library) ActiveSeries(ctx context.Context, pluginIDs []string, limit int) ([]SeriesRow, error) {
 	if len(pluginIDs) == 0 || limit <= 0 {
 		return nil, nil
 	}
+	// linkOK and partsKey are CASE expressions over the series' kind and the
+	// linked item's kind, from each kind's SeriesLink.
+	linkOK, linkArgs := "NULL", []any{}
+	partsKey, partsArgs := "NULL", []any{}
+	var okWhen, keyWhen []string
+	for _, id := range pluginIDs {
+		m, ok := l.reg.Manifest(id)
+		if !ok {
+			continue
+		}
+		for _, k := range m.Kinds {
+			if k.SeriesLink == nil {
+				continue
+			}
+			okWhen = append(okWhen, `WHEN s.plugin_id = ? AND s.kind = ? AND li.kind = ? THEN 1`)
+			linkArgs = append(linkArgs, m.ID, k.Key, k.SeriesLink.Kind)
+			if k.SeriesLink.PartsField != "" {
+				keyWhen = append(keyWhen, `WHEN s.plugin_id = ? AND s.kind = ? AND li.kind = ? THEN ?`)
+				partsArgs = append(partsArgs, m.ID, k.Key, k.SeriesLink.Kind, k.SeriesLink.PartsField)
+			}
+		}
+	}
+	if len(okWhen) > 0 {
+		linkOK = `CASE ` + strings.Join(okWhen, " ") + ` END`
+	}
+	if len(keyWhen) > 0 {
+		partsKey = `CASE ` + strings.Join(keyWhen, " ") + ` END`
+	}
 	var args []any
+	args = append(args, linkArgs...)
+	args = append(args, partsArgs...)
+	args = append(args, maxSeriesPartsTotal)
 	for _, id := range pluginIDs {
 		args = append(args, id)
 	}
 	args = append(args, limit)
 	//nolint:gosec // G202: constant SQL and placeholders; values are bound
 	rows, err := l.db.QueryContext(ctx, `SELECT `+seriesCols+`,
-			COUNT(e.item_id), COALESCE(SUM(e.status = 'completed'), 0), COALESCE(MAX(e.updated_at), ''),
-			COALESCE((SELECT i2.cover_path FROM series_parts sp2 JOIN `+tableEntries+` e2 ON e2.item_id = sp2.item_id
-				JOIN items i2 ON i2.id = sp2.item_id WHERE sp2.series_id = s.id ORDER BY sp2.spin_off, sp2.position LIMIT 1), '')
+			COALESCE(SUM(sp.spin_off = 0 AND e.item_id IS NOT NULL), 0) AS n,
+			COALESCE(SUM(sp.spin_off = 0 AND e.status = 'completed'), 0) AS done,
+			COALESCE(MAX(e.updated_at), '') AS updated,
+			COALESCE(NULLIF(s.cover_path, ''),
+				CASE WHEN `+linkOK+` = 1 THEN NULLIF(li.cover_path, '') END,
+				(SELECT i2.cover_path FROM series_parts sp2 JOIN `+tableEntries+` e2 ON e2.item_id = sp2.item_id
+					JOIN items i2 ON i2.id = sp2.item_id WHERE sp2.series_id = s.id AND sp2.spin_off = 0 ORDER BY sp2.position LIMIT 1),
+				'') AS cover,
+			COALESCE(NULLIF(s.parts_total, 0),
+				MIN(MAX(CAST((SELECT lf.num FROM item_fields lf WHERE lf.item_id = li.id AND lf.key = `+partsKey+`) AS INTEGER), 0), ?),
+				0) AS expected,
+			COALESCE(SUM(sp.spin_off = 0 AND e.status = 'dropped'), 0) AS dropped,
+			COALESCE(SUM(sp.spin_off = 0 AND e.status = 'planned'), 0) AS planned,
+			COALESCE(SUM(sp.spin_off = 0 AND e.status = 'active'), 0) AS active,
+			COALESCE(SUM(sp.spin_off = 0 AND e.status = 'paused'), 0) AS paused
 		FROM series s
 		LEFT JOIN series_parts sp ON sp.series_id = s.id
 		LEFT JOIN `+tableEntries+` e ON e.item_id = sp.item_id
+		LEFT JOIN items li ON li.id = s.linked_item_id
 		WHERE s.plugin_id IN (`+placeholders(len(pluginIDs))+`)
 		GROUP BY s.id
-		HAVING NOT (COUNT(e.item_id) > 0 AND SUM(e.status = 'dropped') = COUNT(e.item_id))
-		   AND NOT (COALESCE(SUM(e.status = 'completed'), 0) > 0 AND SUM(e.status IN ('completed', 'dropped')) = COUNT(e.item_id))
-		   AND NOT (COUNT(e.item_id) > 0 AND SUM(e.status = 'planned') = COUNT(e.item_id))
-		   AND NOT (COALESCE(SUM(e.status = 'active'), 0) = 0 AND SUM(e.status = 'paused') > 0)
-		ORDER BY COALESCE(MAX(e.updated_at), '') DESC, s.id DESC
+		HAVING NOT (n > 0 AND dropped = n)
+		   AND NOT (done > 0 AND done + dropped = n AND done >= expected)
+		   AND NOT (n > 0 AND planned = n)
+		   AND NOT (active = 0 AND paused > 0)
+		ORDER BY updated DESC, s.id DESC
 		LIMIT ?`, args...)
 	if err != nil {
 		return nil, fmt.Errorf("active series: %w", err)
@@ -1187,11 +1286,16 @@ func (l *Library) ActiveSeries(ctx context.Context, pluginIDs []string, limit in
 	for rows.Next() {
 		var r SeriesRow
 		var updated string
-		s, err := scanSeries(rows, &r.Parts, &r.Completed, &updated, &r.Cover)
+		var expected, dropped, planned, active, paused int
+		s, err := scanSeries(rows, &r.Parts, &r.Completed, &updated, &r.Cover, &expected, &dropped, &planned, &active, &paused)
 		if err != nil {
 			return nil, fmt.Errorf("active series: %w", err)
 		}
-		r.Series, r.Status = *s, Active
+		r.Series, r.Status, r.ParentID = *s, Active, s.ParentID
+		r.PartsTotal = expected
+		if r.PartsTotal == 0 {
+			r.PartsTotal = r.Parts
+		}
 		if updated != "" {
 			if r.Updated, err = time.Parse(time.RFC3339, updated); err != nil {
 				return nil, fmt.Errorf("active series: entry updated_at: %w", err)
