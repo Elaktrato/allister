@@ -2,6 +2,7 @@ package library
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -805,5 +806,95 @@ func TestRestoreSeriesHostileInput(t *testing.T) {
 	}
 	if count(`SELECT count(*) FROM series`) != seriesN+1 || count(`SELECT count(*) FROM items`) != items {
 		t.Fatal("unexpected series or item count")
+	}
+}
+
+// TestActiveSeriesMatchesDerivedStatus: for every combination of up to three
+// part statuses, ActiveSeries returns the series exactly when
+// DeriveSeriesStatus says active, newest part update first, cut at limit.
+func TestActiveSeriesMatchesDerivedStatus(t *testing.T) {
+	e := newEnv(t)
+	all := Statuses()
+	var combos [][]Status
+	for i, a := range all {
+		combos = append(combos, []Status{a})
+		for j := i; j < len(all); j++ {
+			combos = append(combos, []Status{a, all[j]})
+			for k := j; k < len(all); k++ {
+				combos = append(combos, []Status{a, all[j], all[k]})
+			}
+		}
+	}
+	n := 0
+	titleOf := map[int64]string{}
+	want := map[string]bool{}
+	for _, c := range combos {
+		var ids []int64
+		for range c {
+			n++
+			ids = append(ids, addShow(t, e.lib, "x"+fmt.Sprint(n), nil, Entry{Status: Planned}))
+		}
+		title := "S" + fmt.Sprint(n)
+		s := mustSeries(t, e, ids[0], title)
+		mustAddPart(t, e, s.ID, ids[1:]...)
+		for i, st := range c {
+			if _, err := e.db.Exec(`UPDATE entries SET status = ? WHERE item_id = ?`, string(st), ids[i]); err != nil {
+				t.Fatal(err)
+			}
+		}
+		titleOf[s.ID] = title
+		want[title] = DeriveSeriesStatus(c) == Active
+	}
+	got, err := e.lib.ActiveSeries(bg, []string{"tv"}, 1000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	have := map[string]bool{}
+	for _, r := range got {
+		if r.Status != Active || r.Parts == 0 {
+			t.Fatalf("%+v", r)
+		}
+		have[r.Series.Title] = true
+	}
+	for title, w := range want {
+		if have[title] != w {
+			t.Errorf("%s: active=%v, ActiveSeries has it=%v", title, w, have[title])
+		}
+	}
+	if lim, _ := e.lib.ActiveSeries(bg, []string{"tv"}, 3); len(lim) != 3 {
+		t.Fatalf("limit: %d", len(lim))
+	}
+	if none, _ := e.lib.ActiveSeries(bg, []string{"book"}, 10); len(none) != 0 {
+		t.Fatalf("other plugin: %d", len(none))
+	}
+	if none, _ := e.lib.ActiveSeries(bg, nil, 10); len(none) != 0 {
+		t.Fatalf("no plugins: %d", len(none))
+	}
+}
+
+// TestActiveSeriesOrderAndCounts: newest part update first, with the
+// completed/parts counts and the first part's cover.
+func TestActiveSeriesOrderAndCounts(t *testing.T) {
+	e := newEnv(t)
+	a1 := addShow(t, e.lib, "o1", nil, Entry{Status: Completed})
+	a2 := addShow(t, e.lib, "o2", nil, Entry{Status: Active})
+	b1 := addShow(t, e.lib, "o3", nil, Entry{Status: Active})
+	sa := mustSeries(t, e, a1, "Older")
+	mustAddPart(t, e, sa.ID, a2)
+	sb := mustSeries(t, e, b1, "Newer")
+	stamp := func(id int64, at string) {
+		if _, err := e.db.Exec(`UPDATE entries SET updated_at = ? WHERE item_id = ?`, at, id); err != nil {
+			t.Fatal(err)
+		}
+	}
+	stamp(a1, "2025-01-01T00:00:00Z")
+	stamp(a2, "2025-01-02T00:00:00Z")
+	stamp(b1, "2025-02-01T00:00:00Z")
+	got, err := e.lib.ActiveSeries(bg, []string{"tv"}, 10)
+	if err != nil || len(got) != 2 || got[0].Series.ID != sb.ID || got[1].Series.ID != sa.ID {
+		t.Fatalf("%+v %v", got, err)
+	}
+	if got[1].Parts != 2 || got[1].Completed != 1 || !got[1].Updated.Equal(time.Date(2025, 1, 2, 0, 0, 0, 0, time.UTC)) {
+		t.Fatalf("%+v", got[1])
 	}
 }

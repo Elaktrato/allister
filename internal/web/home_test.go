@@ -214,8 +214,12 @@ func TestHomeIncrementReturnsCard(t *testing.T) {
 	got := rec.Body.String()
 	mustContain(t, got, "data-card", `name="return" value="/"`, "Dark", "1 / ?")
 	mustNotContain(t, got, "<tr")
-	// the card keeps the plugin's kind label like the home page's cards
-	mustContain(t, got, "Show")
+	// the card keeps the plugin's badge like the home page's cards
+	mustContain(t, got, `<span class="icon text-[0.875rem]" aria-hidden="true">category</span><span class="truncate">Show</span>`)
+	// a +1 on a list answers the card without it
+	list := e.do("POST", "/list/"+fmt.Sprint(id)+"/increment", url.Values{"return": {"/tv"}, "view": {"cards"}}, true).Body.String()
+	mustContain(t, list, "data-card")
+	mustNotContain(t, list, `class="truncate">Show</span>`, "left-0 top-0")
 	// without htmx it goes back home
 	rec = e.do("POST", "/list/"+fmt.Sprint(id)+"/increment", url.Values{"return": {"/"}}, false)
 	if rec.Code != http.StatusSeeOther || rec.Header().Get("Location") != "/" {
@@ -249,4 +253,57 @@ func TestHomeEscapesTitles(t *testing.T) {
 	b := e.get("/").Body.String()
 	mustNotContain(t, b, "<script>alert", "<b>Saga</b>")
 	mustContain(t, b, "&lt;script&gt;alert(1)&lt;/script&gt;", "&lt;b&gt;Saga&lt;/b&gt;")
+}
+
+func TestHomeEditAndRemoveReturnHome(t *testing.T) {
+	e := newFixtureEnv(t)
+	id := fmt.Sprint(e.addFixture(t, "tv", "show", tvShow("1", "Dark"), library.Entry{Status: library.Active}))
+	mustContain(t, e.get("/").Body.String(), `id="dialog-slot"`, `data-swap-statuses=`)
+	dlg := e.do("GET", "/list/"+id+"/edit?return=%2F", nil, true).Body.String()
+	mustContain(t, dlg, `name="return" value="/"`)
+	rec := e.do("POST", "/list/"+id+"/edit", url.Values{"status": {"paused"}, "return": {"/"}}, true)
+	if rec.Code != http.StatusNoContent || rec.Header().Get("HX-Redirect") != "/" {
+		t.Fatalf("edit: %d %q %s", rec.Code, rec.Header().Get("HX-Redirect"), rec.Body.String())
+	}
+	rec = e.do("POST", "/list/"+id+"/remove", url.Values{"return": {"/"}}, true)
+	if rec.Code != http.StatusNoContent || rec.Header().Get("HX-Redirect") != "/" {
+		t.Fatalf("remove: %d %q", rec.Code, rec.Header().Get("HX-Redirect"))
+	}
+	// other values keep the plugin list
+	id2 := fmt.Sprint(e.addFixture(t, "tv", "show", tvShow("2", "Light"), library.Entry{Status: library.Active}))
+	rec = e.do("POST", "/list/"+id2+"/edit", url.Values{"status": {"paused"}, "return": {"/settings"}}, true)
+	if rec.Header().Get("HX-Redirect") != "/tv" {
+		t.Fatalf("%q", rec.Header().Get("HX-Redirect"))
+	}
+}
+
+func TestHomeOmitsDisabledPlugins(t *testing.T) {
+	e := newFixtureEnv(t)
+	now := time.Date(2026, 11, 10, 12, 0, 0, 0, time.UTC)
+	e.now = &now
+	id := e.addFixture(t, "tv", "show", tvShow("1", "Hidden Show"), library.Entry{Status: library.Active})
+	e.lib.SaveSchedule(context.Background(), id, []library.Airing{{Number: 2, AirsAt: now.Add(time.Hour)}}, now)
+	e.tvSeries(t, "Hidden Saga")
+	e.addFixture(t, "book", "book", bookItem("b", "Visible Book"), library.Entry{Status: library.Active})
+	mustContain(t, e.get("/").Body.String(), "Hidden Show", "Hidden Saga", "Coming up", "Series in progress")
+	if rec := e.do("POST", "/settings/plugins/tv", url.Values{"enabled": {"0"}}, false); rec.Code != http.StatusSeeOther {
+		t.Fatal(rec.Code)
+	}
+	b := e.get("/").Body.String()
+	mustContain(t, b, "Visible Book")
+	mustNotContain(t, b, "Hidden", "Coming up", "Series in progress", `href="/tv`)
+}
+
+func TestHomeOneLinkPerKindWithPluralLabel(t *testing.T) {
+	e := newFixtureEnv(t)
+	e.addFixture(t, "tv", "show", tvShow("1", "Dark"), library.Entry{Status: library.Active})
+	e.addFixture(t, "book", "book", bookItem("b", "Earthsea"), library.Entry{Status: library.Active})
+	sec := section(t, e.get("/").Body.String(), "In progress")
+	mustContain(t, sec, "All active in Shows", "All active in Books")
+}
+
+func TestHomeSeriesBar(t *testing.T) {
+	e := newFixtureEnv(t)
+	e.tvSeries(t, "Saga") // 1 of 3 completed
+	mustContain(t, section(t, e.get("/").Body.String(), "Series in progress"), `style="width: 33%"`)
 }

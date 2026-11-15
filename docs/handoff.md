@@ -45,6 +45,7 @@ State of the project when the work moved from Claude Code to another agent. `mai
 - Not built (series): a per-volume chapter roll-up (a series shows completed parts, not summed chapters) and automatic grouping (the hint only suggests and orders; the owner makes the series). Not built: a Goodreads/StoryGraph/Calibre import beyond the Goodreads CSV, MyAnimeList as a live library source (deliberately skipped; only the optional manga Magazine field calls the MAL API v2, see docs/usage.md), other movie sources and imports (Trakt), GOG and HowLongToBeat (no official library API or export; deliberately out), dashboards, accounts.
 - **Not built, by owner decision: a MangaDex manga release calendar.** MangaDex only knows chapters a scanlation group has already scheduled (usually none), and AniList manga would need a second schedule source in the core.
 - **Not built, by owner decision: magazine release calendars.** There is no official schedule, feed or API for Weekly Shonen Jump or Shonen Jump+ (scraping Jump+ is ruled out by its terms), MANGA Plus has next-chapter dates only through an unofficial, undocumented API, and VIZ lists volumes only.
+- Shared (home page and calendar page): the day headings of Coming up on `/` and the cells of `/calendar` use the server time zone, while the release times are rewritten to the browser zone by `data-local`; near midnight a release can sit under the neighbouring day for a viewer in another zone. Left as is; fix both together (group by day client-side or pass the viewer zone).
 
 ## Running and previews
 

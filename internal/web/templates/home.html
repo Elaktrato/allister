@@ -37,6 +37,7 @@
     {{range .Series}}
     <li class="rounded border border-slate-800 bg-slate-900 p-3 text-sm">
       <div class="flex items-center gap-2"><span class="icon text-[1rem] text-slate-400" aria-hidden="true" title="{{.BadgeLabel}}">{{.BadgeIcon}}</span><a href="{{.Href}}" class="min-w-0 truncate font-medium text-slate-100 hover:underline">{{.Title}}</a><span class="ml-auto shrink-0 text-slate-300">{{.Progress}}</span></div>
+      {{if ge .BarPct 0}}<div class="mt-2 h-1 rounded bg-slate-800" aria-hidden="true"><div class="h-full rounded bg-indigo-500" style="width: {{.BarPct}}%"></div></div>{{end}}
     </li>
     {{end}}
   </ul>
@@ -52,4 +53,5 @@
   </ul>
 </section>
 {{end}}
+<div id="dialog-slot" data-swap-statuses="{{dialogStatuses}}"></div>
 {{end}}
