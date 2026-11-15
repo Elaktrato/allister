@@ -989,7 +989,7 @@ type BackupPartRef struct {
 func (l *Library) BackupSeries(ctx context.Context, fn func(BackupSeries) error) error {
 	rows, err := l.db.QueryContext(ctx, `SELECT `+seriesCols+`, li.plugin_id, li.kind, li.source, li.source_id, ps.uid,
 		i.plugin_id, i.kind, i.source, i.source_id, p.spin_off
-		FROM series s JOIN series_parts p ON p.series_id = s.id JOIN items i ON i.id = p.item_id
+		FROM series s LEFT JOIN series_parts p ON p.series_id = s.id LEFT JOIN items i ON i.id = p.item_id
 		LEFT JOIN items li ON li.id = s.linked_item_id LEFT JOIN series ps ON ps.id = s.parent_id
 		ORDER BY s.id, p.spin_off, p.position`)
 	if err != nil {
@@ -1012,10 +1012,12 @@ func (l *Library) BackupSeries(ctx context.Context, fn func(BackupSeries) error)
 		return err
 	}
 	for rows.Next() {
-		var ref BackupPartRef
+		// the part columns are NULL for a series without parts
 		var lPlugin, lKind, lSource, lID, parent sql.NullString
+		var pPlugin, pKind, pSource, pID sql.NullString
+		var pSpin sql.NullBool
 		s, err := scanSeries(rows, &lPlugin, &lKind, &lSource, &lID, &parent,
-			&ref.PluginID, &ref.Kind, &ref.Source, &ref.SourceID, &ref.SpinOff)
+			&pPlugin, &pKind, &pSource, &pID, &pSpin)
 		if err != nil {
 			return fmt.Errorf("backup series: %w", err)
 		}
@@ -1029,7 +1031,10 @@ func (l *Library) BackupSeries(ctx context.Context, fn func(BackupSeries) error)
 				cur.Linked = &BackupItemRef{PluginID: lPlugin.String, Kind: lKind.String, Source: lSource.String, SourceID: lID.String}
 			}
 		}
-		cur.Parts = append(cur.Parts, ref)
+		if pPlugin.Valid {
+			cur.Parts = append(cur.Parts, BackupPartRef{PluginID: pPlugin.String, Kind: pKind.String, Source: pSource.String,
+				SourceID: pID.String, SpinOff: pSpin.Bool})
+		}
 	}
 	if err := rows.Err(); err != nil {
 		return fmt.Errorf("backup series: %w", err)
@@ -1077,11 +1082,17 @@ type LeftOutPart struct {
 // differently from the backup (only for a created series); Parent the
 // parent uid that RestoreSeriesParent must resolve once every series of the
 // backup is restored ("" for none).
+//
+// Empty marks a series created without parts and without own values: it is
+// only worth keeping when a spin-off series of the backup names it as its
+// parent, so the caller passes it to DeleteSeriesIfEmpty once every parent
+// is set.
 type SeriesRestore struct {
 	Created bool
 	LeftOut []LeftOutPart
 	Notes   []string
 	Parent  string
+	Empty   bool
 }
 
 // RestoreSeries merges one series of a backup in a single transaction. A
@@ -1089,9 +1100,11 @@ type SeriesRestore struct {
 // parts are resolved by identity and keep their block (main or spin-off) in
 // backup order; a part whose item is missing, has no entry, is of another
 // plugin or kind than the series, is listed twice, or already belongs to a
-// series is left out (named in LeftOut with the reason). A series with no
-// resolvable part is not created. The uid, title and stamps of the backup
-// are kept; an invalid title, uid or kind is ErrInvalid.
+// series is left out (named in LeftOut with the reason). A series none of
+// whose archived parts resolves is not created unless it holds own values;
+// one archived without parts (kept for its data or its spin-offs) is. The
+// uid, title and stamps of the backup are kept; an invalid title, uid or
+// kind is ErrInvalid.
 //
 // The values are checked one by one with the rules of UpdateSeriesDetails
 // against the installed kind; a value that fails, a linked entry that is
@@ -1173,9 +1186,6 @@ func (l *Library) RestoreSeries(ctx context.Context, bs BackupSeries, opts Resto
 		taken[id] = true
 		parts = append(parts, SeriesPart{ItemID: id, SpinOff: ref.SpinOff})
 	}
-	if len(parts) == 0 {
-		return res, nil
-	}
 	if kindErr == nil && bs.Linked != nil {
 		id, note, err := restoreSeriesLink(ctx, tx, bs.PluginID, kind, *bs.Linked)
 		if err != nil {
@@ -1197,6 +1207,12 @@ func (l *Library) RestoreSeries(ctx context.Context, bs BackupSeries, opts Resto
 			notes = append(notes, note)
 		}
 	}
+	// a series whose parts all failed is kept only for its own data (R6); one
+	// archived without parts was kept for its data or its spin-offs (Empty)
+	if len(parts) == 0 && len(bs.Parts) > 0 && !d.holdsOwn() {
+		return res, nil
+	}
+	res.Empty = len(parts) == 0 && !d.holdsOwn()
 	ins, err := tx.ExecContext(ctx, `INSERT INTO series(uid, plugin_id, kind, title, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`,
 		bs.UID, bs.PluginID, bs.Kind, title, bs.CreatedAt.UTC().Format(time.RFC3339), bs.UpdatedAt.UTC().Format(time.RFC3339))
 	if err != nil {
@@ -1358,6 +1374,26 @@ func restoreSeriesCover(ctx context.Context, opts RestoreOptions, name string) (
 		return "", note, nil
 	}
 	return stored, "", nil
+}
+
+// DeleteSeriesIfEmpty deletes the series uid of the plugin when it has no
+// parts, holds nothing of its own and has no spin-off series, the rule of
+// renumberSeries, and reports whether it did.
+func (l *Library) DeleteSeriesIfEmpty(ctx context.Context, pluginID, uid string) (bool, error) {
+	var id int64
+	switch err := l.db.QueryRowContext(ctx, `SELECT id FROM series WHERE plugin_id = ? AND uid = ?
+		AND NOT EXISTS (SELECT 1 FROM series_parts p WHERE p.series_id = series.id)`, pluginID, uid).Scan(&id); {
+	case errors.Is(err, sql.ErrNoRows):
+		return false, nil
+	case err != nil:
+		return false, fmt.Errorf("delete empty series: %w", err)
+	}
+	res, err := l.db.ExecContext(ctx, deleteEmptySeriesSQL+` AND NOT EXISTS (SELECT 1 FROM series_parts p WHERE p.series_id = ?1)`, id)
+	if err != nil {
+		return false, fmt.Errorf("delete empty series: %w", err)
+	}
+	n, err := res.RowsAffected()
+	return n > 0, err
 }
 
 // RestoreSeriesParent sets the parent of the restored series uid (of the

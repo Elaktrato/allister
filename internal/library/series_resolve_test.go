@@ -244,7 +244,8 @@ func TestDeriveSeriesStatusExpected(t *testing.T) {
 		{n(Dropped, 2), 12, Dropped},
 		{n(Planned, 2), 12, Planned},
 		{[]Status{Completed, Paused}, 12, Paused},
-		{nil, 3, Active},
+		{nil, 3, Planned}, // R6: a series kept without parts waits for them
+		{nil, 0, Planned},
 		// expected 0: the old rules
 		{n(Completed, 5), 0, Completed},
 		{[]Status{Completed, Completed, Dropped}, 0, Completed},
@@ -490,6 +491,36 @@ func TestActiveSeriesMatchesDerivedStatusExpected(t *testing.T) {
 		wantCounts[so.ID] = [2]int{len(c), done}
 		want[so.ID] = wantStatus[so.ID] == Active
 		wantTotal[so.ID] = len(c)
+	}
+
+	// series kept without parts for their own data (R6): planned, 0/expected
+	for _, own := range []struct {
+		name       string
+		set        string
+		linkedVols float64
+		total      int
+	}{
+		{"no parts, description", `UPDATE series SET description = 'Own' WHERE id = ?`, 0, 0},
+		{"no parts, own expected", `UPDATE series SET parts_total = 3 WHERE id = ?`, 0, 3},
+		{"no parts, linked expected", "", 4, 4},
+	} {
+		first := add(Active, nil)
+		so := mustSeries(t, e, first, own.name)
+		if own.set != "" {
+			if _, err := e.db.Exec(own.set, so.ID); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if own.linkedVols > 0 {
+			l := add(Planned, map[string]plugin.FieldValue{"volumes": {Num: fp(own.linkedVols)}})
+			if _, err := e.db.Exec(`UPDATE series SET linked_item_id = ? WHERE id = ?`, l, so.ID); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := e.lib.RemovePart(bg, so.ID, first); err != nil {
+			t.Fatal(err)
+		}
+		want[so.ID], wantStatus[so.ID], wantCounts[so.ID], wantTotal[so.ID] = false, Planned, [2]int{0, 0}, own.total
 	}
 
 	got, err := e.lib.ActiveSeries(bg, []string{"saga"}, 10000)

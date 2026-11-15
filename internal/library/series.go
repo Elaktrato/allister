@@ -63,6 +63,13 @@ type SeriesDetails struct {
 	Fields                        map[string]plugin.FieldValue
 }
 
+// holdsOwn reports whether d holds any own value besides the title and the
+// parent (see deleteEmptySeriesSQL).
+func (d SeriesDetails) holdsOwn() bool {
+	return d.CoverPath != "" || d.Description != "" || d.StartedOn != nil || d.EndedOn != nil || d.Finished ||
+		d.PartsTotal > 0 || len(d.Fields) > 0 || d.LinkedItemID != 0
+}
+
 // SeriesPart is a part of a series and its 1-based position within its
 // block (main parts or spin-off parts).
 type SeriesPart struct {
@@ -588,9 +595,10 @@ type execer interface {
 }
 
 // renumberSeries rewrites the positions of each block of a series (main
-// parts, spin-off parts) densely (1..n, keeping the order) and deletes the
-// series when it has no parts left. It reports whether the series still
-// exists.
+// parts, spin-off parts) densely (1..n, keeping the order). A series left
+// without parts is deleted only when it holds nothing of its own (see
+// deleteEmptySeriesSQL); otherwise it stays with zero parts. It reports
+// whether the series still exists.
 func renumberSeries(ctx context.Context, tx execer, seriesID int64) (bool, error) {
 	rows, err := tx.QueryContext(ctx, `SELECT item_id, spin_off FROM series_parts WHERE series_id = ? ORDER BY spin_off, position, item_id`, seriesID)
 	if err != nil {
@@ -616,8 +624,14 @@ func renumberSeries(ctx context.Context, tx execer, seriesID int64) (bool, error
 	}
 	rows.Close()
 	if len(items) == 0 {
-		_, err := tx.ExecContext(ctx, `DELETE FROM series WHERE id = ?`, seriesID)
-		return false, err
+		res, err := tx.ExecContext(ctx, deleteEmptySeriesSQL, seriesID)
+		if err != nil {
+			return false, err
+		}
+		n, err := res.RowsAffected()
+		if err != nil || n > 0 {
+			return false, err
+		}
 	}
 	for i, id := range items {
 		if _, err := tx.ExecContext(ctx, `UPDATE series_parts SET position = ? WHERE series_id = ? AND item_id = ? AND position <> ?`, positions[i], seriesID, id, positions[i]); err != nil {
@@ -793,9 +807,21 @@ func (l *Library) SetPartSpinOff(ctx context.Context, seriesID, itemID int64, sp
 	return tx.Commit()
 }
 
-// RemovePart takes the item out of the series and keeps its entry. The series
-// is deleted when it was the last part; an item that is not a part is
-// ErrNoSeries.
+// deleteEmptySeriesSQL deletes the series (id bound) when it holds nothing
+// of its own - no cover, description, dates, finished marker, expected parts,
+// series fields or linked entry - and has no spin-off series. The caller
+// knows it has no parts. Owner-curated data never vanishes with the last
+// part.
+const deleteEmptySeriesSQL = `DELETE FROM series WHERE id = ?1
+	AND COALESCE(cover_path, '') = '' AND COALESCE(description, '') = ''
+	AND started_on IS NULL AND ended_on IS NULL AND finished = 0
+	AND parts_total IS NULL AND linked_item_id IS NULL
+	AND NOT EXISTS (SELECT 1 FROM series_fields f WHERE f.series_id = ?1)
+	AND NOT EXISTS (SELECT 1 FROM series c WHERE c.parent_id = ?1)`
+
+// RemovePart takes the item out of the series and keeps its entry. A series
+// left without parts is deleted unless it holds own data or has spin-off
+// series (see renumberSeries); an item that is not a part is ErrNoSeries.
 func (l *Library) RemovePart(ctx context.Context, seriesID, itemID int64) error {
 	tx, err := l.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -867,7 +893,7 @@ func (l *Library) DeleteSeries(ctx context.Context, seriesID int64, removeEntrie
 
 // DeriveSeriesStatus is the status of a series from its main parts'
 // statuses and the expected number of parts (0 = not set), the first rule
-// that applies: all dropped is dropped; every non-dropped part completed,
+// that applies: all dropped is dropped; no part at all is planned; every non-dropped part completed,
 // with at least expected parts completed or dropped, is completed; all planned is
 // planned; any active is active; any paused is paused; otherwise (completed
 // and planned parts, or fewer completed and dropped parts than expected)
@@ -891,6 +917,8 @@ func DeriveSeriesStatus(parts []Status, expected int) Status {
 	switch {
 	case len(parts) > 0 && dropped == len(parts):
 		return Dropped
+	case len(parts) == 0: // a series kept for its own data
+		return Planned
 	case completed > 0 && completed+dropped == len(parts) && completed+dropped >= expected:
 		return Completed
 	case len(parts) > 0 && planned == len(parts):
@@ -907,7 +935,7 @@ func DeriveSeriesStatus(parts []Status, expected int) Status {
 // ResolveSeries): Parts and Completed count the main parts (the spin-off
 // parts when there is no main part), PartsTotal is
 // the expected number of parts, Cover the resolved cover; Updated is the
-// newest update of any part.
+// newest update of any part (the series' own update when it has none).
 type SeriesRow struct {
 	Series           Series
 	Parts, Completed int
@@ -916,6 +944,8 @@ type SeriesRow struct {
 	Status           Status
 	Cover            string
 	Updated          time.Time
+	// partsSeen: Updated already holds a part's update (seriesRows)
+	partsSeen bool
 }
 
 // SeriesQuery selects series of one plugin. Text is a case-insensitive
@@ -951,7 +981,8 @@ func (l *Library) seriesRows(ctx context.Context, q SeriesQuery) ([]SeriesRow, e
 			rows.Close()
 			return nil, fmt.Errorf("list series: %w", err)
 		}
-		out = append(out, SeriesRow{Series: *s, ParentID: s.ParentID})
+		// Updated is the newest part update; a series without parts uses its own
+		out = append(out, SeriesRow{Series: *s, ParentID: s.ParentID, Updated: s.UpdatedAt})
 	}
 	if err := closeRows(rows); err != nil {
 		return nil, fmt.Errorf("list series: %w", err)
@@ -983,8 +1014,8 @@ func (l *Library) seriesRows(ctx context.Context, q SeriesQuery) ([]SeriesRow, e
 			pr.Close()
 			return nil, fmt.Errorf("list series parts: entry updated_at: %w", err)
 		}
-		if r := byID[id]; at.After(r.Updated) {
-			r.Updated = at
+		if r := byID[id]; !r.partsSeen || at.After(r.Updated) {
+			r.Updated, r.partsSeen = at, true
 		}
 		row := Row{Item: Item{CoverPath: cover}, Entry: Entry{Status: Status(status)}}
 		if spinOff {
@@ -1288,7 +1319,7 @@ func (l *Library) SeriesOfItems(ctx context.Context, itemIDs []int64) (map[int64
 // at most limit. The status is computed in SQL from per-series counts of
 // the main parts (all parts when there is no main part) and the set
 // expected number of parts by the same rules as
-// DeriveSeriesStatus and expectedParts (a test compares them on every
+// DeriveSeriesStatus and expectedParts (a series without parts is planned) (a test compares them on every
 // combination of up to three part statuses, with own and linked expected
 // parts and spin-off parts): not all dropped, not (some completed, the rest
 // dropped and at least the expected number completed or dropped), not all planned, and
@@ -1361,7 +1392,8 @@ func (l *Library) ActiveSeries(ctx context.Context, pluginIDs []string, limit in
 		LEFT JOIN (SELECT DISTINCT series_id FROM series_parts WHERE spin_off = 0) hm ON hm.series_id = s.id
 		WHERE s.plugin_id IN (`+placeholders(len(pluginIDs))+`)
 		GROUP BY s.id
-		HAVING NOT (n > 0 AND dropped = n)
+		HAVING n > 0
+		   AND NOT (n > 0 AND dropped = n)
 		   AND NOT (done > 0 AND done + dropped = n AND done + dropped >= expected)
 		   AND NOT (n > 0 AND planned = n)
 		   AND NOT (active = 0 AND paused > 0)

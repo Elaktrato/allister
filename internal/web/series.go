@@ -511,7 +511,7 @@ func (s *server) postSeriesRemove(w http.ResponseWriter, r *http.Request, m plug
 		s.internalError(w, r, err)
 		return
 	}
-	// the last part takes the series with it
+	// the last part takes the series with it unless it holds own data
 	_, err := s.deps.Library.SeriesByUID(r.Context(), m.ID, ser.UID)
 	switch {
 	case errors.Is(err, library.ErrNoSeries):
@@ -544,6 +544,8 @@ func (s *server) postSeriesDelete(w http.ResponseWriter, r *http.Request, m plug
 		s.internalError(w, r, err)
 		return
 	}
+	// the series' own cover file goes unless another row still uses it
+	s.cleanupCover(r.Context(), ser.CoverPath)
 	http.Redirect(w, r, seriesTabURL(m.ID, "", "", "", "", 1), http.StatusSeeOther)
 }
 

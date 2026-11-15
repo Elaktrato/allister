@@ -364,7 +364,7 @@ func (e *Entry) fill(status string, rating sql.NullInt64, started, finished sql.
 // RemoveEntry deletes the item's entry together with its progress values
 // (active and retained), so a later entry starts from zero. The item stays,
 // but leaves its series (a part always has an entry); the series is
-// renumbered, and removed with its last part. It is a no-op (nil) when the item has no entry or does not exist.
+// renumbered, and removed with its last part unless it holds own data (see renumberSeries). It is a no-op (nil) when the item has no entry or does not exist.
 func (l *Library) RemoveEntry(ctx context.Context, itemID int64) error {
 	tx, err := l.db.BeginTx(ctx, nil)
 	if err != nil {

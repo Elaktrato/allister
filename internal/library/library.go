@@ -234,7 +234,7 @@ func (l *Library) NeedsSync(ctx context.Context, jobKind string) ([]NeedsSyncIte
 
 // DeleteItem removes the item and, by cascade, everything attached to it.
 // People rows (and image files) stay. A series the item belonged to is
-// renumbered, or deleted when the item was its last part, in the same
+// renumbered, or deleted when the item was its last part and it holds no own data, in the same
 // transaction. It returns ErrNoEntry for an unknown id.
 func (l *Library) DeleteItem(ctx context.Context, id int64) error {
 	tx, err := l.db.BeginTx(ctx, nil)
