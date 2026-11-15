@@ -12,7 +12,8 @@ import (
 
 // maxUnitRunes is the longest FieldDef.Unit; maxIDLabelRunes the longest
 // ImporterInfo.ExternalIDLabel; maxUnmatchedNoteRunes the longest
-// ImporterInfo.UnmatchedNote.
+// ImporterInfo.UnmatchedNote; maxKeyFields the most named credential fields
+// one source may declare.
 const (
 	maxUnitRunes          = 20
 	maxIDLabelRunes       = 40
@@ -21,6 +22,7 @@ const (
 	maxKeyLabelRunes      = 40
 	maxKeyHelpRunes       = 200
 	maxKeyFieldLabelRunes = 40
+	maxKeyFields          = 4
 	maxStatsLabelRunes    = 40
 )
 
@@ -185,12 +187,11 @@ func Validate(m Manifest) error {
 	return errors.Join(p.list...)
 }
 
-// maxKeyFields is the most named credential fields one source may declare.
-const maxKeyFields = 4
-
 // validateKeyFields checks a source's named credential fields: they need a
-// group label, at most maxKeyFields, each a unique key slug with a bounded
-// single-line label.
+// group label, at most maxKeyFields, each a unique key slug (starting with a
+// letter) with a required, bounded single-line label. An invalid name is
+// reported as invalid only: duplicates are checked among valid names, so a
+// repeated invalid name gives one "not a valid key" per position.
 func validateKeyFields(p *problems, path, groupLabel string, fields []KeyField) {
 	if len(fields) == 0 {
 		return
@@ -204,12 +205,14 @@ func validateKeyFields(p *problems, path, groupLabel string, fields []KeyField) 
 	seen := map[string]bool{}
 	for i, f := range fields {
 		fp := fmt.Sprintf("%s[%d]", path, i)
-		if !keyRe.MatchString(f.Name) {
+		switch {
+		case !keyRe.MatchString(f.Name):
 			p.add(fp+".name", "%q is not a valid key (lower-case letters, digits and _, 1 to 32 characters, starting with a letter)", f.Name)
-		} else if seen[f.Name] {
+		case seen[f.Name]:
 			p.add(fp+".name", "duplicate %q", f.Name)
+		default:
+			seen[f.Name] = true
 		}
-		seen[f.Name] = true
 		switch l := f.Label; {
 		case !utf8.ValidString(l) || strings.IndexFunc(l, isControl) >= 0:
 			p.add(fp+".label", "must be a single line without control characters")

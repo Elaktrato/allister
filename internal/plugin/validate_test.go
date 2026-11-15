@@ -110,6 +110,15 @@ func TestValidateRejects(t *testing.T) {
 		{"key field bad name", tv, func(m *plugin.Manifest) {
 			m.Sources[0].KeyFields = []plugin.KeyField{{Name: "Client ID", Label: "Client ID"}}
 		}, `sources[0].key_fields[0].name`},
+		{"key field name leading digit", tv, func(m *plugin.Manifest) {
+			m.Sources[0].KeyFields = []plugin.KeyField{{Name: "1id", Label: "ID"}}
+		}, `sources[0].key_fields[0].name: "1id" is not a valid key`},
+		{"key field name leading underscore", tv, func(m *plugin.Manifest) {
+			m.Sources[0].KeyFields = []plugin.KeyField{{Name: "_id", Label: "ID"}}
+		}, `sources[0].key_fields[0].name: "_id" is not a valid key`},
+		{"key field invalid name repeated", tv, func(m *plugin.Manifest) {
+			m.Sources[0].KeyFields = []plugin.KeyField{{Name: "Bad", Label: "A"}, {Name: "Bad", Label: "B"}}
+		}, `sources[0].key_fields[1].name: "Bad" is not a valid key`},
 		{"key field duplicate", tv, func(m *plugin.Manifest) {
 			m.Sources[0].KeyFields = []plugin.KeyField{{Name: "id", Label: "A"}, {Name: "id", Label: "B"}}
 		}, `sources[0].key_fields[1].name: duplicate`},
@@ -197,6 +206,26 @@ func TestValidateAcceptsKeyFields(t *testing.T) {
 	}
 	if err := plugin.Validate(m); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// TestValidateKeyFieldInvalidNameIsNotAlsoADuplicate: a repeated invalid
+// field name is reported as invalid at each position, never also as a
+// duplicate (only valid names are checked for duplicates).
+func TestValidateKeyFieldInvalidNameIsNotAlsoADuplicate(t *testing.T) {
+	m := tv()
+	m.Sources[0].KeyFields = []plugin.KeyField{{Name: "Bad", Label: "A"}, {Name: "Bad", Label: "B"}}
+	err := plugin.Validate(m)
+	if err == nil {
+		t.Fatal("want an error")
+	}
+	for _, want := range []string{`key_fields[0].name: "Bad" is not a valid key`, `key_fields[1].name: "Bad" is not a valid key`} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("error %q does not contain %q", err, want)
+		}
+	}
+	if strings.Contains(err.Error(), "duplicate") {
+		t.Fatalf("invalid names also reported as duplicates: %v", err)
 	}
 }
 
