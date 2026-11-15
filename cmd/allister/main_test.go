@@ -140,57 +140,16 @@ func TestRemoveRestoreTempsWithGlobCharactersInDataDir(t *testing.T) {
 	}
 }
 
-// TestResolveSourceKey: a saved key wins over the environment, an unset one
-// falls back to it, and a lookup failure is reported instead of silently
-// falling back (the cause must not be hidden).
-func TestResolveSourceKey(t *testing.T) {
-	ctx := context.Background()
-	boom := errors.New("settings store unavailable")
-	fallback := map[string]string{"tmdb": "env-key"}
-	cases := []struct {
-		name     string
-		stored   func(context.Context, string) (string, error)
-		sourceID string
-		want     string
-		wantErr  error
-	}{
-		{
-			name:     "stored key wins",
-			stored:   func(context.Context, string) (string, error) { return "stored-key", nil },
-			sourceID: "tmdb",
-			want:     "stored-key",
-		},
-		{
-			name:     "empty stored key falls back to the environment",
-			stored:   func(context.Context, string) (string, error) { return "", nil },
-			sourceID: "tmdb",
-			want:     "env-key",
-		},
-		{
-			name:     "lookup error is returned instead of falling back",
-			stored:   func(context.Context, string) (string, error) { return "", boom },
-			sourceID: "tmdb",
-			wantErr:  boom,
-		},
-	}
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			got, err := resolveSourceKey(ctx, c.stored, fallback, c.sourceID)
-			if got != c.want || !errors.Is(err, c.wantErr) {
-				t.Fatalf("resolveSourceKey = %q, %v; want %q, %v", got, err, c.want, c.wantErr)
-			}
-		})
-	}
-}
-
-// TestResolveSourceKeyField: the same resolution rules apply per named
-// credential field: a stored field beats the environment, an empty one falls
-// back, an unknown one is empty, and a lookup failure is reported.
+// TestResolveSourceKeyField: credentials resolve per named field (a single-key
+// source uses the field "key"): a stored field beats the environment, an
+// empty one falls back, an unknown one is empty, and a lookup failure is
+// reported instead of silently falling back.
 func TestResolveSourceKeyField(t *testing.T) {
 	ctx := context.Background()
 	boom := errors.New("settings store unavailable")
 	fallback := map[string]map[string]string{
 		"igdb": {"client_id": "env-id", "client_secret": "env-secret"},
+		"tmdb": {"key": "env-key"},
 	}
 	cases := []struct {
 		name     string
@@ -213,6 +172,13 @@ func TestResolveSourceKeyField(t *testing.T) {
 			sourceID: "igdb",
 			field:    "client_secret",
 			want:     "env-secret",
+		},
+		{
+			name:     "a single key falls back to the environment",
+			stored:   func(context.Context, string, string) (string, error) { return "", nil },
+			sourceID: "tmdb",
+			field:    "key",
+			want:     "env-key",
 		},
 		{
 			name:     "unknown field falls back to empty",
