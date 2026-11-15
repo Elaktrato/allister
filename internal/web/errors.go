@@ -4,7 +4,6 @@ import (
 	"errors"
 	"log"
 	"net/http"
-	"strings"
 
 	"github.com/allister/allister/internal/library"
 	"github.com/allister/allister/internal/plugin"
@@ -59,7 +58,8 @@ func (s *server) fail(w http.ResponseWriter, r *http.Request, err error, retry s
 
 // unmatchedHint explains an imported manual item that its importer's
 // external id did not resolve ("" when the item carries no such id): the
-// importer's UnmatchedNote with every {id} replaced by the id, or a neutral
+// importer's UnmatchedNote filled by plugin.FillUnmatchedNote ({id} the id,
+// {title} the item's first title, {year} its year field), or a neutral
 // sentence naming the id by its label (its type when there is no label).
 func unmatchedHint(m plugin.Manifest, it *library.Item) string {
 	for _, imp := range m.Importers {
@@ -68,7 +68,14 @@ func unmatchedHint(m plugin.Manifest, it *library.Item) string {
 			continue
 		}
 		if imp.UnmatchedNote != "" {
-			return strings.ReplaceAll(imp.UnmatchedNote, "{id}", v)
+			title, year := "", 0
+			if len(it.Titles) > 0 {
+				title = it.Titles[0].Text
+			}
+			if y := it.Fields["year"].Num; y != nil {
+				year = int(*y)
+			}
+			return plugin.FillUnmatchedNote(imp.UnmatchedNote, v, title, year)
 		}
 		label := imp.ExternalIDLabel
 		if label == "" {

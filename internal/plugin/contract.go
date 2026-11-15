@@ -326,8 +326,9 @@ type SourceInfo struct {
 // item that still carries its ExternalIDType id), for example "Imported from
 // Example CSV; Example DB had no match for #{id}.": a single line of at most
 // 200 characters without control characters, in which every "{id}" is
-// replaced by the item's id of ExternalIDType. Empty means the core's own
-// neutral sentence.
+// replaced by the item's id of ExternalIDType, every "{title}" by its title
+// and every "{year}" by its year field (see FillUnmatchedNote). Empty means
+// the core's own neutral sentence.
 type ImporterInfo struct {
 	ID       string   `json:"id"`
 	Name     string   `json:"name"`

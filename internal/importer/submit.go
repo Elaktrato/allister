@@ -170,7 +170,9 @@ func (r *Runner) storedRows(ref *importerRef, res plugin.ParseResult) (rows []st
 			value = plugin.SingleLine(e.ExternalIDs[idType], maxTitleRunes)
 		}
 		e.Title = plugin.SingleLine(e.Title, maxTitleRunes)
+		generated := false
 		if e.Title == "" && value != "" {
+			generated = true
 			e.Title = ref.idLabel() + " #" + value
 			e.Notes = append(e.Notes, "no title in the file, using "+e.Title)
 		}
@@ -190,7 +192,7 @@ func (r *Runner) storedRows(ref *importerRef, res plugin.ParseResult) (rows []st
 			rows = append(rows, row)
 			continue
 		}
-		b, err := json.Marshal(e)
+		b, err := json.Marshal(storedEntry{ParsedEntry: e, GeneratedTitle: generated})
 		if err != nil {
 			return nil, 0, fmt.Errorf("import: %w", err)
 		}

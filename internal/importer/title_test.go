@@ -10,6 +10,8 @@ func TestNormaliseTitle(t *testing.T) {
 		{"Spider-Man: Into the Spider-Verse", "spider man into the spider verse", true},
 		{"Fast & Furious", "Fast and Furious", true},
 		{"Amélie", "Amelie", false},
+		{"Ame\u0301lie", "Amelie", false}, // NFD: the combining accent is kept
+		{"ก\u0e34น", "กน", false},         // a Thai vowel sign is kept
 		{"Se7en", "se7en", true},
 		{"Alien", "Aliens", false},
 	} {
