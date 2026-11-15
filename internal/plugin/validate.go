@@ -234,8 +234,9 @@ func validateKeyFields(p *problems, path, groupLabel string, fields []KeyField) 
 // lookup and can look up the importer's ExternalIDType; otherwise every row
 // of every import would fail its lookup. The source error and the external-id
 // error have separate paths so a fallback names itself in both. With byTitle
-// the source is only searched, so lookup support and the id type are not
-// required.
+// and an id type the source does not list (or none), the source is only
+// searched, so lookup support is not required; a listed id type is also
+// looked up, so the lookup check stays.
 func validateResolveViaSource(p *problems, path, externalPath, sourceID, idType string, byTitle bool, sources []SourceInfo) {
 	var src *SourceInfo
 	for i := range sources {
@@ -248,8 +249,8 @@ func validateResolveViaSource(p *problems, path, externalPath, sourceID, idType 
 		p.add(path, "unknown source %q", sourceID)
 		return
 	}
-	if byTitle {
-		// resolved by a title search: the id stays on the entry only
+	if byTitle && (idType == "" || !slices.Contains(src.ExternalIDTypes, idType)) {
+		// resolved by a title search only: the id stays on the entry
 		return
 	}
 	if !src.SupportsLookup {

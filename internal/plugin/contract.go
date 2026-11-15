@@ -315,8 +315,9 @@ type SourceInfo struct {
 
 // ImporterInfo describes an import format. ResolveVia names the declared
 // source used to look up ExternalIDType (that source must have
-// SupportsLookup and list ExternalIDType in its ExternalIDTypes; an empty
-// ResolveVia makes the importer manual-only); FallbackTitleLang is the title
+// SupportsLookup and list ExternalIDType in its ExternalIDTypes, unless
+// ResolveByTitle is set and the source does not list it: then it is only
+// searched; an empty ResolveVia makes the importer manual-only); FallbackTitleLang is the title
 // language of the manual entry kept when nothing matches. ExternalIDLabel is
 // an optional human name of ExternalIDType ("Example DB"): a single line of
 // at most 40 characters; the core shows such an id as "<label> #<value>"
@@ -341,9 +342,10 @@ type ImporterInfo struct {
 	ResolveViaFallback []string `json:"resolve_via_fallback,omitempty"`
 	// ResolveByTitle makes the import runner resolve rows without an id of
 	// ExternalIDType by an exact title and year search on the ResolveVia
-	// source (and its fallbacks). It requires ResolveVia; the source then
-	// needs neither SupportsLookup nor to list ExternalIDType, because the
-	// id is only kept on the entry.
+	// source (and its fallbacks). It requires ResolveVia; a source that does
+	// not list ExternalIDType (or an importer without one) needs no
+	// SupportsLookup, because it is only searched and the id is kept on the
+	// entry. A listed ExternalIDType is still looked up and needs it.
 	ResolveByTitle    bool   `json:"resolve_by_title,omitempty"`
 	ManualRows        bool   `json:"manual_rows,omitempty"`
 	FallbackTitleLang string `json:"fallback_title_lang,omitempty"`
