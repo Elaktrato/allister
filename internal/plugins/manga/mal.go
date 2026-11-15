@@ -52,7 +52,8 @@ func newMALClient(base string, hc *http.Client, id func(context.Context) (string
 }
 
 // wait reserves the next request slot under the lock and sleeps until it
-// outside the lock, so a cancelled waiter leaves at once.
+// outside the lock, so a cancelled waiter leaves at once. It keeps its reserved
+// slot, which delays later requests by at most one interval.
 func (c *malClient) wait(ctx context.Context) error {
 	if err := ctx.Err(); err != nil {
 		return err
