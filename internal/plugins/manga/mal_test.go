@@ -1,11 +1,15 @@
 package manga
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"io"
+	"log"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -186,26 +190,109 @@ func TestMagazineManifest(t *testing.T) {
 		}
 	}
 	want := plugin.FieldDef{Key: "magazine", Label: "Magazine", Type: plugin.FieldText, Show: true, Editable: true, Filterable: true}
-	if f.Key == "" || f.Label != want.Label || f.Type != want.Type || !f.Show || !f.Editable || !f.Filterable {
-		t.Fatalf("magazine field = %+v", f)
+	if !reflect.DeepEqual(f, want) {
+		t.Fatalf("magazine field = %+v, want %+v", f, want)
 	}
+	var col plugin.ColumnDef
 	for _, c := range m.Kinds[0].Columns {
 		if c.Key == "magazine" {
-			if c.Default {
-				t.Fatal("magazine column is on by default")
-			}
-			goto col
+			col = c
 		}
 	}
-	t.Fatal("no magazine column")
-col:
+	if wantCol := (plugin.ColumnDef{Key: "magazine", Hide: "lg"}); col != wantCol {
+		t.Fatalf("magazine column = %+v, want %+v", col, wantCol)
+	}
 	s := m.Sources[0]
-	if !s.KeyOptional || len(s.KeyFields) != 1 || s.KeyFields[0].Name != MALClientIDField ||
-		!strings.Contains(s.KeyHelp, "https://myanimelist.net/apiconfig") || !strings.Contains(s.KeyHelp, "MyAnimeList") {
+	if !s.KeyOptional || s.KeyLabel != "MyAnimeList" ||
+		!reflect.DeepEqual(s.KeyFields, []plugin.KeyField{{Name: MALClientIDField, Label: "MyAnimeList Client ID", Secret: true}}) {
 		t.Fatalf("source key = %+v", s)
+	}
+	if !strings.HasPrefix(s.KeyHelp, "Fills the manga Magazine field from MyAnimeList (data courtesy of MyAnimeList)") ||
+		strings.Contains(s.KeyHelp, "Optional") || !strings.Contains(s.KeyHelp, "https://myanimelist.net/apiconfig") {
+		t.Fatalf("key help = %q", s.KeyHelp)
 	}
 	if err := plugin.Validate(m); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// TestRefusedClientIDIsLogged: a refused Client ID (401) and a failing
+// credential lookup are logged without the id; the details still succeed
+// and carry no magazine. 404 and an unset id stay silent.
+func TestRefusedClientIDIsLogged(t *testing.T) {
+	const secret = "sekrit-client-id"
+	anilist := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write(fixture(t, "manga.json"))
+	}))
+	defer anilist.Close()
+	status := 401
+	mal := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(status)
+	}))
+	defer mal.Close()
+	cases := []struct {
+		name    string
+		id      func(context.Context) (string, error)
+		status  int
+		wantLog bool
+	}{
+		{"refused", idFn(secret), 401, true},
+		{"forbidden", idFn(secret), 403, true},
+		{"lookup fails", func(context.Context) (string, error) { return "", errors.New("store down") }, 200, true},
+		{"not found", idFn(secret), 404, false},
+		{"unset", idFn(""), 200, false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			log.SetOutput(&buf)
+			defer log.SetOutput(os.Stderr)
+			status = c.status
+			s := New(Options{AniListURL: anilist.URL, HTTP: anilist.Client(), MALURL: mal.URL, MALClientID: c.id, MALInterval: time.Nanosecond}).Source("anilist")
+			d, err := s.Details(context.Background(), KindManga, "30013")
+			if err != nil || d.ID != "30013" {
+				t.Fatalf("details: %v", err)
+			}
+			if _, ok := d.Fields["magazine"]; ok {
+				t.Fatal("magazine set")
+			}
+			out := buf.String()
+			if (out != "") != c.wantLog {
+				t.Fatalf("log = %q, want log %v", out, c.wantLog)
+			}
+			if strings.Contains(out, secret) {
+				t.Fatalf("log leaks the id: %q", out)
+			}
+		})
+	}
+}
+
+// TestMALPacingCancelWhileQueued: a waiter whose context is cancelled leaves
+// the queue promptly even though earlier waiters still hold their slots.
+func TestMALPacingCancelWhileQueued(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{"serialization":[]}`))
+	}))
+	defer srv.Close()
+	c := newMALClient(srv.URL+"/v2", srv.Client(), idFn("x"), 600*time.Millisecond)
+	if _, err := c.Serialization(context.Background(), "1"); err != nil {
+		t.Fatal(err)
+	}
+	go c.Serialization(context.Background(), "1") // queued behind the first
+	time.Sleep(50 * time.Millisecond)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { _, err := c.Serialization(ctx, "1"); done <- err }()
+	time.Sleep(50 * time.Millisecond)
+	start := time.Now()
+	cancel()
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) || time.Since(start) > 200*time.Millisecond {
+			t.Fatalf("err %v after %v", err, time.Since(start))
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("cancelled waiter still blocked")
 	}
 }
 

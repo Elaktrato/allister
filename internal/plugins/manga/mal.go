@@ -22,6 +22,9 @@ const (
 	malTimeout         = 10 * time.Second
 )
 
+// errMALNotSet: no Client ID is configured (normal; never logged).
+var errMALNotSet = fmt.Errorf("mal: no Client ID: %w", plugin.ErrNotConfigured)
+
 // malClient is a small client for the official MyAnimeList API v2. The
 // Client ID travels only in the X-MAL-CLIENT-ID header and is never part of
 // a URL, an error or a log line. Requests are paced to one per interval.
@@ -48,24 +51,31 @@ func newMALClient(base string, hc *http.Client, id func(context.Context) (string
 	return &malClient{base: strings.TrimRight(base, "/"), http: hc, clientID: id, interval: interval}
 }
 
-// wait blocks until one interval has passed since the previous request.
+// wait reserves the next request slot under the lock and sleeps until it
+// outside the lock, so a cancelled waiter leaves at once.
 func (c *malClient) wait(ctx context.Context) error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if d := time.Until(c.last.Add(c.interval)); d > 0 {
-		t := time.NewTimer(d)
-		defer t.Stop()
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-t.C:
-		}
-	}
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	c.last = time.Now()
-	return nil
+	c.mu.Lock()
+	slot := time.Now()
+	if next := c.last.Add(c.interval); next.After(slot) {
+		slot = next
+	}
+	c.last = slot
+	c.mu.Unlock()
+	d := time.Until(slot)
+	if d <= 0 {
+		return nil
+	}
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-t.C:
+		return nil
+	}
 }
 
 // Serialization returns the magazine names of a manga by its MAL id. An
@@ -75,14 +85,14 @@ func (c *malClient) Serialization(ctx context.Context, malID string) ([]string, 
 		return nil, err
 	}
 	if c.clientID == nil {
-		return nil, fmt.Errorf("mal: no Client ID: %w", plugin.ErrNotConfigured)
+		return nil, errMALNotSet
 	}
 	id, err := c.clientID(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("mal: Client ID lookup failed: %w", err)
 	}
 	if id == "" {
-		return nil, fmt.Errorf("mal: no Client ID: %w", plugin.ErrNotConfigured)
+		return nil, errMALNotSet
 	}
 	if err := c.wait(ctx); err != nil {
 		return nil, err

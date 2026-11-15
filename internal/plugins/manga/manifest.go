@@ -107,9 +107,9 @@ func manifest() plugin.Manifest {
 			// not as a key-only source: a source without search or lookup
 			// would appear in every source switch and match dialog.
 			KeyLabel:    "MyAnimeList",
-			KeyFields:   []plugin.KeyField{{Name: MALClientIDField, Label: "Client ID"}},
+			KeyFields:   []plugin.KeyField{{Name: MALClientIDField, Label: "MyAnimeList Client ID", Secret: true}},
 			KeyOptional: true,
-			KeyHelp:     "Optional: fills the Magazine field from MyAnimeList (data courtesy of MyAnimeList). Register a client at https://myanimelist.net/apiconfig and paste its Client ID.",
+			KeyHelp:     "Fills the manga Magazine field from MyAnimeList (data courtesy of MyAnimeList). Register a client at https://myanimelist.net/apiconfig and paste its Client ID.",
 		}},
 		Importers: []plugin.ImporterInfo{{
 			ID:                AccountImp,
