@@ -8,10 +8,14 @@ import (
 )
 
 // normaliseTitle is the form two titles are compared in when a row is
-// resolved by title: lower case, "&" read as "and", every rune that is not a
-// letter, a combining mark or a number (digits, superscripts, Roman numeral runes) dropped. Diacritics are not folded and
-// combining marks are kept, so "Amélie" (composed or not) and "Amelie"
-// differ: the row then stays unmatched, as a wrong match is worse than none.
+// resolved by title: lower case, "&" read as "and", and every rune that is not
+// a letter, a combining mark or a number (digits, superscripts, Roman numeral
+// runes) dropped. There is no Unicode normalisation: diacritics are not
+// folded, and the composed and the decomposed form of the same text ("é" as
+// one rune or as "e" plus a combining accent) are NOT treated as equal, so
+// they stay unmatched. "Amélie" (in either form) and "Amelie" differ as well.
+// The row then stays unmatched, which is the safe side: a wrong match is worse
+// than none.
 func normaliseTitle(s string) string {
 	var b strings.Builder
 	for _, r := range strings.ToLower(s) {

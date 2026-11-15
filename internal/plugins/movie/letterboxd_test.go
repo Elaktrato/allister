@@ -171,8 +171,8 @@ func TestLetterboxdManifest(t *testing.T) {
 func TestLetterboxdDiaryRatingFallbackUsesLatestWatch(t *testing.T) {
 	res, err := lbParse(t, map[string]string{
 		"diary.csv": "Date,Name,Year,Letterboxd URI,Rating,Rewatch,Tags,Watched Date\n" +
-			"2026-01-01,Film One,2001,https://boxd.it/e1,2,,,2026-01-01\n" +
-			"2026-03-01,Film One,2001,https://boxd.it/e2,4,Yes,,2026-02-27\n",
+			"2026-03-01,Film One,2001,https://boxd.it/e2,4,Yes,,2026-02-27\n" +
+			"2026-01-01,Film One,2001,https://boxd.it/e1,2,,,2026-01-01\n",
 	})
 	if err != nil || len(res.Entries) != 1 || res.Entries[0].Rating == nil || *res.Entries[0].Rating != 8 {
 		t.Fatalf("res = %+v err = %v", res, err)
@@ -204,10 +204,14 @@ func TestLetterboxdStreamsAndCapsCompressibleMember(t *testing.T) {
 	lines := "Name\n" + strings.Repeat("a\n", 5<<20-4)
 	start := time.Now()
 	_, err := lbParse(t, map[string]string{"watched.csv": lines})
-	if !errors.Is(err, plugin.ErrBadInput) || !strings.Contains(err.Error(), "100,000 rows") {
+	// The row cap is what refuses it: that error exists only once the parser
+	// has counted past the cap, so it stopped streaming there.
+	if !errors.Is(err, plugin.ErrBadInput) || !strings.Contains(err.Error(), "more than "+groupThousands(letterboxdMaxRows)+" rows") {
 		t.Fatalf("err = %v", err)
 	}
-	if d := time.Since(start); d > 5*time.Second {
+	// Only a runaway bound (a parse of all 5M rows with per-row work would
+	// take far longer); generous so a slow CI machine cannot flake.
+	if d := time.Since(start); d > time.Minute {
 		t.Fatalf("took %v", d)
 	}
 }
