@@ -2,6 +2,7 @@ package web
 
 import (
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"os"
 	"regexp"
@@ -200,19 +201,22 @@ func TestSeriesEditRoundTrip(t *testing.T) {
 		t.Fatalf("stored: %+v", got)
 	}
 	uploaded := got.CoverPath
-	// a cover URL replaces the upload; the file goes
-	form.Set("cover_url", "https://img.example/series.jpg")
+	// a cover URL replaces the upload: downloaded into the cover store, the
+	// uploaded file goes
+	img := imageServer(t, fe.env)
+	form.Set("cover_url", img+"/png/series-url")
 	form.Set("linked", "")
 	form.Del("parent") // absent keeps
 	if rec := fe.do("POST", base+"/edit", form, true); rec.Code != 204 || rec.Header().Get("HX-Redirect") != base {
 		t.Fatalf("htmx save: %d %q", rec.Code, rec.Header().Get("HX-Redirect"))
 	}
 	got = mustSeriesWeb(t, fe, ser.UID)
-	if got.CoverPath != "https://img.example/series.jpg" || got.LinkedItemID != 0 || got.ParentID != parent.ID || hasFile(fe.env, uploaded) {
+	if !hashedPNG.MatchString(got.CoverPath) || got.CoverPath == uploaded || !hasFile(fe.env, got.CoverPath) ||
+		got.LinkedItemID != 0 || got.ParentID != parent.ID || hasFile(fe.env, uploaded) {
 		t.Fatalf("url cover: %+v file %v", got, hasFile(fe.env, uploaded))
 	}
 	// clearing a field clears the own value
-	clear := url.Values{"title": {"Saga"}, "cover_url": {""}, "parent": {"0"}}
+	clear := url.Values{"title": {"Saga"}, "cover_url": {""}, "remove_cover": {"1"}, "parent": {"0"}}
 	if rec := fe.do("POST", base+"/edit", clear, false); rec.Code != http.StatusSeeOther {
 		t.Fatalf("clear: %d", rec.Code)
 	}
@@ -398,7 +402,8 @@ func TestSeriesCoverSharedBetweenSeries(t *testing.T) {
 		t.Fatal("failed save removed the shared file")
 	}
 	// A replaces its cover with a URL: B keeps the file
-	if rec := fe.do("POST", seriesURL("book", a.UID)+"/edit", url.Values{"title": {"A"}, "cover_url": {"https://img.example/a.jpg"}}, false); rec.Code != 303 {
+	img := imageServer(t, fe.env)
+	if rec := fe.do("POST", seriesURL("book", a.UID)+"/edit", url.Values{"title": {"A"}, "cover_url": {img + "/png/a"}}, false); rec.Code != 303 {
 		t.Fatalf("replace: %d", rec.Code)
 	}
 	if !hasFile(fe.env, name) {
@@ -501,5 +506,87 @@ func TestSeriesStaleLinkDoesNotBlockSave(t *testing.T) {
 	}
 	if got := mustSeriesWeb(t, fe, ser.UID); got.Description != "Edited" || got.LinkedItemID != c {
 		t.Fatalf("stored %+v", got)
+	}
+}
+
+// imageServer serves images over TLS for cover URL downloads and makes the
+// server trust it: /png/<x> is a PNG, /html a web page, anything else 404.
+func imageServer(t *testing.T, e *env) string {
+	t.Helper()
+	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasPrefix(r.URL.Path, "/png/"):
+			w.Header().Set("Content-Type", "image/png")
+			w.Write(png1(strings.TrimPrefix(r.URL.Path, "/png/")))
+		case r.URL.Path == "/html":
+			w.Header().Set("Content-Type", "text/html")
+			w.Write([]byte("<html></html>"))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(ts.Close)
+	e.srv.deps.HTTP = ts.Client()
+	return ts.URL
+}
+
+// TestSeriesCoverURLIsDownloaded: a cover URL is fetched into the cover
+// store (a local file, never a hot link); a URL that does not give an image
+// is refused naming the cover and stores nothing.
+func TestSeriesCoverURLIsDownloaded(t *testing.T) {
+	fe := newFixtureEnv(t, withSeriesData)
+	ser, _ := fe.bookSeries(t, "Saga")
+	img := imageServer(t, fe.env)
+	base := seriesURL("book", ser.UID)
+	for _, bad := range []string{img + "/html", img + "/missing.png"} {
+		rec := fe.do("POST", base+"/edit", url.Values{"title": {"Saga"}, "cover_url": {bad}}, false)
+		alert := alertRe.FindStringSubmatch(rec.Body.String())
+		if rec.Code != http.StatusUnprocessableEntity || alert == nil || !strings.Contains(alert[1], "Could not download the cover") {
+			t.Fatalf("%s: %d %v", bad, rec.Code, alert)
+		}
+		if got := mustSeriesWeb(t, fe, ser.UID); got.CoverPath != "" {
+			t.Fatalf("%s: stored %q", bad, got.CoverPath)
+		}
+		if n := countFiles(t, fe.env); n != 0 {
+			t.Fatalf("%s: %d files", bad, n)
+		}
+	}
+	rec := fe.do("POST", base+"/edit", url.Values{"title": {"Saga"}, "cover_url": {img + "/png/ok"}}, false)
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("download: %d %v", rec.Code, alertRe.FindStringSubmatch(rec.Body.String()))
+	}
+	got := mustSeriesWeb(t, fe, ser.UID)
+	if !hashedPNG.MatchString(got.CoverPath) || !hasFile(fe.env, got.CoverPath) {
+		t.Fatalf("stored %q (file %v)", got.CoverPath, hasFile(fe.env, got.CoverPath))
+	}
+	body := fe.get(base).Body.String()
+	mustContain(t, body, `src="/covers/`+got.CoverPath+`"`)
+	mustNotContain(t, body, img)
+}
+
+// TestSeriesUnchangedLegacyCoverURL: a cover URL stored earlier (a restored
+// backup's cover_url) is downloaded when the dialog is saved; when it cannot
+// be fetched the unchanged value stays and the save goes through.
+func TestSeriesUnchangedLegacyCoverURL(t *testing.T) {
+	fe := newFixtureEnv(t, withSeriesData)
+	ser, _ := fe.bookSeries(t, "Saga")
+	img := imageServer(t, fe.env)
+	k := bookKind(t, fe)
+	base := seriesURL("book", ser.UID)
+	for _, c := range []struct {
+		stored string
+		local  bool
+	}{{img + "/missing.png", false}, {img + "/png/legacy", true}} {
+		if err := fe.lib.UpdateSeriesDetails(bg, ser.ID, k, library.SeriesDetails{Title: "Saga", CoverPath: c.stored}); err != nil {
+			t.Fatal(err)
+		}
+		rec := fe.do("POST", base+"/edit", url.Values{"title": {"Saga"}, "description": {"x"}, "cover_url": {c.stored}}, false)
+		if rec.Code != http.StatusSeeOther {
+			t.Fatalf("%s: %d %v", c.stored, rec.Code, alertRe.FindStringSubmatch(rec.Body.String()))
+		}
+		got := mustSeriesWeb(t, fe, ser.UID).CoverPath
+		if c.local != hashedPNG.MatchString(got) || (!c.local && got != c.stored) {
+			t.Fatalf("%s: stored %q", c.stored, got)
+		}
 	}
 }
