@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -1111,5 +1112,311 @@ func TestImportUpdateNotesInactiveProgress(t *testing.T) {
 	}
 	if msg := e.message(id, 1); !strings.Contains(msg, "progress not active: pages") {
 		t.Fatalf("message = %q", msg)
+	}
+}
+
+// titleSource is a fake source answering Search by searchFn (n counts the
+// searches so far, 1 for the first) and Details from details by id.
+type titleSource struct {
+	plugintest.FakeSource
+	mu       sync.Mutex
+	searchFn func(q string, n int) ([]plugin.ItemSummary, error)
+	details  map[string]plugin.ItemData
+	searched []string
+	detailed []string
+}
+
+func (s *titleSource) Search(_ context.Context, _, q string) ([]plugin.ItemSummary, error) {
+	s.mu.Lock()
+	s.searched = append(s.searched, q)
+	n := len(s.searched)
+	s.mu.Unlock()
+	return s.searchFn(q, n)
+}
+
+func (s *titleSource) Details(_ context.Context, _, id string) (plugin.ItemData, error) {
+	s.mu.Lock()
+	s.detailed = append(s.detailed, id)
+	s.mu.Unlock()
+	d, ok := s.details[id]
+	if !ok {
+		return plugin.ItemData{}, plugin.ErrNotFound
+	}
+	return d, nil
+}
+
+func (s *titleSource) Lookup(context.Context, string, string, string) (plugin.ItemData, error) {
+	return plugin.ItemData{}, errors.New("title importer rows must not be looked up")
+}
+
+// titleNote is the UnmatchedNote of the title fixture importer.
+const titleNote = `Imported from Shelf CSV; Fake Books had no unique match for "{title}" ({year}).`
+
+// newTitleEnv is the book fixture with a year field and a "shelf-csv"
+// importer that resolves rows by title and year through the books source;
+// its own "shelf" id is not one the source can look up.
+func newTitleEnv(t *testing.T) (*genEnv, *titleSource, *plugintest.FakeImporter) {
+	return newTitleEnvWith(t, false)
+}
+
+// newTitleEnvWith with searchOnly makes the books source one that cannot
+// look up at all (and drops the isbn importer that needs it).
+func newTitleEnvWith(t *testing.T, searchOnly bool) (*genEnv, *titleSource, *plugintest.FakeImporter) {
+	t.Helper()
+	d := openDB(t)
+	e := &genEnv{t: t, q: &fakeQueue{inner: jobs.NewQueue(d)}, clk: &clock{t: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)},
+		enabled: plugintest.NewMemEnabled(), dbh: d}
+	bk := plugintest.BookPlugin()
+	bk.M.Kinds[0].Fields = append(bk.M.Kinds[0].Fields, plugin.FieldDef{Key: "year", Label: "Year", Type: plugin.FieldNumber})
+	bk.M.Importers = append(bk.M.Importers, plugin.ImporterInfo{ID: "shelf-csv", Name: "Shelf CSV", Accept: []string{".csv"},
+		ExternalIDType: "shelf", ResolveVia: "books", ResolveByTitle: true, FallbackTitleLang: "en", UnmatchedNote: titleNote})
+	src := &titleSource{details: map[string]plugin.ItemData{}}
+	imp := &plugintest.FakeImporter{}
+	bk.Sources = map[string]plugin.Source{"books": src}
+	bk.Importers = map[string]plugin.Importer{"books-csv": &plugintest.FakeImporter{}, "shelf-csv": imp}
+	if searchOnly {
+		bk.M.Sources[0].SupportsLookup, bk.M.Sources[0].ExternalIDTypes = false, nil
+		bk.M.Importers = bk.M.Importers[1:]
+	}
+	e.reg = plugin.NewRegistry(e.enabled)
+	if err := e.reg.Register(bk); err != nil {
+		t.Fatal(err)
+	}
+	e.lib = library.New(d, e.reg)
+	e.im = New(Deps{DB: d, Library: e.lib, Registry: e.reg, Queue: e.q,
+		SyncJobs: map[string]func(int64) (string, any){"book": jobs.SyncJobFor("book")},
+		Now:      e.clk.now, Sleep: e.clk.sleep})
+	e.bookPlugin = bk
+	return e, src, imp
+}
+
+func titled(id, title string, year float64) plugin.ItemSummary {
+	return plugin.ItemSummary{Source: "books", ID: id, Kind: "book", Titles: []plugin.Title{{Lang: "en", Text: title}},
+		Fields: map[string]plugin.FieldValue{"year": {Num: pf(year)}}}
+}
+
+func titledData(id, title string, year float64) plugin.ItemData {
+	return plugin.ItemData{ItemSummary: titled(id, title, year), ExternalURL: "https://books.example/work/" + id}
+}
+
+func shelfEntry(shelf, title string, year float64) plugin.ParsedEntry {
+	e := plugin.ParsedEntry{Kind: "book", Title: title, ExternalIDs: map[string]string{"shelf": shelf}, Status: plugin.Completed}
+	if year > 0 {
+		e.Fields = map[string]plugin.FieldValue{"year": {Num: pf(year)}}
+	}
+	return e
+}
+
+func TestTitleResolveExactMatch(t *testing.T) {
+	e, src, imp := newTitleEnv(t)
+	src.searchFn = func(string, int) ([]plugin.ItemSummary, error) {
+		return []plugin.ItemSummary{titled("w1", "Fast & Furious", 2001), titled("w2", "Fast and Furious", 2009)}, nil
+	}
+	src.details["w2"] = titledData("w2", "Fast and Furious", 2009)
+	imp.Result = plugin.ParseResult{Entries: []plugin.ParsedEntry{shelfEntry("/film/ff/", "Fast & Furious", 2009)}}
+	id := e.submit("book", "shelf-csv")
+	if err := e.run("book", id); err != nil {
+		t.Fatal(err)
+	}
+	if r := e.report(); r.State != "done" || r.Imported != 1 || r.Unmatched != 0 {
+		t.Fatalf("report: %+v", r)
+	}
+	if len(src.detailed) != 1 || src.detailed[0] != "w2" {
+		t.Fatalf("details fetched for %v, want [w2]", src.detailed)
+	}
+	it, en := e.item("book", "book", "shelf", "/film/ff/")
+	if it.Source != "books" || it.SourceID != "w2" || en.Status != library.Completed {
+		t.Errorf("item %s/%s status %s", it.Source, it.SourceID, en.Status)
+	}
+}
+
+func TestTitleResolveAmbiguousIsUnmatched(t *testing.T) {
+	e, src, imp := newTitleEnv(t)
+	src.searchFn = func(string, int) ([]plugin.ItemSummary, error) {
+		return []plugin.ItemSummary{titled("w1", "Solaris", 1972), titled("w2", "SOLARIS", 1972), titled("w3", "Solaris", 2002)}, nil
+	}
+	imp.Result = plugin.ParseResult{Entries: []plugin.ParsedEntry{shelfEntry("/film/solaris/", "Solaris", 1972)}}
+	id := e.submit("book", "shelf-csv")
+	if err := e.run("book", id); err != nil {
+		t.Fatal(err)
+	}
+	r := e.report()
+	if r.State != "done" || r.Unmatched != 1 || r.Imported != 0 {
+		t.Fatalf("report: %+v", r)
+	}
+	msg := e.message(id, 1)
+	if !strings.Contains(msg, "no unique match") || !strings.Contains(msg, `"Solaris" (1972)`) {
+		t.Errorf("message = %q", msg)
+	}
+	if len(src.detailed) != 0 {
+		t.Errorf("details fetched for %v", src.detailed)
+	}
+	it, _ := e.item("book", "book", "shelf", "/film/solaris/")
+	if it.Source != manualSource {
+		t.Errorf("source = %q, want manual", it.Source)
+	}
+}
+
+func TestTitleResolveOtherKindOrYearDoesNotMatch(t *testing.T) {
+	e, src, imp := newTitleEnv(t)
+	other := titled("w9", "Dune", 2021)
+	other.Kind = "comic"
+	src.searchFn = func(string, int) ([]plugin.ItemSummary, error) {
+		return []plugin.ItemSummary{other, titled("w1", "Dune", 1984)}, nil
+	}
+	imp.Result = plugin.ParseResult{Entries: []plugin.ParsedEntry{shelfEntry("/film/dune/", "Dune", 2021)}}
+	id := e.submit("book", "shelf-csv")
+	if err := e.run("book", id); err != nil {
+		t.Fatal(err)
+	}
+	if r := e.report(); r.Unmatched != 1 {
+		t.Fatalf("report: %+v", r)
+	}
+}
+
+func TestTitleResolveNoYearNotSearched(t *testing.T) {
+	e, src, imp := newTitleEnv(t)
+	src.searchFn = func(string, int) ([]plugin.ItemSummary, error) {
+		t.Error("searched a row without a year")
+		return nil, nil
+	}
+	imp.Result = plugin.ParseResult{Entries: []plugin.ParsedEntry{shelfEntry("/film/x/", "Untitled", 0)}}
+	id := e.submit("book", "shelf-csv")
+	if err := e.run("book", id); err != nil {
+		t.Fatal(err)
+	}
+	if r := e.report(); r.State != "done" || r.Unmatched != 1 {
+		t.Fatalf("report: %+v", r)
+	}
+	if len(src.searched) != 0 {
+		t.Errorf("searched %v", src.searched)
+	}
+	if it, _ := e.item("book", "book", "shelf", "/film/x/"); it.Source != manualSource {
+		t.Errorf("source = %q", it.Source)
+	}
+}
+
+func TestTitleResolveNotConfiguredIsManual(t *testing.T) {
+	e, src, imp := newTitleEnv(t)
+	src.searchFn = func(string, int) ([]plugin.ItemSummary, error) {
+		return nil, fmt.Errorf("no key: %w", plugin.ErrNotConfigured)
+	}
+	imp.Result = plugin.ParseResult{Entries: []plugin.ParsedEntry{
+		shelfEntry("/film/a/", "Alpha", 2000), shelfEntry("", "Beta", 2001)}} // Beta has no id at all
+	id := e.submit("book", "shelf-csv")
+	if err := e.run("book", id); err != nil {
+		t.Fatal(err)
+	}
+	r := e.report()
+	if r.State != "done" || r.Unmatched != 2 || r.Failed != 0 {
+		t.Fatalf("report: %+v", r)
+	}
+	if msg := e.message(id, 1); !strings.Contains(msg, "not configured") {
+		t.Errorf("message = %q", msg)
+	}
+}
+
+func TestTitleResolveRateLimitedRetries(t *testing.T) {
+	e, src, imp := newTitleEnv(t)
+	src.searchFn = func(_ string, n int) ([]plugin.ItemSummary, error) {
+		if n == 1 {
+			return nil, fmt.Errorf("http 429: %w", plugin.ErrRateLimited)
+		}
+		return []plugin.ItemSummary{titled("w1", "Heat", 1995)}, nil
+	}
+	src.details["w1"] = titledData("w1", "Heat", 1995)
+	imp.Result = plugin.ParseResult{Entries: []plugin.ParsedEntry{shelfEntry("/film/heat/", "Heat", 1995)}}
+	id := e.submit("book", "shelf-csv")
+	if err := e.run("book", id); err != nil {
+		t.Fatal(err)
+	}
+	if r := e.report(); r.State != "done" || r.Imported != 1 || r.Note != "" {
+		t.Fatalf("report: %+v", r)
+	}
+	if len(src.searched) != 2 {
+		t.Errorf("searched %d times, want 2", len(src.searched))
+	}
+	if e.clk.slept() < rateLimitWait {
+		t.Errorf("slept only %v", e.clk.slept())
+	}
+}
+
+func TestTitleResolveBadResponseFailsRow(t *testing.T) {
+	e, src, imp := newTitleEnv(t)
+	src.searchFn = func(string, int) ([]plugin.ItemSummary, error) {
+		return nil, fmt.Errorf("garbage: %w", plugin.ErrBadResponse)
+	}
+	imp.Result = plugin.ParseResult{Entries: []plugin.ParsedEntry{shelfEntry("/film/a/", "Alpha", 2000)}}
+	id := e.submit("book", "shelf-csv")
+	if err := e.run("book", id); err != nil {
+		t.Fatal(err)
+	}
+	if r := e.report(); r.State != "done" || r.Failed != 1 {
+		t.Fatalf("report: %+v", r)
+	}
+}
+
+func TestTitleResolveExistingItemUpdated(t *testing.T) {
+	for _, c := range []struct {
+		mode    string
+		outcome string
+		status  library.Status
+	}{
+		{ModeSkip, "skipped", library.Planned},
+		{ModeAlways, "updated", library.Completed},
+	} {
+		t.Run(c.mode, func(t *testing.T) {
+			e, src, imp := newTitleEnv(t)
+			pre, err := e.lib.AddToList(context.Background(), "book", "book", titledData("w1", "Heat", 1995),
+				library.Entry{Status: library.Planned}, library.WithSyncState("done"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			src.searchFn = func(string, int) ([]plugin.ItemSummary, error) {
+				return []plugin.ItemSummary{titled("w1", "Heat", 1995)}, nil
+			}
+			src.details["w1"] = titledData("w1", "Heat", 1995)
+			imp.Result = plugin.ParseResult{Entries: []plugin.ParsedEntry{shelfEntry("/film/heat/", "Heat", 1995)}}
+			id, err := e.im.SubmitMode(context.Background(), "book", "shelf-csv", "file.csv", c.mode, strings.NewReader("x"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := e.run("book", id); err != nil {
+				t.Fatal(err)
+			}
+			var n, outcomeItem int64
+			var outcome string
+			if err := e.dbh.QueryRow(`SELECT COUNT(*) FROM items`).Scan(&n); err != nil || n != 1 {
+				t.Fatalf("items = %d (%v), want 1", n, err)
+			}
+			if err := e.dbh.QueryRow(`SELECT outcome, COALESCE(item_id, 0) FROM import_rows WHERE import_id=? AND seq=1`, id).Scan(&outcome, &outcomeItem); err != nil {
+				t.Fatal(err)
+			}
+			if outcome != c.outcome || outcomeItem != pre {
+				t.Errorf("row %s item %d, want %s %d", outcome, outcomeItem, c.outcome, pre)
+			}
+			if en, err := e.lib.Entry(context.Background(), pre); err != nil || en.Status != c.status {
+				t.Errorf("entry %+v %v, want status %s", en, err, c.status)
+			}
+			if len(src.detailed) != 0 {
+				t.Errorf("details fetched for an existing item: %v", src.detailed)
+			}
+		})
+	}
+}
+
+func TestTitleResolveSearchOnlySource(t *testing.T) {
+	e, src, imp := newTitleEnvWith(t, true)
+	src.searchFn = func(string, int) ([]plugin.ItemSummary, error) {
+		return []plugin.ItemSummary{titled("w1", "Heat", 1995)}, nil
+	}
+	src.details["w1"] = titledData("w1", "Heat", 1995)
+	imp.Result = plugin.ParseResult{Entries: []plugin.ParsedEntry{shelfEntry("/film/heat/", "Heat", 1995)}}
+	id := e.submit("book", "shelf-csv")
+	if err := e.run("book", id); err != nil {
+		t.Fatal(err)
+	}
+	if r := e.report(); r.State != "done" || r.Imported != 1 {
+		t.Fatalf("report: %+v", r)
 	}
 }
