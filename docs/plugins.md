@@ -61,7 +61,7 @@ type Exporter interface {
 | `Kinds` | One or more media kinds (below). At least one is required. |
 | `Sources`, `Importers`, `Exporters` | Optional declarations (below). |
 
-**Reserved ids.** Plugin ids `list`, `people`, `settings`, `covers`, `static`, `healthz`, `api` and `version` belong to the core's first URL segment. Source ids `manual`, `export` and `search` would be hidden by the core's own routes under `/{plugin}/` and are refused too. Kind, source, importer and exporter ids use the slug rule above. Field and progress keys use `^[a-z][a-z0-9_]{0,31}$`.
+**Reserved ids.** Plugin ids `list`, `people`, `settings`, `covers`, `static`, `healthz`, `api` and `version` belong to the core's first URL segment. Source ids `manual`, `export`, `search` and `series` would be hidden by the core's own routes under `/{plugin}/` and are refused too. Kind, source, importer and exporter ids use the slug rule above. Field and progress keys use `^[a-z][a-z0-9_]{0,31}$`.
 
 ### Kinds
 
@@ -77,6 +77,7 @@ A `KindDef` describes one media kind:
 - `Progress`: see [Progress](#progress).
 - `Sections`: see [Sections](#sections).
 - `Stats`: optional, how the kind's time and units count on the Statistics page (see [Statistics](#statistics)). JSON `stats`, omitted when unset.
+- `SeriesHint`: optional `SeriesHintDef{TitleField, PositionField}` naming fields of the same kind that already hold a series title (a text field, required) and the position in it (a number field, optional), so the core can propose series groups from them. Unknown or mistyped fields are refused. JSON `series_hint`, omitted when unset.
 
 ### Table columns
 

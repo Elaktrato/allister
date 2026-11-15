@@ -261,6 +261,17 @@ type KindDef struct {
 	TitleFallback  []string     `json:"title_fallback,omitempty"`
 	Columns        []ColumnDef  `json:"columns,omitempty"`
 	Stats          *StatsDef    `json:"stats,omitempty"`
+	// SeriesHint names the kind's own fields that already carry a series
+	// title and a position in it, so the core can propose series groups.
+	SeriesHint *SeriesHintDef `json:"series_hint,omitempty"`
+}
+
+// SeriesHintDef points at fields of the same kind: TitleField (a text field)
+// holds the series title, PositionField (an optional number field) the
+// entry's position in it.
+type SeriesHintDef struct {
+	TitleField    string `json:"title_field"`
+	PositionField string `json:"position_field,omitempty"`
 }
 
 // KeyField is one named credential field of a source ("client_id"). Name is a

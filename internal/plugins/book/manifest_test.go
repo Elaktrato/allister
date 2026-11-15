@@ -33,8 +33,11 @@ func TestBooksManifest(t *testing.T) {
 		!slices.Equal(book.Progress.Defaults, []string{"pages"}) {
 		t.Fatalf("book progress = %+v", book.Progress)
 	}
+	if h := book.SeriesHint; h == nil || h.TitleField != "series" || h.PositionField != "series_number" {
+		t.Fatalf("book series hint = %+v", h)
+	}
 	series := m.Kinds[1]
-	if series.Label != "Series" || series.LabelPlural != "Series" {
+	if series.Key != "series" || series.Label != "Light novel" || series.LabelPlural != "Light novels" {
 		t.Fatalf("series kind = %+v", series)
 	}
 	for _, key := range []string{"author", "volumes", "chapters", "year", "synopsis", "published_on"} {
@@ -84,7 +87,7 @@ func TestBooksManifest(t *testing.T) {
 	wantYamtrack := plugin.ImporterInfo{
 		ID:                ImporterYamtrack,
 		Name:              "Yamtrack Novel CSV",
-		FileHint:          "Upload the Yamtrack general CSV. Only manga rows that AniList reports as novels are imported into Series.",
+		FileHint:          "Upload the Yamtrack general CSV. Only manga rows that AniList reports as novels are imported into Light novels.",
 		Accept:            []string{".csv"},
 		ExternalIDType:    "mal",
 		ExternalIDLabel:   "MyAnimeList",

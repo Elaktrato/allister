@@ -55,6 +55,7 @@ func TestManifestJSONRoundTrip(t *testing.T) {
 			TitleLanguages: []string{"en", "ja"},
 			TitleFallback:  []string{"ja", "en"},
 			Columns:        []plugin.ColumnDef{{Key: "n", Label: "Number", Default: true, Hide: "md"}, {Key: "rating"}},
+			SeriesHint:     &plugin.SeriesHintDef{TitleField: "e", PositionField: "n"},
 			Stats: &plugin.StatsDef{
 				Time:  &plugin.StatsTimeDef{Label: "Time", DurationKey: "d", CompletedField: "n", UnitsKey: "x", PerUnitField: "n"},
 				Units: &plugin.StatsUnitsDef{Key: "x", LabelPlural: "Units"},
@@ -245,5 +246,39 @@ func TestKindColumnsJSON(t *testing.T) {
 	k.Columns = nil
 	if b, _ = json.Marshal(k); strings.Contains(string(b), "columns") {
 		t.Fatalf("empty columns not omitted: %s", b)
+	}
+}
+
+func TestKindSeriesHintJSON(t *testing.T) {
+	k := plugin.KindDef{Key: "k", SeriesHint: &plugin.SeriesHintDef{TitleField: "series", PositionField: "series_number"}}
+	b, err := json.Marshal(k)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(b), `"series_hint":{"title_field":"series","position_field":"series_number"}`) {
+		t.Fatalf("json = %s", b)
+	}
+	roundTrip(t, "kind with hint", k)
+	b, _ = json.Marshal(plugin.KindDef{Key: "k"})
+	if strings.Contains(string(b), "series_hint") {
+		t.Fatalf("hint not omitted: %s", b)
+	}
+	b, _ = json.Marshal(plugin.KindDef{Key: "k", SeriesHint: &plugin.SeriesHintDef{TitleField: "s"}})
+	if strings.Contains(string(b), "position_field") {
+		t.Fatalf("position not omitted: %s", b)
+	}
+}
+
+func TestExportEntrySeriesJSON(t *testing.T) {
+	b, err := json.Marshal(plugin.ExportEntry{Kind: "k", Series: "The Expanse", SeriesPosition: 3})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(b), `"series":"The Expanse","series_position":3`) {
+		t.Fatalf("json = %s", b)
+	}
+	b, _ = json.Marshal(plugin.ExportEntry{Kind: "k"})
+	if strings.Contains(string(b), "series") {
+		t.Fatalf("zero values not omitted: %s", b)
 	}
 }

@@ -120,7 +120,7 @@ func manifest() plugin.Manifest {
 		}, {
 			ID:                ImporterYamtrack,
 			Name:              "Yamtrack Manga CSV",
-			FileHint:          "Upload the Yamtrack general CSV. Manga rows are matched on AniList by MyAnimeList id; novels are skipped (they belong in Books > Series).",
+			FileHint:          "Upload the Yamtrack general CSV. Manga rows are matched on AniList by MyAnimeList id; novels are skipped (they belong in Books > Light novels).",
 			Accept:            []string{".csv"},
 			ExternalIDType:    "mal",
 			ExternalIDLabel:   "MyAnimeList",

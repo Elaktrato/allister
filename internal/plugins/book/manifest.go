@@ -102,7 +102,7 @@ func manifest() plugin.Manifest {
 			{
 				ID:                ImporterYamtrack,
 				Name:              "Yamtrack Novel CSV",
-				FileHint:          "Upload the Yamtrack general CSV. Only manga rows that AniList reports as novels are imported into Series.",
+				FileHint:          "Upload the Yamtrack general CSV. Only manga rows that AniList reports as novels are imported into Light novels.",
 				Accept:            []string{".csv"},
 				ExternalIDType:    "mal",
 				ExternalIDLabel:   "MyAnimeList",
@@ -123,6 +123,7 @@ func bookKind() plugin.KindDef {
 		Key:         KindBook,
 		Label:       "Book",
 		LabelPlural: "Books",
+		SeriesHint:  &plugin.SeriesHintDef{TitleField: "series", PositionField: "series_number"},
 		Fields: []plugin.FieldDef{
 			{Key: "author", Label: "Author", Type: plugin.FieldText, Show: true, Editable: true, Filterable: true},
 			{Key: "pages", Label: "Pages", Type: plugin.FieldNumber, Min: num(1), Max: num(100000), Show: true, Editable: true},
@@ -179,8 +180,8 @@ func bookKind() plugin.KindDef {
 func seriesKind() plugin.KindDef {
 	return plugin.KindDef{
 		Key:         KindSeries,
-		Label:       "Series",
-		LabelPlural: "Series",
+		Label:       "Light novel",
+		LabelPlural: "Light novels",
 		Fields: []plugin.FieldDef{
 			{Key: "author", Label: "Author", Type: plugin.FieldText, Show: true, Editable: true, Filterable: true},
 			{Key: "volumes", Label: "Volumes", Type: plugin.FieldNumber, Min: num(1), Max: num(10000), Show: true, Editable: true},
