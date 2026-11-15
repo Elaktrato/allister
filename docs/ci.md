@@ -91,10 +91,10 @@ Versions released less than a week before pinning were skipped for the previous 
 
 ## Releases
 
-Versions are semantic version tags on `main`: `vMAJOR.MINOR.PATCH`, release candidates `vMAJOR.MINOR.PATCH-rc.N`. v0.2.0 (2026-11-12) was tagged and released by hand, before these workflows existed; the next release is the first one the Release workflow publishes.
+Versions are semantic version tags on `main`: `vMAJOR.MINOR.PATCH`, release candidates `vMAJOR.MINOR.PATCH-rc.N`. v0.1.0 (2026-11-12) was tagged and released by hand, before these workflows existed; v0.2.0 is the first one the Release workflow publishes.
 
-1. Merge everything for the release into `main`, push it, and wait for CI on `main` to pass.
-2. Move the entries under "Unreleased" in `CHANGELOG.md` to a section for the new version and commit that on `main`.
+1. Merge everything for the release into `main` (through pull requests) and wait for CI on `main` to pass.
+2. Move the entries under "Unreleased" in `CHANGELOG.md` to a section for the new version and merge that pull request.
 3. Dry run: `scripts/release-check.sh v0.2.0`. It checks the version format, that the tag does not exist (locally and on `origin`), that the working tree is clean, that you are on `main` and level with `origin/main`, and runs `go vet` and the full test suite. It prints the commands and never tags or pushes.
 4. Tag and push (an annotated tag carries the tagger and date):
    ```
