@@ -936,3 +936,147 @@ func restorePerson(ctx context.Context, tx *sql.Tx, pluginID, source string, p p
 	}
 	return id, nil
 }
+
+// BackupSeries is one series of a backup: its parts in position order,
+// identified like items everywhere in the backup (no numeric ids).
+type BackupSeries struct {
+	UID       string          `json:"uid"`
+	PluginID  string          `json:"plugin_id"`
+	Kind      string          `json:"kind"`
+	Title     string          `json:"title"`
+	CreatedAt time.Time       `json:"created_at"`
+	UpdatedAt time.Time       `json:"updated_at"`
+	Parts     []BackupPartRef `json:"parts"`
+}
+
+// BackupPartRef identifies a series part by its item's source identity.
+type BackupPartRef struct {
+	PluginID string `json:"plugin_id"`
+	Kind     string `json:"kind"`
+	Source   string `json:"source"`
+	SourceID string `json:"source_id"`
+}
+
+// BackupSeries calls fn for every series (ordered by id) with its parts in
+// position order, streamed from one query.
+func (l *Library) BackupSeries(ctx context.Context, fn func(BackupSeries) error) error {
+	rows, err := l.db.QueryContext(ctx, `SELECT `+seriesCols+`, i.plugin_id, i.kind, i.source, i.source_id
+		FROM series s JOIN series_parts p ON p.series_id = s.id JOIN items i ON i.id = p.item_id
+		ORDER BY s.id, p.position`)
+	if err != nil {
+		return fmt.Errorf("backup series: %w", err)
+	}
+	defer rows.Close()
+	var cur *BackupSeries
+	var curID int64
+	flush := func() error {
+		if cur == nil {
+			return nil
+		}
+		err := fn(*cur)
+		cur = nil
+		return err
+	}
+	for rows.Next() {
+		var ref BackupPartRef
+		s, err := scanSeries(rows, &ref.PluginID, &ref.Kind, &ref.Source, &ref.SourceID)
+		if err != nil {
+			return fmt.Errorf("backup series: %w", err)
+		}
+		if cur == nil || s.ID != curID {
+			if err := flush(); err != nil {
+				return err
+			}
+			curID = s.ID
+			cur = &BackupSeries{UID: s.UID, PluginID: s.PluginID, Kind: s.Kind, Title: s.Title,
+				CreatedAt: s.CreatedAt, UpdatedAt: s.UpdatedAt, Parts: []BackupPartRef{}}
+		}
+		cur.Parts = append(cur.Parts, ref)
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("backup series: %w", err)
+	}
+	return flush()
+}
+
+// RestoreSeries merges one series of a backup in a single transaction. A
+// series whose uid exists is skipped (created false, nothing left out). The
+// parts are resolved by identity; a part whose item is missing, has no entry,
+// is of another plugin or kind than the series, or already belongs to a
+// series is left out (counted in leftOut). A series with no resolvable part
+// is not created. The uid, title and stamps of the backup are kept; an
+// invalid title or kind is ErrInvalid.
+func (l *Library) RestoreSeries(ctx context.Context, bs BackupSeries) (created bool, leftOut int, err error) {
+	title, err := cleanSeriesTitle(bs.Title)
+	if err != nil {
+		return false, 0, err
+	}
+	if bs.UID == "" || len(bs.UID) > 100 || bs.PluginID == "" || bs.Kind == "" {
+		return false, 0, invalid("series without a uid, plugin or kind")
+	}
+	if err := cleanText("series uid", bs.UID, singleLine); err != nil {
+		return false, 0, err
+	}
+	now := time.Now().UTC()
+	if bs.CreatedAt.IsZero() {
+		bs.CreatedAt = now
+	}
+	if bs.UpdatedAt.IsZero() {
+		bs.UpdatedAt = bs.CreatedAt
+	}
+	tx, err := l.db.BeginTx(ctx, nil)
+	if err != nil {
+		return false, 0, err
+	}
+	defer tx.Rollback()
+	var n int
+	if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM series WHERE uid = ?`, bs.UID).Scan(&n); err != nil {
+		return false, 0, err
+	}
+	if n > 0 {
+		return false, 0, nil
+	}
+	var itemIDs []int64
+	taken := map[int64]bool{}
+	for _, ref := range bs.Parts {
+		if ref.PluginID != bs.PluginID || ref.Kind != bs.Kind {
+			leftOut++
+			continue
+		}
+		var id int64
+		err := tx.QueryRowContext(ctx, `SELECT i.id FROM items i JOIN `+tableEntries+` e ON e.item_id = i.id
+			WHERE i.plugin_id = ? AND i.kind = ? AND i.source = ? AND i.source_id = ?
+			AND NOT EXISTS (SELECT 1 FROM series_parts p WHERE p.item_id = i.id)`,
+			ref.PluginID, ref.Kind, ref.Source, ref.SourceID).Scan(&id)
+		if errors.Is(err, sql.ErrNoRows) || taken[id] {
+			leftOut++
+			continue
+		}
+		if err != nil {
+			return false, 0, err
+		}
+		taken[id] = true
+		itemIDs = append(itemIDs, id)
+	}
+	if len(itemIDs) == 0 {
+		return false, leftOut, nil
+	}
+	res, err := tx.ExecContext(ctx, `INSERT INTO series(uid, plugin_id, kind, title, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`,
+		bs.UID, bs.PluginID, bs.Kind, title, bs.CreatedAt.UTC().Format(time.RFC3339), bs.UpdatedAt.UTC().Format(time.RFC3339))
+	if err != nil {
+		return false, 0, err
+	}
+	sid, err := res.LastInsertId()
+	if err != nil {
+		return false, 0, err
+	}
+	for i, id := range itemIDs {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO series_parts(series_id, item_id, position) VALUES (?, ?, ?)`, sid, id, i+1); err != nil {
+			return false, 0, mapPartInsertErr(err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return false, 0, err
+	}
+	return true, leftOut, nil
+}

@@ -161,3 +161,25 @@ func TestExporterCancelledContext(t *testing.T) {
 		t.Errorf("err = %v", err)
 	}
 }
+
+func TestExporterWritesSeriesOnlyWhenSet(t *testing.T) {
+	out := export(t, []plugin.ExportEntry{
+		{Kind: "k", Status: plugin.Planned, Series: "Saga", SeriesPosition: 2},
+		{Kind: "k", Status: plugin.Planned},
+	})
+	var doc struct {
+		Entries []map[string]any `json:"entries"`
+	}
+	if err := json.Unmarshal(out, &doc); err != nil {
+		t.Fatal(err)
+	}
+	if doc.Entries[0]["series"] != "Saga" || doc.Entries[0]["series_position"] != float64(2) {
+		t.Fatalf("series entry = %v", doc.Entries[0])
+	}
+	if _, ok := doc.Entries[1]["series"]; ok {
+		t.Fatalf("standalone has series: %v", doc.Entries[1])
+	}
+	if _, ok := doc.Entries[1]["series_position"]; ok {
+		t.Fatalf("standalone has position: %v", doc.Entries[1])
+	}
+}

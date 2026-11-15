@@ -52,6 +52,7 @@
         <div class="rounded border border-slate-800 p-3"><dt class="text-slate-400">Failed</dt><dd class="text-lg font-semibold" data-count="failed">{{.Failed}}</dd></div>
         <div class="rounded border border-slate-800 p-3"><dt class="text-slate-400">Unknown plugin</dt><dd class="text-lg font-semibold" data-count="unknown">{{.UnknownPlugin}}</dd></div>
       </dl>
+      {{if or .SeriesCreated .SeriesSkipped}}<p class="mt-2 text-sm text-slate-400" data-series>Series: <span data-count="series-created">{{.SeriesCreated}}</span> created, <span data-count="series-skipped">{{.SeriesSkipped}}</span> skipped (already present, or none of the parts could be restored).</p>{{end}}
       {{if .Ignored}}<p class="mt-2 text-sm text-slate-400" data-ignored>{{.Ignored}} archive entries were ignored (only backup.json, covers/ and fonts/ files are read).</p>{{end}}
       {{with .Appearance}}
       <section class="mt-6">

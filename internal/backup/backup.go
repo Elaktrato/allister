@@ -8,7 +8,8 @@
 //	              "created_at": "<RFC 3339 UTC>",
 //	              "plugins": [{"id": ..., "version": ...}],   (informational)
 //	              "appearance": {...},                        (optional)
-//	              "items": [library.BackupItem, ...]}
+//	              "items": [library.BackupItem, ...],
+//	              "series": [library.BackupSeries, ...]}      (optional, after items)
 //	covers/<name>  the file of every item whose cover is a local file
 //	fonts/<name>   the file of every uploaded font
 //
@@ -197,6 +198,23 @@ func Write(ctx context.Context, w io.Writer, lib *library.Library, plugins []Plu
 	if err != nil {
 		return fmt.Errorf("backup: %w", err)
 	}
+	_, _ = bw.WriteString(`],"series":[`)
+	first = true
+	err = lib.BackupSeries(ctx, func(bs library.BackupSeries) error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if !first {
+			if _, err := bw.WriteString(","); err != nil {
+				return err
+			}
+		}
+		first = false
+		return enc.Encode(bs)
+	})
+	if err != nil {
+		return fmt.Errorf("backup: %w", err)
+	}
 	_, _ = bw.WriteString("]}\n") // sticky, reported by Flush
 	if err := bw.Flush(); err != nil {
 		return fmt.Errorf("backup: %w", err)
@@ -294,8 +312,12 @@ type Report struct {
 	MoreFailed, MoreUnknown, MoreSkipped    int
 	Notes                                   []Row
 	MoreNotes                               int
-	Ignored                                 int
-	Aborted                                 string
+	// SeriesCreated and SeriesSkipped count the series of the backup that
+	// were created or left alone (the uid exists, or the series is invalid
+	// or has no part that can be restored); parts left out are Notes.
+	SeriesCreated, SeriesSkipped int
+	Ignored                      int
+	Aborted                      string
 	// Appearance notes what the appearance member restored or skipped
 	// (cleaned like the rows).
 	Appearance []string
@@ -508,7 +530,7 @@ func (rs *restorer) decode(ctx context.Context, dec *json.Decoder) error {
 		}
 		key, _ := tok.(string)
 		switch key {
-		case "format", "format_version", "items":
+		case "format", "format_version", "items", "series":
 			if seen[key] {
 				msg := fmt.Sprintf("backup.json has more than one %q member", key)
 				if !seen["items"] {
@@ -548,6 +570,14 @@ func (rs *restorer) decode(ctx context.Context, dec *json.Decoder) error {
 				return err
 			}
 			if err := rs.items(ctx, dec); err != nil {
+				return err
+			}
+		case "series":
+			// series refer to restored items by identity: they come after "items"
+			if !seen["items"] {
+				return reject(`%s: "series" must come after "items".`, notBackup)
+			}
+			if err := rs.series(ctx, dec); err != nil {
 				return err
 			}
 		case "appearance":
@@ -647,6 +677,69 @@ func (rs *restorer) items(ctx context.Context, dec *json.Decoder) error {
 		return rs.syntax(err)
 	}
 	return nil
+}
+
+// series restores the series array (after all items); the decoder stands
+// before '['. One series is one transaction.
+func (rs *restorer) series(ctx context.Context, dec *json.Decoder) error {
+	tok, err := dec.Token()
+	if err != nil {
+		return rs.syntax(err)
+	}
+	if tok != json.Delim('[') {
+		return rs.abort("backup.json is damaged: \"series\" is not a list")
+	}
+	n := 0
+	for dec.More() {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		var raw json.RawMessage
+		if err := rs.decodeCapped(dec, &raw, rs.lim.MaxItemBytes, errItemTooLarge); err != nil {
+			return rs.syntax(err)
+		}
+		if int64(len(raw)) > rs.lim.MaxItemBytes {
+			return rs.abort(rs.limitMessage(errItemTooLarge))
+		}
+		n++
+		var bs library.BackupSeries
+		if err := json.Unmarshal(raw, &bs); err != nil {
+			rs.seriesSkipped(Row{Index: n, Reason: clip("the series cannot be read: "+err.Error(), 300)})
+			continue
+		}
+		row := Row{Index: n, Title: clip(bs.Title, 120), PluginID: clip(bs.PluginID, 60), Kind: clip(bs.Kind, 60)}
+		created, leftOut, err := rs.opts.Library.RestoreSeries(ctx, bs)
+		switch {
+		case errors.Is(err, library.ErrInvalid):
+			row.Reason = clip("the series is not valid: "+err.Error(), 300)
+			rs.seriesSkipped(row)
+			continue
+		case err != nil:
+			return err
+		case created:
+			rs.rep.SeriesCreated++
+		default:
+			rs.rep.SeriesSkipped++
+			if leftOut > 0 { // nothing could be restored
+				row.Reason = fmt.Sprintf("not created: none of its %d parts could be restored", leftOut)
+				addRow(&rs.rep.Notes, &rs.rep.MoreNotes, row)
+			}
+			continue
+		}
+		if leftOut > 0 {
+			row.Reason = fmt.Sprintf("%d parts left out (missing, or already in another series)", leftOut)
+			addRow(&rs.rep.Notes, &rs.rep.MoreNotes, row)
+		}
+	}
+	if _, err := dec.Token(); err != nil {
+		return rs.syntax(err)
+	}
+	return nil
+}
+
+func (rs *restorer) seriesSkipped(r Row) {
+	rs.rep.SeriesSkipped++
+	addRow(&rs.rep.Notes, &rs.rep.MoreNotes, r)
 }
 
 // item restores one decoded item value.

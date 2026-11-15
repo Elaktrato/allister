@@ -110,3 +110,27 @@ func TestExportEntriesFilterByKindAndOrderByItem(t *testing.T) {
 		t.Fatalf("comics: %v %v", titles(comics), err)
 	}
 }
+
+func TestExportCarriesSeries(t *testing.T) {
+	e := newEnv(t)
+	a := addBook(t, e.lib, "a", nil, Entry{Status: Planned})
+	b := addBook(t, e.lib, "b", nil, Entry{Status: Planned})
+	addBook(t, e.lib, "c", nil, Entry{Status: Planned})
+	s, err := e.lib.CreateSeries(bg, b, "Saga")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := e.lib.AddPart(bg, s.ID, a, ""); err != nil {
+		t.Fatal(err)
+	}
+	got, err := e.lib.ExportEntries(bg, "book", "")
+	if err != nil || len(got) != 3 {
+		t.Fatalf("%v %+v", err, got)
+	}
+	if got[0].Series != "Saga" || got[0].SeriesPosition != 2 || got[1].Series != "Saga" || got[1].SeriesPosition != 1 {
+		t.Fatalf("series parts = %+v %+v", got[0], got[1])
+	}
+	if got[2].Series != "" || got[2].SeriesPosition != 0 {
+		t.Fatalf("standalone = %+v", got[2])
+	}
+}
