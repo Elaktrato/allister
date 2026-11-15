@@ -108,13 +108,13 @@ Every third-party action in `.github/workflows` is referenced by its full commit
 | `actions/upload-artifact` | `v7.0.2` | `cf430e030ddbb5b0abf93d22962f4752f3646cd9` |
 | `docker/setup-buildx-action` | `v4.4.1` | `f87e5991a6d7451dcb8d9637bfbc97413f497069` |
 | `docker/build-push-action` | `v7.4.0` | `c3c9e263c25d99ce0380d002d59b67737d91b0dc` |
-| `github/codeql-action` | `v4.39.1` | `9b3254085494b55a0f7c4c2b3d2d52cc712ce370` |
+| `github/codeql-action` | `v4.39.3` | `33d7b85da1a04171e211befe2c739303b9a4c066` |
 | `actions/setup-go` | `v7.0.0` | `b7ad1dad31e06c5925ef5d2fc7ad053ef454303e` |
 | `actions/dependency-review-action` | `v5.0.0` | `a1d282b36b6f3519aa1f3fc636f609c47dddb294` |
 | `ossf/scorecard-action` | `v2.5.0` | `fa7117db83c52d787ae5a89f350999701505d78e` |
-| `docker/login-action` | `v4.7.0` | `81c6f93d4bc991e510b342a00b419b3bb4efc5c6` |
+| `docker/login-action` | `v4.8.0` | `8aa5831fb8d48d8f76594c7ddde61ae58019f550` |
 | `docker/metadata-action` | `v6.2.0` | `dc802804100637a589fabce1cb79ff13a1411302` |
-| `sigstore/cosign-installer` | `v4.1.2` | `6f9f17788090df1f26f669e9d70d6ae9567deba6` |
+| `sigstore/cosign-installer` | `v4.1.3` | `756fe2d284c7292c4e9b62c8a28f1e5629c59532` |
 
 The release workflow's signing tool, installed by `sigstore/cosign-installer` (which checks its signature with a bootstrap cosign of known sha256; `TestPinsDocumentListsCosign` checks this row):
 
