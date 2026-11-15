@@ -65,13 +65,17 @@ func TestGameKindFields(t *testing.T) {
 	if len(k.Fields) != len(want) {
 		t.Fatalf("fields = %+v", k.Fields)
 	}
-	for _, w := range want {
+	for i, w := range want {
 		f, ok := fieldByKey(k.Fields, w.Key)
 		if !ok {
 			t.Fatalf("missing field %q", w.Key)
 		}
 		if !reflect.DeepEqual(f, w) {
 			t.Errorf("field %q = %+v, want %+v", w.Key, f, w)
+		}
+		// the order is the Info block's and the edit dialog's order
+		if k.Fields[i].Key != w.Key {
+			t.Errorf("field %d is %q, want %q", i, k.Fields[i].Key, w.Key)
 		}
 	}
 }
@@ -210,6 +214,7 @@ func TestManifestImportersAndExporter(t *testing.T) {
 	wantYamtrack := plugin.ImporterInfo{
 		ID:                ImporterYamtrack,
 		Name:              "Yamtrack Game CSV",
+		FileHint:          "Export your game data from Yamtrack as CSV and upload it here.",
 		Accept:            []string{".csv"},
 		ExternalIDType:    "igdb",
 		ExternalIDLabel:   "IGDB",
@@ -235,13 +240,13 @@ func TestManifestImportersAndExporter(t *testing.T) {
 		want plugin.ImporterInfo
 	}{{0, wantYamtrack}, {1, wantSteam}} {
 		got := m.Importers[c.idx]
-		if got.FileHint == "" && got.AccountLabel == "" {
-			t.Errorf("importer %q has neither a file hint nor an account label", got.ID)
-		}
-		got.FileHint = ""
 		if !reflect.DeepEqual(got, c.want) {
 			t.Errorf("importer = %+v, want %+v", m.Importers[c.idx], c.want)
 		}
+	}
+	// the account importer takes no file: no hint, no accepted types
+	if m.Importers[1].FileHint != "" || len(m.Importers[1].Accept) != 0 {
+		t.Errorf("steam importer has file settings: %+v", m.Importers[1])
 	}
 	if !strings.Contains(m.Importers[1].AccountLabel, "SteamID64") {
 		t.Errorf("account label = %q", m.Importers[1].AccountLabel)

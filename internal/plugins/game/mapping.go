@@ -42,25 +42,7 @@ func gameData(r gameRecord) plugin.ItemData {
 		Genres:      plugin.CleanTerms(r.Genres, maxTermRunes, maxGenres),
 		Tags:        plugin.CleanTags(r.Tags, maxTermRunes, maxTags),
 	}
-	for key, value := range r.Fields {
-		if key = plugin.SingleLine(key, 40); key == "" {
-			continue
-		}
-		switch {
-		case value.Text != "":
-			if key == "summary" {
-				d.Fields[key] = plugin.FieldValue{Text: plugin.MultiLine(value.Text, maxTextRunes)}
-			} else {
-				d.Fields[key] = plugin.FieldValue{Text: plugin.SingleLine(value.Text, maxTextRunes)}
-			}
-		case value.Num != nil:
-			n := *value.Num
-			d.Fields[key] = plugin.FieldValue{Num: &n}
-		case value.Date != nil:
-			day := plugin.DateOnly(*value.Date)
-			d.Fields[key] = plugin.FieldValue{Date: &day}
-		}
-	}
+	gameFields(d.Fields, r.Fields)
 	for typ, value := range r.ExternalIDs {
 		typ, value = plugin.SingleLine(typ, 40), plugin.SingleLine(value, maxIDRunes)
 		if typ == "" || value == "" {
@@ -74,6 +56,37 @@ func gameData(r gameRecord) plugin.ItemData {
 	return d
 }
 
+// gameFields copies the source fields into out, sanitised: keys capped at 40
+// runes, text single-line (the summary multi-line) and capped, a text that is
+// empty after sanitising dropped, numbers copied, dates cut to the calendar
+// day.
+func gameFields(out, in map[string]plugin.FieldValue) {
+	for key, value := range in {
+		if key = plugin.SingleLine(key, 40); key == "" {
+			continue
+		}
+		switch {
+		case value.Text != "":
+			text := plugin.SingleLine(value.Text, maxTextRunes)
+			if key == "summary" {
+				text = plugin.MultiLine(value.Text, maxTextRunes)
+			}
+			if text != "" {
+				out[key] = plugin.FieldValue{Text: text}
+			}
+		case value.Num != nil:
+			n := *value.Num
+			out[key] = plugin.FieldValue{Num: &n}
+		case value.Date != nil:
+			day := plugin.DateOnly(*value.Date)
+			out[key] = plugin.FieldValue{Date: &day}
+		}
+	}
+}
+
+// gameTitles keeps the titles that have a text and a language. A title
+// without a language is dropped: the core picks titles by language, so a
+// source must say which one it sends (both IGDB and Steam send "en").
 func gameTitles(ts []plugin.Title) []plugin.Title {
 	var out []plugin.Title
 	for _, t := range ts {
@@ -98,6 +111,12 @@ func gameRecommendations(rs []plugin.ItemSummary) []plugin.ItemSummary {
 		r.Kind = KindGame
 		r.Titles = gameTitles(r.Titles)
 		r.CoverURL = plugin.HTTPSURL(r.CoverURL)
+		r.URL = plugin.HTTPSURL(r.URL)
+		if len(r.Fields) > 0 {
+			fields := map[string]plugin.FieldValue{}
+			gameFields(fields, r.Fields)
+			r.Fields = fields
+		}
 		if r.Source == "" || r.ID == "" || len(r.Titles) == 0 {
 			continue
 		}
