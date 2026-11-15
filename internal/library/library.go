@@ -232,9 +232,29 @@ func (l *Library) NeedsSync(ctx context.Context, jobKind string) ([]NeedsSyncIte
 }
 
 // DeleteItem removes the item and, by cascade, everything attached to it.
-// People rows (and image files) stay. It returns ErrNoEntry for an unknown id.
+// People rows (and image files) stay. A series the item belonged to is
+// renumbered, or deleted when the item was its last part, in the same
+// transaction. It returns ErrNoEntry for an unknown id.
 func (l *Library) DeleteItem(ctx context.Context, id int64) error {
-	res, err := l.db.ExecContext(ctx, `DELETE FROM items WHERE id = ?`, id)
+	tx, err := l.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("delete item: %w", err)
+	}
+	defer tx.Rollback()
+	if err := deleteItemTx(ctx, tx, id); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// deleteItemTx is DeleteItem inside a transaction.
+func deleteItemTx(ctx context.Context, tx *sql.Tx, id int64) error {
+	var seriesID sql.NullInt64
+	err := tx.QueryRowContext(ctx, `SELECT series_id FROM series_parts WHERE item_id = ?`, id).Scan(&seriesID)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return fmt.Errorf("delete item: %w", err)
+	}
+	res, err := tx.ExecContext(ctx, `DELETE FROM items WHERE id = ?`, id)
 	if err != nil {
 		return fmt.Errorf("delete item: %w", err)
 	}
@@ -244,6 +264,11 @@ func (l *Library) DeleteItem(ctx context.Context, id int64) error {
 	}
 	if n == 0 {
 		return ErrNoEntry
+	}
+	if seriesID.Valid {
+		if _, err := renumberSeries(ctx, tx, seriesID.Int64); err != nil {
+			return fmt.Errorf("delete item: %w", err)
+		}
 	}
 	return nil
 }
