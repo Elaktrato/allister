@@ -110,7 +110,9 @@ type itemView struct {
 	Match        *matchView
 }
 
-func (s *server) itemView(ctx context.Context, li *loadedItem) itemView {
+// itemView builds the overview of li. A failing credential read (the "Match
+// to" label names the configured default source) is returned.
+func (s *server) itemView(ctx context.Context, li *loadedItem) (itemView, error) {
 	m, k, d := li.man, li.kind, li.data
 	lang := s.titleLang(ctx, m)
 	v := itemView{Title: library.ResolveTitle(d.Titles, lang, k.TitleFallback)}
@@ -126,7 +128,11 @@ func (s *server) itemView(ctx context.Context, li *loadedItem) itemView {
 			v.UpdateURL, v.UpdateLabel = itemAction(m, d.Source, d.ID, d.Kind, "refresh", nil), "Update from source"
 		}
 		if it.Source == manualSource && len(m.Sources) > 0 {
-			v.MatchURL, v.MatchLabel = itemAction(m, d.Source, d.ID, d.Kind, "match", nil), "Match to "+s.defaultSourceForKind(ctx, m, d.Kind).Name
+			def, err := s.defaultSourceForKind(ctx, m, d.Kind)
+			if err != nil {
+				return itemView{}, err
+			}
+			v.MatchURL, v.MatchLabel = itemAction(m, d.Source, d.ID, d.Kind, "match", nil), "Match to "+def.Name
 			v.UnmatchedHint = unmatchedHint(m, it)
 		}
 		if li.entry != nil {
@@ -144,7 +150,7 @@ func (s *server) itemView(ctx context.Context, li *loadedItem) itemView {
 			v.Sections = append(v.Sections, sv)
 		}
 	}
-	return v
+	return v, nil
 }
 
 func statusLabel(k plugin.KindDef, st library.Status) string {

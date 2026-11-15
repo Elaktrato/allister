@@ -157,14 +157,18 @@ func (s *server) getPluginSettings(w http.ResponseWriter, r *http.Request) {
 		s.internalError(w, r, err)
 		return
 	}
-	v := s.pluginSettingsData(r, m)
+	v, err := s.pluginSettingsData(r, m)
+	if err != nil {
+		s.internalError(w, r, err)
+		return
+	}
 	v.LangOptions, v.Lang = opts, s.titleLang(ctx, m)
 	s.render(w, r, "settings_plugin", v)
 }
 
 // pluginSettingsData builds the settings page of m (lang options come from
 // the caller, ordered by the stored languages).
-func (s *server) pluginSettingsData(r *http.Request, m plugin.Manifest) pluginSettingsView {
+func (s *server) pluginSettingsData(r *http.Request, m plugin.Manifest) (pluginSettingsView, error) {
 	ctx := r.Context()
 	home := []option{{Value: "", Label: "Every status"}}
 	for _, st := range listTabOrder {
@@ -187,13 +191,14 @@ func (s *server) pluginSettingsData(r *http.Request, m plugin.Manifest) pluginSe
 		}
 		v.Imports = append(v.Imports, f)
 	}
-	v.MissingKeys, v.OtherSources = s.sourceKeyState(ctx, m)
-	return v
+	var err error
+	v.MissingKeys, v.OtherSources, err = s.sourceKeyState(ctx, m)
+	return v, err
 }
 
 // sourceKeyState names m's sources that declare a key label and have no
 // effective key, and reports whether m also has a source that needs no key.
-func (s *server) sourceKeyState(ctx context.Context, m plugin.Manifest) (missing []string, other bool) {
+func (s *server) sourceKeyState(ctx context.Context, m plugin.Manifest) (missing []string, other bool, err error) {
 	seen := map[string]bool{}
 	for _, src := range m.Sources {
 		if seen[src.ID] {
@@ -204,11 +209,15 @@ func (s *server) sourceKeyState(ctx context.Context, m plugin.Manifest) (missing
 			other = true
 			continue
 		}
-		if !s.sourceConfigured(ctx, src) {
+		ok, err := s.sourceConfigured(ctx, src)
+		if err != nil {
+			return nil, false, err
+		}
+		if !ok {
 			missing = append(missing, src.Name)
 		}
 	}
-	return missing, other
+	return missing, other, nil
 }
 
 // postPluginImport stores an importer's settings - the rule for existing
@@ -250,7 +259,11 @@ func (s *server) postPluginImport(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx := r.Context()
 	fail := func(msg string) {
-		v := s.pluginSettingsData(r, m)
+		v, err := s.pluginSettingsData(r, m)
+		if err != nil {
+			s.internalError(w, r, err)
+			return
+		}
 		opts, err := s.titleLangOptions(ctx, m)
 		if err != nil {
 			s.internalError(w, r, err)

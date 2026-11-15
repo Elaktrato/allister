@@ -231,7 +231,11 @@ func (s *server) showItem(w http.ResponseWriter, r *http.Request, ref itemRef, x
 		s.itemFail(w, r, m, ref.Source, err, itemURL(m, ref.Source, ref.ID, ref.Kind))
 		return
 	}
-	v := s.itemView(r.Context(), li)
+	v, err := s.itemView(r.Context(), li)
+	if err != nil {
+		s.internalError(w, r, err)
+		return
+	}
 	if x.Updated != nil && li.saved != nil {
 		v.UpdateNotice = updateNotice(*x.Updated, sourceName(m, li.data.Source))
 	}

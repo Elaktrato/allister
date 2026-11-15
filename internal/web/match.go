@@ -97,7 +97,9 @@ func defaultSource(m plugin.Manifest) plugin.SourceInfo {
 	return m.Sources[0]
 }
 
-func (s *server) newMatchView(r *http.Request, t *matchTarget, si plugin.SourceInfo) matchView {
+// newMatchView builds the match dialog of t for source si. A failing
+// credential read (the source labels) is returned.
+func (s *server) newMatchView(r *http.Request, t *matchTarget, si plugin.SourceInfo) (matchView, error) {
 	m := t.man
 	var extra url.Values
 	validSources := sourcesForKind(m, t.ref.Kind)
@@ -134,11 +136,15 @@ func (s *server) newMatchView(r *http.Request, t *matchTarget, si plugin.SourceI
 	sort.Strings(v.ExternalIDs)
 	if len(validSources) > 1 {
 		for _, x := range validSources {
+			label, err := s.sourceChoiceLabel(r.Context(), x)
+			if err != nil {
+				return matchView{}, err
+			}
 			v.Sources = append(v.Sources, choice{Value: itemAction(m, t.ref.Source, t.ref.ID, t.ref.Kind, "match", url.Values{"source": {x.ID}}),
-				Label: s.sourceChoiceLabel(r.Context(), x), Selected: x.ID == si.ID})
+				Label: label, Selected: x.ID == si.ID})
 		}
 	}
-	return v
+	return v, nil
 }
 
 // matchResponse writes the dialog (htmx) or the overview page with the dialog
@@ -156,12 +162,21 @@ func (s *server) getMatch(w http.ResponseWriter, r *http.Request, pluginID strin
 	if !ok {
 		return
 	}
-	si, ok := s.chooseSourceForKind(r.Context(), t.man, t.ref.Kind, r.URL.Query().Get("source"))
+	si, ok, err := s.chooseSourceForKind(r.Context(), t.man, t.ref.Kind, r.URL.Query().Get("source"))
+	if err != nil {
+		s.internalError(w, r, err)
+		return
+	}
 	if !ok {
 		s.matchNotFound(w, r)
 		return
 	}
-	s.matchResponse(w, r, t, s.newMatchView(r, t, si), http.StatusOK)
+	v, err := s.newMatchView(r, t, si)
+	if err != nil {
+		s.internalError(w, r, err)
+		return
+	}
+	s.matchResponse(w, r, t, v, http.StatusOK)
 }
 
 func (s *server) getMatchSearch(w http.ResponseWriter, r *http.Request, pluginID string) {
@@ -169,12 +184,20 @@ func (s *server) getMatchSearch(w http.ResponseWriter, r *http.Request, pluginID
 	if !ok {
 		return
 	}
-	si, ok := s.chooseSourceForKind(r.Context(), t.man, t.ref.Kind, r.URL.Query().Get("source"))
+	si, ok, err := s.chooseSourceForKind(r.Context(), t.man, t.ref.Kind, r.URL.Query().Get("source"))
+	if err != nil {
+		s.internalError(w, r, err)
+		return
+	}
 	if !ok {
 		s.matchNotFound(w, r)
 		return
 	}
-	v := s.newMatchView(r, t, si)
+	v, err := s.newMatchView(r, t, si)
+	if err != nil {
+		s.internalError(w, r, err)
+		return
+	}
 	q := cleanQuery(r.URL.Query().Get("q"))
 	v.Search.Query = q
 	if q != "" { // an empty query makes no source call
@@ -202,20 +225,36 @@ func (s *server) postMatch(w http.ResponseWriter, r *http.Request, pluginID stri
 		return
 	}
 	ctx := r.Context()
-	si, ok := s.chooseSourceForKind(ctx, t.man, t.ref.Kind, strings.TrimSpace(r.PostFormValue("source")))
+	si, ok, err := s.chooseSourceForKind(ctx, t.man, t.ref.Kind, strings.TrimSpace(r.PostFormValue("source")))
+	if err != nil {
+		s.internalError(w, r, err)
+		return
+	}
 	pick := strings.TrimSpace(r.PostFormValue("pick"))
 	raw := strings.TrimSpace(r.PostFormValue("source_ref"))
 	if !ok {
-		fallback := s.defaultSourceForKind(ctx, t.man, t.ref.Kind)
+		fallback, err := s.defaultSourceForKind(ctx, t.man, t.ref.Kind)
+		if err != nil {
+			s.internalError(w, r, err)
+			return
+		}
 		if fallback.ID == "" {
 			fallback = defaultSource(t.man)
 		}
-		v := s.newMatchView(r, t, fallback)
+		v, err := s.newMatchView(r, t, fallback)
+		if err != nil {
+			s.internalError(w, r, err)
+			return
+		}
 		v.SourceRef, v.Error = raw, "Please choose a source from the list."
 		s.matchResponse(w, r, t, v, http.StatusUnprocessableEntity)
 		return
 	}
-	v := s.newMatchView(r, t, si)
+	v, err := s.newMatchView(r, t, si)
+	if err != nil {
+		s.internalError(w, r, err)
+		return
+	}
 	v.SourceRef = raw
 	fail := func(status int, msg string) {
 		v.Error = msg
@@ -249,7 +288,7 @@ func (s *server) postMatch(w http.ResponseWriter, r *http.Request, pluginID stri
 	// 2. Fetch the details first: a source failure never touches the database.
 	src := s.source(t.man.ID, si.ID)
 	var d plugin.ItemData
-	err := errNoSource
+	err = errNoSource
 	if src != nil {
 		d, err = src.Details(ctx, t.kind.Key, id)
 	}
