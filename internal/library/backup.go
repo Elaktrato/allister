@@ -999,23 +999,39 @@ func (l *Library) BackupSeries(ctx context.Context, fn func(BackupSeries) error)
 	return flush()
 }
 
+// Why a part of a restored series was left out (LeftOutPart.Reason).
+const (
+	LeftOutMissing   = "missing"
+	LeftOutInSeries  = "in another series"
+	LeftOutOtherKind = "other plugin or kind"
+	LeftOutDuplicate = "duplicate"
+)
+
+// LeftOutPart is a part of a backup series that RestoreSeries could not
+// restore: its reference, why, and the item's title when the item exists.
+type LeftOutPart struct {
+	Ref    BackupPartRef
+	Reason string
+	Title  string
+}
+
 // RestoreSeries merges one series of a backup in a single transaction. A
 // series whose uid exists is skipped (created false, nothing left out). The
 // parts are resolved by identity; a part whose item is missing, has no entry,
-// is of another plugin or kind than the series, or already belongs to a
-// series is left out (counted in leftOut). A series with no resolvable part
-// is not created. The uid, title and stamps of the backup are kept; an
-// invalid title or kind is ErrInvalid.
-func (l *Library) RestoreSeries(ctx context.Context, bs BackupSeries) (created bool, leftOut int, err error) {
+// is of another plugin or kind than the series, is listed twice, or already
+// belongs to a series is left out (named in leftOut with the reason). A
+// series with no resolvable part is not created. The uid, title and stamps of
+// the backup are kept; an invalid title or kind is ErrInvalid.
+func (l *Library) RestoreSeries(ctx context.Context, bs BackupSeries) (created bool, leftOut []LeftOutPart, err error) {
 	title, err := cleanSeriesTitle(bs.Title)
 	if err != nil {
-		return false, 0, err
+		return false, nil, err
 	}
 	if bs.UID == "" || len(bs.UID) > 100 || bs.PluginID == "" || bs.Kind == "" {
-		return false, 0, invalid("series without a uid, plugin or kind")
+		return false, nil, invalid("series without a uid, plugin or kind")
 	}
 	if err := cleanText("series uid", bs.UID, singleLine); err != nil {
-		return false, 0, err
+		return false, nil, err
 	}
 	now := time.Now().UTC()
 	if bs.CreatedAt.IsZero() {
@@ -1026,34 +1042,43 @@ func (l *Library) RestoreSeries(ctx context.Context, bs BackupSeries) (created b
 	}
 	tx, err := l.db.BeginTx(ctx, nil)
 	if err != nil {
-		return false, 0, err
+		return false, nil, err
 	}
 	defer tx.Rollback()
 	var n int
 	if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM series WHERE uid = ?`, bs.UID).Scan(&n); err != nil {
-		return false, 0, err
+		return false, nil, err
 	}
 	if n > 0 {
-		return false, 0, nil
+		return false, nil, nil
 	}
 	var itemIDs []int64
 	taken := map[int64]bool{}
 	for _, ref := range bs.Parts {
 		if ref.PluginID != bs.PluginID || ref.Kind != bs.Kind {
-			leftOut++
+			leftOut = append(leftOut, LeftOutPart{Ref: ref, Reason: LeftOutOtherKind})
 			continue
 		}
 		var id int64
-		err := tx.QueryRowContext(ctx, `SELECT i.id FROM items i JOIN `+tableEntries+` e ON e.item_id = i.id
-			WHERE i.plugin_id = ? AND i.kind = ? AND i.source = ? AND i.source_id = ?
-			AND NOT EXISTS (SELECT 1 FROM series_parts p WHERE p.item_id = i.id)`,
-			ref.PluginID, ref.Kind, ref.Source, ref.SourceID).Scan(&id)
-		if errors.Is(err, sql.ErrNoRows) || taken[id] {
-			leftOut++
+		var inSeries bool
+		var itemTitle sql.NullString
+		err := tx.QueryRowContext(ctx, `SELECT i.id, EXISTS (SELECT 1 FROM series_parts p WHERE p.item_id = i.id),
+			(SELECT t.text FROM item_titles t WHERE t.item_id = i.id ORDER BY t.lang, t.text LIMIT 1)
+			FROM items i JOIN `+tableEntries+` e ON e.item_id = i.id
+			WHERE i.plugin_id = ? AND i.kind = ? AND i.source = ? AND i.source_id = ?`,
+			ref.PluginID, ref.Kind, ref.Source, ref.SourceID).Scan(&id, &inSeries, &itemTitle)
+		switch {
+		case errors.Is(err, sql.ErrNoRows):
+			leftOut = append(leftOut, LeftOutPart{Ref: ref, Reason: LeftOutMissing})
 			continue
-		}
-		if err != nil {
-			return false, 0, err
+		case err != nil:
+			return false, nil, err
+		case taken[id]:
+			leftOut = append(leftOut, LeftOutPart{Ref: ref, Reason: LeftOutDuplicate, Title: itemTitle.String})
+			continue
+		case inSeries:
+			leftOut = append(leftOut, LeftOutPart{Ref: ref, Reason: LeftOutInSeries, Title: itemTitle.String})
+			continue
 		}
 		taken[id] = true
 		itemIDs = append(itemIDs, id)
@@ -1064,19 +1089,19 @@ func (l *Library) RestoreSeries(ctx context.Context, bs BackupSeries) (created b
 	res, err := tx.ExecContext(ctx, `INSERT INTO series(uid, plugin_id, kind, title, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`,
 		bs.UID, bs.PluginID, bs.Kind, title, bs.CreatedAt.UTC().Format(time.RFC3339), bs.UpdatedAt.UTC().Format(time.RFC3339))
 	if err != nil {
-		return false, 0, err
+		return false, nil, err
 	}
 	sid, err := res.LastInsertId()
 	if err != nil {
-		return false, 0, err
+		return false, nil, err
 	}
 	for i, id := range itemIDs {
 		if _, err := tx.ExecContext(ctx, `INSERT INTO series_parts(series_id, item_id, position) VALUES (?, ?, ?)`, sid, id, i+1); err != nil {
-			return false, 0, mapPartInsertErr(err)
+			return false, nil, mapPartInsertErr(err)
 		}
 	}
 	if err := tx.Commit(); err != nil {
-		return false, 0, err
+		return false, nil, err
 	}
 	return true, leftOut, nil
 }

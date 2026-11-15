@@ -708,7 +708,7 @@ func TestRemoveEntryLeavesTheSeries(t *testing.T) {
 
 func TestRestoreSeriesHostileInput(t *testing.T) {
 	e := newEnv(t)
-	a := addBook(t, e.lib, "1", fp(1), Entry{Status: Planned})
+	addBook(t, e.lib, "1", fp(1), Entry{Status: Planned})
 	addBook(t, e.lib, "2", fp(1), Entry{Status: Planned})
 	addBook(t, e.lib, "3", fp(1), Entry{Status: Planned})
 	taken := addBook(t, e.lib, "4", fp(1), Entry{Status: Planned})
@@ -716,7 +716,6 @@ func TestRestoreSeriesHostileInput(t *testing.T) {
 		t.Fatal(err)
 	}
 	addShow(t, e.lib, "9", fp(1), Entry{Status: Planned})
-	_ = a
 	ref := func(source, id string) BackupPartRef {
 		return BackupPartRef{PluginID: "book", Kind: "book", Source: source, SourceID: id}
 	}
@@ -750,15 +749,19 @@ func TestRestoreSeriesHostileInput(t *testing.T) {
 		}
 	}
 	// nothing resolvable: not created, the rejects are counted
-	unresolvable := map[string]BackupSeries{
-		"other plugin":      good("u-p", BackupPartRef{PluginID: "tv", Kind: "show", Source: "tvdata", SourceID: "9"}),
-		"other kind":        good("u-k", BackupPartRef{PluginID: "book", Kind: "show", Source: "books", SourceID: "1"}),
-		"in another series": good("u-t", ref("books", "4")),
-		"unknown item":      good("u-g", ref("books", "nope")),
+	unresolvable := map[string]struct {
+		bs     BackupSeries
+		reason string
+	}{
+		"other plugin":      {good("u-p", BackupPartRef{PluginID: "tv", Kind: "show", Source: "tvdata", SourceID: "9"}), LeftOutOtherKind},
+		"other kind":        {good("u-k", BackupPartRef{PluginID: "book", Kind: "show", Source: "books", SourceID: "1"}), LeftOutOtherKind},
+		"in another series": {good("u-t", ref("books", "4")), LeftOutInSeries},
+		"unknown item":      {good("u-g", ref("books", "nope")), LeftOutMissing},
 	}
-	for name, bs := range unresolvable {
-		if created, left, err := e.lib.RestoreSeries(bg, bs); created || left != 1 || err != nil {
-			t.Errorf("%s: created=%v left=%d err=%v", name, created, left, err)
+	for name, c := range unresolvable {
+		created, left, err := e.lib.RestoreSeries(bg, c.bs)
+		if created || err != nil || len(left) != 1 || left[0].Reason != c.reason || left[0].Ref != c.bs.Parts[0] {
+			t.Errorf("%s: created=%v left=%+v err=%v", name, created, left, err)
 		}
 	}
 	if count(`SELECT count(*) FROM series`) != seriesN || count(`SELECT count(*) FROM series_parts`) != partsN || count(`SELECT count(*) FROM items`) != items {
@@ -767,8 +770,12 @@ func TestRestoreSeriesHostileInput(t *testing.T) {
 	// the same part twice and a mix: only the resolvable, first occurrence stays
 	created, left, err := e.lib.RestoreSeries(bg, good("u-mix", ref("books", "2"), ref("books", "2"), ref("books", "4"),
 		BackupPartRef{PluginID: "tv", Kind: "show", Source: "tvdata", SourceID: "9"}, ref("books", "3")))
-	if err != nil || !created || left != 3 {
-		t.Fatalf("mix: created=%v left=%d err=%v", created, left, err)
+	if err != nil || !created || len(left) != 3 {
+		t.Fatalf("mix: created=%v left=%+v err=%v", created, left, err)
+	}
+	if left[0].Reason != LeftOutDuplicate || left[1].Reason != LeftOutInSeries || left[1].Title == "" ||
+		left[2].Reason != LeftOutOtherKind {
+		t.Fatalf("reasons = %+v", left)
 	}
 	if n := count(`SELECT count(*) FROM series_parts p JOIN series s ON s.id = p.series_id WHERE s.uid = 'u-mix'`); n != 2 {
 		t.Fatalf("parts of the mix = %d", n)
