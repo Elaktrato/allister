@@ -203,6 +203,34 @@ func TestSourceKeyFields(t *testing.T) {
 	}
 }
 
+// TestSetSourceKeyFieldsIsAllOrNothing: every field of a source is saved in
+// one transaction, trimmed; when one write fails none is stored and the old
+// values stay.
+func TestSetSourceKeyFieldsIsAllOrNothing(t *testing.T) {
+	s, exec := newStore(t)
+	ctx := context.Background()
+	if err := s.SetSourceKeyFields(ctx, "igdb", map[string]string{"client_id": " id ", "client_secret": "secret"}); err != nil {
+		t.Fatal(err)
+	}
+	for f, want := range map[string]string{"client_id": "id", "client_secret": "secret"} {
+		if got, err := s.SourceKeyField(ctx, "igdb", f); err != nil || got != want {
+			t.Fatalf("%s = %q %v, want %q", f, got, err, want)
+		}
+	}
+
+	// the second write fails: neither field changes
+	exec(`CREATE TRIGGER refuse_secret BEFORE UPDATE ON settings
+		WHEN NEW.key = 'source.igdb.client_secret' BEGIN SELECT RAISE(ABORT, 'refused'); END`)
+	if err := s.SetSourceKeyFields(ctx, "igdb", map[string]string{"client_id": "new-id", "client_secret": "new-secret"}); err == nil {
+		t.Fatal("want error")
+	}
+	for f, want := range map[string]string{"client_id": "id", "client_secret": "secret"} {
+		if got, err := s.SourceKeyField(ctx, "igdb", f); err != nil || got != want {
+			t.Fatalf("after a failed save %s = %q %v, want %q", f, got, err, want)
+		}
+	}
+}
+
 func TestSourceKeyFieldsReportDBErrors(t *testing.T) {
 	d, err := db.Open(filepath.Join(t.TempDir(), "t.db"))
 	if err != nil {

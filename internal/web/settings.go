@@ -287,7 +287,8 @@ func (s *server) postSourceKey(w http.ResponseWriter, r *http.Request) {
 
 // storeSourceKeyFields saves every named credential field of si. Every field
 // is required; a rejected form re-renders the page and stores nothing (all
-// fields are checked before the first write).
+// fields are checked before the write), and the fields are saved in one
+// settings transaction, so a failing write stores none of them.
 func (s *server) storeSourceKeyFields(w http.ResponseWriter, r *http.Request, si plugin.SourceInfo) {
 	values := make(map[string]string, len(si.KeyFields))
 	for _, f := range si.KeyFields {
@@ -298,11 +299,9 @@ func (s *server) storeSourceKeyFields(w http.ResponseWriter, r *http.Request, si
 		}
 		values[f.Name] = value
 	}
-	for _, f := range si.KeyFields {
-		if err := s.deps.Settings.SetSourceKeyField(r.Context(), si.ID, f.Name, values[f.Name]); err != nil {
-			s.internalError(w, r, err)
-			return
-		}
+	if err := s.deps.Settings.SetSourceKeyFields(r.Context(), si.ID, values); err != nil {
+		s.internalError(w, r, err)
+		return
 	}
 	http.Redirect(w, r, "/settings/plugins#source-keys", http.StatusSeeOther)
 }

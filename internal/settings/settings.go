@@ -7,6 +7,8 @@ import (
 	"encoding/json"
 	"errors"
 	"log"
+	"maps"
+	"slices"
 	"strings"
 )
 
@@ -271,6 +273,26 @@ func (s *Store) SourceKeyField(ctx context.Context, sourceID, field string) (str
 // surrounding white space.
 func (s *Store) SetSourceKeyField(ctx context.Context, sourceID, field, value string) error {
 	return s.Set(ctx, sourceFieldKey(sourceID, field), strings.TrimSpace(value))
+}
+
+// SetSourceKeyFields stores every field of source id given in values (field
+// name -> value, each without surrounding white space) in one transaction:
+// either all are saved or, on a failure, none and the old values stay.
+func (s *Store) SetSourceKeyFields(ctx context.Context, sourceID string, values map[string]string) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	for _, field := range slices.Sorted(maps.Keys(values)) {
+		if _, err := tx.ExecContext(ctx,
+			`INSERT INTO settings(key, value) VALUES(?, ?)
+			 ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+			sourceFieldKey(sourceID, field), strings.TrimSpace(values[field])); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }
 
 // ClearSourceKeys removes every stored field of source id; other sources are
