@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"unicode/utf8"
 
 	"github.com/allister/allister/internal/plugin"
 )
@@ -24,14 +25,16 @@ const notesDivider = "\n\n---\n\n"
 //   - The other item's runs join the survivor's, ordered by start day (the
 //     run's creation day when it has none; on a tie the survivor's first,
 //     then by their own number) and renumbered 1..n. Of the planned, active
-//     and paused runs only the latest stays open; the others become dropped,
-//     without an event. Progress values (every key) move with their run as
+//     and paused runs only the latest stays open and is numbered last (an
+//     open run must be the latest); the others become dropped, without an
+//     event. Progress values (every key) move with their run as
 //     stored, bounded by no total; so do the runs' unit notes and events.
 //     The other item's events without a run move too. The display run is
 //     refreshed.
 //   - When only the other item has an entry the survivor gets one with its
 //     notes; when both have one the other's notes are appended after a
-//     divider line (none when either side is empty).
+//     divider line (none when either side is empty); joined notes longer
+//     than MaxNotesRunes are refused (ErrInvalid).
 //   - Own tags and custom lists: union. A list keeps the survivor's place
 //     when both are members, else the other's.
 //   - Series: the survivor keeps its own; when only the other is a part, the
@@ -202,6 +205,9 @@ func mergeEntry(ctx context.Context, tx *sql.Tx, keepID, otherID int64) error {
 		case notes != "":
 			joined = keepNotes + notesDivider + notes
 		}
+		if utf8.RuneCountInString(joined) > MaxNotesRunes {
+			return invalid("the merged notes would be longer than %d characters; shorten one of them first", MaxNotesRunes)
+		}
 		if _, err := tx.ExecContext(ctx, `UPDATE `+tableEntries+` SET notes = ?, added_at = MIN(added_at, ?), updated_at = MAX(updated_at, ?)
 			WHERE item_id = ?`, joined, added, updated, keepID); err != nil {
 			return fmt.Errorf("merge items: entry: %w", err)
@@ -275,18 +281,25 @@ func mergeRuns(ctx context.Context, tx *sql.Tx, keepID, otherID int64) error {
 		}
 		return a.number < b.number
 	})
+	// the open run that is latest in date order stays open and goes last
+	// (an open run must be the latest run); the others keep date order
+	last := -1
+	for i, r := range runs {
+		if r.open {
+			last = i
+		}
+	}
+	if last >= 0 {
+		open := runs[last]
+		runs = append(append(runs[:last:last], runs[last+1:]...), open)
+		last = len(runs) - 1
+	}
 	// the unique (item_id, number) index: every row first moves above every
 	// number in use, then down to its place, one row at a time
 	n := len(runs)
 	for i, r := range runs {
 		if _, err := tx.ExecContext(ctx, `UPDATE `+tableRuns+` SET item_id = ?, number = ? WHERE id = ?`, keepID, 2*n+i+1, r.id); err != nil {
 			return fmt.Errorf("merge items: runs: %w", err)
-		}
-	}
-	last := -1
-	for i, r := range runs {
-		if r.open {
-			last = i
 		}
 	}
 	for i, r := range runs {
