@@ -98,3 +98,19 @@ func TestDuplicateRowsSkipAPairWhoseItemIsGone(t *testing.T) {
 		t.Fatalf("rows = %+v, want only the pair of existing items", rows)
 	}
 }
+
+// TestListPageSurvivesAFailingDuplicateCheck: the duplicate check is an
+// extra; when it fails the list still shows, without the link.
+func TestListPageSurvivesAFailingDuplicateCheck(t *testing.T) {
+	fe := newFixtureEnv(t)
+	fe.twoBooksSameISBN(t)
+	if _, err := fe.d.Exec(`DROP TABLE dismissed_duplicates`); err != nil {
+		t.Fatal(err)
+	}
+	rec := fe.get("/book")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("code %d", rec.Code)
+	}
+	mustContain(t, rec.Body.String(), "Earthsea")
+	mustNotContain(t, rec.Body.String(), "Possible duplicates")
+}
