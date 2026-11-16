@@ -127,6 +127,10 @@ type listView struct {
 	// BulkNotice reports an applied bulk change.
 	Bulk       *bulkBar
 	BulkNotice *bulkNotice
+	// Duplicates is the number of possible duplicate pairs (full pages only;
+	// the link shows when it is above 0).
+	Duplicates    int
+	DuplicatesURL string
 }
 
 // seriesRowView is one series of the Series tab.
@@ -611,6 +615,12 @@ func (s *server) showList(w http.ResponseWriter, r *http.Request, m plugin.Manif
 		return
 	}
 	v.Dialog = dialog
+	if n, err := s.duplicateCount(r, m.ID); err != nil {
+		s.internalError(w, r, err)
+		return
+	} else if n > 0 {
+		v.Duplicates, v.DuplicatesURL = n, duplicatesURL(m.ID)
+	}
 	s.renderStatus(w, r, code, "list", v)
 }
 
