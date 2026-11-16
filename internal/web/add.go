@@ -655,8 +655,8 @@ func (s *server) enqueueSync(ctx context.Context, pluginID string, itemID int64)
 	}
 }
 
-// redirectAfterAdd redirects to target (the plugin's list, the series or the custom list): htmx would swap a 303 target into
-// the dialog, so it gets HX-Redirect with 204.
+// redirectAfterAdd redirects to target (the plugin's list, the series or the custom list; also after a bulk change): htmx
+// would swap a 303 target into the dialog, so it gets HX-Redirect with 204.
 func (s *server) redirectAfterAdd(w http.ResponseWriter, r *http.Request, target string) {
 	if isPartialRequest(r) {
 		w.Header().Set("HX-Redirect", target)

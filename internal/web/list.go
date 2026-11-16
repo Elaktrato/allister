@@ -615,6 +615,7 @@ func (s *server) showList(w http.ResponseWriter, r *http.Request, m plugin.Manif
 		return
 	}
 	v.Dialog = dialog
+	v.BulkNotice = bulkNoticeOf(r, v.PushURL)
 	// the duplicate check is an extra: a failure is logged and hides the link
 	if n, err := s.duplicateCount(r, m.ID); err != nil {
 		log.Printf("duplicates of %s: %v", logSafe(m.ID), logSafe(err))
