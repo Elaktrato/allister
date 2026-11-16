@@ -319,14 +319,10 @@ func insertItem(ctx context.Context, tx *sql.Tx, pluginID, kind string, d plugin
 	if err != nil {
 		return 0, fmt.Errorf("save item: %w", err)
 	}
-	var existing int64
-	err = tx.QueryRowContext(ctx, `SELECT id FROM items WHERE plugin_id = ? AND kind = ? AND source = ? AND source_id = ?`,
-		pluginID, kind, p.source, p.sourceID).Scan(&existing)
-	if err == nil {
-		return 0, &AlreadySavedError{ExistingID: existing}
-	}
-	if !errors.Is(err, sql.ErrNoRows) {
+	if existing, err := identityOwner(ctx, tx, pluginID, kind, p.source, p.sourceID); err != nil {
 		return 0, fmt.Errorf("save item: %w", err)
+	} else if existing != 0 {
+		return 0, &AlreadySavedError{ExistingID: existing}
 	}
 	res, err := tx.ExecContext(ctx, `INSERT INTO items
 		(plugin_id, kind, source, source_id, cover_path, external_url, sync_state, progress_keys)
@@ -398,17 +394,38 @@ func (l *Library) Item(ctx context.Context, id int64) (*Item, error) {
 	return loadItem(ctx, l.db, `id = ?`, id)
 }
 
-// ItemBySource returns the item with the given identity, or nil, nil.
+// identityWhere selects the id of the item that owns an identity (plugin,
+// kind, source, source id): the item with it, else the item it is an alias
+// of (a merge keeps the identity of the item merged away). Its arguments are
+// the identity twice.
+const identityWhere = `id = COALESCE(
+	(SELECT id FROM items WHERE plugin_id = ? AND kind = ? AND source = ? AND source_id = ?),
+	(SELECT item_id FROM item_aliases WHERE plugin_id = ? AND kind = ? AND source = ? AND source_id = ?))`
+
+// identityOwner returns the id of the item that owns the identity, or 0.
+func identityOwner(ctx context.Context, q queryer, pluginID, kind, source, sourceID string) (int64, error) {
+	var id int64
+	err := q.QueryRowContext(ctx, `SELECT id FROM items WHERE `+identityWhere,
+		pluginID, kind, source, sourceID, pluginID, kind, source, sourceID).Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, nil
+	}
+	return id, err
+}
+
+// ItemBySource returns the item with the given identity, or the item it is
+// an alias of, or nil, nil.
 func (l *Library) ItemBySource(ctx context.Context, pluginID, kind, source, sourceID string) (*Item, error) {
-	return loadItem(ctx, l.db, `plugin_id = ? AND kind = ? AND source = ? AND source_id = ?`, pluginID, kind, source, sourceID)
+	return loadItem(ctx, l.db, identityWhere, pluginID, kind, source, sourceID, pluginID, kind, source, sourceID)
 }
 
 // ItemByPluginSource returns the plugin's items of every kind with the given
-// source identity, ordered by id (several only for a plugin with several
-// kinds); none is an empty result, not an error.
+// source identity, or that it is an alias of, ordered by id (several only
+// for a plugin with several kinds); none is an empty result, not an error.
 func (l *Library) ItemByPluginSource(ctx context.Context, pluginID, source, sourceID string) ([]Item, error) {
-	rows, err := l.db.QueryContext(ctx, `SELECT id FROM items WHERE plugin_id = ? AND source = ? AND source_id = ? ORDER BY id`,
-		pluginID, source, sourceID)
+	rows, err := l.db.QueryContext(ctx, `SELECT id FROM items WHERE plugin_id = ? AND source = ? AND source_id = ?
+		UNION SELECT item_id FROM item_aliases WHERE plugin_id = ? AND source = ? AND source_id = ? ORDER BY 1`,
+		pluginID, source, sourceID, pluginID, source, sourceID)
 	if err != nil {
 		return nil, fmt.Errorf("items by source: %w", err)
 	}
