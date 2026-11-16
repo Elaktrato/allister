@@ -279,8 +279,16 @@ func (l *Library) AddPart(ctx context.Context, seriesID, itemID int64, positionF
 		return err
 	}
 	defer tx.Rollback()
+	if err := addPartTx(ctx, tx, seriesID, itemID, positionField); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// addPartTx is AddPart inside tx.
+func addPartTx(ctx context.Context, tx *sql.Tx, seriesID, itemID int64, positionField string) error {
 	var sPlugin, sKind string
-	err = tx.QueryRowContext(ctx, `SELECT plugin_id, kind FROM series WHERE id = ?`, seriesID).Scan(&sPlugin, &sKind)
+	err := tx.QueryRowContext(ctx, `SELECT plugin_id, kind FROM series WHERE id = ?`, seriesID).Scan(&sPlugin, &sKind)
 	if errors.Is(err, sql.ErrNoRows) {
 		return ErrNoSeries
 	}
@@ -315,10 +323,8 @@ func (l *Library) AddPart(ctx context.Context, seriesID, itemID int64, positionF
 	if _, err := tx.ExecContext(ctx, `INSERT INTO series_parts(series_id, item_id, position) VALUES (?, ?, ?)`, seriesID, itemID, pos); err != nil {
 		return mapPartInsertErr(err)
 	}
-	if _, err := renumberSeries(ctx, tx, seriesID); err != nil {
-		return err
-	}
-	return tx.Commit()
+	_, err = renumberSeries(ctx, tx, seriesID)
+	return err
 }
 
 // insertPosition returns the 1-based position for a new part (see AddPart).
