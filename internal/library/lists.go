@@ -542,15 +542,27 @@ func (l *Library) rowsOfPlugins(ctx context.Context, plugins []string, byPlugin 
 // case-insensitive, % _ and \ literal), ordered by display title (langs as
 // for ListRows). A blank text finds nothing.
 func (l *Library) SearchLibrary(ctx context.Context, text string, langs map[string]string, limit int) ([]Row, error) {
+	return l.searchLibrary(ctx, text, langs, limit, "", nil)
+}
+
+// MergeCandidates is SearchLibrary within the plugin and kind, without the
+// item exceptID: the items "Merge with…" offers for it.
+func (l *Library) MergeCandidates(ctx context.Context, pluginID, kind string, exceptID int64, text string, langs map[string]string, limit int) ([]Row, error) {
+	return l.searchLibrary(ctx, text, langs, limit, ` AND items.plugin_id = ? AND items.kind = ? AND items.id <> ?`, []any{pluginID, kind, exceptID})
+}
+
+// searchLibrary is SearchLibrary with the extra condition cond (constant
+// SQL starting with AND, its values in condArgs).
+func (l *Library) searchLibrary(ctx context.Context, text string, langs map[string]string, limit int, cond string, condArgs []any) ([]Row, error) {
 	text = strings.TrimSpace(truncateRunes(text, maxFilterRunes))
 	if text == "" || limit <= 0 || strings.ContainsRune(text, 0) {
 		return nil, nil
 	}
 	vis, visArgs := l.visiblePlugins("items.plugin_id")
-	args := append(append([]any{containsPattern(text)}, visArgs...), limit)
+	args := append(append(append([]any{containsPattern(text)}, visArgs...), condArgs...), limit)
 	//nolint:gosec // G202: constant SQL and placeholders; values are bound
 	rows, err := l.db.QueryContext(ctx, `SELECT items.id, items.plugin_id`+fromSQL+`
-		WHERE EXISTS (SELECT 1 FROM item_titles t WHERE t.item_id = items.id AND lower(t.text) LIKE ? ESCAPE '\') AND `+vis+`
+		WHERE EXISTS (SELECT 1 FROM item_titles t WHERE t.item_id = items.id AND lower(t.text) LIKE ? ESCAPE '\') AND `+vis+cond+`
 		ORDER BY (SELECT lower(t.text) FROM item_titles t WHERE t.item_id = items.id ORDER BY t.rowid LIMIT 1), items.id LIMIT ?`, args...)
 	if err != nil {
 		return nil, fmt.Errorf("search library: %w", err)

@@ -2,6 +2,7 @@ package library
 
 import (
 	"errors"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -431,5 +432,27 @@ func TestSearchLibrary(t *testing.T) {
 	}
 	if g := got("kingdom", 10); !reflect.DeepEqual(g, []string{"Kingdom Book"}) {
 		t.Fatalf("with tv disabled = %q", g)
+	}
+}
+
+// MergeCandidates searches like SearchLibrary within one plugin and kind,
+// without the given item, so other plugins' matches never crowd it out.
+func TestMergeCandidates(t *testing.T) {
+	e := newEnv(t)
+	keep := addTitledBook(t, e.lib, "k", "Kingdom", Entry{Status: Planned})
+	other := addTitledBook(t, e.lib, "o", "The Kingdom", Entry{Status: Planned})
+	mustSave(t, e.lib, "book", "book", titled(bookData("u"), "Kingdom unsaved")) // no entry
+	for i := range 210 {
+		addTitledShow(t, e.lib, fmt.Sprintf("s%d", i), fmt.Sprintf("A kingdom show %d", i), Entry{Status: Planned})
+	}
+	rows, err := e.lib.MergeCandidates(bg, "book", "book", keep, "kingdom", nil, 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 1 || rows[0].Item.ID != other {
+		t.Fatalf("candidates = %+v, want only %d", rows, other)
+	}
+	if rows, err = e.lib.MergeCandidates(bg, "book", "show", keep, "kingdom", nil, 20); err != nil || len(rows) != 0 {
+		t.Fatalf("other kind: %d rows, %v", len(rows), err)
 	}
 }

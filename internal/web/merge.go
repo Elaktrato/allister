@@ -303,7 +303,7 @@ type mergePickResult struct {
 }
 
 // getMergePick searches the library for items of the survivor's plugin and
-// kind (the custom lists' library search), each linking to the merge page.
+// kind (library.MergeCandidates), each linking to the merge page.
 func (s *server) getMergePick(w http.ResponseWriter, r *http.Request, pluginID string) {
 	m, ok := s.deps.Registry.Manifest(pluginID)
 	var keep *mergeSide
@@ -320,8 +320,7 @@ func (s *server) getMergePick(w http.ResponseWriter, r *http.Request, pluginID s
 		return
 	}
 	q := strings.TrimSpace(r.URL.Query().Get("q"))
-	// other plugins and kinds are dropped after the search: ask for more
-	found, err := s.deps.Library.SearchLibrary(r.Context(), q, s.titleLangs(r), 10*maxListResults)
+	found, err := s.deps.Library.MergeCandidates(r.Context(), m.ID, keep.item.Kind, keep.item.ID, q, s.titleLangs(r), maxListResults)
 	if err != nil {
 		s.internalError(w, r, err)
 		return
@@ -331,18 +330,12 @@ func (s *server) getMergePick(w http.ResponseWriter, r *http.Request, pluginID s
 		Return: itemURL(m, keep.item.Source, keep.item.SourceID, keep.item.Kind)}
 	for _, row := range found {
 		it := row.Item
-		if it.PluginID != m.ID || it.Kind != keep.item.Kind || it.ID == keep.item.ID {
-			continue
-		}
 		title := row.Title
 		if title == "" {
 			title = "(untitled)"
 		}
 		v.Results = append(v.Results, mergePickResult{Title: title, Cover: covers.Src(it.CoverPath),
 			Href: mergeURL(m.ID, keep.item.ID, it.ID, keep.item.Source == manualSource, it.Source == manualSource)})
-		if len(v.Results) == maxListResults {
-			break
-		}
 	}
 	s.render(w, r, "merge_pick", v)
 }
