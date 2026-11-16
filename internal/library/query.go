@@ -97,7 +97,9 @@ const (
 // only (SQLite lower()); other scripts match by exact case.
 //
 // Genres and Tags match case-insensitively on the term key; "any" (default)
-// needs one selected term, GenresAll/TagsAll every selected term.
+// needs one selected term, GenresAll/TagsAll every selected term. UserTags
+// (the owner's own tags, offered by every kind) match the same way on the
+// tag's name key, UserTagsAll needing every selected tag.
 //
 // The rating conditions RatingMin/RatingMax (an inclusive range), Unrated
 // (rating NULL) and RatingZero (rating explicitly 0) are alternatives: an
@@ -110,6 +112,8 @@ type Query struct {
 	Filters            []Filter
 	Genres, Tags       []string
 	GenresAll, TagsAll bool
+	UserTags           []string
+	UserTagsAll        bool
 	RatingMin          *int
 	RatingMax          *int
 	Unrated            bool
@@ -155,6 +159,8 @@ type Row struct {
 	Entry Entry
 	Title string
 	Flags RowFlags
+	// UserTags are the entry's own tags (ordered by name key), nil for none.
+	UserTags []string
 	// PastRuns are the entry's runs other than the display run, newest
 	// first. Only StatsRows fills them; every other loader leaves it nil.
 	PastRuns []Run
@@ -326,6 +332,13 @@ func (l *Library) compile(q Query) (*compiled, error) {
 			c.clauses = append(c.clauses, cl)
 		}
 	}
+	cl, ok, err := compileUserTags(q.UserTags, q.UserTagsAll)
+	if err != nil {
+		return nil, err
+	}
+	if ok {
+		c.clauses = append(c.clauses, cl)
+	}
 	if err := c.compileRating(q); err != nil {
 		return nil, err
 	}
@@ -396,12 +409,12 @@ func unmatchedClause(man plugin.Manifest) clause {
 	return clause{sql: `(items.source = 'manual' AND EXISTS (SELECT 1 FROM external_ids x WHERE x.item_id = items.id AND x.type IN (` + placeholders(len(types)) + `)))`, args: args}
 }
 
-func compileTerms(name, kind string, vals []string, all bool, td plugin.TermDef) (clause, bool, error) {
-	var keys []string
+// filterKeys are the distinct term keys of a term filter's values (blanks
+// skipped); nul reports a value with a NUL, which no stored name has.
+func filterKeys(name, kind string, vals []string) (keys []string, nul bool, err error) {
 	seen := map[string]bool{}
-	nul := false
 	for _, v := range vals {
-		k := strings.ToLower(strings.TrimSpace(truncateRunes(v, maxFilterRunes)))
+		k := termKey(strings.TrimSpace(truncateRunes(v, maxFilterRunes)))
 		switch {
 		case k == "":
 		case strings.ContainsRune(k, 0):
@@ -410,18 +423,23 @@ func compileTerms(name, kind string, vals []string, all bool, td plugin.TermDef)
 			seen[k] = true
 			keys = append(keys, k)
 			if len(keys) > maxFilterValues { // fail fast, before looking at the rest
-				return clause{}, false, filterErr(name, "more than %d %s values", maxFilterValues, kind)
+				return nil, false, filterErr(name, "more than %d %s values", maxFilterValues, kind)
 			}
 		}
+	}
+	return keys, nul, nil
+}
+
+func compileTerms(name, kind string, vals []string, all bool, td plugin.TermDef) (clause, bool, error) {
+	keys, nul, err := filterKeys(name, kind, vals)
+	if err != nil {
+		return clause{}, false, err
 	}
 	if len(keys) == 0 && !nul {
 		return clause{}, false, nil
 	}
 	if !td.Enabled || !td.Filterable {
 		return clause{}, false, filterErr(name, "the kind does not offer a %s filter", kind)
-	}
-	if len(keys) > maxFilterValues {
-		return clause{}, false, filterErr(name, "more than %d %s values", maxFilterValues, kind)
 	}
 	if len(keys) == 0 || (nul && all) {
 		return clause{name, `0`, nil}, true, nil
@@ -1021,6 +1039,18 @@ func (l *Library) loadRowParts(ctx context.Context, ids []any, byID map[int64]*R
 			it.ExternalIDs = map[string]string{}
 		}
 		it.ExternalIDs[k] = v
+		return nil
+	}); err != nil {
+		return err
+	}
+	if err := query("own tags", `SELECT x.item_id, u.name FROM entry_user_tags x JOIN user_tags u ON u.id = x.tag_id
+		WHERE x.item_id IN (`+placeholders(len(ids))+`) ORDER BY x.item_id, u.name_key`, func(r *sql.Rows) error {
+		var id int64
+		var name string
+		if err := r.Scan(&id, &name); err != nil {
+			return err
+		}
+		byID[id].UserTags = append(byID[id].UserTags, name)
 		return nil
 	}); err != nil {
 		return err

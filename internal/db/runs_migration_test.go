@@ -3,6 +3,7 @@ package db
 import (
 	"database/sql"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/pressly/goose/v3"
@@ -281,5 +282,40 @@ func TestRunsMigrationDown(t *testing.T) {
 	}
 	if n := rowCount(t, d, `SELECT count(*) FROM entry_runs`); n != 3 {
 		t.Errorf("runs after up again = %d, want 3", n)
+	}
+}
+
+// Tag and list names are unique by name_key (the library's Unicode case
+// folding, written by the library); name keeps the first-typed spelling and
+// is not unique on its own (COLLATE NOCASE would fold ASCII only). The down
+// migration removes both tables.
+func TestRunsMigrationNameKeys(t *testing.T) {
+	d, err := Open(tempPath(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	for _, tc := range []struct{ tbl, cols, vals, noKey string }{
+		{"user_tags", "name, name_key, created_at", "?, ?, 'x'", `INSERT INTO user_tags(name, created_at) VALUES('n', 'x')`},
+		{"lists", "name, name_key, created_at, updated_at", "?, ?, 'x', 'x'", `INSERT INTO lists(name, created_at, updated_at) VALUES('n', 'x', 'x')`},
+	} {
+		insert := `INSERT INTO ` + tc.tbl + `(` + tc.cols + `) VALUES(` + tc.vals + `)`
+		mustExec(t, d, insert, "Äpfel", "äpfel")
+		if _, err := d.Exec(insert, "äpfel", "äpfel"); err == nil {
+			t.Errorf("%s: a second row with the same name_key was accepted", tc.tbl)
+		}
+		// the spelling alone is not unique: only the key decides
+		mustExec(t, d, insert, "Äpfel", "other")
+		if _, err := d.Exec(tc.noKey); err == nil || !strings.Contains(err.Error(), "name_key") {
+			t.Errorf("%s: a row without name_key: %v", tc.tbl, err)
+		}
+	}
+	if err := goose.DownTo(d, "migrations", 18); err != nil {
+		t.Fatal(err)
+	}
+	for _, tbl := range []string{"user_tags", "lists"} {
+		if tableCount(t, d, tbl) != 0 {
+			t.Errorf("table %s still exists after down", tbl)
+		}
 	}
 }

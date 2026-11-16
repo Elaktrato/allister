@@ -7,7 +7,8 @@ package web
 // "..b" or one value, with f.<field>.from / f.<field>.to as the form's
 // aliases; text or url: a substring), genre and tag (repeatable, with
 // genre_mode / tag_mode any|all, only when the kind enables them as
-// filterable), progress (not_started, in_progress or finished: the state of
+// filterable), ut (the owner's own tags, every kind; repeatable, with ut_all=1
+// for all of them instead of any), progress (not_started, in_progress or finished: the state of
 // the item's active progress tracks), rmin / rmax (scores 0..10), unrated=1,
 // zero=1, unmatched=1, partial=1, sort (updated, title, rating, progress or a
 // Sortable field key) with dir asc|desc. kind, status and page belong to parseListQuery.
@@ -52,6 +53,8 @@ type listFilters struct {
 	Fields             []fieldFilter // in schema order
 	Genres, Tags       []string
 	GenresAll, TagsAll bool
+	UserTags           []string              // own tags (ut)
+	UserTagsAll        bool                  // ut_all=1
 	Progress           library.ProgressState // "" = any
 	RatingMin          *int
 	RatingMax          *int
@@ -91,6 +94,12 @@ func (f listFilters) values() url.Values {
 			}
 		}
 	}
+	if len(f.UserTags) > 0 {
+		v[userTagParam] = slices.Clone(f.UserTags)
+		if f.UserTagsAll {
+			v.Set(userTagAllParam, "1")
+		}
+	}
 	if f.Progress != "" {
 		v.Set("progress", string(f.Progress))
 	}
@@ -118,12 +127,12 @@ func (f listFilters) values() url.Values {
 }
 
 // panelCount counts the filters of the panel that are set (the badge of
-// the Filters toggle): each field filter, genres, tags, progress, the score
+// the Filters toggle): each field filter, genres, tags, own tags, progress, the score
 // range (rmin and rmax together), unrated, zero, unmatched and partial count
 // one each; q and the sort are not in the panel and do not count.
 func (f listFilters) panelCount() int {
 	n := len(f.Fields)
-	for _, on := range []bool{len(f.Genres) > 0, len(f.Tags) > 0, f.Progress != "", f.RatingMin != nil || f.RatingMax != nil,
+	for _, on := range []bool{len(f.Genres) > 0, len(f.Tags) > 0, len(f.UserTags) > 0, f.Progress != "", f.RatingMin != nil || f.RatingMax != nil,
 		f.Unrated, f.Zero, f.Unmatched, f.Partial} {
 		if on {
 			n++
@@ -151,6 +160,7 @@ func (f listFilters) apply(k plugin.KindDef, q *library.Query) {
 		q.Filters = append(q.Filters, library.Filter{Key: ff.Key, Op: filterOp(fd, ff.Values), Values: ff.Values})
 	}
 	q.Genres, q.Tags, q.GenresAll, q.TagsAll = f.Genres, f.Tags, f.GenresAll, f.TagsAll
+	q.UserTags, q.UserTagsAll = f.UserTags, f.UserTagsAll
 	q.Progress = f.Progress
 	q.RatingMin, q.RatingMax, q.Unrated, q.RatingZero = f.RatingMin, f.RatingMax, f.Unrated, f.Zero
 	q.Unmatched, q.PartialSync = f.Unmatched, f.Partial
@@ -293,20 +303,20 @@ func parseFilters(k plugin.KindDef, q url.Values) (listFilters, []string) {
 			*t.all = false
 			continue
 		}
-		// distinct values (case-insensitive), at most maxTermValues: the scan
-		// stops at the first value beyond the cap, so the work stays bounded
-		var keep []string
-		for _, v := range vals {
-			if slices.ContainsFunc(keep, func(x string) bool { return strings.EqualFold(x, v) }) {
-				continue
-			}
-			if len(keep) == maxTermValues {
-				reject(t.key)
-				break
-			}
-			keep = append(keep, v)
+		*t.vals = distinctTerms(vals, func() { reject(t.key) })
+	}
+	// own tags: every kind offers them
+	if vals, all := take(userTagParam), take(userTagAllParam); len(vals) > 0 {
+		f.UserTags = distinctTerms(vals, func() { reject(userTagParam) })
+		switch {
+		case len(all) == 0:
+		case len(all) == 1 && all[0] == "1":
+			f.UserTagsAll = true
+		default:
+			reject(userTagAllParam)
 		}
-		*t.vals = keep
+	} else if len(all) > 1 || len(all) == 1 && all[0] != "1" {
+		reject(userTagAllParam)
 	}
 	switch vals := take("progress"); {
 	case len(vals) == 0:
@@ -346,6 +356,30 @@ func parseFilters(k plugin.KindDef, q url.Values) (listFilters, []string) {
 	}
 	sort.Strings(keys)
 	return f, keys
+}
+
+// The own-tag filter's URL parameters.
+const (
+	userTagParam    = "ut"
+	userTagAllParam = "ut_all"
+)
+
+// distinctTerms are the distinct values (case-insensitive), at most
+// maxTermValues: the scan stops at the first value beyond the cap (calling
+// over), so the work stays bounded.
+func distinctTerms(vals []string, over func()) []string {
+	var keep []string
+	for _, v := range vals {
+		if slices.ContainsFunc(keep, func(x string) bool { return strings.EqualFold(x, v) }) {
+			continue
+		}
+		if len(keep) == maxTermValues {
+			over()
+			break
+		}
+		keep = append(keep, v)
+	}
+	return keep
 }
 
 // progressStates are the values of the progress filter, in the bar's order.
@@ -439,9 +473,11 @@ type filterField struct {
 	Options          []option
 }
 
-// termInput is the multi-select of genres or tags with the any/all switch.
+// termInput is the multi-select of genres or tags with the any/all switch
+// (ModeName any|all), or of own tags with the all checkbox (AllName=1).
 type termInput struct {
 	Label, Name, ModeName string
+	AllName               string
 	All                   bool
 	Options               []option
 }
@@ -453,7 +489,8 @@ type filterBar struct {
 	Q             string
 	Fields        []filterField
 	Genres, Tags  *termInput
-	Progress      []option // the progress state select ("" = any)
+	UserTags      *termInput // own tags: shown once the library has any (or one is selected)
+	Progress      []option   // the progress state select ("" = any)
 	RatingMin     string
 	RatingMax     string
 	Unrated, Zero bool
@@ -482,7 +519,9 @@ func (b *filterBar) outOfBand() { b.OOB = true }
 // buildFilterBar draws the bar of kind k from the schema: only Filterable
 // fields, genres and tags only when enabled and filterable (with the counts
 // in genres/tags; a selected term without a count shows 0).
-func buildFilterBar(m plugin.Manifest, k plugin.KindDef, lq listQuery, genres, tags []library.TermCount) filterBar {
+// The own tags (userTags, with the counts of the matching entries) are
+// offered when showUserTags (the library has own tags) or one is selected.
+func buildFilterBar(m plugin.Manifest, k plugin.KindDef, lq listQuery, genres, tags, userTags []library.TermCount, showUserTags bool) filterBar {
 	f := lq.Filters
 	b := filterBar{Action: "/" + url.PathEscape(m.ID), Status: lq.Status, View: lq.View, Q: f.Q,
 		Unrated: f.Unrated, Zero: f.Zero, Unmatched: f.Unmatched, Partial: f.Partial}
@@ -534,6 +573,10 @@ func buildFilterBar(m plugin.Manifest, k plugin.KindDef, lq listQuery, genres, t
 	}
 	if k.Tags.Enabled && k.Tags.Filterable {
 		b.Tags = termBar(k.Tags, "tag", f.Tags, f.TagsAll, tags)
+	}
+	if showUserTags || len(f.UserTags) > 0 {
+		b.UserTags = termBar(plugin.TermDef{Label: "Own tags"}, userTagParam, f.UserTags, f.UserTagsAll, userTags)
+		b.UserTags.ModeName, b.UserTags.AllName = "", userTagAllParam
 	}
 	if len(k.Progress.Eligible) > 0 {
 		b.Progress = []option{{Value: "", Label: "Any", Selected: f.Progress == ""}}
