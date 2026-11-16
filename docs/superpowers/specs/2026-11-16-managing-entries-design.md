@@ -1,4 +1,4 @@
-# Managing entries (design, 2026-11-16)
+# Managing entries (design, 2026-11-16, approved)
 
 Project 2 of the next version (issue #34): update from source with a merge
 view, bulk edit, and a duplicate finder with merge. Builds on the tracking
