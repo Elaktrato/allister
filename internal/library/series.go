@@ -510,7 +510,7 @@ func (l *Library) seriesRows(ctx context.Context, q SeriesQuery) ([]SeriesRow, e
 	statuses := map[int64][]Status{}
 	pr, err := l.db.QueryContext(ctx, `SELECT sp.series_id, e.status, e.updated_at, i.cover_path
 		FROM series_parts sp JOIN series s ON s.id = sp.series_id
-		JOIN `+tableEntries+` e ON e.item_id = sp.item_id JOIN items i ON i.id = sp.item_id
+		JOIN `+viewEntryState+` e ON e.item_id = sp.item_id JOIN items i ON i.id = sp.item_id
 		WHERE s.plugin_id = ? ORDER BY sp.series_id, sp.position`, q.PluginID)
 	if err != nil {
 		return nil, fmt.Errorf("list series parts: %w", err)
@@ -768,11 +768,11 @@ func (l *Library) ActiveSeries(ctx context.Context, pluginIDs []string, limit in
 	//nolint:gosec // G202: constant SQL and placeholders; values are bound
 	rows, err := l.db.QueryContext(ctx, `SELECT `+seriesCols+`,
 			COUNT(e.item_id), COALESCE(SUM(e.status = 'completed'), 0), COALESCE(MAX(e.updated_at), ''),
-			COALESCE((SELECT i2.cover_path FROM series_parts sp2 JOIN `+tableEntries+` e2 ON e2.item_id = sp2.item_id
+			COALESCE((SELECT i2.cover_path FROM series_parts sp2 JOIN `+viewEntryState+` e2 ON e2.item_id = sp2.item_id
 				JOIN items i2 ON i2.id = sp2.item_id WHERE sp2.series_id = s.id ORDER BY sp2.position LIMIT 1), '')
 		FROM series s
 		LEFT JOIN series_parts sp ON sp.series_id = s.id
-		LEFT JOIN `+tableEntries+` e ON e.item_id = sp.item_id
+		LEFT JOIN `+viewEntryState+` e ON e.item_id = sp.item_id
 		WHERE s.plugin_id IN (`+placeholders(len(pluginIDs))+`)
 		GROUP BY s.id
 		HAVING NOT (COUNT(e.item_id) > 0 AND SUM(e.status = 'dropped') = COUNT(e.item_id))

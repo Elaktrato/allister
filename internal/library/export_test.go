@@ -16,7 +16,7 @@ func TestExportEntriesHoldEveryStoredValue(t *testing.T) {
 	// 1: a full entry whose pages value became inactive (percent is active now)
 	d1 := bookWith("e1", fp(300))
 	d1.ExternalIDs = map[string]string{"isbn": "978-1", "olid": "OL1"}
-	id1, err := l.AddToList(bg, "book", "book", d1, Entry{Status: Completed, Rating: ip(8), Comment: "line one\nline two",
+	id1, err := l.AddToList(bg, "book", "book", d1, Entry{Status: Completed, Rating: ip(8), Notes: "line one\nline two",
 		StartedOn: tp(day(2024, 3, 1)), FinishedOn: tp(day(2024, 3, 9)), Progress: map[string]float64{"pages": 120}})
 	if err != nil {
 		t.Fatal(err)
@@ -24,7 +24,7 @@ func TestExportEntriesHoldEveryStoredValue(t *testing.T) {
 	if err := l.SetActiveProgress(bg, id1, []string{"percent"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := l.UpsertEntry(bg, Entry{ItemID: id1, Status: Completed, Rating: ip(8), Comment: "line one\nline two",
+	if err := l.UpsertEntry(bg, Entry{ItemID: id1, Status: Completed, Rating: ip(8), Notes: "line one\nline two",
 		StartedOn: tp(day(2024, 3, 1)), FinishedOn: tp(day(2024, 3, 9)), Progress: map[string]float64{"percent": 40}}); err != nil {
 		t.Fatal(err)
 	}

@@ -29,29 +29,61 @@ func Statuses() []Status { return []Status{Planned, Active, Paused, Completed, D
 
 func validStatus(s Status) bool { return slices.Contains(Statuses(), s) }
 
-// SQL table names of the user's list.
+// SQL table name of the user's list: one row per entry (library
+// membership and the entry's notes); the state lives in its runs (runs.go).
+const tableEntries = "entries"
+
+// MaxNotesRunes is the longest entry notes text (in runes) the library
+// accepts; forms cap the typed notes at it. MaxReviewRunes is the same for a
+// run's review.
 const (
-	tableEntries       = "entries"
-	tableEntryProgress = "entry_progress"
+	MaxNotesRunes  = 10000
+	MaxReviewRunes = 10000
 )
 
-// MaxCommentRunes is the longest entry comment (in runes) the library
-// accepts; forms cap the typed comment at it.
-const MaxCommentRunes = 2000
-
-// Entry is the user's list entry of an item. Progress holds the values of
-// the item's ACTIVE progress keys; values of keys that are no longer active
-// stay in the database but are not part of an Entry (see SetActiveProgress).
-// StartedOn and FinishedOn are calendar days: written as the calendar day of
-// the given time (in its own zone), read back as UTC midnight.
+// Entry is the user's list entry of an item as it presents itself: the
+// entry's notes plus the state of its display run (status, rating, review,
+// dates, progress; see refreshDisplayRun). Writing an Entry writes the
+// notes to the entry and the rest to the display run. Progress holds the
+// values of the item's ACTIVE progress keys; values of keys that are no
+// longer active stay in the database but are not part of an Entry (see
+// SetActiveProgress). StartedOn and FinishedOn are calendar days: written as
+// the calendar day of the given time (in its own zone), read back as UTC
+// midnight. UpdatedAt is the newer of the entry's and the run's change
+// times. RunID, RunNumber and Repeats (the number of completed runs) are
+// read only.
 type Entry struct {
 	ItemID                int64
 	Status                Status
 	Rating                *int
-	Comment               string
+	Notes                 string
+	Review                string
 	StartedOn, FinishedOn *time.Time
 	Progress              map[string]float64
 	UpdatedAt             time.Time
+	RunID                 int64
+	RunNumber             int
+	Repeats               int
+}
+
+// stateCols are the entry_state columns (aliased e) that stateScan reads.
+const stateCols = `e.status, e.rating, e.notes, e.review, e.started_on, e.finished_on, e.updated_at, e.run_id, e.run_number, e.repeats`
+
+// stateScan holds the raw entry_state columns until fill converts them.
+type stateScan struct {
+	status, updated   string
+	rating            sql.NullInt64
+	started, finished sql.NullString
+}
+
+// dest returns the scan destinations of stateCols, in order.
+func (s *stateScan) dest(e *Entry) []any {
+	return []any{&s.status, &s.rating, &e.Notes, &e.Review, &s.started, &s.finished, &s.updated, &e.RunID, &e.RunNumber, &e.Repeats}
+}
+
+// fill converts the scanned columns into e.
+func (s *stateScan) fill(e *Entry) error {
+	return e.fill(s.status, s.rating, s.started, s.finished, s.updated)
 }
 
 // writtenDay returns the calendar day of t as written (YYYY-MM-DD), or ok=false
@@ -76,10 +108,16 @@ func (l *Library) ValidateEntry(kind plugin.KindDef, item *Item, e Entry) error 
 	if e.Rating != nil && (*e.Rating < 0 || *e.Rating > 10) {
 		return invalid("rating %d must be between 0 and 10", *e.Rating)
 	}
-	if utf8.RuneCountInString(e.Comment) > MaxCommentRunes {
-		return invalid("comment is longer than %d characters", MaxCommentRunes)
+	if utf8.RuneCountInString(e.Notes) > MaxNotesRunes {
+		return invalid("notes are longer than %d characters", MaxNotesRunes)
 	}
-	if err := cleanText("comment", e.Comment, multiLine); err != nil {
+	if err := cleanText("notes", e.Notes, multiLine); err != nil {
+		return err
+	}
+	if utf8.RuneCountInString(e.Review) > MaxReviewRunes {
+		return invalid("review is longer than %d characters", MaxReviewRunes)
+	}
+	if err := cleanText("review", e.Review, multiLine); err != nil {
 		return err
 	}
 	started, ok1 := writtenDay(e.StartedOn)
@@ -112,8 +150,9 @@ func (l *Library) ValidateEntry(kind plugin.KindDef, item *Item, e Entry) error 
 	return nil
 }
 
-// writeEntry stores the scalar part of the entry and the progress values
-// present in e.Progress. The caller validated e.
+// writeEntry stores the entry's notes and, on its display run, the scalar
+// state and the progress values present in e.Progress; an item without an
+// entry gets one with run 1. The caller validated e.
 func writeEntry(ctx context.Context, tx *sql.Tx, itemID int64, e Entry) error {
 	_, err := writeEntryMode(ctx, tx, itemID, e, false)
 	return err
@@ -134,23 +173,34 @@ func writeEntryMode(ctx context.Context, tx *sql.Tx, itemID int64, e Entry, crea
 	if finished != "" {
 		fin = finished
 	}
-	conflict := `DO UPDATE SET status = excluded.status, rating = excluded.rating, comment = excluded.comment,
-		  started_on = excluded.started_on, finished_on = excluded.finished_on, updated_at = excluded.updated_at`
-	if createOnly {
-		conflict = `DO NOTHING`
-	}
-	res, err := tx.ExecContext(ctx, `INSERT INTO `+tableEntries+`(item_id, status, rating, comment, started_on, finished_on, updated_at)
-		VALUES (?,?,?,?,?,?,`+nowSQL+`)
-		ON CONFLICT(item_id) `+conflict,
-		itemID, string(e.Status), rating, e.Comment, st, fin)
-	if err != nil {
-		return false, fmt.Errorf("save entry: %w", err)
-	}
-	if createOnly {
-		if n, err := res.RowsAffected(); err != nil {
+	runID, err := displayRunTx(ctx, tx, itemID)
+	switch {
+	case errors.Is(err, ErrNoEntry):
+		if _, err := tx.ExecContext(ctx, `INSERT INTO `+tableEntries+`(item_id, notes, added_at, updated_at)
+			VALUES (?,?,`+nowSQL+`,`+nowSQL+`)`, itemID, e.Notes); err != nil {
 			return false, fmt.Errorf("save entry: %w", err)
-		} else if n == 0 {
-			return false, nil
+		}
+		res, err := tx.ExecContext(ctx, `INSERT INTO `+tableRuns+`(item_id, number, status, rating, review, started_on, finished_on, created_at, updated_at)
+			VALUES (?,1,?,?,?,?,?,`+nowSQL+`,`+nowSQL+`)`, itemID, string(e.Status), rating, e.Review, st, fin)
+		if err != nil {
+			return false, fmt.Errorf("save entry: %w", err)
+		}
+		if runID, err = res.LastInsertId(); err != nil {
+			return false, fmt.Errorf("save entry: %w", err)
+		}
+		created = true
+	case err != nil:
+		return false, err
+	case createOnly:
+		return false, nil
+	default:
+		if _, err := tx.ExecContext(ctx, `UPDATE `+tableEntries+` SET notes = ?, updated_at = `+nowSQL+` WHERE item_id = ?`,
+			e.Notes, itemID); err != nil {
+			return false, fmt.Errorf("save entry: %w", err)
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE `+tableRuns+` SET status = ?, rating = ?, review = ?, started_on = ?, finished_on = ?,
+			updated_at = `+nowSQL+` WHERE id = ?`, string(e.Status), rating, e.Review, st, fin, runID); err != nil {
+			return false, fmt.Errorf("save entry: %w", err)
 		}
 	}
 	keys := make([]string, 0, len(e.Progress))
@@ -159,12 +209,15 @@ func writeEntryMode(ctx context.Context, tx *sql.Tx, itemID int64, e Entry, crea
 	}
 	slices.Sort(keys)
 	for _, k := range keys {
-		if _, err := tx.ExecContext(ctx, `INSERT INTO `+tableEntryProgress+`(item_id, key, value) VALUES (?,?,?)
-			ON CONFLICT(item_id, key) DO UPDATE SET value = excluded.value`, itemID, k, e.Progress[k]); err != nil {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO `+tableRunProgress+`(run_id, key, value) VALUES (?,?,?)
+			ON CONFLICT(run_id, key) DO UPDATE SET value = excluded.value`, runID, k, e.Progress[k]); err != nil {
 			return false, fmt.Errorf("save entry progress: %w", err)
 		}
 	}
-	return true, nil
+	if err := refreshDisplayRun(ctx, tx, itemID); err != nil {
+		return false, err
+	}
+	return created, nil
 }
 
 // AddToList saves the item and its list entry in ONE transaction and returns
@@ -206,9 +259,10 @@ func (l *Library) AddToList(ctx context.Context, pluginID, kind string, d plugin
 }
 
 // UpsertEntry creates or replaces the entry of e.ItemID after validating it
-// against the stored item. Status, rating, comment and dates are replaced as a
-// whole; progress values are replaced only for the keys present in e.Progress,
-// other keys are left untouched (see ClearProgress). It returns ErrNoEntry for
+// against the stored item. Notes, and the display run's status, rating,
+// review and dates, are replaced as a whole (a new entry gets run 1); the
+// display run's progress values are replaced only for the keys present in
+// e.Progress, other keys are left untouched (see ClearProgress). It returns ErrNoEntry for
 // an unknown item. The change is recorded in the event log; the option
 // WithEventOrigin sets its origin (manual by default), and creating the entry
 // records nothing.
@@ -291,12 +345,11 @@ func (l *Library) Entry(ctx context.Context, itemID int64) (*Entry, error) {
 // returns nil, nil when the item has no entry.
 func loadEntry(ctx context.Context, q queryer, itemID int64) (*Entry, error) {
 	e := Entry{ItemID: itemID, Progress: map[string]float64{}}
-	var status, pk, updated string
-	var rating sql.NullInt64
-	var started, finished sql.NullString
-	err := q.QueryRowContext(ctx, `SELECT e.status, e.rating, e.comment, e.started_on, e.finished_on, e.updated_at, i.progress_keys
-		FROM `+tableEntries+` e JOIN items i ON i.id = e.item_id WHERE e.item_id = ?`, itemID).
-		Scan(&status, &rating, &e.Comment, &started, &finished, &updated, &pk)
+	var pk string
+	var st stateScan
+	err := q.QueryRowContext(ctx, `SELECT `+stateCols+`, i.progress_keys
+		FROM `+viewEntryState+` e JOIN items i ON i.id = e.item_id WHERE e.item_id = ?`, itemID).
+		Scan(append(st.dest(&e), &pk)...)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -307,10 +360,10 @@ func loadEntry(ctx context.Context, q queryer, itemID int64) (*Entry, error) {
 	if err := decodeKeys(pk, &active); err != nil {
 		return nil, err
 	}
-	if err := e.fill(status, rating, started, finished, updated); err != nil {
+	if err := st.fill(&e); err != nil {
 		return nil, err
 	}
-	rows, err := q.QueryContext(ctx, `SELECT key, value FROM `+tableEntryProgress+` WHERE item_id = ?`, itemID)
+	rows, err := q.QueryContext(ctx, `SELECT key, value FROM `+tableRunProgress+` WHERE run_id = ?`, e.RunID)
 	if err != nil {
 		return nil, fmt.Errorf("load entry progress: %w", err)
 	}
@@ -361,8 +414,9 @@ func (e *Entry) fill(status string, rating sql.NullInt64, started, finished sql.
 	return nil
 }
 
-// RemoveEntry deletes the item's entry together with its progress values
-// (active and retained), so a later entry starts from zero. The item stays,
+// RemoveEntry deletes the item's entry together with its runs and their
+// progress values (active and retained), so a later entry starts from zero;
+// its events stay with the item, without a run. The item stays,
 // but leaves its series (a part always has an entry); the series is
 // renumbered, and removed with its last part. It is a no-op (nil) when the item has no entry or does not exist.
 func (l *Library) RemoveEntry(ctx context.Context, itemID int64) error {
@@ -384,10 +438,9 @@ func (l *Library) RemoveEntry(ctx context.Context, itemID int64) error {
 			return fmt.Errorf("remove entry: %w", err)
 		}
 	}
-	for _, q := range []string{`DELETE FROM ` + tableEntryProgress + ` WHERE item_id = ?`, `DELETE FROM ` + tableEntries + ` WHERE item_id = ?`} {
-		if _, err := tx.ExecContext(ctx, q, itemID); err != nil {
-			return fmt.Errorf("remove entry: %w", err)
-		}
+	// runs, their progress, tags and list places cascade from the entry
+	if _, err := tx.ExecContext(ctx, `DELETE FROM `+tableEntries+` WHERE item_id = ?`, itemID); err != nil {
+		return fmt.Errorf("remove entry: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("remove entry: %w", err)
@@ -396,11 +449,12 @@ func (l *Library) RemoveEntry(ctx context.Context, itemID int64) error {
 }
 
 // ApplyImport applies the three list fields of an import row - status,
-// rating and the primary progress value - to an existing entry and bumps its
-// updated_at. With a non-nil newerThan it does nothing when the entry is not
-// older than that source modification time: the user's own later changes win.
-// Everything else (comment, dates, the other progress tracks) stays as it is.
-// The change is recorded in the event log with the import origin, which the
+// rating and the primary progress value - to an existing entry's display run
+// (an import never starts a run) and bumps its updated_at. With a non-nil
+// newerThan it does nothing when the entry is not older than that source
+// modification time: the user's own later changes win. Everything else
+// (notes, review, dates, the other progress tracks) stays as it is. The
+// change is recorded in the event log with the import origin, which the
 // activity heatmap leaves out. It reports whether anything was written.
 func (l *Library) ApplyImport(ctx context.Context, itemID int64, in Entry, newerThan *time.Time) (bool, error) {
 	cur, err := l.Entry(ctx, itemID)
@@ -421,7 +475,7 @@ func (l *Library) ApplyImport(ctx context.Context, itemID int64, in Entry, newer
 		return false, nil
 	}
 	upd := Entry{ItemID: itemID, Status: cur.Status, Rating: cur.Rating,
-		Comment: cur.Comment, StartedOn: cur.StartedOn, FinishedOn: cur.FinishedOn,
+		Notes: cur.Notes, Review: cur.Review, StartedOn: cur.StartedOn, FinishedOn: cur.FinishedOn,
 		Progress: map[string]float64{}}
 	for k, v := range cur.Progress {
 		upd.Progress[k] = v

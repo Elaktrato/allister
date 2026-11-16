@@ -64,7 +64,7 @@ func (e *matchEnv) unmatched(t *testing.T) int64 {
 		CoverURL: "oldcover.jpg"}, ExternalIDs: map[string]string{"mal": "5114"}}
 	start := time.Date(2024, 1, 2, 0, 0, 0, 0, time.UTC)
 	return e.addFixture(t, "anime", "anime", d, library.Entry{Status: library.Completed, Rating: ip(0), StartedOn: &start,
-		Comment: "c", Progress: map[string]float64{"episode": 3}}, library.WithSyncState("pending"))
+		Notes: "c", Progress: map[string]float64{"episode": 3}}, library.WithSyncState("pending"))
 }
 
 // snapshot returns the item and its entry. ADAPTED: library types.
@@ -417,7 +417,7 @@ func tvManual(t *testing.T, e *env) int64 {
 	t.Helper()
 	d := plugin.ItemData{ItemSummary: plugin.ItemSummary{Source: "manual", ID: "m1", Kind: "show", Titles: ttl("My Show"),
 		Fields: map[string]plugin.FieldValue{"type": {Text: "series"}}}}
-	return e.addFixture(t, "tv", "show", d, library.Entry{Status: library.Active, Comment: "mine",
+	return e.addFixture(t, "tv", "show", d, library.Entry{Status: library.Active, Notes: "mine",
 		Progress: map[string]float64{"episode": 30}}, library.WithSyncState("done"))
 }
 
@@ -446,7 +446,7 @@ func TestMatchUsesSourceDetailsAndSearch(t *testing.T) {
 		t.Fatalf("details %d lookup %d", e.tv.Calls(plugintest.OpDetails), e.tv.Calls(plugintest.OpLookup))
 	}
 	it, en := e.snapshot(t, id)
-	if it.Source != "tvdata" || it.SourceID != "77" || it.Titles[0].Text != "Found Show" || en.Comment != "mine" {
+	if it.Source != "tvdata" || it.SourceID != "77" || it.Titles[0].Text != "Found Show" || en.Notes != "mine" {
 		t.Fatalf("%+v %+v", it, en)
 	}
 	if len(e.jobs.got) != 0 {
@@ -462,7 +462,7 @@ func TestConvertClampsProgressToNewTotal(t *testing.T) {
 	if rec := e.do("POST", "/tv/manual/m1/match", url.Values{"pick": {"77"}}, true); rec.Code != 204 {
 		t.Fatalf("%d %s", rec.Code, rec.Body.String())
 	}
-	if _, en := e.snapshot(t, id); en.Progress["episode"] != 12 || en.Status != library.Active || en.Comment != "mine" {
+	if _, en := e.snapshot(t, id); en.Progress["episode"] != 12 || en.Status != library.Active || en.Notes != "mine" {
 		t.Fatalf("%+v", en)
 	}
 }

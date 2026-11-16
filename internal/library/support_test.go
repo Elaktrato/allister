@@ -21,8 +21,9 @@ func TestRemoveEntryDeletesEntryAndProgressOnly(t *testing.T) {
 	if en, err := e.lib.Entry(bg, id); en != nil || err != nil {
 		t.Fatalf("entry remains: %+v %v", en, err)
 	}
-	if n := count(t, e.db, `SELECT count(*) FROM entry_progress WHERE item_id = ?`, id); n != 0 {
-		t.Fatalf("progress rows remain: %d", n)
+	// only the other entry's run keeps a progress row
+	if n := count(t, e.db, `SELECT count(*) FROM run_progress`); n != 1 {
+		t.Fatalf("progress rows = %d, want the other entry's only", n)
 	}
 	if it := mustItem(t, e.lib, id); it.SourceID != "1" {
 		t.Fatal("item removed")
@@ -51,9 +52,7 @@ func TestRowsLimitOffsetUnpaged(t *testing.T) {
 	var ids []int64
 	for i := 0; i < 5; i++ {
 		id := bookT(t, e.lib, fmt.Sprint(i), fmt.Sprint("T", i), nil, Entry{Status: Active})
-		if _, err := e.db.Exec(`UPDATE entries SET updated_at = ? WHERE item_id = ?`, fmt.Sprintf("2024-01-0%dT00:00:00Z", i+1), id); err != nil {
-			t.Fatal(err)
-		}
+		setEntryUpdated(t, e.db, fmt.Sprintf("2024-01-0%dT00:00:00Z", i+1), id)
 		ids = append(ids, id)
 	}
 	rowIDs := func(rs []Row) []int64 {

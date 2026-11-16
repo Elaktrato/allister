@@ -13,11 +13,14 @@ import (
 )
 
 // stamp sets the entry's update time (the library stamps "now" in whole
-// seconds, which cannot order a test's rows).
+// seconds, which cannot order a test's rows). The entry presents the newer of
+// its own and its runs' times, so both are set.
 func (e *env) stamp(t *testing.T, id int64, at time.Time) {
 	t.Helper()
-	if _, err := e.d.Exec(`UPDATE entries SET updated_at = ? WHERE item_id = ?`, at.UTC().Format("2006-01-02T15:04:05Z"), id); err != nil {
-		t.Fatal(err)
+	for _, q := range []string{`UPDATE entries SET updated_at = ? WHERE item_id = ?`, `UPDATE entry_runs SET updated_at = ? WHERE item_id = ?`} {
+		if _, err := e.d.Exec(q, at.UTC().Format("2006-01-02T15:04:05Z"), id); err != nil {
+			t.Fatal(err)
+		}
 	}
 }
 

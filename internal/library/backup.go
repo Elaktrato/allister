@@ -381,7 +381,8 @@ func (l *Library) backupParts(ctx context.Context, ids []int64, items []BackupIt
 	var rating sql.NullInt64
 	var comment string
 	var started, finished sql.NullString
-	if err := l.eachRow(ctx, `SELECT item_id, status, rating, comment, started_on, finished_on, updated_at FROM `+tableEntries+` WHERE item_id IN (?)`, ids,
+	// the display run's state; the entry's notes are the backup's comment
+	if err := l.eachRow(ctx, `SELECT item_id, status, rating, notes, started_on, finished_on, updated_at FROM `+viewEntryState+` WHERE item_id IN (?)`, ids,
 		func(r *sql.Rows) (int64, error) {
 			return id, r.Scan(&id, &status, &rating, &comment, &started, &finished, &updated)
 		},
@@ -407,7 +408,7 @@ func (l *Library) backupParts(ctx context.Context, ids []int64, items []BackupIt
 
 	var pkey string
 	var pval float64
-	if err := l.eachRow(ctx, `SELECT item_id, key, value FROM `+tableEntryProgress+` WHERE item_id IN (?)`, ids,
+	if err := l.eachRow(ctx, `SELECT item_id, key, value FROM `+viewDisplayProgress+` WHERE item_id IN (?)`, ids,
 		func(r *sql.Rows) (int64, error) { return id, r.Scan(&id, &pkey, &pval) },
 		func(i int) error {
 			// values without an entry are not part of a backup
@@ -775,7 +776,7 @@ func (l *Library) restoreEntry(p *prepared, d plugin.ItemData, be BackupEntry) (
 			return nil, err
 		}
 	}
-	e := Entry{Status: be.Status, Rating: be.Rating, Comment: be.Comment, StartedOn: started, FinishedOn: finished, Progress: active}
+	e := Entry{Status: be.Status, Rating: be.Rating, Notes: be.Comment, StartedOn: started, FinishedOn: finished, Progress: active}
 	if err := l.ValidateEntry(p.def, item, e); err != nil {
 		return nil, err
 	}
@@ -858,15 +859,25 @@ func (l *Library) writeRestore(ctx context.Context, bi BackupItem, plan *restore
 		if _, err := writeEntryMode(ctx, tx, id, *plan.entry, true); err != nil {
 			return 0, err
 		}
+		runID, err := displayRunTx(ctx, tx, id)
+		if err != nil {
+			return 0, err
+		}
 		if plan.entryStamp != "" {
-			if _, err := tx.ExecContext(ctx, `UPDATE `+tableEntries+` SET updated_at = ? WHERE item_id = ?`, plan.entryStamp, id); err != nil {
-				return 0, fmt.Errorf("restore item: %w", err)
+			// the entry presents the newer of the two stamps: set both
+			for _, q := range []string{
+				`UPDATE ` + tableEntries + ` SET added_at = ?1, updated_at = ?1 WHERE item_id = ?2`,
+				`UPDATE ` + tableRuns + ` SET created_at = ?1, updated_at = ?1 WHERE item_id = ?2`,
+			} {
+				if _, err := tx.ExecContext(ctx, q, plan.entryStamp, id); err != nil {
+					return 0, fmt.Errorf("restore item: %w", err)
+				}
 			}
 		}
 		// the backup holds the log newest first: insert oldest first so the
 		// restored ids stay in chronological order
 		for i := len(plan.events) - 1; i >= 0; i-- {
-			if err := restoreEvent(ctx, tx, id, plan.events[i]); err != nil {
+			if err := restoreEvent(ctx, tx, id, runID, plan.events[i]); err != nil {
 				return 0, err
 			}
 		}
@@ -877,9 +888,9 @@ func (l *Library) writeRestore(ctx context.Context, bi BackupItem, plan *restore
 	return id, nil
 }
 
-// restoreEvent appends one backed-up event with its stored time stamp and
-// origin, so the restored log keeps the history of the backup.
-func restoreEvent(ctx context.Context, tx *sql.Tx, itemID int64, ev BackupEvent) error {
+// restoreEvent appends one backed-up event of run runID with its stored time
+// stamp and origin, so the restored log keeps the history of the backup.
+func restoreEvent(ctx context.Context, tx *sql.Tx, itemID, runID int64, ev BackupEvent) error {
 	var oldV, newV any
 	if ev.OldNum != nil {
 		oldV = *ev.OldNum
@@ -887,9 +898,9 @@ func restoreEvent(ctx context.Context, tx *sql.Tx, itemID int64, ev BackupEvent)
 	if ev.NewNum != nil {
 		newV = *ev.NewNum
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO `+tableEntryEvents+`(item_id, occurred_at, event_type, progress_key, old_num, new_num, old_text, new_text, origin)
-		VALUES (?,?,?,?,?,?,?,?,?)`,
-		itemID, ev.OccurredAt, ev.Type, ev.ProgressKey, oldV, newV, ev.OldText, ev.NewText, ev.Origin); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO `+tableEntryEvents+`(item_id, run_id, occurred_at, event_type, progress_key, old_num, new_num, old_text, new_text, origin)
+		VALUES (?,?,?,?,?,?,?,?,?,?)`,
+		itemID, runID, ev.OccurredAt, ev.Type, ev.ProgressKey, oldV, newV, ev.OldText, ev.NewText, ev.Origin); err != nil {
 		return fmt.Errorf("restore event: %w", err)
 	}
 	return nil

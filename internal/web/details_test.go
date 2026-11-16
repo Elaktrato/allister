@@ -47,7 +47,7 @@ func (e *env) manualAnimeItem(t *testing.T, cover string) int64 {
 		Titles:   []plugin.Title{{Lang: "ja-latn", Text: "Old Name"}, {Lang: "en", Text: "Old EN"}},
 		Fields:   map[string]plugin.FieldValue{"type": {Text: "TV"}, "episodes": {Num: num(12)}},
 		CoverURL: cover}}
-	return e.addFixture(t, "anime", "anime", d, library.Entry{Status: library.Active, Rating: ip(8), Comment: "keep",
+	return e.addFixture(t, "anime", "anime", d, library.Entry{Status: library.Active, Rating: ip(8), Notes: "keep",
 		Progress: map[string]float64{"episode": 3}}, library.WithSyncState("done"))
 }
 

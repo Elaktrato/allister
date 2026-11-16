@@ -140,9 +140,9 @@ func itemMeta(ctx context.Context, tx *sql.Tx, itemID int64) (pluginID, kind str
 }
 
 // Increment adds 1 to the item's primary progress (the kind's
-// Progress.PrimaryKey, a count or pages track) with one atomic upsert: the
-// row is created at 1 when absent, and the value never rises above the total
-// when the item has one (a no-op at the total). A planned entry becomes
+// Progress.PrimaryKey, a count or pages track) of the display run with one
+// atomic upsert: the row is created at 1 when absent, and the value never
+// rises above the total when the item has one (a no-op at the total). A planned entry becomes
 // active — bumping progress means the user started it — every other status
 // stays. The move is recorded in the event log (a progress event and a status
 // event when the status changed); a no-op writes none. It returns ErrNoEntry
@@ -171,16 +171,20 @@ func (l *Library) Increment(ctx context.Context, itemID int64) error {
 	if key == "" || !ok || !slices.Contains(active, key) || (pd.Type != plugin.Count && pd.Type != plugin.Pages) {
 		return nil
 	}
+	runID, err := displayRunTx(ctx, tx, itemID)
+	if err != nil {
+		return err
+	}
 	// the old values are the baseline of the events logged below
-	oldStatus, oldVal, err := incrementPoint(ctx, tx, itemID, key)
+	oldStatus, oldVal, err := incrementPoint(ctx, tx, runID, key)
 	if err != nil {
 		return err
 	}
 	const total = `(SELECT f.num FROM item_fields f WHERE f.item_id = ?1 AND f.key = ?3 AND f.num > 0 ORDER BY f.seq LIMIT 1)`
-	res, err := tx.ExecContext(ctx, `INSERT INTO `+tableEntryProgress+`(item_id, key, value)
-		SELECT ?1, ?2, 1 WHERE `+total+` IS NULL OR `+total+` >= 1
-		ON CONFLICT(item_id, key) DO UPDATE SET value = value + 1
-		WHERE `+total+` IS NULL OR value < `+total, itemID, key, pd.TotalField)
+	res, err := tx.ExecContext(ctx, `INSERT INTO `+tableRunProgress+`(run_id, key, value)
+		SELECT ?4, ?2, 1 WHERE `+total+` IS NULL OR `+total+` >= 1
+		ON CONFLICT(run_id, key) DO UPDATE SET value = value + 1
+		WHERE `+total+` IS NULL OR value < `+total, itemID, key, pd.TotalField, runID)
 	if err != nil {
 		return fmt.Errorf("increment progress: %w", err)
 	}
@@ -194,27 +198,30 @@ func (l *Library) Increment(ctx context.Context, itemID int64) error {
 			if !pd.ResetOnPrimary || pd.Key == key || !slices.Contains(active, pd.Key) {
 				continue
 			}
-			if _, err := tx.ExecContext(ctx, `DELETE FROM `+tableEntryProgress+` WHERE item_id = ? AND key = ?`,
-				itemID, pd.Key); err != nil {
+			if _, err := tx.ExecContext(ctx, `DELETE FROM `+tableRunProgress+` WHERE run_id = ? AND key = ?`,
+				runID, pd.Key); err != nil {
 				return fmt.Errorf("increment progress: reset %s: %w", pd.Key, err)
 			}
 		}
 		// a planned entry starts when its progress moves
-		if _, err := tx.ExecContext(ctx, `UPDATE `+tableEntries+` SET status = CASE status WHEN ? THEN ? ELSE status END,
-			updated_at = `+nowSQL+` WHERE item_id = ?`, string(Planned), string(Active), itemID); err != nil {
+		if _, err := tx.ExecContext(ctx, `UPDATE `+tableRuns+` SET status = CASE status WHEN ? THEN ? ELSE status END,
+			updated_at = `+nowSQL+` WHERE id = ?`, string(Planned), string(Active), runID); err != nil {
 			return fmt.Errorf("increment progress: %w", err)
 		}
-		newStatus, newVal, err := incrementPoint(ctx, tx, itemID, key)
+		if err := refreshDisplayRun(ctx, tx, itemID); err != nil {
+			return err
+		}
+		newStatus, newVal, err := incrementPoint(ctx, tx, runID, key)
 		if err != nil {
 			return err
 		}
 		if newVal > oldVal {
-			if err := insertEvent(ctx, tx, itemID, eventProgress, key, &oldVal, &newVal, "", "", OriginManual); err != nil {
+			if err := insertEvent(ctx, tx, itemID, runID, eventProgress, key, &oldVal, &newVal, "", "", OriginManual); err != nil {
 				return err
 			}
 		}
 		if newStatus != oldStatus {
-			if err := insertEvent(ctx, tx, itemID, eventStatus, "", nil, nil, oldStatus, newStatus, OriginManual); err != nil {
+			if err := insertEvent(ctx, tx, itemID, runID, eventStatus, "", nil, nil, oldStatus, newStatus, OriginManual); err != nil {
 				return err
 			}
 		}
@@ -225,13 +232,13 @@ func (l *Library) Increment(ctx context.Context, itemID int64) error {
 	return nil
 }
 
-// incrementPoint reads the entry's status and the value of one progress track
-// inside tx; an absent value counts as 0.
-func incrementPoint(ctx context.Context, tx *sql.Tx, itemID int64, key string) (status string, value float64, err error) {
-	if err := tx.QueryRowContext(ctx, `SELECT status FROM `+tableEntries+` WHERE item_id = ?`, itemID).Scan(&status); err != nil {
+// incrementPoint reads a run's status and the value of one of its progress
+// tracks inside tx; an absent value counts as 0.
+func incrementPoint(ctx context.Context, tx *sql.Tx, runID int64, key string) (status string, value float64, err error) {
+	if err := tx.QueryRowContext(ctx, `SELECT status FROM `+tableRuns+` WHERE id = ?`, runID).Scan(&status); err != nil {
 		return "", 0, fmt.Errorf("increment progress: %w", err)
 	}
-	err = tx.QueryRowContext(ctx, `SELECT value FROM `+tableEntryProgress+` WHERE item_id = ? AND key = ?`, itemID, key).Scan(&value)
+	err = tx.QueryRowContext(ctx, `SELECT value FROM `+tableRunProgress+` WHERE run_id = ? AND key = ?`, runID, key).Scan(&value)
 	if errors.Is(err, sql.ErrNoRows) {
 		return status, 0, nil
 	}
@@ -314,9 +321,9 @@ func (l *Library) SetActiveProgress(ctx context.Context, itemID int64, keys []st
 	return nil
 }
 
-// ClearProgress deletes the stored values of the given keys (active or
-// retained). Absent keys are fine. It returns ErrNoEntry when the item has no
-// entry.
+// ClearProgress deletes the display run's stored values of the given keys
+// (active or retained). Absent keys are fine. It returns ErrNoEntry when the
+// item has no entry.
 func (l *Library) ClearProgress(ctx context.Context, itemID int64, keys ...string) error {
 	tx, err := l.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -328,16 +335,23 @@ func (l *Library) ClearProgress(ctx context.Context, itemID int64, keys ...strin
 	} else if !hasEntry {
 		return ErrNoEntry
 	}
+	runID, err := displayRunTx(ctx, tx, itemID)
+	if err != nil {
+		return err
+	}
 	for _, k := range keys {
 		if strings.TrimSpace(k) == "" {
 			return invalid("a progress key must not be empty")
 		}
-		if _, err := tx.ExecContext(ctx, `DELETE FROM `+tableEntryProgress+` WHERE item_id = ? AND key = ?`, itemID, k); err != nil {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM `+tableRunProgress+` WHERE run_id = ? AND key = ?`, runID, k); err != nil {
 			return fmt.Errorf("clear progress: %w", err)
 		}
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE `+tableEntries+` SET updated_at = `+nowSQL+` WHERE item_id = ?`, itemID); err != nil {
+	if _, err := tx.ExecContext(ctx, `UPDATE `+tableRuns+` SET updated_at = `+nowSQL+` WHERE id = ?`, runID); err != nil {
 		return fmt.Errorf("clear progress: %w", err)
+	}
+	if err := refreshDisplayRun(ctx, tx, itemID); err != nil {
+		return err
 	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("clear progress: %w", err)
@@ -428,12 +442,12 @@ func (l *Library) ItemPluginID(ctx context.Context, id int64) (string, error) {
 	return p, nil
 }
 
-// StoredProgress returns every stored progress value of the item: the
-// active ones and those retained for keys that are not active (see
+// StoredProgress returns every stored progress value of the item's display
+// run: the active ones and those retained for keys that are not active (see
 // SetActiveProgress). An unknown item or one without values yields an empty
 // map. The edit dialog shows retained values next to their inactive tracks.
 func (l *Library) StoredProgress(ctx context.Context, itemID int64) (map[string]float64, error) {
-	rows, err := l.db.QueryContext(ctx, `SELECT key, value FROM `+tableEntryProgress+` WHERE item_id = ?`, itemID)
+	rows, err := l.db.QueryContext(ctx, `SELECT key, value FROM `+viewDisplayProgress+` WHERE item_id = ?`, itemID)
 	if err != nil {
 		return nil, fmt.Errorf("stored progress: %w", err)
 	}

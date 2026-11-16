@@ -241,7 +241,7 @@ func statusLabel(k plugin.KindDef, st library.Status) string {
 }
 
 func entrySummary(k plugin.KindDef, it *library.Item, e *library.Entry) *entryView {
-	v := &entryView{Status: statusLabel(k, e.Status), Rating: "–", Comment: e.Comment,
+	v := &entryView{Status: statusLabel(k, e.Status), Rating: "–", Comment: e.Notes,
 		EditURL: "/list/" + strconv.FormatInt(it.ID, 10) + "/edit"}
 	if e.Rating != nil {
 		v.Rating = strconv.Itoa(*e.Rating)

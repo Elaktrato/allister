@@ -97,9 +97,9 @@ func (l *Library) ConvertToSource(ctx context.Context, itemID int64, d plugin.It
 	return nil
 }
 
-// clampProgress lowers stored progress values (active or retained) that are
-// above the total of their track in item, and bumps the entry's updated_at
-// only when a value changed.
+// clampProgress lowers stored progress values (active or retained, of every
+// run) that are above the total of their track in item, and bumps the
+// entry's updated_at only when a value changed.
 func clampProgress(ctx context.Context, tx *sql.Tx, itemID int64, kind plugin.KindDef, item *Item) error {
 	var changed int64
 	for _, def := range kind.Progress.Eligible {
@@ -107,7 +107,8 @@ func clampProgress(ctx context.Context, tx *sql.Tx, itemID int64, kind plugin.Ki
 		if !bounded {
 			continue
 		}
-		res, err := tx.ExecContext(ctx, `UPDATE `+tableEntryProgress+` SET value = ? WHERE item_id = ? AND key = ? AND value > ?`,
+		res, err := tx.ExecContext(ctx, `UPDATE `+tableRunProgress+` SET value = ?
+			WHERE run_id IN (SELECT id FROM `+tableRuns+` WHERE item_id = ?) AND key = ? AND value > ?`,
 			total, itemID, def.Key, total)
 		if err != nil {
 			return fmt.Errorf("clamp progress: %w", err)
