@@ -79,6 +79,19 @@ func (l *Library) ApplyChanges(ctx context.Context, itemID int64, in plugin.Item
 		return nil, fmt.Errorf("apply changes: %w", err)
 	}
 	defer tx.Rollback()
+	applied, err := l.applyChangesTx(ctx, tx, itemID, in, credits, withCredits, keys)
+	if err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("apply changes: %w", err)
+	}
+	return applied, nil
+}
+
+// applyChangesTx is ApplyChanges inside tx (a merge applies the other item's
+// data in its own transaction).
+func (l *Library) applyChangesTx(ctx context.Context, tx *sql.Tx, itemID int64, in plugin.ItemData, credits []plugin.Credit, withCredits bool, keys []string) ([]string, error) {
 	def, parts, err := l.changeParts(ctx, tx, itemID, in, credits, withCredits)
 	if err != nil {
 		return nil, err
@@ -115,9 +128,6 @@ func (l *Library) ApplyChanges(ctx context.Context, itemID int64, in plugin.Item
 		if _, err := tx.ExecContext(ctx, `UPDATE items SET updated_at = `+nowSQL+` WHERE id = ?`, itemID); err != nil {
 			return nil, fmt.Errorf("apply changes: %w", err)
 		}
-	}
-	if err := tx.Commit(); err != nil {
-		return nil, fmt.Errorf("apply changes: %w", err)
 	}
 	applied := make([]string, len(todo))
 	for i, p := range todo {

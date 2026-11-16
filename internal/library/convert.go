@@ -56,13 +56,10 @@ func (l *Library) ConvertToSource(ctx context.Context, itemID int64, d plugin.It
 	if p.source == manualSource {
 		return invalid("the match target needs a source other than manual")
 	}
-	var existing int64
-	switch err := tx.QueryRowContext(ctx, `SELECT id FROM items WHERE plugin_id = ? AND kind = ? AND source = ? AND source_id = ?`,
-		pluginID, kindKey, p.source, p.sourceID).Scan(&existing); {
-	case err == nil:
-		return &AlreadySavedError{ExistingID: existing}
-	case !errors.Is(err, sql.ErrNoRows):
+	if existing, err := identityOwner(ctx, tx, pluginID, kindKey, p.source, p.sourceID); err != nil {
 		return fmt.Errorf("convert item: %w", err)
+	} else if existing != 0 {
+		return &AlreadySavedError{ExistingID: existing}
 	}
 
 	if _, err := tx.ExecContext(ctx, `UPDATE items SET source = ?, source_id = ?, cover_path = ?, cover_source = '', external_url = ?,
