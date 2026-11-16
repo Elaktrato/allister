@@ -47,28 +47,16 @@ const notesDivider = "\n\n---\n\n"
 //     external URL when the survivor has none) instead, and no alias is
 //     kept.
 func (l *Library) MergeItems(ctx context.Context, keepID, otherID int64, keys []string) error {
-	if keepID == otherID {
-		return invalid("an item cannot be merged with itself")
-	}
 	tx, err := l.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("merge items: %w", err)
 	}
 	defer tx.Rollback()
-	keep, err := loadItem(ctx, tx, `id = ?`, keepID)
+	p, err := loadMergePair(ctx, tx, keepID, otherID)
 	if err != nil {
 		return err
 	}
-	other, in, credits, err := itemDataTx(ctx, tx, otherID)
-	if err != nil {
-		return err
-	}
-	switch {
-	case keep == nil || other == nil:
-		return invalid("unknown item")
-	case keep.PluginID != other.PluginID || keep.Kind != other.Kind:
-		return invalid("only items of the same kind can be merged")
-	}
+	keep, other, in, credits := p.keep, p.other, p.in, p.credits
 	if err := mergeEntry(ctx, tx, keepID, otherID); err != nil {
 		return err
 	}
@@ -99,23 +87,72 @@ func (l *Library) MergeItems(ctx context.Context, keepID, otherID int64, keys []
 			return fmt.Errorf("merge items: list: %w", err)
 		}
 	}
-	source := keep.Source
 	if takeOver {
 		// the other item is gone: its identity is free for the survivor
-		source = other.Source
 		if _, err := tx.ExecContext(ctx, `UPDATE items SET source = ?, source_id = ?,
 			external_url = CASE WHEN external_url = '' THEN ? ELSE external_url END, updated_at = `+nowSQL+` WHERE id = ?`,
 			other.Source, other.SourceID, other.ExternalURL, keepID); err != nil {
 			return fmt.Errorf("merge items: source link: %w", err)
 		}
 	}
-	if _, err := l.applyChangesTx(ctx, tx, keepID, in, credits, source == other.Source, keys); err != nil {
+	if _, err := l.applyChangesTx(ctx, tx, keepID, in, credits, p.withCredits(), keys); err != nil {
 		return err
 	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("merge items: %w", err)
 	}
 	return nil
+}
+
+// MergeChanges returns the parts of the other item's data that differ from
+// the survivor's: the choices MergeItems offers for the same pair (its keys),
+// credits only when MergeItems would compare them. It changes nothing and
+// refuses the pairs MergeItems refuses (ErrInvalid).
+func (l *Library) MergeChanges(ctx context.Context, keepID, otherID int64) ([]Change, error) {
+	p, err := loadMergePair(ctx, l.db, keepID, otherID)
+	if err != nil {
+		return nil, err
+	}
+	return l.ItemChanges(ctx, keepID, p.in, p.credits, p.withCredits())
+}
+
+// mergePair is the survivor and the other item of a merge, with the other
+// item as incoming data.
+type mergePair struct {
+	keep, other *Item
+	in          plugin.ItemData
+	credits     []plugin.Credit
+}
+
+// withCredits: the survivor's people come from the other item's source
+// after the merge (the same source, or a manual survivor that takes the
+// other's source link), so a person id means the same to both.
+func (p mergePair) withCredits() bool {
+	return p.keep.Source == p.other.Source || (p.keep.Source == manualSource && p.other.Source != manualSource)
+}
+
+// loadMergePair reads both items through q and refuses what cannot be
+// merged: the same item, an unknown one, or items of another plugin or kind
+// (ErrInvalid).
+func loadMergePair(ctx context.Context, q queryer, keepID, otherID int64) (mergePair, error) {
+	if keepID == otherID {
+		return mergePair{}, invalid("an item cannot be merged with itself")
+	}
+	keep, err := loadItem(ctx, q, `id = ?`, keepID)
+	if err != nil {
+		return mergePair{}, err
+	}
+	other, in, credits, err := itemDataTx(ctx, q, otherID)
+	if err != nil {
+		return mergePair{}, err
+	}
+	switch {
+	case keep == nil || other == nil:
+		return mergePair{}, invalid("unknown item")
+	case keep.PluginID != other.PluginID || keep.Kind != other.Kind:
+		return mergePair{}, invalid("only items of the same kind can be merged")
+	}
+	return mergePair{keep: keep, other: other, in: in, credits: credits}, nil
 }
 
 // itemDataTx reads the item through q as incoming data for ApplyChanges:

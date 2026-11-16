@@ -22,13 +22,15 @@ import (
 // changesView is the comparison page. Title is the heading, Action the URL
 // "Apply selected" posts the ticked keys to, Return the page "Cancel" goes
 // back to. Source names the incoming side ("From <Source>", "up to date
-// with <Source>"). Empty: nothing differs (no form).
+// with <Source>"). Empty: nothing differs (no form, except for a merge).
+// Merge is set on the merge page (merge.go).
 type changesView struct {
 	Title, Action string
 	Rows          []changeRow
 	Empty         bool
 	Return        string
 	Source        string
+	Merge         *mergeView
 }
 
 // changeRow is one differing part. Stored and Incoming are display texts;

@@ -66,6 +66,9 @@ func (s *server) coreRoutes(pluginID string) routeSet {
 		reg.Handle("POST /bulk", func(w http.ResponseWriter, r *http.Request) { s.postBulk(w, r, pluginID) })
 		reg.Handle("GET /duplicates", func(w http.ResponseWriter, r *http.Request) { s.getDuplicates(w, r, pluginID) })
 		reg.Handle("POST /duplicates/dismiss", func(w http.ResponseWriter, r *http.Request) { s.postDuplicateDismiss(w, r, pluginID) })
+		reg.Handle("GET /merge", func(w http.ResponseWriter, r *http.Request) { s.getMerge(w, r, pluginID) })
+		reg.Handle("POST /merge", func(w http.ResponseWriter, r *http.Request) { s.postMerge(w, r, pluginID) })
+		reg.Handle("GET /merge/pick", func(w http.ResponseWriter, r *http.Request) { s.getMergePick(w, r, pluginID) })
 		s.seriesRoutes(reg, pluginID)
 	}
 }
@@ -208,6 +211,11 @@ func (s *server) showItem(w http.ResponseWriter, r *http.Request, ref itemRef, x
 		http.Redirect(w, r, itemURL(m, ref.Source, li.canonicalID, ref.Kind), http.StatusFound)
 		return
 	}
+	if it := li.saved; x.CanonicalRedirect && it != nil && (it.Source != ref.Source || it.SourceID != ref.ID) {
+		// an alias of a merged item: the survivor's own URL
+		http.Redirect(w, r, itemURL(m, it.Source, it.SourceID, it.Kind), http.StatusFound)
+		return
+	}
 	v, err := s.itemView(r.Context(), li)
 	if err != nil {
 		s.internalError(w, r, err)
@@ -222,6 +230,9 @@ func (s *server) showItem(w http.ResponseWriter, r *http.Request, ref itemRef, x
 			v.UpdateNotice = "The entry was added to your list, but could not be put into the series."
 		case noticeListAttach:
 			v.UpdateNotice = "The entry was added to your list, but could not be put into the custom list."
+		}
+		if n := mergedNotice(r); n != "" {
+			v.UpdateNotice = n
 		}
 	}
 	if x.Dialog != nil {

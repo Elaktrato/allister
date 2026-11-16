@@ -20,6 +20,7 @@ import (
 // duplicateSide is one item of a pair.
 type duplicateSide struct {
 	Title, Href, Cover, Source, Status string
+	manual                             bool
 }
 
 // duplicateRow is one pair with the reason text and its two actions.
@@ -80,7 +81,7 @@ func (s *server) duplicateSideOf(r *http.Request, m plugin.Manifest, id int64) (
 		title = "(untitled)"
 	}
 	sd := duplicateSide{Title: title, Href: itemURL(m, it.Source, it.SourceID, it.Kind), Cover: covers.Src(it.CoverPath),
-		Source: "Added by hand", Status: "not in your library"}
+		Source: "Added by hand", Status: "not in your library", manual: it.Source == manualSource}
 	if it.Source != manualSource {
 		sd.Source = sourceName(m, it.Source)
 	}
@@ -115,7 +116,7 @@ func (s *server) getDuplicates(w http.ResponseWriter, r *http.Request, pluginID 
 			if b, _, err = s.duplicateSideOf(r, m, p.B); err == nil {
 				ida, idb := strconv.FormatInt(p.A, 10), strconv.FormatInt(p.B, 10)
 				v.Rows = append(v.Rows, duplicateRow{A: a, B: b, AID: ida, BID: idb, Reason: duplicateReason(m, k, p.Reason),
-					MergeURL: "/" + url.PathEscape(pluginID) + "/merge?" + url.Values{"keep": {ida}, "other": {idb}}.Encode()})
+					MergeURL: mergeURL(pluginID, p.A, p.B, a.manual, b.manual)})
 			}
 		}
 		if err != nil {

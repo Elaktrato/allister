@@ -9,6 +9,7 @@ How a release is cut: move the entries under "Unreleased" to a new `## vX.Y.Z - 
 ### Added
 
 - **Bulk edit in every list.** Tick rows or cards (or the whole page, or every entry the current filter matches) and set their status, add them to a custom list or a series, add or remove own tags, or remove them from your library in one step. A confirmation names the count first and asks again if it changed; afterwards the list says how many changed and why any were skipped. Bulk changes do not count as activity in the statistics heatmap.
+- **Duplicates and merge.** Each plugin's list links to its possible duplicates (items sharing an id such as an ISBN, or the same title and year) when there are any; hide a pair with "Not a duplicate". "Compare & merge" there, or "Merge with…" on an item page, shows both items side by side: tick which details to take from the other item, then merge. Runs, notes, own tags, custom lists and the series place move to the item you keep, the other is removed, and adding or importing it again finds the kept item.
 
 ## v0.4.0 - 2026-11-16
 

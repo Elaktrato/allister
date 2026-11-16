@@ -54,6 +54,9 @@
     {{if .UpdateURL}}
     <a href="{{.UpdateURL}}" class="block rounded border border-slate-700 px-4 py-2 text-center text-sm hover:bg-slate-800">{{.UpdateLabel}}</a>
     {{end}}
+    {{if .MergeURL}}
+    <a href="{{.MergeURL}}" class="block rounded border border-slate-700 px-4 py-2 text-center text-sm hover:bg-slate-800">Merge with…</a>
+    {{end}}
   </aside>
   <div class="min-w-0 space-y-6">
     <div>
