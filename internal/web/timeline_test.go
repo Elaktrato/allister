@@ -108,3 +108,16 @@ func TestItemPageLoadsTheTimelineLazily(t *testing.T) {
 	mustContain(t, body, `hx-get="`+runTimelineURL(id, run)+`"`, `hx-trigger="toggle once"`, "Timeline")
 	mustNotContain(t, body, "Nothing was logged")
 }
+
+// Without JavaScript the collapsed timeline offers a link to its fragment
+// instead of staying "Loading…".
+func TestTimelineNoscriptLink(t *testing.T) {
+	e := newFixtureEnv(t)
+	id := e.addFixture(t, "tv", "show", tvShow("1", "Linked"), library.Entry{Status: library.Active})
+	u := runTimelineURL(id, e.runsOf(t, id)[0])
+	b := e.get("/tv/tvdata/1").Body.String()
+	mustContain(t, b, `<noscript><a href="`+u+`"`)
+	if rec := e.do("GET", u, nil, false); rec.Code != 200 {
+		t.Fatalf("timeline without htmx: %d", rec.Code)
+	}
+}
