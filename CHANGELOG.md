@@ -6,9 +6,11 @@ How a release is cut: move the entries under "Unreleased" to a new `## vX.Y.Z - 
 
 ## Unreleased
 
+## v0.4.0 - 2026-11-16
+
 ### Added
 
-- **Runs and Start again.** Every entry keeps each viewing, reading or playthrough as a run with its own status, rating, review, progress and dates. "Start again" (Rewatch, Reread, Replay, in each plugin's own words) begins a new run, and moving a completed entry back in the Edit dialog asks "<Action> instead?" first. A repeat shows a marker while active and "x2" once finished twice; a repeat you drop leaves the entry showing its last completed run. Earlier runs can only be completed or dropped, and edited or deleted from the run history. Statistics count every run.
+- **Runs and Start again.** Every entry keeps each viewing, reading or playthrough as a run with its own status, rating, review, progress and dates. "Start again" (Rewatch, Reread, Replay, in each plugin's own words) begins a new run, and moving a completed entry back in the Edit dialog first asks whether to start a new run (Rewatch, ...) or correct the current one. A repeat shows a marker while active and "x2" once finished twice; a repeat you drop leaves the entry showing its last completed run. Earlier runs can only be completed or dropped, and edited or deleted from the run history. Statistics count every run.
 - **Run timeline.** Each run in an entry's history has a collapsed, read-only timeline of its logged changes (progress steps and jumps, status and rating changes) with times in your time zone; imported and restored changes are marked. Plugins can declare an optional plural track label (`label_plural`).
 - **Notes, reviews and unit notes.** The Edit dialog holds the entry's notes and the review of the current run (10,000 characters each; past runs' reviews are edited in the run history). Add a short note to a single unit (an episode, a page, ...) from a run's timeline or from the "Note on ..." link after a +1; notes show in the timeline at their unit. Notes and reviews take simple formatting: bold, italic, lists, https links and spoilers that stay hidden until clicked.
 - **Own tags.** Label entries of any plugin with your own tags ("comfort", "with-partner") in the Edit dialog, with suggestions from your existing tags. Filter every list by them (any or all, `ut` / `ut_all=1`), show them as a table column, see them on the item page, and rename, merge or delete them under Settings > Tags. Names ignore case, also beyond ASCII.
