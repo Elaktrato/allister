@@ -143,7 +143,7 @@ func (l *Library) loadPastRuns(ctx context.Context, rows []Row) error {
 			byItem[chunk[i].Item.ID] = &chunk[i]
 		}
 		in := `r.item_id IN (` + placeholders(len(ids)) + `)`
-		rrows, err := l.db.QueryContext(ctx, `SELECT r.item_id, `+runCols+` FROM `+tableRuns+` r WHERE `+in+` ORDER BY r.item_id, r.number DESC`, ids...)
+		rrows, err := l.db.QueryContext(ctx, `SELECT r.item_id, `+runCols+` FROM `+tableRuns+` r WHERE `+in+` ORDER BY r.item_id, r.number DESC`, ids...) //nolint:gosec // G202: constant SQL and placeholders; values are bound
 		if err != nil {
 			return fmt.Errorf("load past runs: %w", err)
 		}
@@ -186,6 +186,7 @@ func (l *Library) loadPastRuns(ctx context.Context, rows []Row) error {
 		if len(index) == 0 {
 			continue
 		}
+		//nolint:gosec // G202: constant SQL and placeholders; values are bound
 		prows, err := l.db.QueryContext(ctx, `SELECT r.item_id, p.run_id, p.key, p.value FROM `+tableRunProgress+` p
 			JOIN `+tableRuns+` r ON r.id = p.run_id WHERE `+in, ids...)
 		if err != nil {

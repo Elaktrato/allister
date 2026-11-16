@@ -195,6 +195,7 @@ func exportDay(ns sql.NullString) (*time.Time, error) {
 // exportRuns fills the runs of the exported entries, oldest first, with every
 // stored progress value of each run.
 func (l *Library) exportRuns(ctx context.Context, from string, args []any, out []plugin.ExportEntry, byID map[int64]int) error {
+	//nolint:gosec // G202: from is constant SQL of this package; values are bound
 	rows, err := l.db.QueryContext(ctx, `SELECT r.item_id, r.id, r.number, r.status, r.rating, r.review, r.started_on, r.finished_on
 		FROM `+tableRuns+` r WHERE r.item_id IN (SELECT i.id`+from+`) ORDER BY r.item_id, r.number`, args...)
 	if err != nil {
@@ -233,6 +234,7 @@ func (l *Library) exportRuns(ctx context.Context, from string, args []any, out [
 	if err := closeRows(rows); err != nil {
 		return fmt.Errorf("export runs: %w", err)
 	}
+	//nolint:gosec // G202: from is constant SQL of this package; values are bound
 	prows, err := l.db.QueryContext(ctx, `SELECT p.run_id, p.key, p.value FROM `+tableRunProgress+` p JOIN `+tableRuns+` r ON r.id = p.run_id
 		WHERE r.item_id IN (SELECT i.id`+from+`)`, args...)
 	if err != nil {

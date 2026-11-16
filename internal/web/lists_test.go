@@ -3,6 +3,7 @@ package web
 import (
 	"html"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"reflect"
 	"strconv"
@@ -127,11 +128,11 @@ func TestCustomListManualOrder(t *testing.T) {
 	b := e.addFixture(t, "book", "book", bookItem("1", "B"), library.Entry{Status: library.Planned})
 	c := e.addFixture(t, "tv", "show", tvShow("2", "C"), library.Entry{Status: library.Planned})
 	e.joinList(t, id, c, a, b)
-	move := func(item int64, dir string) *http.Response {
-		return e.do("POST", listPath(id)+"/items/"+idStr(item)+"/move", url.Values{"dir": {dir}}, false).Result()
+	move := func(item int64, dir string) *httptest.ResponseRecorder {
+		return e.do("POST", listPath(id)+"/items/"+idStr(item)+"/move", url.Values{"dir": {dir}}, false)
 	}
-	if res := move(a, "up"); res.StatusCode != http.StatusUnprocessableEntity {
-		t.Fatalf("move in a sorted list: %d", res.StatusCode)
+	if res := move(a, "up"); res.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("move in a sorted list: %d", res.Code)
 	}
 	if rec := e.do("POST", listPath(id), url.Values{"order": {"manual"}}, false); rec.Code != http.StatusSeeOther {
 		t.Fatalf("order: %d", rec.Code)
@@ -141,18 +142,18 @@ func TestCustomListManualOrder(t *testing.T) {
 		t.Fatalf("manual %q, want %q", got, want)
 	}
 	mustContain(t, body, `action="`+listPath(id)+"/items/"+idStr(a)+`/move"`, "Move up", "Move down", `href="`+listPath(id)+`?sort=position"`)
-	if res := move(b, "up"); res.StatusCode != http.StatusSeeOther || res.Header.Get("Location") != listPath(id) {
-		t.Fatalf("move: %d", res.StatusCode)
+	if res := move(b, "up"); res.Code != http.StatusSeeOther || res.Header().Get("Location") != listPath(id) {
+		t.Fatalf("move: %d", res.Code)
 	}
 	if got, want := cardTitles(e.get(listPath(id)).Body.String()), []string{"C", "B", "A"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("after move %q, want %q", got, want)
 	}
-	if res := move(b, "sideways"); res.StatusCode != http.StatusNotFound {
-		t.Fatalf("bad dir: %d", res.StatusCode)
+	if res := move(b, "sideways"); res.Code != http.StatusNotFound {
+		t.Fatalf("bad dir: %d", res.Code)
 	}
 	other := e.addFixture(t, "tv", "show", tvShow("3", "Other"), library.Entry{Status: library.Planned})
-	if res := move(other, "up"); res.StatusCode != http.StatusNotFound {
-		t.Fatalf("non-member: %d", res.StatusCode)
+	if res := move(other, "up"); res.Code != http.StatusNotFound {
+		t.Fatalf("non-member: %d", res.Code)
 	}
 	// remove from the list: the entry stays
 	if rec := e.do("POST", listPath(id)+"/items/"+idStr(c)+"/delete", url.Values{}, false); rec.Code != http.StatusSeeOther {
