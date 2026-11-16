@@ -669,9 +669,8 @@ type tagName struct{ name, key string }
 // or deletes anything. The item is validated with the same rules as SaveItem
 // (titles, fields, terms, external ids, relations, cover), SaveCredits and
 // entries (notes; per run status, rating, review, dates, progress of every
-// stored key: active keys like ValidateEntry, inactive ones must be eligible
-// and in range; run numbers 1..n where only the latest run may be other than
-// completed or dropped; unit notes as SetUnitNote; own tags as SetEntryTags),
+// stored key, see restoreRun; run numbers 1..n; unit notes as SetUnitNote
+// but not bounded by the total; own tags as SetEntryTags),
 // plus caps on titles, external ids and events and RFC 3339 time stamps.
 // Manual items additionally need their required fields (as ValidateItem),
 // and every credited person needs a name.
@@ -940,8 +939,9 @@ func (l *Library) restoreEntry(p *prepared, d plugin.ItemData, be BackupEntry) (
 	for i := len(orphans) - 1; i >= 0; i-- {
 		plan.events = append(plan.events, planEvent{run: -1, ev: orphans[i]})
 	}
+	display := displayRunIndex(runs)
 	for i, r := range runs {
-		rp, err := l.restoreRun(p, item, r, r.Number == len(runs))
+		rp, err := l.restoreRun(p, item, r, i == display)
 		if err != nil {
 			return nil, err
 		}
@@ -972,11 +972,30 @@ func (l *Library) restoreEntry(p *prepared, d plugin.ItemData, be BackupEntry) (
 	return plan, nil
 }
 
-// restoreRun validates one run: its state like ValidateEntry (a past run can
-// only be completed or dropped), the active keys' values like ValidateEntry,
-// the other stored values must be eligible progress of the kind and within
-// their bounds, its unit notes like SetUnitNote and its stamps.
-func (l *Library) restoreRun(p *prepared, item *Item, r BackupRun, latest bool) (runPlan, error) {
+// displayRunIndex applies refreshDisplayRun's rule to runs (in number
+// order): the latest run, except that a dropped repeat gives way to the
+// latest completed run.
+func displayRunIndex(runs []BackupRun) int {
+	last := len(runs) - 1
+	if runs[last].Number > 1 && runs[last].Status == Dropped {
+		for i := last - 1; i >= 0; i-- {
+			if runs[i].Status == Completed {
+				return i
+			}
+		}
+	}
+	return last
+}
+
+// restoreRun validates one run: its state like ValidateEntry, and its stored
+// progress values, which must be eligible progress of the kind. The display
+// run's values are checked against the item's totals (the active keys like
+// ValidateEntry); the other runs are stored as written, so their values are
+// bounded only by the largest value the library takes (a total can be
+// lowered after a run was finished). The status of a past run is not
+// checked either: the app can store any. Unit notes are checked like
+// SetUnitNote except for the total (see checkUnitNote), then the stamps.
+func (l *Library) restoreRun(p *prepared, item *Item, r BackupRun, display bool) (runPlan, error) {
 	at := fmt.Sprintf("run %d ", r.Number)
 	started, err := restoreDay(at+"started_on", r.StartedOn)
 	if err != nil {
@@ -993,7 +1012,7 @@ func (l *Library) restoreRun(p *prepared, item *Item, r BackupRun, latest bool) 
 	}
 	slices.Sort(keys)
 	for _, k := range keys {
-		if slices.Contains(p.progress, k) {
+		if display && slices.Contains(p.progress, k) {
 			active[k] = r.Progress[k]
 			continue
 		}
@@ -1002,6 +1021,9 @@ func (l *Library) restoreRun(p *prepared, item *Item, r BackupRun, latest bool) 
 			return runPlan{}, invalid("progress %q is not a progress of kind %q", truncateRunes(k, 40), p.def.Key)
 		}
 		total, bounded := progressBound(def, item)
+		if !display {
+			total, bounded = 0, false
+		}
 		if err := checkProgressValue(def, r.Progress[k], total, bounded); err != nil {
 			return runPlan{}, err
 		}
@@ -1009,9 +1031,6 @@ func (l *Library) restoreRun(p *prepared, item *Item, r BackupRun, latest bool) 
 	if err := l.ValidateEntry(p.def, item, Entry{Status: r.Status, Rating: r.Rating, Review: r.Review,
 		StartedOn: started, FinishedOn: finished, Progress: active}); err != nil {
 		return runPlan{}, err
-	}
-	if !latest && r.Status != Completed && r.Status != Dropped {
-		return runPlan{}, invalid("past run %d can only be completed or dropped, not %s", r.Number, r.Status)
 	}
 	rp := runPlan{run: r}
 	if rp.run.Progress == nil {
@@ -1025,7 +1044,7 @@ func (l *Library) restoreRun(p *prepared, item *Item, r BackupRun, latest bool) 
 	}
 	seen := map[string]bool{}
 	for _, n := range r.UnitNotes {
-		if err := checkUnitNote(p.def, item, n); err != nil {
+		if err := checkUnitNote(p.def, n); err != nil {
 			return runPlan{}, err
 		}
 		id := fmt.Sprintf("%s %d", n.ProgressKey, n.Unit)
@@ -1044,9 +1063,12 @@ func (l *Library) restoreRun(p *prepared, item *Item, r BackupRun, latest bool) 
 	return rp, nil
 }
 
-// checkUnitNote applies SetUnitNote's rules to a backed-up unit note; a
-// blank note (SetUnitNote deletes it) is refused.
-func checkUnitNote(kind plugin.KindDef, item *Item, n BackupUnitNote) error {
+// checkUnitNote applies SetUnitNote's rules to a backed-up unit note, except
+// the item's total: a note is stored as written even when the total was
+// lowered after it (a conversion clamps progress, never notes), so the unit
+// is bounded only by the largest value the library takes. A blank note
+// (SetUnitNote deletes it) is refused.
+func checkUnitNote(kind plugin.KindDef, n BackupUnitNote) error {
 	def, ok := progressDef(kind, n.ProgressKey)
 	if !ok {
 		return invalid("unit note progress %q is not a progress of kind %q", truncateRunes(n.ProgressKey, 40), kind.Key)
@@ -1059,9 +1081,6 @@ func checkUnitNote(kind plugin.KindDef, item *Item, n BackupUnitNote) error {
 	}
 	if float64(n.Unit) > maxProgressValue {
 		return invalid("the unit %d is too large", n.Unit)
-	}
-	if total, bounded := progressBound(def, item); bounded && float64(n.Unit) > total {
-		return invalid("the unit %d is above the total of %v", n.Unit, total)
 	}
 	if strings.TrimSpace(n.Body) == "" {
 		return invalid("a unit note is empty")

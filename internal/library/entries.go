@@ -158,8 +158,29 @@ func writeEntry(ctx context.Context, tx *sql.Tx, itemID int64, e Entry) error {
 	return err
 }
 
+// errPastDisplayRun refuses reopening a past display run: the completed run
+// shown behind a dropped repeat. Only the latest run may be planned, active
+// or paused (as UpdateRun keeps it); starting again makes a new run.
+var errPastDisplayRun = invalid("the shown run is an earlier run behind a dropped repeat: it can only be completed or dropped; start it again instead")
+
+// pastDisplayRun reports whether the item's display run is not its latest
+// run (a dropped repeat fell back to the latest completed run).
+func pastDisplayRun(ctx context.Context, q queryer, itemID int64) (bool, error) {
+	var past bool
+	err := q.QueryRowContext(ctx, `SELECT r.number < (SELECT MAX(l.number) FROM `+tableRuns+` l WHERE l.item_id = e.item_id)
+		FROM `+tableEntries+` e JOIN `+tableRuns+` r ON r.id = e.display_run_id WHERE e.item_id = ?`, itemID).Scan(&past)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("display run: %w", err)
+	}
+	return past, nil
+}
+
 // writeEntryMode is writeEntry; with createOnly an existing entry is left
-// untouched and created is false (nothing written).
+// untouched and created is false (nothing written). Setting a past display
+// run (see pastDisplayRun) to planned, active or paused is ErrInvalid.
 func writeEntryMode(ctx context.Context, tx *sql.Tx, itemID int64, e Entry, createOnly bool) (created bool, err error) {
 	started, _ := writtenDay(e.StartedOn)
 	finished, _ := writtenDay(e.FinishedOn)
@@ -194,6 +215,15 @@ func writeEntryMode(ctx context.Context, tx *sql.Tx, itemID int64, e Entry, crea
 	case createOnly:
 		return false, nil
 	default:
+		if e.Status != Completed && e.Status != Dropped {
+			past, err := pastDisplayRun(ctx, tx, itemID)
+			if err != nil {
+				return false, err
+			}
+			if past {
+				return false, errPastDisplayRun
+			}
+		}
 		if _, err := tx.ExecContext(ctx, `UPDATE `+tableEntries+` SET notes = ?, updated_at = `+nowSQL+` WHERE item_id = ?`,
 			e.Notes, itemID); err != nil {
 			return false, fmt.Errorf("save entry: %w", err)
@@ -263,7 +293,8 @@ func (l *Library) AddToList(ctx context.Context, pluginID, kind string, d plugin
 // review and dates, are replaced as a whole (a new entry gets run 1); the
 // display run's progress values are replaced only for the keys present in
 // e.Progress, other keys are left untouched (see ClearProgress). It returns ErrNoEntry for
-// an unknown item. The change is recorded in the event log; the option
+// an unknown item, and ErrInvalid when it would set a past display run (see
+// pastDisplayRun) to planned, active or paused. The change is recorded in the event log; the option
 // WithEventOrigin sets its origin (manual by default), and creating the entry
 // records nothing.
 func (l *Library) UpsertEntry(ctx context.Context, e Entry, opts ...EntryOption) error {
@@ -450,7 +481,8 @@ func (l *Library) RemoveEntry(ctx context.Context, itemID int64) error {
 
 // ApplyImport applies the three list fields of an import row - status,
 // rating and the primary progress value - to an existing entry's display run
-// (an import never starts a run) and bumps its updated_at. With a non-nil
+// (an import never starts a run; when the display run is a past run, see
+// pastDisplayRun, its status is kept) and bumps its updated_at. With a non-nil
 // newerThan it does nothing when the entry is not older than that source
 // modification time: the user's own later changes win. Everything else
 // (notes, review, dates, the other progress tracks) stays as it is. The
@@ -480,7 +512,12 @@ func (l *Library) ApplyImport(ctx context.Context, itemID int64, in Entry, newer
 	for k, v := range cur.Progress {
 		upd.Progress[k] = v
 	}
-	if in.Status != "" {
+	// an import never reopens a past display run: its status stays
+	past, err := pastDisplayRun(ctx, l.db, itemID)
+	if err != nil {
+		return false, err
+	}
+	if in.Status != "" && !past {
 		upd.Status = in.Status
 	}
 	if in.Rating != nil {
