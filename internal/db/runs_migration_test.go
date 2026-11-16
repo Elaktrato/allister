@@ -100,7 +100,7 @@ func TestRunsMigrationConvertsEntries(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer d.Close()
-	if v, err := goose.GetDBVersion(d); err != nil || v != latestVersion || latestVersion != 19 {
+	if v, err := goose.GetDBVersion(d); err != nil || v != latestVersion || latestVersion != 20 {
 		t.Fatalf("version = %d, %v", v, err)
 	}
 	for _, tbl := range []string{"entry_runs", "run_progress", "unit_notes", "user_tags", "entry_user_tags", "lists", "list_items"} {
