@@ -36,15 +36,15 @@ type BulkSkip struct {
 const reasonNotInLibrary = "not in your library"
 
 // MatchingIDs returns the id of every entry the list query q matches, in the
-// list's order (titles sorted as for no particular language), without
+// list's order for the title language lang (as List and Rows), without
 // paging: exactly the union of all pages. q.Page and q.PageSize are ignored.
-func (l *Library) MatchingIDs(ctx context.Context, q Query) ([]int64, error) {
+func (l *Library) MatchingIDs(ctx context.Context, q Query, lang string) ([]int64, error) {
 	c, err := l.compile(q)
 	if err != nil {
 		return nil, err
 	}
 	whereSQL, whereArgs := c.where()
-	order, orderArgs, err := c.orderBy(q.Sort, "")
+	order, orderArgs, err := c.orderBy(q.Sort, lang)
 	if err != nil {
 		return nil, err
 	}

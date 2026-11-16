@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/allister/allister/internal/plugin"
 )
 
 // skipFor returns the reason the item was skipped, or "" when it was not.
@@ -60,7 +62,7 @@ func TestMatchingIDsIsTheUnionOfAllPages(t *testing.T) {
 			}
 		}
 		q.Page = 3 // paging is ignored
-		got, err := e.lib.MatchingIDs(bg, q)
+		got, err := e.lib.MatchingIDs(bg, q, "")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -68,7 +70,7 @@ func TestMatchingIDsIsTheUnionOfAllPages(t *testing.T) {
 			t.Fatalf("MatchingIDs(%+v) = %v, want %v", q, got, want)
 		}
 	}
-	if _, err := e.lib.MatchingIDs(bg, Query{PluginID: "book", Kind: "book", Sort: Sort{Kind: "nope"}}); !errors.Is(err, ErrInvalid) {
+	if _, err := e.lib.MatchingIDs(bg, Query{PluginID: "book", Kind: "book", Sort: Sort{Kind: "nope"}}, ""); !errors.Is(err, ErrInvalid) {
 		t.Fatalf("bad sort err = %v", err)
 	}
 }
@@ -336,8 +338,45 @@ func TestBulkRemove(t *testing.T) {
 	if n := count(t, e.db, `SELECT count(*) FROM series`); n != 0 {
 		t.Fatalf("series left = %d", n)
 	}
-	ids, err := e.lib.MatchingIDs(bg, Query{PluginID: "book", Kind: "book"})
+	ids, err := e.lib.MatchingIDs(bg, Query{PluginID: "book", Kind: "book"}, "")
 	if err != nil || !slices.Equal(ids, []int64{c}) {
 		t.Fatalf("left = %v, %v", ids, err)
+	}
+}
+
+// Under a title sort MatchingIDs follows the preferred title language like
+// the list pages do.
+func TestMatchingIDsFollowsTheTitleLanguage(t *testing.T) {
+	e := newEnv(t)
+	for _, b := range []struct{ id, en, de string }{{"a", "Alpha", "Zeta"}, {"b", "Beta", "Anfang"}, {"c", "Gamma", "Mitte"}} {
+		d := bookWith(b.id, nil)
+		d.Titles = []plugin.Title{{Lang: "en", Text: b.en}, {Lang: "de", Text: b.de}}
+		if _, err := e.lib.AddToList(bg, "book", "book", d, Entry{Status: Active}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	q := Query{PluginID: "book", Kind: "book", Sort: Sort{Kind: SortTitle}}
+	pageIDs := func(lang string) []int64 {
+		rows, err := e.lib.Rows(bg, q, lang, -1, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var ids []int64
+		for _, r := range rows {
+			ids = append(ids, r.Item.ID)
+		}
+		return ids
+	}
+	if slices.Equal(pageIDs("de"), pageIDs("en")) {
+		t.Fatal("fixture: the language does not reorder the title sort")
+	}
+	for _, lang := range []string{"de", "en", ""} {
+		got, err := e.lib.MatchingIDs(bg, q, lang)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if want := pageIDs(lang); !slices.Equal(got, want) {
+			t.Fatalf("MatchingIDs(%q) = %v, want %v", lang, got, want)
+		}
 	}
 }
