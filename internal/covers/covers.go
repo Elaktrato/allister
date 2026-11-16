@@ -21,6 +21,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"syscall"
 	"time"
@@ -57,13 +58,26 @@ func Src(path string) string {
 	return "/covers/" + url.PathEscape(path)
 }
 
+// downloadURL is the only URL shape Download accepts: an http(s) scheme
+// (any case), a host with no userinfo (an "@" before the host can disguise
+// it) and no whitespace, then an optional path, query or fragment on one
+// line. It is the explicit request-forgery guard static analysis (CodeQL)
+// recognises; what keeps a download off loopback and the local network is
+// the default client's dialer check (refusePrivate), which it does not
+// replace.
+var downloadURL = regexp.MustCompile(`(?i)^https?://[^/?#@\s]+(?:[/?#].*)?$`)
+
 // Download fetches an image over http(s) into dir and returns its file name
 // (sha256 of the content plus an extension from Content-Type). A nil hc means
 // the default client: a 20s timeout, and connections (redirects included) only
 // to public addresses, so a typed URL cannot reach loopback or the local
 // network (ErrNotPublic). Content over MaxImageBytes is ErrTooLarge. No
-// partial file is left on error.
+// partial file is left on error. A URL outside the downloadURL shape (userinfo,
+// whitespace, a line break) is refused before any request is made.
 func Download(ctx context.Context, hc *http.Client, dir, rawURL string) (string, error) {
+	if !downloadURL.MatchString(rawURL) {
+		return "", fmt.Errorf("download cover: unsupported url %q", rawURL)
+	}
 	u, err := url.Parse(rawURL)
 	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
 		return "", fmt.Errorf("download cover: unsupported url %q", rawURL)

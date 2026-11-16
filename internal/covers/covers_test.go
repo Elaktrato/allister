@@ -136,6 +136,61 @@ func TestDownloadRejectsSchemes(t *testing.T) {
 	}
 }
 
+// TestDownloadRejectsMalformedURLs: Download accepts only the plain shape
+// http(s)://host[/path][?query][#fragment], so a URL with userinfo (which
+// can disguise the real host) or a line break is refused before any request
+// is made. The server must never be reached.
+func TestDownloadRejectsMalformedURLs(t *testing.T) {
+	hit := false
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		hit = true
+		w.Header().Set("Content-Type", "image/png")
+		_, _ = w.Write([]byte("png"))
+	}))
+	defer srv.Close()
+	host := strings.TrimPrefix(srv.URL, "http://")
+	for _, u := range []string{
+		"http://user:pass@" + host + "/a.png",
+		"http://@" + host + "/a.png",
+		"http://" + host + "/a.png\nX-Injected: 1",
+		"http://" + host + "\r/a.png",
+		"http:///a.png",
+		"http://" + host + " /a.png",
+		" http://" + host + "/a.png",
+	} {
+		if _, err := Download(context.Background(), plain, t.TempDir(), u); err == nil {
+			t.Errorf("%q accepted", u)
+		}
+	}
+	if hit {
+		t.Error("a malformed URL reached the server")
+	}
+}
+
+// TestDownloadAcceptsURLShapes: the shape check keeps every ordinary cover
+// URL: upper-case scheme, port, query, fragment, an @ in the path and an
+// IPv6 literal (the default client's dialer still judges the address).
+func TestDownloadAcceptsURLShapes(t *testing.T) {
+	srv := imageServer(t, "image/png", 200, []byte("png"))
+	host := strings.TrimPrefix(srv.URL, "http://")
+	for _, u := range []string{
+		srv.URL,
+		srv.URL + "/a.png",
+		"HTTP://" + host + "/a.png",
+		srv.URL + "/a.png?size=L&v=2",
+		srv.URL + "?x=1",
+		srv.URL + "/a.png#frag",
+		srv.URL + "/u/@name/a.png",
+	} {
+		if _, err := Download(context.Background(), plain, t.TempDir(), u); err != nil {
+			t.Errorf("%q: %v", u, err)
+		}
+	}
+	if !downloadURL.MatchString("https://[2001:db8::1]:8443/a.png") {
+		t.Error("IPv6 literal refused by the shape check")
+	}
+}
+
 func TestDownloadFollowsRedirect(t *testing.T) {
 	img := imageServer(t, "image/webp", 200, []byte("w"))
 	redir := httptest.NewServer(http.RedirectHandler(img.URL, http.StatusFound))

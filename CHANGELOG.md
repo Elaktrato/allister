@@ -6,6 +6,10 @@ How a release is cut: move the entries under "Unreleased" to a new `## vX.Y.Z - 
 
 ## Unreleased
 
+### Fixed
+
+- Cover downloads refuse a URL with userinfo (`user@host`), whitespace or a line break before making any request.
+
 ## v0.3.0 - 2026-11-15
 
 ### Added
