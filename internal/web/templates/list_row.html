@@ -10,6 +10,7 @@
       {{if .Series}}<a href="{{.SeriesHref}}" title="Part {{.SeriesPos}} of {{.Series}}" class="rounded bg-slate-800 px-2 py-0.5 text-indigo-300 hover:underline">{{.SeriesPos}} · {{.Series}}</a>{{end}}
       {{if .PartialSync}}<span title="Some details are still being downloaded in the background" class="rounded bg-slate-800 px-2 py-0.5 text-amber-300">partially synced</span>{{end}}
       {{if .Unmatched}}<span title="{{.UnmatchedHint}}" class="rounded bg-slate-800 px-2 py-0.5 text-sky-300">unmatched</span>{{end}}
+      {{template "repeat_badges" .}}
     </div>
   </td>
   {{range .Cells}}
@@ -44,3 +45,6 @@
   </td>
 </tr>
 {{end}}
+
+{{/* the repeat marker of an active repeat run and the repeat count "x<n>" */}}
+{{define "repeat_badges"}}{{with .RepeatMarker}}<span class="rounded bg-slate-800 px-2 py-0.5 text-indigo-300">{{.}}</span>{{end}}{{if ge .Repeats 2}}<span title="{{.RepeatsTitle}}" class="rounded bg-slate-800 px-2 py-0.5 text-slate-300">x{{.Repeats}}</span>{{end}}{{end}}

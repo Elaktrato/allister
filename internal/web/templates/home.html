@@ -48,7 +48,7 @@
   <h2 id="home-recent" class="mb-3 text-xl font-semibold">Recently updated</h2>
   <ul class="divide-y divide-slate-800 rounded border border-slate-800 bg-slate-900">
     {{range .Recent}}
-    <li class="flex items-center gap-3 px-3 py-2 text-sm"><span class="icon text-[1rem] text-slate-400" aria-hidden="true" title="{{.BadgeLabel}}">{{.BadgeIcon}}</span><a href="{{.Href}}" class="min-w-0 flex-1 truncate font-medium text-slate-100 hover:underline">{{.Title}}</a><span class="shrink-0 {{template "status_tone" .StatusKey}}">{{.Status}}</span><time datetime="{{.Updated}}" class="hidden shrink-0 text-slate-400 sm:inline">{{.Updated}}</time></li>
+    <li class="flex items-center gap-3 px-3 py-2 text-sm"><span class="icon text-[1rem] text-slate-400" aria-hidden="true" title="{{.BadgeLabel}}">{{.BadgeIcon}}</span><a href="{{.Href}}" class="min-w-0 flex-1 truncate font-medium text-slate-100 hover:underline">{{.Title}}</a>{{with .RepeatMarker}}<span class="shrink-0 rounded bg-slate-800 px-1.5 text-xs text-indigo-300">{{.}}</span>{{end}}<span class="shrink-0 {{template "status_tone" .StatusKey}}">{{.Status}}</span><time datetime="{{.Updated}}" class="hidden shrink-0 text-slate-400 sm:inline">{{.Updated}}</time></li>
     {{end}}
   </ul>
 </section>

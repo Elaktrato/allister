@@ -62,6 +62,7 @@ type homeSeries struct {
 type homeRecent struct {
 	Title, Href, Status, StatusKey, Updated string
 	BadgeIcon, BadgeLabel                   string
+	RepeatMarker                            string // an active repeat run's badge
 }
 
 // badge is the plugin icon and kind label shown on a home entry.
@@ -171,6 +172,7 @@ func (s *server) getHome(w http.ResponseWriter, r *http.Request) {
 		}
 		hr := homeRecent{Title: title, Href: itemURL(he.m, he.row.Item.Source, he.row.Item.SourceID, he.row.Item.Kind),
 			Status: statusLabel(he.k, he.row.Entry.Status), StatusKey: string(he.row.Entry.Status), BadgeIcon: icon, BadgeLabel: label}
+		hr.RepeatMarker, _, _ = repeatBadges(he.k, he.row.Entry)
 		if !he.row.Entry.UpdatedAt.IsZero() {
 			hr.Updated = he.row.Entry.UpdatedAt.Format("2006-01-02")
 		}

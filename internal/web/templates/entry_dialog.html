@@ -38,10 +38,24 @@
     <label class="block text-sm">Comment
       <textarea name="comment" rows="3" maxlength="10000" class="mt-1 w-full rounded border border-slate-700 bg-slate-950 px-3 py-2">{{.Comment}}</textarea>
     </label>
+    {{with .Ask}}
+    {{/* the confirm state: moving a completed run back. The plain "correct"
+          button comes first, so Enter keeps the edit as typed. */}}
+    <div class="space-y-1 rounded border border-indigo-500 bg-slate-950 p-3 text-sm" role="alert">
+      <p class="font-medium">This entry is {{.Completed}}.</p>
+      <p class="text-slate-300">Start a new run with these values ({{.Action}}), or correct the current one?</p>
+    </div>
+    <div class="flex flex-wrap justify-end gap-3">
+      <a href="{{$.CancelURL}}" data-dialog-close class="rounded px-4 py-2 hover:bg-slate-800">Cancel</a>
+      <button type="submit" name="run_choice" value="correct" class="rounded border border-slate-700 px-4 py-2 hover:bg-slate-800">No, correct this one</button>
+      <button type="submit" name="run_choice" value="new" class="rounded bg-indigo-600 px-4 py-2 font-medium hover:bg-indigo-500">{{.Action}} instead</button>
+    </div>
+    {{else}}
     <div class="flex justify-end gap-3">
       <a href="{{.CancelURL}}" data-dialog-close class="rounded px-4 py-2 hover:bg-slate-800">Cancel</a>
       <button type="submit" class="rounded bg-indigo-600 px-4 py-2 font-medium hover:bg-indigo-500">{{.Submit}}</button>
     </div>
+    {{end}}
   </form>
 </div>
 {{end}}
