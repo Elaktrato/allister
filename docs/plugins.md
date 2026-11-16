@@ -139,11 +139,11 @@ Progress types are a **closed core enum**: `count`, `pages`, `percent` and `dura
 
 ```go
 type ProgressDef struct {
-	Key        string       // unique within the kind
-	Type       ProgressType
-	Label      string       // "Episode", "Page", "Position"
-	LabelPlural string      // optional plural: "Episodes"
-	TotalField string       // optional: a number field holding the total
+	Key         string       // unique within the kind
+	Type        ProgressType
+	Label       string       // "Episode", "Page", "Position"
+	LabelPlural string       // optional plural: "Episodes"
+	TotalField  string       // optional: a number field holding the total
 }
 type ProgressSpec struct {
 	Eligible     []ProgressDef
@@ -156,11 +156,12 @@ type ProgressSpec struct {
 Rules enforced by `Validate`:
 
 - Each eligible key is unique, has a label and a known type. The same type may appear more than once under different keys (a TV kind: `count` Season, `count` Episode, `duration` Position).
-- `LabelPlural` is optional (single line, at most 40 characters; JSON `label_plural`). The run timeline uses it for ranges ("Episodes 5-7"); without it the core adds an "s" to `Label`.
 - `TotalField` must name a **number** field of the kind, and is not allowed on `percent`.
 - When anything is eligible, `Defaults` and at least one combination are required. Every key in them must be eligible and listed once, no combination may be empty, and `Defaults` must equal one of the combinations (as a set).
 - `PrimaryKey`, when set, must be an eligible `count` or `pages` track.
 - `ResetOnPrimary` is for a track that belongs to the release the +1 advances: the TV position is cleared when the episode increments. It is not set on the primary track.
+
+`LabelPlural` is optional data (JSON `label_plural`, not validated): the run timeline uses it for ranges ("Episodes 5-7"); without it the core adds an "s" to `Label`.
 
 Behaviour: an item starts with the default combination. The **entry dialog** (Edit on a list row or on the overview, route `/list/{id}/edit`) offers the allowed combinations when there is more than one, for example a book switching from pages to percent. Values of tracks that become inactive are kept and come back when the user switches again. Edit details does not change the combination. A bounded track cannot exceed its total. "Finished" means every active bounded track is at its total (percent at 100), "not started" means every active track is 0, and anything else is "in progress". The list's progress filter (`progress=not_started|in_progress|finished`) uses these rules. Setting the status to completed does not change progress. "+1" raises the primary track by one, capped at its total. It is hidden when there is no primary key or the primary track is not active.
 
