@@ -2,8 +2,10 @@ package library
 
 import (
 	"database/sql"
+	"errors"
 	"reflect"
 	"testing"
+	"time"
 )
 
 // runRow is one stored run with its progress, as the tests compare it.
@@ -357,5 +359,297 @@ func TestDisplayRunInvariant(t *testing.T) {
 	// c: run 3 dropped, the import completed the display run 2 and left run 3
 	if runs := runsOf(t, e, c); runs[1].Rating.Int64 != 5 || runs[2].Status != string(Dropped) {
 		t.Fatalf("c runs = %+v", runs)
+	}
+}
+
+// refresh recomputes the item's display run, for runs seeded straight into
+// the database.
+func refresh(t *testing.T, e *env, itemID int64) {
+	t.Helper()
+	tx, err := e.db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := refreshDisplayRun(bg, tx, itemID); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func mustRuns(t *testing.T, l *Library, itemID int64) []Run {
+	t.Helper()
+	runs, err := l.Runs(bg, itemID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return runs
+}
+
+func mustStartRun(t *testing.T, l *Library, itemID int64) Run {
+	t.Helper()
+	r, err := l.StartRun(bg, itemID, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return r
+}
+
+// activityAround counts the manual activity of the days around now.
+func activityAround(t *testing.T, l *Library) map[string]int {
+	t.Helper()
+	now := time.Now().UTC()
+	got, err := l.ActivityDays(bg, now.AddDate(0, 0, -1), now.AddDate(0, 0, 1), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return got
+}
+
+func TestStartRun(t *testing.T) {
+	e := newEnv(t)
+	l := e.lib
+	id := addShow(t, l, "s1", fp(12), Entry{Status: Completed, Rating: ip(8), Review: "first time",
+		StartedOn: new(day(2024, 1, 1)), FinishedOn: new(day(2024, 2, 1)), Progress: map[string]float64{"episode": 12}})
+	run1 := displayRunOf(t, e, id)
+	// "today" is the calendar day of the given time in its own zone (the
+	// configured time zone), not the UTC day
+	today := time.Date(2026, 11, 16, 0, 30, 0, 0, time.FixedZone("east", 2*3600))
+	r, err := l.StartRun(bg, id, today)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.ID == 0 || r.ID == run1 || r.Number != 2 || r.Status != Active || r.Rating == nil || *r.Rating != 8 || r.Review != "" ||
+		r.StartedOn == nil || !r.StartedOn.Equal(day(2026, 11, 16)) || r.FinishedOn != nil || len(r.Progress) != 0 ||
+		r.CreatedAt.IsZero() || r.UpdatedAt.IsZero() {
+		t.Fatalf("new run = %+v", r)
+	}
+	if got := displayRunOf(t, e, id); got != r.ID {
+		t.Fatalf("display run = %d, want the new run %d", got, r.ID)
+	}
+	en := mustEntry(t, l, id)
+	if en.Status != Active || en.RunNumber != 2 || en.Repeats != 1 || en.Review != "" || len(en.Progress) != 0 {
+		t.Fatalf("entry = %+v", en)
+	}
+	runs := mustRuns(t, l, id)
+	if len(runs) != 2 || !reflect.DeepEqual(runs[0], r) {
+		t.Fatalf("runs = %+v, want the new run first", runs)
+	}
+	if p := runs[1]; p.ID != run1 || p.Number != 1 || p.Status != Completed || p.Review != "first time" ||
+		!p.StartedOn.Equal(day(2024, 1, 1)) || !p.FinishedOn.Equal(day(2024, 2, 1)) || !reflect.DeepEqual(p.Progress, map[string]float64{"episode": 12}) {
+		t.Fatalf("run 1 = %+v", p)
+	}
+	// one status event completed -> active, manual, on the new run
+	var runID int64
+	var oldText, newText, origin string
+	if err := e.db.QueryRow(`SELECT run_id, old_text, new_text, origin FROM entry_events WHERE item_id = ? AND event_type = 'status'`, id).
+		Scan(&runID, &oldText, &newText, &origin); err != nil {
+		t.Fatal(err)
+	}
+	if runID != r.ID || oldText != "completed" || newText != "active" || origin != "manual" {
+		t.Fatalf("event = %d %s %s %s", runID, oldText, newText, origin)
+	}
+	if n := count(t, e.db, `SELECT count(*) FROM entry_events WHERE item_id = ?`, id); n != 1 {
+		t.Fatalf("events = %d, want 1", n)
+	}
+	// the display run is active now: no second start
+	_, err = l.StartRun(bg, id, today)
+	wantInvalid(t, err, "completed")
+	if n := len(runsOf(t, e, id)); n != 2 {
+		t.Fatalf("runs after refused start = %d", n)
+	}
+	// an explicit 0 is copied as 0, unrated stays unrated
+	zero := addBook(t, l, "b0", fp(300), Entry{Status: Completed, Rating: ip(0)})
+	if r := mustStartRun(t, l, zero); r.Rating == nil || *r.Rating != 0 {
+		t.Fatalf("rating 0 not copied: %+v", r)
+	}
+	unrated := addBook(t, l, "bn", fp(300), Entry{Status: Completed})
+	if r := mustStartRun(t, l, unrated); r.Rating != nil {
+		t.Fatalf("unrated became %d", *r.Rating)
+	}
+	if _, err := l.StartRun(bg, 9999, today); !errors.Is(err, ErrNoEntry) {
+		t.Fatalf("unknown item: %v, want ErrNoEntry", err)
+	}
+	if runs, err := l.Runs(bg, 9999); err != nil || len(runs) != 0 {
+		t.Fatalf("runs of an unknown item = %v %v", runs, err)
+	}
+}
+
+func TestStartRunAfterDroppedRepeat(t *testing.T) {
+	e := newEnv(t)
+	l := e.lib
+	id := addShow(t, l, "s1", fp(12), Entry{Status: Active})
+	run1 := displayRunOf(t, e, id)
+	setRun(t, e, run1, Completed, 7, "2024-01-01", "2024-02-01", map[string]float64{"episode": 12})
+	seedRun(t, e, id, 2, Dropped, 3, "2024-03-01", nil, map[string]float64{"episode": 4})
+	refresh(t, e, id)
+	if got := displayRunOf(t, e, id); got != run1 {
+		t.Fatalf("display run = %d, want run 1", got)
+	}
+	r := mustStartRun(t, l, id)
+	if r.Number != 3 || r.Status != Active || r.Rating == nil || *r.Rating != 7 {
+		t.Fatalf("new run = %+v, want run 3 with run 1's rating", r)
+	}
+	if got := displayRunOf(t, e, id); got != r.ID {
+		t.Fatalf("display run = %d, want %d", got, r.ID)
+	}
+	if runs := runsOf(t, e, id); runs[1].Status != string(Dropped) {
+		t.Fatalf("the dropped repeat changed: %+v", runs[1])
+	}
+}
+
+func TestDeleteLatestRunUndoesStart(t *testing.T) {
+	e := newEnv(t)
+	l := e.lib
+	id := addShow(t, l, "s1", fp(12), Entry{Status: Completed, Rating: ip(8), Progress: map[string]float64{"episode": 12}})
+	run1 := displayRunOf(t, e, id)
+	r := mustStartRun(t, l, id)
+	if err := l.Increment(bg, id); err != nil {
+		t.Fatal(err)
+	}
+	before := activityAround(t, l)
+	if len(before) == 0 {
+		t.Fatal("the +1 on the new run counts as activity")
+	}
+	if err := l.DeleteRun(bg, r.ID); err != nil {
+		t.Fatal(err)
+	}
+	if got := displayRunOf(t, e, id); got != run1 {
+		t.Fatalf("display run = %d, want run 1 (%d)", got, run1)
+	}
+	en := mustEntry(t, l, id)
+	if en.Status != Completed || en.RunNumber != 1 || en.Rating == nil || *en.Rating != 8 || en.Progress["episode"] != 12 {
+		t.Fatalf("entry = %+v", en)
+	}
+	if runs := mustRuns(t, l, id); len(runs) != 1 || runs[0].ID != run1 {
+		t.Fatalf("runs = %+v", runs)
+	}
+	// past activity never changes: the events stay, without a run
+	if after := activityAround(t, l); !reflect.DeepEqual(after, before) {
+		t.Fatalf("activity %v -> %v", before, after)
+	}
+	if n := count(t, e.db, `SELECT count(*) FROM entry_events WHERE item_id = ? AND run_id IS NULL`, id); n != 2 {
+		t.Fatalf("events without run = %d, want the start and the +1", n)
+	}
+	if n := count(t, e.db, `SELECT count(*) FROM run_progress WHERE run_id = ?`, r.ID); n != 0 {
+		t.Fatalf("%d progress rows of the deleted run survived", n)
+	}
+}
+
+func TestDeleteOnlyRunRefused(t *testing.T) {
+	e := newEnv(t)
+	id := addShow(t, e.lib, "s1", fp(12), Entry{Status: Completed})
+	run1 := displayRunOf(t, e, id)
+	wantInvalid(t, e.lib.DeleteRun(bg, run1), "only run")
+	if runs := runsOf(t, e, id); len(runs) != 1 || runs[0].ID != run1 {
+		t.Fatalf("runs = %+v", runs)
+	}
+	if err := e.lib.DeleteRun(bg, 9999); !errors.Is(err, ErrNoRun) {
+		t.Fatalf("stale run: %v, want ErrNoRun", err)
+	}
+}
+
+func TestDeleteRunRenumbers(t *testing.T) {
+	e := newEnv(t)
+	l := e.lib
+	id := addShow(t, l, "s1", fp(12), Entry{Status: Completed, Rating: ip(6)})
+	run1 := displayRunOf(t, e, id)
+	run2 := seedRun(t, e, id, 2, Completed, 8, nil, nil, map[string]float64{"episode": 12})
+	run3 := seedRun(t, e, id, 3, Active, nil, nil, nil, map[string]float64{"episode": 2})
+	run4 := seedRun(t, e, id, 4, Dropped, nil, nil, nil, nil)
+	refresh(t, e, id)
+	if err := l.DeleteRun(bg, run2); err != nil {
+		t.Fatal(err)
+	}
+	runs := runsOf(t, e, id)
+	if len(runs) != 3 || runs[0].ID != run1 || runs[0].Number != 1 || runs[1].ID != run3 || runs[1].Number != 2 ||
+		runs[2].ID != run4 || runs[2].Number != 3 {
+		t.Fatalf("runs = %+v, want 1, 3, 4 numbered 1, 2, 3", runs)
+	}
+	// run 4 (now 3) is a dropped repeat: the display falls back to run 1,
+	// the only completed run left
+	if got := displayRunOf(t, e, id); got != run1 {
+		t.Fatalf("display run = %d, want run 1 (%d)", got, run1)
+	}
+	if en := mustEntry(t, l, id); en.Repeats != 1 || en.RunNumber != 1 {
+		t.Fatalf("entry = %+v", en)
+	}
+	if err := l.DeleteRun(bg, run2); !errors.Is(err, ErrNoRun) {
+		t.Fatalf("deleting again: %v, want ErrNoRun", err)
+	}
+}
+
+func TestUpdatePastRunStatusLimited(t *testing.T) {
+	e := newEnv(t)
+	l := e.lib
+	id := addShow(t, l, "s1", fp(12), Entry{Status: Completed, Rating: ip(8)})
+	run1 := displayRunOf(t, e, id)
+	run2 := mustStartRun(t, l, id).ID
+	for _, st := range []Status{Planned, Active, Paused} {
+		wantInvalid(t, l.UpdateRun(bg, run1, RunUpdate{Status: st, Rating: ip(8)}), "completed or dropped")
+	}
+	// the display run takes any status: dropping the repeat hands the
+	// display back to run 1
+	if err := l.UpdateRun(bg, run2, RunUpdate{Status: Dropped, Rating: ip(8)}); err != nil {
+		t.Fatal(err)
+	}
+	if got := displayRunOf(t, e, id); got != run1 {
+		t.Fatalf("display run = %d, want run 1", got)
+	}
+	wantInvalid(t, l.UpdateRun(bg, run2, RunUpdate{Status: Active, Rating: ip(8)}), "completed or dropped")
+	// a past run's dates, score, review and status
+	if err := l.UpdateRun(bg, run2, RunUpdate{Status: Completed, Rating: ip(5), Review: "second look",
+		StartedOn: new(day(2024, 3, 1)), FinishedOn: new(day(2024, 3, 9))}); err != nil {
+		t.Fatal(err)
+	}
+	runs := mustRuns(t, l, id)
+	if r := runs[0]; r.ID != run2 || r.Status != Completed || r.Rating == nil || *r.Rating != 5 || r.Review != "second look" ||
+		!r.StartedOn.Equal(day(2024, 3, 1)) || !r.FinishedOn.Equal(day(2024, 3, 9)) {
+		t.Fatalf("run 2 = %+v", r)
+	}
+	if got := displayRunOf(t, e, id); got != run2 {
+		t.Fatalf("display run = %d, want the completed run 2", got)
+	}
+	// the changes are logged on run 2: start, drop, complete, rating
+	type ev struct {
+		Type, Old, New string
+		OldNum, NewNum sql.NullFloat64
+	}
+	rows, err := e.db.Query(`SELECT event_type, old_text, new_text, old_num, new_num FROM entry_events WHERE run_id = ? AND origin = 'manual' ORDER BY id`, run2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []ev
+	for rows.Next() {
+		var x ev
+		if err := rows.Scan(&x.Type, &x.Old, &x.New, &x.OldNum, &x.NewNum); err != nil {
+			t.Fatal(err)
+		}
+		got = append(got, x)
+	}
+	if err := closeRows(rows); err != nil {
+		t.Fatal(err)
+	}
+	f := func(v float64) sql.NullFloat64 { return sql.NullFloat64{Float64: v, Valid: true} }
+	want := []ev{
+		{Type: "status", Old: "completed", New: "active"},
+		{Type: "status", Old: "active", New: "dropped"},
+		{Type: "status", Old: "dropped", New: "completed"},
+		{Type: "rating", OldNum: f(8), NewNum: f(5)},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("events = %+v, want %+v", got, want)
+	}
+	if n := count(t, e.db, `SELECT count(*) FROM entry_events WHERE item_id = ? AND run_id <> ?`, id, run2); n != 0 {
+		t.Fatalf("%d events not on run 2", n)
+	}
+	// invalid input and stale ids
+	wantInvalid(t, l.UpdateRun(bg, run1, RunUpdate{Status: Completed, Rating: ip(11)}), "rating")
+	wantInvalid(t, l.UpdateRun(bg, run1, RunUpdate{Status: Completed, StartedOn: new(day(2024, 2, 1)), FinishedOn: new(day(2024, 1, 1))}), "before")
+	wantInvalid(t, l.UpdateRun(bg, run1, RunUpdate{Status: "bogus"}), "status")
+	wantInvalid(t, l.UpdateRun(bg, run1, RunUpdate{Status: Completed, Review: "a\x00b"}), "review")
+	if err := l.UpdateRun(bg, 9999, RunUpdate{Status: Completed}); !errors.Is(err, ErrNoRun) {
+		t.Fatalf("stale run: %v, want ErrNoRun", err)
 	}
 }

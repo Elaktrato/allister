@@ -182,6 +182,10 @@ func TestRunsMigrationViews(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer d.Close()
+	// deleting a run sets display_run_id to NULL: the column is indexed
+	if n := rowCount(t, d, `SELECT count(*) FROM sqlite_master WHERE type='index' AND name='entries_display_run' AND tbl_name='entries'`); n != 1 {
+		t.Errorf("index entries_display_run missing")
+	}
 	mustExec(t, d, `INSERT INTO items(id, plugin_id, kind, source, source_id) VALUES(1, 'p', 'k', 's', '1')`)
 	mustExec(t, d, `INSERT INTO entries(item_id, notes, added_at, updated_at) VALUES(1, 'n', '2024-01-01T00:00:00Z', '2024-06-01T00:00:00Z')`)
 	mustExec(t, d, `INSERT INTO entry_runs(id, item_id, number, status, created_at, updated_at) VALUES
