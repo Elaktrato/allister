@@ -128,7 +128,11 @@ type ParseResult struct {
 	Ignored int           `json:"ignored,omitempty"`
 }
 
-// ExportEntry is one list entry handed to an exporter.
+// ExportEntry is one list entry handed to an exporter. Status, Rating,
+// Progress and the dates are those of the entry's display run (the run the
+// list shows); Runs holds every run, oldest first. Notes are the entry's
+// notes, UserTags its own tags and Lists the names of the custom lists it is
+// in (both ordered by name, ignoring case).
 type ExportEntry struct {
 	Kind        string             `json:"kind"`
 	Titles      []Title            `json:"titles,omitempty"`
@@ -138,9 +142,25 @@ type ExportEntry struct {
 	Progress    map[string]float64 `json:"progress,omitempty"`
 	StartedOn   *time.Time         `json:"started_on,omitempty"`  // calendar day, UTC midnight by convention (see DateOnly)
 	FinishedOn  *time.Time         `json:"finished_on,omitempty"` // calendar day, UTC midnight by convention (see DateOnly)
-	Comment     string             `json:"comment,omitempty"`
+	Notes       string             `json:"notes,omitempty"`
+	Runs        []ExportRun        `json:"runs,omitempty"`
+	UserTags    []string           `json:"user_tags,omitempty"`
+	Lists       []string           `json:"lists,omitempty"`
 	// Series is the title of the series group the entry belongs to and
 	// SeriesPosition its position in it (0: none).
 	Series         string `json:"series,omitempty"`
 	SeriesPosition int    `json:"series_position,omitempty"`
+}
+
+// ExportRun is one run (viewing, reading, playthrough) of an exported entry:
+// its number (1 for the first), state, review and every stored progress
+// value.
+type ExportRun struct {
+	Number     int                `json:"number"`
+	Status     StatusClass        `json:"status,omitempty"`
+	Rating     *int               `json:"rating,omitempty"`
+	Review     string             `json:"review,omitempty"`
+	Progress   map[string]float64 `json:"progress,omitempty"`
+	StartedOn  *time.Time         `json:"started_on,omitempty"`  // calendar day, UTC midnight by convention (see DateOnly)
+	FinishedOn *time.Time         `json:"finished_on,omitempty"` // calendar day, UTC midnight by convention (see DateOnly)
 }

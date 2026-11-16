@@ -2,22 +2,23 @@
 // with backup.json (every item of every plugin, enabled or not, with its
 // parts and list entry) and covers/<name> for every local item cover.
 //
-// Archive format (format "allister.backup", format_version 1):
+// Archive format (format "allister.backup", format_version 2):
 //
-//	backup.json  {"format": "allister.backup", "format_version": 1,
+//	backup.json  {"format": "allister.backup", "format_version": 2,
 //	              "created_at": "<RFC 3339 UTC>",
 //	              "plugins": [{"id": ..., "version": ...}],   (informational)
 //	              "appearance": {...},                        (optional)
 //	              "time_zone": "Europe/Berlin",               (optional)
 //	              "items": [library.BackupItem, ...],
-//	              "series": [library.BackupSeries, ...]}      (optional, after items)
+//	              "series": [library.BackupSeries, ...],      (optional, after items)
+//	              "lists": [library.BackupList, ...]}         (optional, after items)
 //	covers/<name>  the file of every item whose cover is a local file
 //	fonts/<name>   the file of every uploaded font
 //
 // The appearance member (see appearance.go) holds the appearance settings
 // and the list of uploaded fonts; it and the fonts/ entries are ignored by
-// a restore of an older Allister (an unknown member, unread entries), so
-// the format version stays 1. The member may come before the header: it is
+// a restore of an older Allister (an unknown member, unread entries). The
+// member may come before the header: it is
 // held (within Limits.MaxMemberBytes) and applied only after "format" and
 // "format_version" were accepted, so a refused archive stores nothing.
 //
@@ -27,8 +28,13 @@
 // again. An item whose local cover file is missing at backup time carries
 // "cover": "" and "cover_missing": true.
 //
+// Format 2 changed the item's entry: notes, runs (each with its progress,
+// unit notes and change log), own tags and orphaned events instead of one
+// state with a comment (library.BackupEntry). A restore reads format 1 too:
+// its entry (library.BackupEntryV1) becomes run 1, the comment the notes.
+//
 // In backup.json "format" and "format_version" must come before "items",
-// "series" after it, and each of the four members appears once; a restore
+// "series" and "lists" after it, and each of the five members appears once; a restore
 // refuses anything else (before restoring an item where it can be detected
 // that early). One item's JSON is limited to Limits.MaxItemBytes.
 //
@@ -71,9 +77,11 @@ import (
 const (
 	// Format is the value of backup.json's "format" member.
 	Format = "allister.backup"
-	// FormatVersion is the backup format version this code writes and the
-	// only one it restores.
-	FormatVersion = 1
+	// FormatVersion is the backup format version this code writes. A
+	// restore reads it and every older version (MinFormatVersion on).
+	FormatVersion = 2
+	// MinFormatVersion is the oldest format version a restore reads.
+	MinFormatVersion = 1
 	// MaxListed caps every row list of a Report.
 	MaxListed = 200
 
@@ -218,6 +226,23 @@ func Write(ctx context.Context, w io.Writer, lib *library.Library, plugins []Plu
 	if err != nil {
 		return fmt.Errorf("backup: %w", err)
 	}
+	_, _ = bw.WriteString(`],"lists":[`)
+	first = true
+	err = lib.BackupLists(ctx, func(bl library.BackupList) error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if !first {
+			if _, err := bw.WriteString(","); err != nil {
+				return err
+			}
+		}
+		first = false
+		return enc.Encode(bl)
+	})
+	if err != nil {
+		return fmt.Errorf("backup: %w", err)
+	}
 	_, _ = bw.WriteString("]}\n") // sticky, reported by Flush
 	if err := bw.Flush(); err != nil {
 		return fmt.Errorf("backup: %w", err)
@@ -327,8 +352,13 @@ type Report struct {
 	// were created or left alone (the uid exists, or the series is invalid
 	// or has no part that can be restored); parts left out are Notes.
 	SeriesCreated, SeriesSkipped int
-	Ignored                      int
-	Aborted                      string
+	// Lists counts the custom lists of the backup that were restored
+	// (created, or merged into the list of the same name); ListItemsAdded the
+	// entries added to them and ListItemsLeftOut those whose item is not in
+	// the library (named per list in Notes, like lists that are not valid).
+	Lists, ListItemsAdded, ListItemsLeftOut int
+	Ignored                                 int
+	Aborted                                 string
 	// Appearance notes what the appearance member restored or skipped
 	// (cleaned like the rows).
 	Appearance []string
@@ -391,6 +421,7 @@ type restorer struct {
 	fonts   map[string]*zip.File
 	looked  bool // the appearance member was handled
 	zoned   bool // the time zone member was handled
+	version int  // the accepted format version
 	done    map[string]coverResult
 	budget  *budget
 	rep     *Report
@@ -497,8 +528,9 @@ func (rs *restorer) index(zr *zip.Reader) *zip.File {
 }
 
 // decode reads backup.json token by token: "format" and "format_version"
-// must come before "items" and "series" after it (as Write puts them), and
-// each of the four may appear once; items are decoded one by one.
+// must come before "items", "series" and "lists" after it (as Write puts
+// them), and
+// each of the five may appear once; items are decoded one by one.
 func (rs *restorer) decode(ctx context.Context, dec *json.Decoder) error {
 	dec.UseNumber()
 	tok, err := dec.Token()
@@ -515,13 +547,16 @@ func (rs *restorer) decode(ctx context.Context, dec *json.Decoder) error {
 			return reject("%s.", notBackup)
 		}
 		if !haveVersion {
-			return reject("This backup has no format version; this version of Allister restores backups of format version %d.", FormatVersion)
+			return reject("This backup has no format version; this version of Allister restores backups of format versions %d and %d.", MinFormatVersion, FormatVersion)
 		}
-		if version != fmt.Sprint(FormatVersion) {
-			return reject("This backup has format version %s; this version of Allister restores only format version %d. Use a newer Allister to restore it.",
-				clip(version, 20), FormatVersion)
+		for v := MinFormatVersion; v <= FormatVersion; v++ {
+			if version == fmt.Sprint(v) {
+				rs.version = v
+				return nil
+			}
 		}
-		return nil
+		return reject("This backup has format version %s; this version of Allister restores only format versions %d and %d. Use a newer Allister to restore it.",
+			clip(version, 20), MinFormatVersion, FormatVersion)
 	}
 	seen := map[string]bool{}
 	// pending holds appearance and time zone members read before the header
@@ -553,7 +588,7 @@ func (rs *restorer) decode(ctx context.Context, dec *json.Decoder) error {
 		}
 		key, _ := tok.(string)
 		switch key {
-		case "format", "format_version", "items", "series":
+		case "format", "format_version", "items", "series", "lists":
 			if seen[key] {
 				msg := fmt.Sprintf("backup.json has more than one %q member", key)
 				if !seen["items"] {
@@ -601,6 +636,14 @@ func (rs *restorer) decode(ctx context.Context, dec *json.Decoder) error {
 				return reject(`%s: "series" must come after "items".`, notBackup)
 			}
 			if err := rs.series(ctx, dec); err != nil {
+				return err
+			}
+		case "lists":
+			// lists refer to restored items by identity: they come after "items"
+			if !seen["items"] {
+				return reject(`%s: "lists" must come after "items".`, notBackup)
+			}
+			if err := rs.lists(ctx, dec); err != nil {
 				return err
 			}
 		case "appearance", "time_zone":
@@ -764,6 +807,58 @@ func (rs *restorer) series(ctx context.Context, dec *json.Decoder) error {
 	return nil
 }
 
+// lists restores the lists array (after all items); the decoder stands
+// before '['. One list is one transaction.
+func (rs *restorer) lists(ctx context.Context, dec *json.Decoder) error {
+	tok, err := dec.Token()
+	if err != nil {
+		return rs.syntax(err)
+	}
+	if tok != json.Delim('[') {
+		return rs.abort("backup.json is damaged: \"lists\" is not a list")
+	}
+	n := 0
+	for dec.More() {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		var raw json.RawMessage
+		if err := rs.decodeCapped(dec, &raw, rs.lim.MaxItemBytes, errItemTooLarge); err != nil {
+			return rs.syntax(err)
+		}
+		if int64(len(raw)) > rs.lim.MaxItemBytes {
+			return rs.abort(rs.limitMessage(errItemTooLarge))
+		}
+		n++
+		var bl library.BackupList
+		if err := json.Unmarshal(raw, &bl); err != nil {
+			addRow(&rs.rep.Notes, &rs.rep.MoreNotes, Row{Index: n, Reason: clip("the list cannot be read: "+err.Error(), 300)})
+			continue
+		}
+		row := Row{Index: n, Title: clip(bl.Name, 120)}
+		added, leftOut, err := rs.opts.Library.RestoreList(ctx, bl)
+		switch {
+		case errors.Is(err, library.ErrInvalid):
+			row.Reason = clip("the list is not valid: "+err.Error(), 300)
+			addRow(&rs.rep.Notes, &rs.rep.MoreNotes, row)
+			continue
+		case err != nil:
+			return err
+		}
+		rs.rep.Lists++
+		rs.rep.ListItemsAdded += added
+		rs.rep.ListItemsLeftOut += leftOut
+		if leftOut > 0 {
+			row.Reason = fmt.Sprintf("%d entries left out: their items are not in the library", leftOut)
+			addRow(&rs.rep.Notes, &rs.rep.MoreNotes, row)
+		}
+	}
+	if _, err := dec.Token(); err != nil {
+		return rs.syntax(err)
+	}
+	return nil
+}
+
 // maxNamedParts is how many left-out parts a series note names.
 const maxNamedParts = 5
 
@@ -797,8 +892,8 @@ func (rs *restorer) item(ctx context.Context, index int, raw json.RawMessage) er
 		addRow(&rs.rep.FailedRows, &rs.rep.MoreFailed, Row{Index: index, Reason: "the item is not a JSON object"})
 		return nil
 	}
-	var bi library.BackupItem
-	if err := json.Unmarshal(raw, &bi); err != nil {
+	bi, err := rs.decodeItem(raw)
+	if err != nil {
 		// identify the row as far as the identity members decode
 		var id struct {
 			PluginID string `json:"plugin_id"`
@@ -844,6 +939,29 @@ func (rs *restorer) item(ctx context.Context, index int, raw json.RawMessage) er
 		addRow(&rs.rep.FailedRows, &rs.rep.MoreFailed, row)
 	}
 	return nil
+}
+
+// decodeItem decodes one item of the accepted format version; a format-1
+// entry is upgraded to its format-2 form (run 1).
+func (rs *restorer) decodeItem(raw json.RawMessage) (library.BackupItem, error) {
+	if rs.version >= 2 {
+		var bi library.BackupItem
+		err := json.Unmarshal(raw, &bi)
+		return bi, err
+	}
+	var v1 struct {
+		library.BackupItem
+		Entry *library.BackupEntryV1 `json:"entry,omitempty"` // shadows the format-2 entry
+	}
+	if err := json.Unmarshal(raw, &v1); err != nil {
+		return library.BackupItem{}, err
+	}
+	bi := v1.BackupItem
+	if v1.Entry != nil {
+		e := v1.Entry.Upgrade()
+		bi.Entry = &e
+	}
+	return bi, nil
 }
 
 func identity(index int, bi library.BackupItem) Row {

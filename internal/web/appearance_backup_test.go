@@ -66,7 +66,7 @@ func TestBackupRefusedHeaderStoresNoAppearance(t *testing.T) {
 	font := testWoff2(t)
 	sum := sha256.Sum256(font)
 	file := hex.EncodeToString(sum[:]) + ".woff2"
-	head := `{"appearance":{"preset":"rose","font_scale":"large","fonts":[{"id":1,"name":"Sneaky","file":"` + file + `","format":"woff2"}]},"format":"allister.backup","format_version":2,"items":[]}`
+	head := `{"appearance":{"preset":"rose","font_scale":"large","fonts":[{"id":1,"name":"Sneaky","file":"` + file + `","format":"woff2"}]},"format":"allister.backup","format_version":3,"items":[]}`
 	var buf bytes.Buffer
 	zw := zip.NewWriter(&buf)
 	for name, body := range map[string][]byte{"backup.json": []byte(head), "fonts/" + file: font} {
@@ -79,7 +79,7 @@ func TestBackupRefusedHeaderStoresNoAppearance(t *testing.T) {
 	if rec.Code != 422 {
 		t.Fatalf("status %d", rec.Code)
 	}
-	mustContain(t, rec.Body.String(), `role="alert"`, "format version 2")
+	mustContain(t, rec.Body.String(), `role="alert"`, "format version 3")
 	if fs := e.fonts(t); len(fs) != 0 {
 		t.Errorf("fonts stored: %v", fs)
 	}

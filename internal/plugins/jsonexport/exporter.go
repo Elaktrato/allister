@@ -11,10 +11,11 @@ import (
 	"github.com/allister/allister/internal/plugin"
 )
 
-// exportVersion is the version of the export format.
-const exportVersion = 1
+// exportVersion is the version of the export format. Version 2 replaced
+// "comment" with "notes" and added "runs", "user_tags" and "lists".
+const exportVersion = 2
 
-// Exporter writes {"format":<name>,"version":1,"entries":[...]}. Field order
+// Exporter writes {"format":<name>,"version":2,"entries":[...]}. Field order
 // is fixed by the structs and map keys are sorted by encoding/json, so the
 // output is deterministic. It streams: the header, each entry and the footer
 // are separate writes.
@@ -33,10 +34,25 @@ type exportEntry struct {
 	Progress    map[string]float64 `json:"progress"`
 	StartedOn   *string            `json:"started_on"`
 	FinishedOn  *string            `json:"finished_on"`
-	Comment     string             `json:"comment"`
+	Notes       string             `json:"notes"`
+	Runs        []exportRun        `json:"runs"`
+	UserTags    []string           `json:"user_tags"`
+	Lists       []string           `json:"lists"`
 	// Series and SeriesPosition are written only for an entry in a series.
 	Series         string `json:"series,omitempty"`
 	SeriesPosition int    `json:"series_position,omitempty"`
+}
+
+// exportRun is one run of an entry; the entry's top-level state is its
+// display run.
+type exportRun struct {
+	Number     int                `json:"number"`
+	Status     plugin.StatusClass `json:"status"`
+	Rating     *int               `json:"rating"`
+	Review     string             `json:"review"`
+	Progress   map[string]float64 `json:"progress"`
+	StartedOn  *string            `json:"started_on"`
+	FinishedOn *string            `json:"finished_on"`
 }
 
 func exportDay(t *time.Time) *string {
@@ -73,8 +89,23 @@ func (e Exporter) Export(ctx context.Context, entries []plugin.ExportEntry, w io
 		}
 		ee := exportEntry{
 			Kind: e.Kind, Titles: e.Titles, ExternalIDs: e.ExternalIDs, Status: e.Status, Rating: e.Rating,
-			Progress: e.Progress, StartedOn: exportDay(e.StartedOn), FinishedOn: exportDay(e.FinishedOn), Comment: e.Comment,
+			Progress: e.Progress, StartedOn: exportDay(e.StartedOn), FinishedOn: exportDay(e.FinishedOn), Notes: e.Notes,
+			Runs: make([]exportRun, 0, len(e.Runs)), UserTags: e.UserTags, Lists: e.Lists,
 			Series: e.Series, SeriesPosition: e.SeriesPosition,
+		}
+		for _, r := range e.Runs {
+			er := exportRun{Number: r.Number, Status: r.Status, Rating: r.Rating, Review: r.Review, Progress: r.Progress,
+				StartedOn: exportDay(r.StartedOn), FinishedOn: exportDay(r.FinishedOn)}
+			if er.Progress == nil {
+				er.Progress = map[string]float64{}
+			}
+			ee.Runs = append(ee.Runs, er)
+		}
+		if ee.UserTags == nil {
+			ee.UserTags = []string{}
+		}
+		if ee.Lists == nil {
+			ee.Lists = []string{}
 		}
 		if ee.Titles == nil {
 			ee.Titles = []plugin.Title{}
