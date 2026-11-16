@@ -342,6 +342,16 @@ const KeyTimeZone = "time_zone"
 // "" and "Local" are not names (the server's own zone is chosen with
 // the TZ environment variable, which is the default).
 func ValidTimeZone(name string) bool {
+	if !timeZoneSyntax(name) {
+		return false
+	}
+	_, err := time.LoadLocation(name)
+	return err == nil
+}
+
+// timeZoneSyntax is the name check ValidTimeZone runs before it asks the zone
+// database, so no file path or odd name ever reaches time.LoadLocation.
+func timeZoneSyntax(name string) bool {
 	if name == "" || len(name) > 64 || (name != "UTC" && !strings.Contains(name, "/")) {
 		return false
 	}
@@ -351,11 +361,7 @@ func ValidTimeZone(name string) bool {
 			return false
 		}
 	}
-	if name[0] == '/' || strings.Contains(name, "..") {
-		return false
-	}
-	_, err := time.LoadLocation(name)
-	return err == nil
+	return name[0] != '/' && !strings.Contains(name, "..")
 }
 
 // StoredTimeZone is the zone the owner stored, "" when none (or an invalid
