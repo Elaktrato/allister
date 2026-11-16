@@ -136,8 +136,8 @@ type itemView struct {
 	// matched to the plugin's source.
 	MatchURL, MatchLabel, UnmatchedHint string
 	// DetailsURL opens "Edit details" (every saved item); it returns to
-	// the overview.
-	DetailsURL string
+	// the overview. MergeURL is the "Merge with…" search of a saved item.
+	DetailsURL, MergeURL string
 	// UpdateURL, UpdateLabel: the "Update from source" link of a saved item
 	// whose source is declared, implemented and not manual.
 	UpdateURL, UpdateLabel string
@@ -167,6 +167,7 @@ func (s *server) itemView(ctx context.Context, li *loadedItem) (itemView, error)
 		v.Cover = covers.Src(it.CoverPath)
 		v.PartialSync = it.SyncState != "done"
 		v.DetailsURL = itemAction(m, d.Source, d.ID, d.Kind, "edit", url.Values{"return": {overview}})
+		v.MergeURL = "/" + url.PathEscape(m.ID) + "/merge/pick?" + url.Values{"keep": {strconv.FormatInt(it.ID, 10)}}.Encode()
 		if it.Source != manualSource && hasSource(m, it.Source) && s.source(m.ID, it.Source) != nil {
 			v.UpdateURL, v.UpdateLabel = itemAction(m, d.Source, d.ID, d.Kind, "refresh", nil), "Update from source"
 		}

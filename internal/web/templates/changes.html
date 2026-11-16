@@ -1,12 +1,22 @@
 {{define "title"}}{{.Title}} - Allister{{end}}
 {{define "content"}}
 <h1 class="mb-6 text-2xl font-semibold">{{.Title}}</h1>
-{{if .Empty}}
+{{with .Merge}}
+<div class="mb-4 max-w-4xl space-y-2 text-sm">
+  {{if .Error}}<p role="alert" class="rounded border border-amber-700 bg-amber-950 p-3 text-amber-200">{{.Error}}</p>{{end}}
+  <p class="rounded border border-slate-700 bg-slate-900 px-3 py-2 text-amber-300">{{.Warning}}</p>
+  <p class="text-slate-300">{{.Moves}}</p>
+  <a href="{{.SwapURL}}" class="text-indigo-300 hover:underline">Swap: keep the other item instead</a>
+</div>
+{{end}}
+{{if and .Empty (not .Merge)}}
 <p class="mb-4 text-slate-300">This item is up to date with {{.Source}}.</p>
 <a href="{{.Return}}" class="text-indigo-300 hover:underline">Back to the item</a>
 {{else}}
 <form method="post" action="{{.Action}}" class="max-w-4xl space-y-4">
-  <p class="text-sm text-slate-400">Tick what to take from {{.Source}}; everything else stays as it is.</p>
+  {{with .Merge}}<input type="hidden" name="keep" value="{{.KeepID}}"><input type="hidden" name="other" value="{{.OtherID}}">{{end}}
+  {{if .Empty}}<p class="text-sm text-slate-400">Nothing differs in the details of the two items.</p>
+  {{else}}<p class="text-sm text-slate-400">Tick what to take from {{.Source}}; everything else stays as it is.</p>{{end}}
   <ul class="space-y-3">
     {{range .Rows}}
     <li class="rounded border border-slate-800 bg-slate-900 p-3">
@@ -30,7 +40,7 @@
     {{end}}
   </ul>
   <div class="flex flex-wrap items-center gap-3">
-    <button type="submit" class="rounded bg-indigo-600 px-4 py-2 font-medium hover:bg-indigo-500">Apply selected</button>
+    <button type="submit" class="rounded bg-indigo-600 px-4 py-2 font-medium hover:bg-indigo-500">{{if .Merge}}Merge{{else}}Apply selected{{end}}</button>
     <a href="{{.Return}}" class="text-indigo-300 hover:underline">Cancel</a>
   </div>
 </form>

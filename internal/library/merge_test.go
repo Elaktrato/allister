@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -552,5 +553,50 @@ func TestMergePutsTheOpenRunLast(t *testing.T) {
 	}
 	if got := displayRunOf(t, e, keep); got != k1 {
 		t.Fatalf("display run = %d, want %d", got, k1)
+	}
+}
+
+func TestMergeChangesOffersWhatMergeItemsApplies(t *testing.T) {
+	e := newEnv(t)
+	keep := mergeBook(t, e, "books", "k", "Dune", nil, true, "")
+	other := mergeBook(t, e, "books", "o", "Dune Messiah", nil, true, "")
+	manual := mergeBook(t, e, manualSource, "m1", "Dune Messiah", nil, true, "")
+	credits := []plugin.Credit{{Role: "author", Person: plugin.PersonRef{ID: "p1", Name: "Frank Herbert"}}}
+	if err := e.lib.SaveCredits(bg, other, credits); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.lib.SaveCredits(bg, manual, []plugin.Credit{{Role: "author", Person: plugin.PersonRef{ID: "p2", Name: "Someone Else"}}}); err != nil {
+		t.Fatal(err)
+	}
+	keys := func(cs []Change) []string {
+		var out []string
+		for _, c := range cs {
+			out = append(out, c.Key)
+		}
+		return out
+	}
+	before := dbDump(t, e.db)
+	got, err := e.lib.MergeChanges(bg, keep, other)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"titles", "cover", "credits"}; !reflect.DeepEqual(keys(got), want) {
+		t.Fatalf("same source: keys = %v, want %v", keys(got), want)
+	}
+	// a manual item's people mean nothing to the survivor's source
+	if got, err = e.lib.MergeChanges(bg, keep, manual); err != nil || !reflect.DeepEqual(keys(got), []string{"titles", "cover"}) {
+		t.Fatalf("manual other: keys = %v, %v", keys(got), err)
+	}
+	// a manual survivor takes the other's source: its credits count
+	if got, err = e.lib.MergeChanges(bg, manual, other); err != nil || !slices.Contains(keys(got), "credits") {
+		t.Fatalf("manual keep: keys = %v, %v", keys(got), err)
+	}
+	if dbDump(t, e.db) != before {
+		t.Fatal("MergeChanges changed the database")
+	}
+	for name, pair := range map[string][2]int64{"same": {keep, keep}, "unknown": {keep, 999}} {
+		if _, err := e.lib.MergeChanges(bg, pair[0], pair[1]); !errors.Is(err, ErrInvalid) {
+			t.Fatalf("%s: err = %v, want ErrInvalid", name, err)
+		}
 	}
 }
