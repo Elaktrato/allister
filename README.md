@@ -11,8 +11,8 @@ It is a single Go binary with a SQLite database, server-rendered pages, htmx and
 ## Features
 
 - Search AniList and open an overview: titles in several languages, genres and tags (spoiler tags hidden until asked), related entries, cast, and recommendations that load after the page.
-- Your list: status, rating, progress, dates and comment; 100 per page with status tabs, +1, and search and filters in the URL. A **Statistics** page (`/stats`) totals time, units and ratings by finish date, filterable by period, status, genre, tag and field, with an activity heatmap of the last 365 days; **Update from source** on an item fills in missing data such as the anime episode duration.
-- Runs and notes: start an entry again (rewatch, reread, replay) and keep every run with its own status, rating, review, progress and a read-only timeline; notes with simple formatting and spoilers; your own tags and custom lists across plugins.
+- Your list: status, rating, progress, dates and comment; 100 per page with status tabs, +1, and search and filters in the URL. A **Statistics** page (`/stats`) totals time, units and ratings by finish date, filterable by period, status, genre, tag and field, with an activity heatmap of the last 365 days; **Update from source** on an item compares it with the source and applies only the rows you tick.
+- Runs and notes: start an entry again (rewatch, reread, replay) and keep every run with its own status, rating, review, progress and a read-only timeline; notes with simple formatting and spoilers; your own tags and custom lists across plugins; bulk edit of ticked or all matching entries, and a possible-duplicates page that merges two items into one.
 - Edit details of any saved entry (titles, fields, genres, tags, cover); AniList never overwrites your edits.
 - Character and voice-actor pages, manual entries with cover upload, and "Match to AniList".
 - Yamtrack, Yamtrack novel, Yamtrack manga, Goodreads, IMDb CSV (movies and TV), Letterboxd export (movies) and TV imports, the Steam account import, AniList light-novel import, JSON export, and a universal backup with restore.

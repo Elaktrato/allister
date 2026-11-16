@@ -8,8 +8,14 @@ How a release is cut: move the entries under "Unreleased" to a new `## vX.Y.Z - 
 
 ### Added
 
-- **Bulk edit in every list.** Tick rows or cards (or the whole page, or every entry the current filter matches) and set their status, add them to a custom list or a series, add or remove own tags, or remove them from your library in one step. A confirmation names the count first and asks again if it changed; afterwards the list says how many changed and why any were skipped. Bulk changes do not count as activity in the statistics heatmap.
-- **Duplicates and merge.** Each plugin's list links to its possible duplicates (items sharing an id such as an ISBN, or the same title and year) when there are any; hide a pair with "Not a duplicate". "Compare & merge" there, or "Merge with…" on an item page, shows both items side by side: tick which details to take from the other item, then merge. Runs, notes, own tags, custom lists and the series place move to the item you keep, the other is removed, and adding or importing it again finds the kept item.
+- **Update from source shows a comparison.** On a saved item, Update from source asks the source again and lists only what differs (each field, and titles, genres, tags, cover, relations and credits as a whole), with rows you have left empty ticked; it writes only the rows you tick. A blank source value never clears yours.
+- **Bulk edit in every list.** Tick rows or cards (or the whole page, or every entry the current filter matches) and set their status, add them to a custom list or a series, add or remove own tags, or remove them from your library in one step. A confirmation names the count first and asks again if it changed; afterwards the list says how many changed and why any were skipped. Completed fills an empty finish date and the known totals.
+- **Duplicates and merge.** Each plugin's list links to its possible duplicates (items sharing an id such as an ISBN, or the same title and year) when there are any; hide a pair with "Not a duplicate". "Compare & merge" there, or "Merge with…" on an item page, shows both items side by side: tick which details to take from the other item, then merge. Runs, notes, own tags, custom lists and the series place move to the item you keep, the other is removed, and adding or importing it again finds the kept item. Backups keep the merged identities and the hidden pairs (still format 2; older Allister versions skip them).
+
+### Changed
+
+- **Update from source no longer fills empty fields silently**: it always shows the comparison first and changes only what you tick.
+- **Bulk changes do not count on the activity heatmap.** They appear in each run's timeline but, like imports and restores, are not counted as your activity in the statistics heatmap.
 
 ## v0.4.0 - 2026-11-16
 
