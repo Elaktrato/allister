@@ -187,7 +187,7 @@ func (s *server) itemView(ctx context.Context, li *loadedItem) (itemView, error)
 			}
 			for _, name := range tags[it.ID] {
 				v.Entry.UserTags = append(v.Entry.UserTags, tagLink{Name: name,
-					Href: filteredListURL(m, d.Kind, "", "", 1, listFilters{UserTags: []string{name}})})
+					Href: filteredListURL(m, it.Kind, "all", "", 1, listFilters{UserTags: []string{name}})})
 			}
 			if li.entry.Status == library.Completed {
 				v.Entry.StartURL = "/list/" + strconv.FormatInt(it.ID, 10) + "/runs"

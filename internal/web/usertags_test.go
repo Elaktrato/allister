@@ -2,8 +2,10 @@ package web
 
 import (
 	"context"
+	"html"
 	"net/url"
 	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -148,7 +150,7 @@ func TestOwnTagsOnItemPageAndColumn(t *testing.T) {
 	m, _ := e.reg.Manifest("tv")
 	k, _ := kindDef(m, "show")
 	b := e.get(itemURL(m, "tvdata", "1", "show")).Body.String()
-	mustContain(t, b, `<a href="/tv?ut=Comfort" class=`, `>Comfort</a>`, `<a href="/tv?ut=%C3%84pfel" class=`)
+	mustContain(t, b, `<a href="/tv?status=all&amp;ut=Comfort" class=`, `>Comfort</a>`, `<a href="/tv?status=all&amp;ut=%C3%84pfel" class=`)
 	// a column option of every kind, not shown by default
 	b = e.listGet(t, "/tv?view=table")
 	mustNotContain(t, thead(t, b), "Own tags")
@@ -223,4 +225,44 @@ func TestSettingsTagsRenameMergeDelete(t *testing.T) {
 		t.Fatal(err)
 	}
 	mustContain(t, e.get("/settings/tags").Body.String(), "No own tags yet")
+}
+
+// tagHref is the href of the item page's own-tag link named name.
+func tagHref(t *testing.T, body, name string) string {
+	t.Helper()
+	i := strings.Index(body, `>`+name+`</a>`)
+	if i < 0 {
+		t.Fatalf("no tag link %q", name)
+	}
+	j := strings.LastIndex(body[:i], `<a href="`)
+	href := body[j+len(`<a href="`):]
+	return html.UnescapeString(href[:strings.Index(href, `"`)])
+}
+
+// The item page's tag link lists every entry with the tag: a home status
+// does not hide the other statuses, and a multi-kind plugin's link opens
+// the item's kind.
+func TestOwnTagLinkIgnoresHomeStatusAndKeepsKind(t *testing.T) {
+	e := newFixtureEnv(t, withComicKind)
+	if err := e.set.SetHomeStatuses(context.Background(), "tv", string(library.Active)); err != nil {
+		t.Fatal(err)
+	}
+	id := e.addFixture(t, "tv", "show", tvShow("1", "Done Show"), library.Entry{Status: library.Completed})
+	e.setTags(t, id, "Comfort")
+	href := tagHref(t, e.get("/tv/tvdata/1").Body.String(), "Comfort")
+	if got := cardTitles(e.listGet(t, href)); !slices.Equal(got, []string{"Done Show"}) {
+		t.Fatalf("%s lists %q", href, got)
+	}
+	cd := bookItem("7", "The Comic")
+	cd.Kind = "comic"
+	cid := e.addFixture(t, "book", "comic", cd, library.Entry{Status: library.Planned})
+	e.setTags(t, cid, "Comfort")
+	m, _ := e.reg.Manifest("book")
+	href = tagHref(t, e.get(itemURL(m, "books", "7", "comic")).Body.String(), "Comfort")
+	if !strings.Contains(href, "kind=comic") || !strings.Contains(href, "status=all") {
+		t.Fatalf("comic tag link %s", href)
+	}
+	if got := cardTitles(e.listGet(t, href)); !slices.Equal(got, []string{"The Comic"}) {
+		t.Fatalf("%s lists %q", href, got)
+	}
 }
