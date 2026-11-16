@@ -456,6 +456,17 @@ func (l *Library) RemoveEntry(ctx context.Context, itemID int64) error {
 		return fmt.Errorf("remove entry: %w", err)
 	}
 	defer tx.Rollback()
+	if err := removeEntryTx(ctx, tx, itemID); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("remove entry: %w", err)
+	}
+	return nil
+}
+
+// removeEntryTx is RemoveEntry inside tx.
+func removeEntryTx(ctx context.Context, tx *sql.Tx, itemID int64) error {
 	var seriesID int64
 	switch err := tx.QueryRowContext(ctx, `SELECT series_id FROM series_parts WHERE item_id = ?`, itemID).Scan(&seriesID); {
 	case errors.Is(err, sql.ErrNoRows):
@@ -471,9 +482,6 @@ func (l *Library) RemoveEntry(ctx context.Context, itemID int64) error {
 	}
 	// runs, their progress, tags and list places cascade from the entry
 	if _, err := tx.ExecContext(ctx, `DELETE FROM `+tableEntries+` WHERE item_id = ?`, itemID); err != nil {
-		return fmt.Errorf("remove entry: %w", err)
-	}
-	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("remove entry: %w", err)
 	}
 	return nil
