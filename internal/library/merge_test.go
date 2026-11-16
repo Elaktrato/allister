@@ -516,3 +516,41 @@ func TestMergeRunTieGoesToTheSurvivorFirst(t *testing.T) {
 		t.Fatalf("runs = %+v, want keep's run first on the same start day", runs)
 	}
 }
+
+func TestMergeRefusesNotesAboveTheLimit(t *testing.T) {
+	e := newEnv(t)
+	keep := mergeBook(t, e, "books", "k", "Dune", nil, true, strings.Repeat("a", 6000))
+	other := mergeBook(t, e, "books", "o", "Dune", nil, true, strings.Repeat("b", 6000))
+	before := dbDump(t, e.db)
+	wantInvalid(t, e.lib.MergeItems(bg, keep, other, nil), "the merged notes would be longer than 10000 characters; shorten one of them first")
+	if after := dbDump(t, e.db); after != before {
+		t.Fatal("a refused merge changed the database")
+	}
+}
+
+func TestMergePutsTheOpenRunLast(t *testing.T) {
+	e := newEnv(t)
+	keep := mergeBook(t, e, "books", "k", "Dune", nil, true, "")
+	other := mergeBook(t, e, "books", "o", "Dune", nil, true, "")
+	k1, o1 := displayRunOf(t, e, keep), displayRunOf(t, e, other)
+	setRun(t, e, k1, Active, 6, "2020-03-01", nil, map[string]float64{"pages": 12})
+	setRun(t, e, o1, Completed, nil, "2024-01-01", "2024-02-01", nil)
+	if err := e.lib.MergeItems(bg, keep, other, nil); err != nil {
+		t.Fatal(err)
+	}
+	runs := runsOf(t, e, keep)
+	if len(runs) != 2 || runs[0].ID != o1 || runs[1].ID != k1 {
+		t.Fatalf("runs = %+v, want the open run last", runs)
+	}
+	open := runs[1]
+	if open.Number != 2 || open.Status != "active" || open.Started.String != "2020-03-01" || open.Finished.Valid ||
+		!reflect.DeepEqual(open.Progress, map[string]float64{"pages": 12}) || open.Rating.Int64 != 6 {
+		t.Fatalf("open run = %+v", open)
+	}
+	if runs[0].Status != "completed" {
+		t.Fatalf("closed run = %+v", runs[0])
+	}
+	if got := displayRunOf(t, e, keep); got != k1 {
+		t.Fatalf("display run = %d, want %d", got, k1)
+	}
+}
