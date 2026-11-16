@@ -56,7 +56,7 @@ func TestDefaultColumnsReproduceTheAnimeTable(t *testing.T) {
 	mustContain(t, headCell(t, head, "Updated"), `class="hidden py-2 pr-3 font-medium lg:table-cell"`, `id="sort-updated"`)
 	mustNotContain(t, head, ">Episodes<", ">Studio<", ">Source<", ">Started<", ">Ended<")
 	row := rowOf(t, b, "Title 1")
-	if n := rowCells(row); n != 9 { // cover, title, the six columns, actions
+	if n := rowCells(row); n != 10 { // bulk checkbox, cover, title, the six columns, actions
 		t.Errorf("row has %d cells: %s", n, row)
 	}
 	mustContain(t, row, `<td class="hidden py-2 pr-3 text-slate-300 sm:table-cell">TV</td>`, "3 / 12", `data-score="none"`,
@@ -95,7 +95,7 @@ func TestDeclaredColumnsDriveTheTable(t *testing.T) {
 	row := rowOf(t, b, "Earthsea")
 	mustContain(t, row, ">Ursula K. Le Guin</td>", ">183</td>", ">Reading</td>")
 	mustNotContain(t, row, "data-score", "<time", "/increment")
-	if n := rowCells(row); n != 6 { // cover, title, author, length, status, actions
+	if n := rowCells(row); n != 7 { // bulk checkbox, cover, title, author, length, status, actions
 		t.Errorf("book row has %d cells: %s", n, row)
 	}
 	mustContain(t, headCell(t, thead(t, b), "Length"), `class="hidden py-2 pr-3 font-medium md:table-cell"`)
@@ -244,7 +244,7 @@ func TestPostColumnsChangesTheList(t *testing.T) {
 	row := rowOf(t, b, "Title 1")
 	mustContain(t, row, ">Madhouse</td>", `data-score="none"`, ">TV</td>")
 	mustNotContain(t, row, "3 / 12", "Watching", "<time")
-	if n := rowCells(row); n != 6 {
+	if n := rowCells(row); n != 7 { // with the bulk checkbox
 		t.Errorf("row cells %d", n)
 	}
 	ctl := filterForm(t, b)
@@ -259,7 +259,7 @@ func TestPostColumnsChangesTheList(t *testing.T) {
 	if inc.Code != 200 {
 		t.Fatalf("+1: %d", inc.Code)
 	}
-	if n := rowCells(inc.Body.String()); n != 6 {
+	if n := rowCells(inc.Body.String()); n != 7 {
 		t.Errorf("+1 row cells %d: %s", n, inc.Body.String())
 	}
 	mustContain(t, inc.Body.String(), ">Madhouse</td>")

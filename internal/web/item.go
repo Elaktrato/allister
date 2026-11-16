@@ -63,6 +63,7 @@ func (s *server) coreRoutes(pluginID string) routeSet {
 		reg.Handle("POST /{source}/{id}/match", func(w http.ResponseWriter, r *http.Request) { s.postMatch(w, r, pluginID) })
 		reg.Handle("GET /export/{exporter}", func(w http.ResponseWriter, r *http.Request) { s.getExport(w, r, pluginID) })
 		reg.Handle("POST /{source}/{id}/series", func(w http.ResponseWriter, r *http.Request) { s.postMakeSeries(w, r, pluginID) })
+		reg.Handle("POST /bulk", func(w http.ResponseWriter, r *http.Request) { s.postBulk(w, r, pluginID) })
 		s.seriesRoutes(reg, pluginID)
 	}
 }

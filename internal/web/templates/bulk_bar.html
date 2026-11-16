@@ -1,0 +1,52 @@
+{{/* The bulk edit bar under a plugin's list (outside the rows region, so
+      a rows partial never carries its fields): a plain form for the ticked
+      rows of the page (each row's checkbox joins it with form="bulk-form").
+      app.js shows it as a floating bar (the classes in data-float-class)
+      while something is ticked, reveals the page select-all, offers
+      "Select all N matching", which switches the selection to the list's
+      filter (scope=filter with the list parameters in "list"), and after a
+      rows partial copies the new parameters and count from the rows'
+      data-bulk-state. */}}
+{{define "bulk_bar"}}
+<form id="bulk-form" method="post" action="{{.Action}}" data-bulk-bar data-bulk-total="{{.Total}}" data-float-class="fixed inset-x-0 bottom-0 z-50" class="mt-4 rounded-lg border border-slate-700 bg-slate-950 p-3">
+  <input type="hidden" name="list" value="{{.List}}" data-bulk-list>
+  <input type="hidden" name="scope" value="ids" data-bulk-scope>
+  <div class="flex flex-wrap items-center gap-3 text-sm">
+    <span data-bulk-count class="font-medium">Tick entries on this page, then choose what to change.</span>
+    <button type="button" hidden data-bulk-all-matching class="text-indigo-300 underline">Select all {{.Total}} matching</button>
+    {{template "bulk_fields" .}}
+    <button type="submit" class="rounded bg-indigo-600 px-4 py-2 font-medium hover:bg-indigo-500">Apply</button>
+  </div>
+</form>
+{{end}}
+
+{{define "bulk_params"}}{{range .}}<input type="hidden" name="{{.Name}}" value="{{.Value}}">{{end}}{{end}}
+
+{{/* the action and its value; app.js shows only the value of the chosen action */}}
+{{define "bulk_fields"}}
+<label class="flex items-center gap-2"><span>Action</span>
+  <select name="action" data-bulk-action class="rounded border border-slate-700 bg-slate-950 px-3 py-2">
+    <option value="">Choose…</option>
+    {{range .Actions}}<option value="{{.Value}}"{{if .Selected}} selected{{end}}>{{.Label}}</option>{{end}}
+  </select>
+</label>
+<span data-bulk-for="status"><label>Status
+  <select name="to_status" class="rounded border border-slate-700 bg-slate-950 px-3 py-2">
+    <option value="">Choose…</option>
+    {{range .Statuses}}<option value="{{.Value}}"{{if .Selected}} selected{{end}}>{{.Label}}</option>{{end}}
+  </select></label></span>
+{{if .Lists}}<span data-bulk-for="list"><label>List
+  <select name="to_list" class="rounded border border-slate-700 bg-slate-950 px-3 py-2">
+    <option value="">Choose…</option>
+    {{range .Lists}}<option value="{{.Value}}"{{if .Selected}} selected{{end}}>{{.Label}}</option>{{end}}
+  </select></label></span>{{end}}
+<span data-bulk-for="tags"><label>Add tags
+  <input type="text" name="add_tags" value="{{.AddTags}}" maxlength="1000" placeholder="comma separated" autocomplete="off" class="rounded border border-slate-700 bg-slate-950 px-3 py-2"></label>
+  <label>Remove tags
+  <input type="text" name="remove_tags" value="{{.RemoveTags}}" maxlength="1000" placeholder="comma separated" autocomplete="off" class="rounded border border-slate-700 bg-slate-950 px-3 py-2"></label></span>
+{{if .Series}}<span data-bulk-for="series"><label>Series
+  <select name="to_series" class="rounded border border-slate-700 bg-slate-950 px-3 py-2">
+    <option value="">Choose…</option>
+    {{range .Series}}<option value="{{.Value}}"{{if .Selected}} selected{{end}}>{{.Label}}</option>{{end}}
+  </select></label></span>{{end}}
+{{end}}

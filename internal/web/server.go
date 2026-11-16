@@ -113,7 +113,7 @@ type server struct {
 
 // pageNames lists every page template (templates/<name>.html). Add a page by
 // dropping its file in templates/ and listing it here.
-var pageNames = []string{"calendar", "stats", "settings", "settings_appearance", "settings_plugins_page", "settings_plugin", "search", "item", "list", "series", "person", "manual_form", "details_form", "import", "error", "recommendations", "backup", "home", "settings_tags", "lists", "list_page", "changes"}
+var pageNames = []string{"calendar", "stats", "settings", "settings_appearance", "settings_plugins_page", "settings_plugin", "search", "item", "list", "series", "person", "manual_form", "details_form", "import", "error", "recommendations", "backup", "home", "settings_tags", "lists", "list_page", "changes", "bulk_confirm"}
 
 // pagePartials lists extra template files a page needs (also rendered alone
 // for htmx requests).
@@ -122,12 +122,13 @@ var pagePartials = map[string][]string{
 	"settings_plugins_page": {"templates/settings_plugins.html"},
 	"item":                  {"templates/sections.html", "templates/add_dialog.html", "templates/progress_inputs.html", "templates/match_dialog.html", "templates/run_history.html", "templates/timeline.html", "templates/list_picker.html"},
 	"series":                {"templates/series_candidates.html"},
-	"list":                  {"templates/list_row.html", "templates/list_cards.html", "templates/series_rows.html", "templates/filter_bar.html", "templates/entry_dialog.html", "templates/progress_inputs.html"},
+	"list":                  {"templates/list_row.html", "templates/list_cards.html", "templates/series_rows.html", "templates/filter_bar.html", "templates/entry_dialog.html", "templates/progress_inputs.html", "templates/bulk_bar.html"},
 	"manual_form":           {"templates/item_inputs.html", "templates/progress_inputs.html"},
 	"details_form":          {"templates/item_inputs.html"},
 	"stats":                 {"templates/filter_bar.html"},
 	"home":                  {"templates/list_cards.html"},
 	"list_page":             {"templates/list_cards.html"},
+	"bulk_confirm":          {"templates/bulk_bar.html"},
 }
 
 // parsePages builds one template set per page, each cloned from base.html plus
