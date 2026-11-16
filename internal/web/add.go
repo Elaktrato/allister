@@ -75,14 +75,14 @@ type progressContext struct {
 }
 
 // readEntryValues reads the raw form values. The comment (the entry's
-// notes) and the review are trimmed; their length is the library's check
+// notes) and the review are trimmed, with line breaks as LF (lfBreaks); their length is the library's check
 // (library.MaxNotesRunes, library.MaxReviewRunes). A repeated parameter counts with its
 // FIRST value (PostFormValue). When both progress.<primary> and the
 // progressShorthand are sent, the explicit progress.<primary> wins.
 func readEntryValues(kind plugin.KindDef, r *http.Request) entryValues {
 	get := func(k string) string { return strings.TrimSpace(r.PostFormValue(k)) }
 	v := entryValues{Status: get("status"), Rating: get("rating"), StartedOn: get("started_on"),
-		FinishedOn: get("finished_on"), Comment: get("comment"), Review: get("review"), Progress: map[string]string{}}
+		FinishedOn: get("finished_on"), Comment: lfBreaks(get("comment")), Review: lfBreaks(get("review")), Progress: map[string]string{}}
 	for name := range r.PostForm {
 		if key, ok := strings.CutPrefix(name, progressField); ok {
 			v.Progress[key] = get(name)

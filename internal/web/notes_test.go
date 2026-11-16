@@ -242,3 +242,55 @@ func TestTimelineShowsUnitNotes(t *testing.T) {
 		t.Fatalf("the note is not at its unit:\n%s", b)
 	}
 }
+
+// crlfText is a text of n runes once its line breaks are LF, written with
+// CRLF breaks as browsers submit a textarea (so it has more runes as sent),
+// and that LF form.
+func crlfText(n int) (sent, stored string) {
+	line := strings.Repeat("a", 100)
+	breaks := (n - 1) / 101
+	stored = strings.Repeat(line+"\n", breaks) + strings.Repeat("a", n-breaks*101)
+	return strings.ReplaceAll(stored, "\n", "\r\n"), stored
+}
+
+// Line breaks count once against the rune limits: a CRLF (or lone CR) is
+// stored as LF, through the entry dialog, the run edit, the unit-note form
+// and the manual form.
+func TestTextFormsStoreLFLineBreaks(t *testing.T) {
+	e := newFixtureEnv(t)
+	sent, stored := crlfText(library.MaxNotesRunes)
+	if len([]rune(stored)) != library.MaxNotesRunes || len([]rune(sent)) <= library.MaxNotesRunes {
+		t.Fatalf("fixture: %d / %d runes", len([]rune(stored)), len([]rune(sent)))
+	}
+	id, run := noteShow(t, e.env, "8")
+	if rec := e.do("POST", "/list/"+idStr(id)+"/edit", editForm(sent, strings.ReplaceAll(sent, "\r\n", "\r")), true); rec.Code != 204 {
+		t.Fatalf("entry dialog: %d %s", rec.Code, rec.Body.String())
+	}
+	if en := e.entryOf(t, id); en.Notes != stored || en.Review != stored {
+		t.Fatalf("entry dialog stored CRs: %t / %t", strings.Contains(en.Notes, "\r"), strings.Contains(en.Review, "\r"))
+	}
+	rf := url.Values{"status": {"active"}, "review": {sent + "\r\n"}, "return": {"/tv"}}
+	if rec := e.do("POST", "/list/"+idStr(id)+"/runs/"+runIDStr(run)+"/edit", rf, true); rec.Code != 204 {
+		t.Fatalf("run edit: %d %s", rec.Code, rec.Body.String())
+	}
+	if got := e.runsOf(t, id)[0].Review; got != stored {
+		t.Fatalf("run edit stored CRs: %t", strings.Contains(got, "\r"))
+	}
+	usent, ustored := crlfText(library.MaxUnitNoteRunes)
+	if rec := e.do("POST", noteURLOf(id, run, "episode", 6), url.Values{"body": {usent}}, true); rec.Code != 204 {
+		t.Fatalf("unit note: %d %s", rec.Code, rec.Body.String())
+	}
+	if notes, err := e.lib.UnitNotes(context.Background(), run.ID); err != nil || len(notes) != 1 || notes[0].Body != ustored {
+		t.Fatalf("unit note: %d notes, %v", len(notes), err)
+	}
+	if rec := e.postMultipart(t, "/tv/manual/new", url.Values{"title": {"Hand Made"}, "status": {"planned"}, "comment": {sent}}, nil); rec.Code != 303 {
+		t.Fatalf("manual: %d %s", rec.Code, rec.Body.String())
+	}
+	var manual int64
+	if err := e.d.QueryRow(`SELECT max(id) FROM items`).Scan(&manual); err != nil {
+		t.Fatal(err)
+	}
+	if en := e.entryOf(t, manual); en.Notes != stored {
+		t.Fatalf("manual stored CRs: %t (%d runes)", strings.Contains(en.Notes, "\r"), len([]rune(en.Notes)))
+	}
+}
