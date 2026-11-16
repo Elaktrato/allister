@@ -514,24 +514,33 @@ func (s *server) listPicker(r *http.Request, itemID int64, ret string) (*listPic
 	return p, nil
 }
 
-// postItemLists saves the picker: the entry is in exactly the posted lists.
+// postItemLists saves the picker: membership changes only for the lists
+// the form showed (ticked = a member), so a list joined or created in
+// another tab meanwhile keeps its membership; a shown list deleted
+// meanwhile is ignored.
 func (s *server) postItemLists(w http.ResponseWriter, r *http.Request) {
 	ref := entryOf(r)
 	if !parseForm(w, r) {
 		return
 	}
-	var ids []int64
-	for _, raw := range r.PostForm["list"] {
-		id, ok := formItemID(raw)
-		if !ok {
-			s.listNotFound(w, r)
-			return
+	ids := func(field string) ([]int64, bool) {
+		var ids []int64
+		for _, raw := range r.PostForm[field] {
+			id, ok := formItemID(raw)
+			if !ok {
+				return nil, false
+			}
+			ids = append(ids, id)
 		}
-		ids = append(ids, id)
+		return ids, true
 	}
-	switch err := s.deps.Library.SetListsOfItem(r.Context(), ref.ID, ids); {
-	case errors.Is(err, library.ErrNoList):
+	shown, ok := ids("shown")
+	member, ok2 := ids("list")
+	if !ok || !ok2 {
 		s.listNotFound(w, r)
+		return
+	}
+	switch err := s.deps.Library.SetListsOfItem(r.Context(), ref.ID, shown, member); {
 	case errors.Is(err, library.ErrNoEntry):
 		s.entryNotFound(w, r)
 	case err != nil:

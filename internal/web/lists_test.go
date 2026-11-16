@@ -341,8 +341,41 @@ func TestCustomListHidesDisabledPlugins(t *testing.T) {
 	}
 }
 
+// A save changes only the lists the form showed: a membership added in
+// another tab after the page loaded (a list not on the form) survives, and a
+// shown list deleted meanwhile does not fail the save.
+func TestItemPageListPickerKeepsOtherLists(t *testing.T) {
+	e := newFixtureEnv(t)
+	one := e.newCustomList(t, "One")
+	gone := e.newCustomList(t, "Gone")
+	e.tv.Data = tvShow("1", "Picked")
+	show := e.addFixture(t, "tv", "show", tvShow("1", "Picked"), library.Entry{Status: library.Planned})
+	e.get("/tv/tvdata/1") // the page is loaded with One and Gone
+	later := e.newCustomList(t, "Later")
+	e.joinList(t, later, show)
+	if err := e.lib.DeleteList(bg, gone); err != nil {
+		t.Fatal(err)
+	}
+	rec := e.do("POST", "/list/"+idStr(show)+"/lists", url.Values{
+		"shown": {idStr(one), idStr(gone)}, "list": {idStr(one), idStr(gone)}, "return": {"/tv/tvdata/1"}}, false)
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("save: %d", rec.Code)
+	}
+	of, err := e.lib.ListsOfItem(bg, show)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ids []int64
+	for _, x := range of {
+		ids = append(ids, x.ID)
+	}
+	if !reflect.DeepEqual(ids, []int64{later, one}) {
+		t.Fatalf("lists of item %v, want Later and One", ids)
+	}
+}
+
 // The item page offers every list with a checkbox and saves the membership
-// in one request.
+// of the lists it showed in one request.
 func TestItemPageListPicker(t *testing.T) {
 	e := newFixtureEnv(t)
 	one := e.newCustomList(t, "One")
@@ -352,8 +385,10 @@ func TestItemPageListPicker(t *testing.T) {
 	e.joinList(t, one, show)
 	body := e.get("/tv/tvdata/1").Body.String()
 	mustContain(t, body, `action="/list/`+idStr(show)+`/lists"`,
-		`name="list" value="`+idStr(one)+`" checked`, `name="list" value="`+idStr(two)+`">`, "Lists")
-	rec := e.do("POST", "/list/"+idStr(show)+"/lists", url.Values{"list": {idStr(two)}, "return": {"/tv/tvdata/1"}}, false)
+		`name="list" value="`+idStr(one)+`" checked`, `name="list" value="`+idStr(two)+`">`, "Lists",
+		`name="shown" value="`+idStr(one)+`"`, `name="shown" value="`+idStr(two)+`"`)
+	rec := e.do("POST", "/list/"+idStr(show)+"/lists", url.Values{
+		"shown": {idStr(one), idStr(two)}, "list": {idStr(two)}, "return": {"/tv/tvdata/1"}}, false)
 	if rec.Code != http.StatusSeeOther || rec.Header().Get("Location") != "/tv/tvdata/1" {
 		t.Fatalf("save: %d %s", rec.Code, rec.Header().Get("Location"))
 	}
@@ -361,9 +396,9 @@ func TestItemPageListPicker(t *testing.T) {
 	if err != nil || len(of) != 1 || of[0].ID != two {
 		t.Fatalf("lists of item %+v %v", of, err)
 	}
-	for _, bad := range []string{"999", "x"} {
-		if rec := e.do("POST", "/list/"+idStr(show)+"/lists", url.Values{"list": {bad}}, false); rec.Code != http.StatusNotFound {
-			t.Errorf("list %q: %d", bad, rec.Code)
+	for _, field := range []string{"list", "shown"} {
+		if rec := e.do("POST", "/list/"+idStr(show)+"/lists", url.Values{field: {"x"}}, false); rec.Code != http.StatusNotFound {
+			t.Errorf("malformed %s: %d", field, rec.Code)
 		}
 	}
 	if of, _ := e.lib.ListsOfItem(bg, show); len(of) != 1 {

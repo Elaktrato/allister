@@ -307,30 +307,38 @@ func TestListMembershipFollowsEntries(t *testing.T) {
 	}
 }
 
-// Membership of one item is saved at once: lists not named are left, named
-// ones joined (appended), unknown ones refused without a change.
+// Membership of one item is saved at once, for the shown lists only: a
+// shown list ticked is joined (appended), a shown list unticked is left,
+// every list not shown keeps its membership, and an unknown shown id is
+// ignored.
 func TestSetListsOfItem(t *testing.T) {
 	e := newEnv(t)
 	one := mustCustomList(t, e.lib, "One")
 	two := mustCustomList(t, e.lib, "Two")
 	three := mustCustomList(t, e.lib, "Three")
+	four := mustCustomList(t, e.lib, "Four")
 	a := addTitledBook(t, e.lib, "p-1", "A", Entry{Status: Planned})
 	b := addTitledBook(t, e.lib, "p-2", "B", Entry{Status: Planned})
 	addToList(t, e.lib, two.ID, b)
 	addToList(t, e.lib, one.ID, a)
-	if err := e.lib.SetListsOfItem(bg, a, []int64{two.ID, three.ID, two.ID}); err != nil {
+	addToList(t, e.lib, four.ID, a) // joined elsewhere, not on the form
+	shown := []int64{one.ID, two.ID, three.ID}
+	if err := e.lib.SetListsOfItem(bg, a, shown, []int64{two.ID, three.ID, two.ID}); err != nil {
 		t.Fatal(err)
 	}
-	of, err := e.lib.ListsOfItem(bg, a)
-	if err != nil {
-		t.Fatal(err)
+	names := func() []string {
+		of, err := e.lib.ListsOfItem(bg, a)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var names []string
+		for _, x := range of {
+			names = append(names, x.Name)
+		}
+		return names
 	}
-	var names []string
-	for _, x := range of {
-		names = append(names, x.Name)
-	}
-	if !reflect.DeepEqual(names, []string{"Three", "Two"}) {
-		t.Fatalf("lists of item = %q", names)
+	if got := names(); !reflect.DeepEqual(got, []string{"Four", "Three", "Two"}) {
+		t.Fatalf("lists of item = %q", got)
 	}
 	if got := listTitles(t, e.lib, two.ID, ""); !reflect.DeepEqual(got, []string{"A", "B"}) {
 		t.Fatalf("two = %q", got)
@@ -341,20 +349,21 @@ func TestSetListsOfItem(t *testing.T) {
 	if got := listTitles(t, e.lib, two.ID, "position"); !reflect.DeepEqual(got, []string{"B", "A"}) {
 		t.Fatalf("two in manual order = %q (a joined list appends)", got)
 	}
-	if err := e.lib.SetListsOfItem(bg, a, []int64{one.ID, 999}); !errors.Is(err, ErrNoList) {
-		t.Fatalf("unknown list = %v, want ErrNoList", err)
+	// a shown list deleted meanwhile is ignored, the rest is saved
+	if err := e.lib.SetListsOfItem(bg, a, []int64{one.ID, 999}, []int64{one.ID, 999}); err != nil {
+		t.Fatalf("unknown shown list = %v, want it ignored", err)
 	}
-	if of, _ := e.lib.ListsOfItem(bg, a); len(of) != 2 {
-		t.Fatalf("a refused save changed the lists: %+v", of)
+	if got := names(); !reflect.DeepEqual(got, []string{"Four", "One", "Three", "Two"}) {
+		t.Fatalf("after an unknown list: %q", got)
 	}
-	if err := e.lib.SetListsOfItem(bg, 999, nil); !errors.Is(err, ErrNoEntry) {
+	if err := e.lib.SetListsOfItem(bg, 999, nil, nil); !errors.Is(err, ErrNoEntry) {
 		t.Fatalf("unknown item = %v, want ErrNoEntry", err)
 	}
-	if err := e.lib.SetListsOfItem(bg, a, nil); err != nil {
+	if err := e.lib.SetListsOfItem(bg, a, shown, nil); err != nil {
 		t.Fatal(err)
 	}
-	if of, _ := e.lib.ListsOfItem(bg, a); len(of) != 0 {
-		t.Fatalf("cleared lists: %+v", of)
+	if got := names(); !reflect.DeepEqual(got, []string{"Four"}) {
+		t.Fatalf("cleared shown lists: %q", got)
 	}
 }
 
