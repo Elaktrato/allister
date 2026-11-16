@@ -242,3 +242,17 @@ func TestMergeQueuesCoverAndSyncJobs(t *testing.T) {
 		t.Fatalf("takeover enqueued %+v, want %+v", fe.jobs.got, want)
 	}
 }
+
+// TestMergePickSearchesOnlyThePluginAndKind: more than 200 matches of
+// another plugin (sorted first) do not hide the candidates.
+func TestMergePickSearchesOnlyThePluginAndKind(t *testing.T) {
+	fe := newFixtureEnv(t)
+	a := fe.addFixture(t, "book", "book", bookItem("d1", "Earthsea"), library.Entry{Status: library.Planned})
+	b := fe.addFixture(t, "book", "book", bookItem("d2", "Tales from Earthsea"), library.Entry{Status: library.Planned})
+	for i := range 210 {
+		fe.addFixture(t, "tv", "show", tvShow("t"+idStr(int64(i)), "An Earthsea Show "+idStr(int64(i))), library.Entry{Status: library.Planned})
+	}
+	body := fe.get("/book/merge/pick?keep=" + idStr(a) + "&q=earth").Body.String()
+	mustContain(t, body, "Tales from Earthsea", `other=`+idStr(b))
+	mustNotContain(t, body, "An Earthsea Show")
+}
