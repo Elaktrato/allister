@@ -31,6 +31,7 @@ type runView struct {
 	EditURL                   string // the run's form (the entry dialog for the display run)
 	DeleteURL, DeleteConfirm  string // "" with one run (deleting it is removing the entry)
 	Return                    string
+	TimelineURL               string // the lazily loaded timeline fragment
 }
 
 // runDialog is the data of run_dialog (run_history.html).
@@ -271,7 +272,7 @@ func (s *server) runHistory(ctx context.Context, k plugin.KindDef, it *library.I
 	for _, run := range runs {
 		v := runView{Number: run.Number, Status: statusLabel(k, run.Status), StatusKey: string(run.Status),
 			Started: fmtDay(run.StartedOn), Finished: fmtDay(run.FinishedOn), Rating: "–", Review: run.Review,
-			Display: run.ID == e.RunID, Return: overview}
+			Display: run.ID == e.RunID, Return: overview, TimelineURL: timelineURL(it.ID, run.ID)}
 		if run.Rating != nil {
 			v.Rating = strconv.Itoa(*run.Rating)
 		}

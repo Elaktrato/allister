@@ -46,7 +46,7 @@ func TestManifestJSONRoundTrip(t *testing.T) {
 			Tags:     plugin.TermDef{Enabled: true, Label: "Tags", Editable: true, Filterable: true},
 			Statuses: plugin.StatusLabels{Planned: "P", Active: "A", Paused: "Pa", Completed: "C", Dropped: "D"},
 			Progress: plugin.ProgressSpec{
-				Eligible:     []plugin.ProgressDef{{Key: "x", Type: plugin.Count, Label: "X", TotalField: "n"}, {Key: "y", Type: plugin.Percent, Label: "Y", ResetOnPrimary: true}, {Key: "d", Type: plugin.Duration, Label: "D"}},
+				Eligible:     []plugin.ProgressDef{{Key: "x", Type: plugin.Count, Label: "X", LabelPlural: "Xes", TotalField: "n"}, {Key: "y", Type: plugin.Percent, Label: "Y", ResetOnPrimary: true}, {Key: "d", Type: plugin.Duration, Label: "D"}},
 				Defaults:     []string{"x"},
 				Combinations: [][]string{{"x"}, {"y"}},
 				PrimaryKey:   "x",
@@ -306,4 +306,13 @@ func TestSourceKeyOptionalJSON(t *testing.T) {
 		t.Errorf("unset must be omitted: %s", off)
 	}
 	roundTrip(t, "key optional", plugin.SourceInfo{ID: "s", KeyLabel: "API key", KeyOptional: true})
+}
+
+func TestProgressDefPluralLabel(t *testing.T) {
+	if got := (plugin.ProgressDef{Label: "Page"}).PluralLabel(); got != "Pages" {
+		t.Fatalf("default plural = %q", got)
+	}
+	if got := (plugin.ProgressDef{Label: "Match", LabelPlural: "Matches"}).PluralLabel(); got != "Matches" {
+		t.Fatalf("declared plural = %q", got)
+	}
 }

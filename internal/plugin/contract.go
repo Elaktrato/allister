@@ -117,8 +117,18 @@ type ProgressDef struct {
 	Key            string       `json:"key"`
 	Type           ProgressType `json:"type"`
 	Label          string       `json:"label"`
+	LabelPlural    string       `json:"label_plural,omitempty"`
 	TotalField     string       `json:"total_field,omitempty"`
 	ResetOnPrimary bool         `json:"reset_on_primary,omitempty"`
+}
+
+// PluralLabel is the track's plural label (the timeline reads "Pages 5-7"):
+// LabelPlural when the plugin declares one, else Label with an "s".
+func (d ProgressDef) PluralLabel() string {
+	if d.LabelPlural != "" {
+		return d.LabelPlural
+	}
+	return d.Label + "s"
 }
 
 // ProgressSpec lists the eligible progress tracks of a kind, the default

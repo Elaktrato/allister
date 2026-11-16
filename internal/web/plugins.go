@@ -37,6 +37,7 @@ func (s *server) entryRoutes(reg routeRegistrar) {
 	reg.Handle("GET /list/{id}/runs/{run}/edit", s.getRunEdit)
 	reg.Handle("POST /list/{id}/runs/{run}/edit", s.postRunEdit)
 	reg.Handle("POST /list/{id}/runs/{run}/delete", s.postRunDelete)
+	reg.Handle("GET /list/{id}/runs/{run}/timeline", s.getTimeline)
 }
 
 // muxRegistrar mounts relative patterns on a mux behind a guard.
