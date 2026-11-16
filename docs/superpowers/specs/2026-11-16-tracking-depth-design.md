@@ -1,4 +1,4 @@
-# Tracking depth (design, 2026-11-16)
+# Tracking depth (design, 2026-11-16, approved)
 
 First of five projects for the next version (tracking depth; managing
 entries; finding what's next; looking back; running it). It covers five
