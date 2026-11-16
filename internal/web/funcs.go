@@ -39,6 +39,8 @@ var templateFuncs = template.FuncMap{
 	},
 	// httpsURL returns u only when it is an absolute https URL, else "".
 	"httpsURL": httpsURL,
+	// fold shortens a long comparison value ("" when it is short).
+	"fold": foldText,
 }
 
 func langLabel(tag string) string {

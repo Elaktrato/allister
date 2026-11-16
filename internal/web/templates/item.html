@@ -52,9 +52,7 @@
     <a href="{{.DetailsURL}}" class="block rounded border border-slate-700 px-4 py-2 text-center text-sm hover:bg-slate-800">Edit details</a>
     {{end}}
     {{if .UpdateURL}}
-    <form method="post" action="{{.UpdateURL}}">
-      <button type="submit" class="w-full rounded border border-slate-700 px-4 py-2 text-sm hover:bg-slate-800">{{.UpdateLabel}}</button>
-    </form>
+    <a href="{{.UpdateURL}}" class="block rounded border border-slate-700 px-4 py-2 text-center text-sm hover:bg-slate-800">{{.UpdateLabel}}</a>
     {{end}}
   </aside>
   <div class="min-w-0 space-y-6">

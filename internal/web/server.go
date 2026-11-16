@@ -41,6 +41,11 @@ type Deps struct {
 	// sync job. cmd/allister wires the generic sync job (jobs.SyncJobFor)
 	// for every installed plugin.
 	SyncJobs map[string]func(itemID int64) (kind string, payload any)
+	// CoverJobs maps a plugin id to its cover-only sync job (jobs.CoverJobFor),
+	// like SyncJobs: taking a source's remote cover on "Update from source"
+	// enqueues it so the cover is downloaded. A plugin without an entry gets
+	// no job (the remote cover stays until a later sync).
+	CoverJobs map[string]func(itemID int64) (kind string, payload any)
 	// ScheduleJobs maps a plugin id to its schedule refresh job, like
 	// SyncJobs: the calendar feed enqueues refreshes without knowing the kind.
 	ScheduleJobs map[string]func(itemID int64) (kind string, payload any)
@@ -108,7 +113,7 @@ type server struct {
 
 // pageNames lists every page template (templates/<name>.html). Add a page by
 // dropping its file in templates/ and listing it here.
-var pageNames = []string{"calendar", "stats", "settings", "settings_appearance", "settings_plugins_page", "settings_plugin", "search", "item", "list", "series", "person", "manual_form", "details_form", "import", "error", "recommendations", "backup", "home", "settings_tags", "lists", "list_page"}
+var pageNames = []string{"calendar", "stats", "settings", "settings_appearance", "settings_plugins_page", "settings_plugin", "search", "item", "list", "series", "person", "manual_form", "details_form", "import", "error", "recommendations", "backup", "home", "settings_tags", "lists", "list_page", "changes"}
 
 // pagePartials lists extra template files a page needs (also rendered alone
 // for htmx requests).
