@@ -660,3 +660,63 @@ func TestUpdatePastRunStatusLimited(t *testing.T) {
 		t.Fatalf("stale run: %v, want ErrNoRun", err)
 	}
 }
+
+func TestStatsRowsLoadPastRuns(t *testing.T) {
+	e := newEnv(t)
+	l := e.lib
+	rewatched := addShow(t, l, "s1", fp(12), Entry{Status: Completed, Rating: ip(8),
+		FinishedOn: new(day(2024, 2, 1)), Progress: map[string]float64{"episode": 12}})
+	first := displayRunOf(t, e, rewatched)
+	run2 := mustStartRun(t, l, rewatched)
+	plain := addShow(t, l, "s2", fp(6), Entry{Status: Completed, Progress: map[string]float64{"episode": 6}})
+	q := Query{PluginID: "tv", Kind: "show"}
+
+	rows, err := l.StatsRows(bg, q, "en")
+	if err != nil || len(rows) != 2 {
+		t.Fatalf("StatsRows = %d rows, %v", len(rows), err)
+	}
+	byID := map[int64]Row{}
+	for _, r := range rows {
+		byID[r.Item.ID] = r
+	}
+	r := byID[rewatched]
+	if r.Entry.RunID != run2.ID || len(r.PastRuns) != 1 {
+		t.Fatalf("rewatched row = display run %d, past %+v", r.Entry.RunID, r.PastRuns)
+	}
+	if p := r.PastRuns[0]; p.ID != first || p.Number != 1 || p.Status != Completed || p.Rating == nil || *p.Rating != 8 ||
+		!p.FinishedOn.Equal(day(2024, 2, 1)) || !reflect.DeepEqual(p.Progress, map[string]float64{"episode": 12}) {
+		t.Fatalf("past run = %+v", p)
+	}
+	if got := byID[plain].PastRuns; got != nil {
+		t.Fatalf("an entry without repeats has no past runs, got %+v", got)
+	}
+
+	// the other loaders leave PastRuns nil
+	pg, err := l.List(bg, q, "en")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range pg.Rows {
+		if r.PastRuns != nil {
+			t.Fatalf("List filled PastRuns: %+v", r.PastRuns)
+		}
+	}
+
+	// a status filter matches an entry through any of its runs
+	completed := Completed
+	q.Status = &completed
+	rows, err = l.StatsRows(bg, q, "en")
+	if err != nil || len(rows) != 2 {
+		t.Fatalf("completed filter = %d rows, %v (the active repeat has a completed past run)", len(rows), err)
+	}
+	dropped := Dropped
+	q.Status = &dropped
+	if rows, err = l.StatsRows(bg, q, "en"); err != nil || len(rows) != 0 {
+		t.Fatalf("dropped filter = %d rows, %v", len(rows), err)
+	}
+	bad := Status("bogus")
+	q.Status = &bad
+	if _, err = l.StatsRows(bg, q, "en"); err == nil {
+		t.Fatal("an unknown status must be rejected")
+	}
+}

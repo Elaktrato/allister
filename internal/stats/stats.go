@@ -42,6 +42,10 @@ type Input struct {
 type Options struct {
 	From, To *time.Time
 	Bucket   BucketMode
+	// Status is the status filter of the report; nil means every status. A
+	// row's display run counts as an entry only when it matches, and every
+	// past run counts its time and units only when its own status matches.
+	Status *library.Status
 }
 
 // Totals are the summed numbers of one kind or of every kind. Statuses holds
@@ -107,23 +111,39 @@ type rowFacts struct {
 	timeMetric bool
 	units      float64
 	hasUnits   bool
+	// runOnly marks a past run: it adds its time and units, but is no entry
+	// (no entry, status or rating count).
+	runOnly bool
 }
 
 // Build aggregates inputs into a report. Rows are narrowed to the period by
 // their finished date; a nil finished date survives only in an all-time
 // report. The kinds keep the input order.
+//
+// Entry counts, statuses and ratings come once per entry from the display run
+// (Row.Entry). Time and units count every run the way an entry counts: the
+// display run and each of Row.PastRuns, each narrowed by the period on its own
+// finished date and by the status filter on its own status.
 func Build(inputs []Input, opts Options) Report {
 	rep := Report{All: newTotals()}
 	facts := make([][]rowFacts, len(inputs))
 	var all []rowFacts
 	for i, in := range inputs {
 		for _, row := range in.Rows {
-			if !inPeriod(row.Entry.FinishedOn, opts) {
-				continue
+			if statusMatches(row.Entry.Status, opts) && inPeriod(row.Entry.FinishedOn, opts) {
+				f := factsFor(in.Kind, row)
+				facts[i] = append(facts[i], f)
+				all = append(all, f)
 			}
-			f := factsFor(in.Kind, row)
-			facts[i] = append(facts[i], f)
-			all = append(all, f)
+			for _, run := range row.PastRuns {
+				if !statusMatches(run.Status, opts) || !inPeriod(run.FinishedOn, opts) {
+					continue
+				}
+				f := factsFor(in.Kind, runRow(row, run))
+				f.runOnly = true
+				facts[i] = append(facts[i], f)
+				all = append(all, f)
+			}
 		}
 	}
 
@@ -160,6 +180,22 @@ func Build(inputs []Input, opts Options) Report {
 	return rep
 }
 
+// statusMatches reports whether a run's status passes the status filter.
+func statusMatches(s library.Status, opts Options) bool {
+	return opts.Status == nil || *opts.Status == s
+}
+
+// runRow is the row of one past run: the item with the run's own status,
+// finish date and progress, so the entry rules apply to it unchanged.
+func runRow(row library.Row, run library.Run) library.Row {
+	row.Entry.Status = run.Status
+	row.Entry.Rating = nil
+	row.Entry.StartedOn, row.Entry.FinishedOn = run.StartedOn, run.FinishedOn
+	row.Entry.Progress = run.Progress
+	row.PastRuns = nil
+	return row
+}
+
 func newTotals() Totals {
 	t := Totals{Statuses: map[plugin.StatusClass]int{}}
 	for _, s := range plugin.StatusClasses() {
@@ -179,6 +215,15 @@ func finishTotals(t *Totals) {
 // declared time metric never count as missing time; a resolved zero is known
 // and only stays out of the average denominators.
 func addTotals(t *Totals, f rowFacts, sumUnits bool) {
+	if f.runOnly {
+		if f.timeMetric && f.hasTime {
+			t.TimeSeconds += f.seconds
+		}
+		if f.hasUnits && sumUnits {
+			t.Units += f.units
+		}
+		return
+	}
 	t.Entries++
 	if s := plugin.StatusClass(f.row.Entry.Status); isStatus(s) {
 		t.Statuses[s]++
@@ -573,10 +618,12 @@ func (a *accumulator) add(f rowFacts, values []string) {
 			d = &Dimension{Value: value}
 			a.seen[key] = d
 		}
-		d.Entries++
-		if r := f.row.Entry.Rating; r != nil {
-			d.Rated++
-			d.RatingSum += *r
+		if !f.runOnly {
+			d.Entries++
+			if r := f.row.Entry.Rating; r != nil {
+				d.Rated++
+				d.RatingSum += *r
+			}
 		}
 		if f.hasTime {
 			d.TimeSeconds += f.seconds
