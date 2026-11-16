@@ -11,7 +11,10 @@
 //	              "time_zone": "Europe/Berlin",               (optional)
 //	              "items": [library.BackupItem, ...],
 //	              "series": [library.BackupSeries, ...],      (optional, after items)
-//	              "lists": [library.BackupList, ...]}         (optional, after items)
+//	              "lists": [library.BackupList, ...],         (optional, after items)
+//	              "aliases": [library.BackupAlias, ...],      (optional, after items)
+//	              "dismissed_duplicates": [library.BackupDismissedPair, ...]}
+//	                                                          (optional, after items)
 //	covers/<name>  the file of every item whose cover is a local file
 //	fonts/<name>   the file of every uploaded font
 //
@@ -33,8 +36,13 @@
 // state with a comment (library.BackupEntry). A restore reads format 1 too:
 // its entry (library.BackupEntryV1) becomes run 1, the comment the notes.
 //
+// The aliases (identities kept by a merge) and dismissed duplicate pairs
+// were added without a new format version: an older Allister skips them as
+// unknown members, and a backup without them restores as before.
+//
 // In backup.json "format" and "format_version" must come before "items",
-// "series" and "lists" after it, and each of the five members appears once; a restore
+// "series", "lists", "aliases" and "dismissed_duplicates" after it, and each
+// of these seven members appears once; a restore
 // refuses anything else (before restoring an item where it can be detected
 // that early). One item's JSON is limited to Limits.MaxItemBytes.
 //
@@ -195,7 +203,7 @@ func Write(ctx context.Context, w io.Writer, lib *library.Library, plugins []Plu
 					names = append(names, bi.Cover)
 				}
 			} else {
-				bi.Cover, bi.CoverMissing = "", true
+				bi.Cover, bi.CoverSource, bi.CoverMissing = "", "", true
 			}
 		}
 		if !first {
@@ -239,6 +247,40 @@ func Write(ctx context.Context, w io.Writer, lib *library.Library, plugins []Plu
 		}
 		first = false
 		return enc.Encode(bl)
+	})
+	if err != nil {
+		return fmt.Errorf("backup: %w", err)
+	}
+	_, _ = bw.WriteString(`],"aliases":[`)
+	first = true
+	err = lib.BackupAliases(ctx, func(ba library.BackupAlias) error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if !first {
+			if _, err := bw.WriteString(","); err != nil {
+				return err
+			}
+		}
+		first = false
+		return enc.Encode(ba)
+	})
+	if err != nil {
+		return fmt.Errorf("backup: %w", err)
+	}
+	_, _ = bw.WriteString(`],"dismissed_duplicates":[`)
+	first = true
+	err = lib.BackupDismissedPairs(ctx, func(bp library.BackupDismissedPair) error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if !first {
+			if _, err := bw.WriteString(","); err != nil {
+				return err
+			}
+		}
+		first = false
+		return enc.Encode(bp)
 	})
 	if err != nil {
 		return fmt.Errorf("backup: %w", err)
@@ -357,8 +399,16 @@ type Report struct {
 	// entries added to them and ListItemsLeftOut those whose item is not in
 	// the library (named per list in Notes, like lists that are not valid).
 	Lists, ListItemsAdded, ListItemsLeftOut int
-	Ignored                                 int
-	Aborted                                 string
+	// Aliases counts the merged-away identities of the backup that were
+	// added; AliasesSkipped those whose identity is an item or an alias
+	// already, AliasesLeftOut those whose survivor is not in the library.
+	Aliases, AliasesSkipped, AliasesLeftOut int
+	// Dismissed counts the dismissed duplicate pairs that were added;
+	// DismissedSkipped those present already, DismissedLeftOut those whose
+	// items are not both in the library (or are one item).
+	Dismissed, DismissedSkipped, DismissedLeftOut int
+	Ignored                                       int
+	Aborted                                       string
 	// Appearance notes what the appearance member restored or skipped
 	// (cleaned like the rows).
 	Appearance []string
@@ -528,9 +578,9 @@ func (rs *restorer) index(zr *zip.Reader) *zip.File {
 }
 
 // decode reads backup.json token by token: "format" and "format_version"
-// must come before "items", "series" and "lists" after it (as Write puts
-// them), and
-// each of the five may appear once; items are decoded one by one.
+// must come before "items", "series", "lists", "aliases" and
+// "dismissed_duplicates" after it (as Write puts them), and each of the
+// seven may appear once; items are decoded one by one.
 func (rs *restorer) decode(ctx context.Context, dec *json.Decoder) error {
 	dec.UseNumber()
 	tok, err := dec.Token()
@@ -588,7 +638,7 @@ func (rs *restorer) decode(ctx context.Context, dec *json.Decoder) error {
 		}
 		key, _ := tok.(string)
 		switch key {
-		case "format", "format_version", "items", "series", "lists":
+		case "format", "format_version", "items", "series", "lists", "aliases", "dismissed_duplicates":
 			if seen[key] {
 				msg := fmt.Sprintf("backup.json has more than one %q member", key)
 				if !seen["items"] {
@@ -644,6 +694,14 @@ func (rs *restorer) decode(ctx context.Context, dec *json.Decoder) error {
 				return reject(`%s: "lists" must come after "items".`, notBackup)
 			}
 			if err := rs.lists(ctx, dec); err != nil {
+				return err
+			}
+		case "aliases", "dismissed_duplicates":
+			// they refer to restored items by identity: they come after "items"
+			if !seen["items"] {
+				return reject(`%s: %q must come after "items".`, notBackup, key)
+			}
+			if err := rs.merges(ctx, dec, key); err != nil {
 				return err
 			}
 		case "appearance", "time_zone":
@@ -857,6 +915,76 @@ func (rs *restorer) lists(ctx context.Context, dec *json.Decoder) error {
 		return rs.syntax(err)
 	}
 	return nil
+}
+
+// merges restores the aliases or dismissed_duplicates array (after all
+// items); the decoder stands before '['. One row is one transaction.
+func (rs *restorer) merges(ctx context.Context, dec *json.Decoder, key string) error {
+	tok, err := dec.Token()
+	if err != nil {
+		return rs.syntax(err)
+	}
+	if tok != json.Delim('[') {
+		return rs.abort(fmt.Sprintf("backup.json is damaged: %q is not a list", key))
+	}
+	what, added, skipped, leftOut := "alias", &rs.rep.Aliases, &rs.rep.AliasesSkipped, &rs.rep.AliasesLeftOut
+	if key == "dismissed_duplicates" {
+		what, added, skipped, leftOut = "dismissed duplicate pair", &rs.rep.Dismissed, &rs.rep.DismissedSkipped, &rs.rep.DismissedLeftOut
+	}
+	n := 0
+	for dec.More() {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		var raw json.RawMessage
+		if err := rs.decodeCapped(dec, &raw, rs.lim.MaxItemBytes, errItemTooLarge); err != nil {
+			return rs.syntax(err)
+		}
+		if int64(len(raw)) > rs.lim.MaxItemBytes {
+			return rs.abort(rs.limitMessage(errItemTooLarge))
+		}
+		n++
+		var outcome library.RestoreMerge
+		var row Row
+		var readErr error
+		if key == "aliases" {
+			var ba library.BackupAlias
+			if readErr = json.Unmarshal(raw, &ba); readErr == nil {
+				row = refRow(n, ba.Alias)
+				outcome, err = rs.opts.Library.RestoreAlias(ctx, ba)
+			}
+		} else {
+			var bp library.BackupDismissedPair
+			if readErr = json.Unmarshal(raw, &bp); readErr == nil {
+				row = refRow(n, bp.A)
+				outcome, err = rs.opts.Library.RestoreDismissedPair(ctx, bp)
+			}
+		}
+		switch {
+		case readErr != nil:
+			addRow(&rs.rep.Notes, &rs.rep.MoreNotes, Row{Index: n, Reason: clip("the "+what+" cannot be read: "+readErr.Error(), 300)})
+		case errors.Is(err, library.ErrInvalid):
+			row.Reason = clip("the "+what+" is not valid: "+err.Error(), 300)
+			addRow(&rs.rep.Notes, &rs.rep.MoreNotes, row)
+		case err != nil:
+			return err
+		case outcome == library.MergeAdded:
+			*added++
+		case outcome == library.MergeSkipped:
+			*skipped++
+		default:
+			*leftOut++
+		}
+	}
+	if _, err := dec.Token(); err != nil {
+		return rs.syntax(err)
+	}
+	return nil
+}
+
+// refRow identifies a row of the backup by an item identity (cleaned).
+func refRow(index int, r library.BackupPartRef) Row {
+	return Row{Index: index, PluginID: clip(r.PluginID, 60), Kind: clip(r.Kind, 60), Source: clip(r.Source, 60), SourceID: clip(r.SourceID, 120)}
 }
 
 // maxNamedParts is how many left-out parts a series note names.

@@ -28,7 +28,9 @@ import (
 // covers/<name>); CoverURL holds a remote cover URL that was never
 // downloaded. At most one of them is set. CoverMissing is set by the archive
 // writer when the item referenced a local cover that could not be included
-// (file missing or name not acceptable); Cover is then "".
+// (file missing or name not acceptable); Cover is then "". CoverSource is
+// the remote URL a local cover was downloaded from (restored only with the
+// cover file).
 type BackupItem struct {
 	PluginID     string                       `json:"plugin_id"`
 	Kind         string                       `json:"kind"`
@@ -45,6 +47,7 @@ type BackupItem struct {
 	Cover        string                       `json:"cover,omitempty"`
 	CoverURL     string                       `json:"cover_url,omitempty"`
 	CoverMissing bool                         `json:"cover_missing,omitempty"`
+	CoverSource  string                       `json:"cover_source,omitempty"`
 	ProgressKeys []string                     `json:"progress_keys"`
 	CreatedAt    string                       `json:"created_at,omitempty"` // RFC 3339 UTC
 	UpdatedAt    string                       `json:"updated_at,omitempty"` // RFC 3339 UTC
@@ -217,7 +220,7 @@ func (l *Library) BackupItems(ctx context.Context, batch int, fn func(BackupItem
 
 // backupBatch reads up to n items with id > after and all their parts.
 func (l *Library) backupBatch(ctx context.Context, after int64, n int) ([]BackupItem, []int64, error) {
-	rows, err := l.db.QueryContext(ctx, `SELECT id, plugin_id, kind, source, source_id, cover_path, external_url, progress_keys, created_at, updated_at
+	rows, err := l.db.QueryContext(ctx, `SELECT id, plugin_id, kind, source, source_id, cover_path, cover_source, external_url, progress_keys, created_at, updated_at
 		FROM items WHERE id > ? ORDER BY id LIMIT ?`, after, n)
 	if err != nil {
 		return nil, nil, fmt.Errorf("backup items: %w", err)
@@ -228,7 +231,7 @@ func (l *Library) backupBatch(ctx context.Context, after int64, n int) ([]Backup
 		var id int64
 		var bi BackupItem
 		var cover, pk string
-		if err := rows.Scan(&id, &bi.PluginID, &bi.Kind, &bi.Source, &bi.SourceID, &cover, &bi.ExternalURL, &pk, &bi.CreatedAt, &bi.UpdatedAt); err != nil {
+		if err := rows.Scan(&id, &bi.PluginID, &bi.Kind, &bi.Source, &bi.SourceID, &cover, &bi.CoverSource, &bi.ExternalURL, &pk, &bi.CreatedAt, &bi.UpdatedAt); err != nil {
 			rows.Close()
 			return nil, nil, fmt.Errorf("backup items: %w", err)
 		}
@@ -240,7 +243,7 @@ func (l *Library) backupBatch(ctx context.Context, after int64, n int) ([]Backup
 			bi.ProgressKeys = []string{}
 		}
 		if isRemote(cover) {
-			bi.CoverURL = cover
+			bi.CoverURL, bi.CoverSource = cover, ""
 		} else {
 			bi.Cover = cover
 		}
@@ -638,6 +641,7 @@ type restorePlan struct {
 	credits              []plugin.Credit
 	entry                *entryPlan
 	createdAt, updatedAt string
+	coverSource          string // kept when the cover file was stored
 }
 
 // entryPlan is a validated backup entry: its runs in number order, the
@@ -721,7 +725,8 @@ func (l *Library) RestoreItem(ctx context.Context, bi BackupItem, opts RestoreOp
 			}
 		}
 		if stored != "" && checkImageRef("cover", stored) == nil {
-			plan.data.CoverURL = stored
+			// the origin of a downloaded cover, kept only with that file
+			plan.data.CoverURL, plan.coverSource = stored, bi.CoverSource
 		} else {
 			stored = ""
 			if note != "" {
@@ -797,6 +802,9 @@ func (l *Library) planRestore(bi BackupItem) (*restorePlan, error) {
 		if !isRemote(bi.CoverURL) {
 			return nil, invalid("cover url must be an http(s) URL")
 		}
+	}
+	if err := checkHTTPURL("cover source", bi.CoverSource); err != nil {
+		return nil, err
 	}
 	d := plugin.ItemData{
 		ItemSummary: plugin.ItemSummary{Source: bi.Source, ID: bi.SourceID, Kind: bi.Kind, Titles: bi.Titles, Fields: bi.Fields, CoverURL: bi.CoverURL},
@@ -1156,6 +1164,11 @@ func (l *Library) writeRestore(ctx context.Context, bi BackupItem, plan *restore
 	}
 	if plan.updatedAt != "" {
 		if _, err := tx.ExecContext(ctx, `UPDATE items SET updated_at = ? WHERE id = ?`, plan.updatedAt, id); err != nil {
+			return 0, fmt.Errorf("restore item: %w", err)
+		}
+	}
+	if plan.coverSource != "" {
+		if _, err := tx.ExecContext(ctx, `UPDATE items SET cover_source = ? WHERE id = ?`, plan.coverSource, id); err != nil {
 			return 0, fmt.Errorf("restore item: %w", err)
 		}
 	}
@@ -1619,4 +1632,190 @@ func (l *Library) RestoreList(ctx context.Context, bl BackupList) (added int, le
 		return 0, 0, fmt.Errorf("restore list: %w", err)
 	}
 	return added, leftOut, nil
+}
+
+// BackupAlias is a merged-away identity of a backup: the identity of the item
+// that kept it (Item) and the identity it stands for (Alias).
+type BackupAlias struct {
+	Item  BackupPartRef `json:"item"`
+	Alias BackupPartRef `json:"alias"`
+}
+
+// BackupDismissedPair is a pair of items the duplicate finder must not offer
+// again, both by identity.
+type BackupDismissedPair struct {
+	A           BackupPartRef `json:"a"`
+	B           BackupPartRef `json:"b"`
+	DismissedAt string        `json:"dismissed_at"` // RFC 3339 UTC
+}
+
+// What RestoreAlias and RestoreDismissedPair did with a row.
+type RestoreMerge int
+
+// The outcomes of RestoreAlias and RestoreDismissedPair.
+const (
+	MergeAdded   RestoreMerge = iota // written
+	MergeSkipped                     // present already
+	MergeLeftOut                     // its items are not in the library
+)
+
+// BackupAliases calls fn for every alias (ordered by its identity) with the
+// identity of the item it belongs to.
+func (l *Library) BackupAliases(ctx context.Context, fn func(BackupAlias) error) error {
+	rows, err := l.db.QueryContext(ctx, `SELECT i.plugin_id, i.kind, i.source, i.source_id, a.plugin_id, a.kind, a.source, a.source_id
+		FROM item_aliases a JOIN items i ON i.id = a.item_id ORDER BY a.plugin_id, a.kind, a.source, a.source_id`)
+	if err != nil {
+		return fmt.Errorf("backup aliases: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var ba BackupAlias
+		if err := rows.Scan(&ba.Item.PluginID, &ba.Item.Kind, &ba.Item.Source, &ba.Item.SourceID,
+			&ba.Alias.PluginID, &ba.Alias.Kind, &ba.Alias.Source, &ba.Alias.SourceID); err != nil {
+			return fmt.Errorf("backup aliases: %w", err)
+		}
+		if err := fn(ba); err != nil {
+			return err
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("backup aliases: %w", err)
+	}
+	return nil
+}
+
+// BackupDismissedPairs calls fn for every dismissed duplicate pair (ordered
+// by item ids) with both identities.
+func (l *Library) BackupDismissedPairs(ctx context.Context, fn func(BackupDismissedPair) error) error {
+	rows, err := l.db.QueryContext(ctx, `SELECT x.plugin_id, x.kind, x.source, x.source_id, y.plugin_id, y.kind, y.source, y.source_id, d.dismissed_at
+		FROM dismissed_duplicates d JOIN items x ON x.id = d.item_a JOIN items y ON y.id = d.item_b ORDER BY d.item_a, d.item_b`)
+	if err != nil {
+		return fmt.Errorf("backup dismissed duplicates: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var bp BackupDismissedPair
+		if err := rows.Scan(&bp.A.PluginID, &bp.A.Kind, &bp.A.Source, &bp.A.SourceID,
+			&bp.B.PluginID, &bp.B.Kind, &bp.B.Source, &bp.B.SourceID, &bp.DismissedAt); err != nil {
+			return fmt.Errorf("backup dismissed duplicates: %w", err)
+		}
+		if err := fn(bp); err != nil {
+			return err
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("backup dismissed duplicates: %w", err)
+	}
+	return nil
+}
+
+// checkRef validates an identity that is written to the database: every
+// part set, single-line text.
+func checkRef(path string, r BackupPartRef) error {
+	for _, v := range []struct{ name, s string }{{"plugin", r.PluginID}, {"kind", r.Kind}, {"source", r.Source}, {"source id", r.SourceID}} {
+		if v.s == "" {
+			return invalid("%s has no %s", path, v.name)
+		}
+		if err := cleanText(path+" "+v.name, v.s, singleLine); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// RestoreAlias merges one alias of a backup. Its survivor is resolved by
+// identity (an item, or the item that identity is an alias of); a missing
+// survivor leaves it out. An alias identity that is an item or an alias
+// already is skipped. The alias must be of the survivor's plugin and kind,
+// and a manual identity is never an alias (ErrInvalid otherwise).
+func (l *Library) RestoreAlias(ctx context.Context, ba BackupAlias) (RestoreMerge, error) {
+	if err := checkRef("alias", ba.Alias); err != nil {
+		return 0, err
+	}
+	if err := checkRef("alias item", ba.Item); err != nil {
+		return 0, err
+	}
+	if ba.Alias.PluginID != ba.Item.PluginID || ba.Alias.Kind != ba.Item.Kind {
+		return 0, invalid("an alias must be of its item's plugin and kind")
+	}
+	if ba.Alias.Source == manualSource {
+		return 0, invalid("a manual identity is not an alias")
+	}
+	tx, err := l.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, fmt.Errorf("restore alias: %w", err)
+	}
+	defer tx.Rollback()
+	a := ba.Alias
+	taken, err := identityOwner(ctx, tx, a.PluginID, a.Kind, a.Source, a.SourceID)
+	if err != nil {
+		return 0, fmt.Errorf("restore alias: %w", err)
+	}
+	if taken != 0 {
+		return MergeSkipped, nil
+	}
+	owner, err := identityOwner(ctx, tx, ba.Item.PluginID, ba.Item.Kind, ba.Item.Source, ba.Item.SourceID)
+	if err != nil {
+		return 0, fmt.Errorf("restore alias: %w", err)
+	}
+	if owner == 0 {
+		return MergeLeftOut, nil
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO item_aliases(item_id, plugin_id, kind, source, source_id) VALUES (?,?,?,?,?)`,
+		owner, a.PluginID, a.Kind, a.Source, a.SourceID); err != nil {
+		return 0, fmt.Errorf("restore alias: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, fmt.Errorf("restore alias: %w", err)
+	}
+	return MergeAdded, nil
+}
+
+// RestoreDismissedPair merges one dismissed duplicate pair of a backup. Both
+// items are resolved by identity (an item, or the item that identity is an
+// alias of); a pair with a missing item, or whose identities resolve to one
+// item, is left out, and one present already is skipped. An invalid identity
+// or stamp is ErrInvalid.
+func (l *Library) RestoreDismissedPair(ctx context.Context, bp BackupDismissedPair) (RestoreMerge, error) {
+	if err := checkRef("dismissed pair", bp.A); err != nil {
+		return 0, err
+	}
+	if err := checkRef("dismissed pair", bp.B); err != nil {
+		return 0, err
+	}
+	stamp, err := restoreStamp("dismissed_at", bp.DismissedAt)
+	if err != nil {
+		return 0, err
+	}
+	tx, err := l.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, fmt.Errorf("restore dismissed pair: %w", err)
+	}
+	defer tx.Rollback()
+	var ids [2]int64
+	for i, r := range []BackupPartRef{bp.A, bp.B} {
+		if ids[i], err = identityOwner(ctx, tx, r.PluginID, r.Kind, r.Source, r.SourceID); err != nil {
+			return 0, fmt.Errorf("restore dismissed pair: %w", err)
+		}
+	}
+	a, b := min(ids[0], ids[1]), max(ids[0], ids[1])
+	if a == 0 || a == b {
+		return MergeLeftOut, nil
+	}
+	res, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO dismissed_duplicates(item_a, item_b, dismissed_at)
+		VALUES (?1, ?2, COALESCE(?3, `+nowSQL+`))`, a, b, orNow(stamp))
+	if err != nil {
+		return 0, fmt.Errorf("restore dismissed pair: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("restore dismissed pair: %w", err)
+	}
+	if n == 0 {
+		return MergeSkipped, nil
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, fmt.Errorf("restore dismissed pair: %w", err)
+	}
+	return MergeAdded, nil
 }
