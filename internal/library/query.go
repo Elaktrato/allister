@@ -155,6 +155,9 @@ type Row struct {
 	Entry Entry
 	Title string
 	Flags RowFlags
+	// PastRuns are the entry's runs other than the display run, newest
+	// first. Only StatsRows fills them; every other loader leaves it nil.
+	PastRuns []Run
 }
 
 // Page is one page of rows. PageNo is the page actually returned (requests
@@ -804,15 +807,36 @@ var ErrTooManyRows = errors.New("too many rows to aggregate")
 const maxStatsRows = 20000
 
 // StatsRows returns every entry matching q in item-id order, for the
-// statistics aggregation. It fails with ErrTooManyRows above maxStatsRows.
+// statistics aggregation, with each row's PastRuns (every run except the
+// display run) loaded for all rows at once. A status filter matches an entry
+// when ANY of its runs has that status, because the statistics narrow each
+// run by its own status; the caller narrows the display runs. It fails with
+// ErrTooManyRows above maxStatsRows.
 func (l *Library) StatsRows(ctx context.Context, q Query, lang string) ([]Row, error) {
-	return l.statsRows(ctx, q, lang, maxStatsRows)
+	rows, err := l.statsRows(ctx, q, lang, maxStatsRows)
+	if err != nil {
+		return nil, err
+	}
+	if err := l.loadPastRuns(ctx, rows); err != nil {
+		return nil, err
+	}
+	return rows, nil
 }
 
 func (l *Library) statsRows(ctx context.Context, q Query, lang string, limit int) ([]Row, error) {
+	status := q.Status
+	q.Status = nil
+	if status != nil && !validStatus(*status) {
+		return nil, invalid("status %q must be one of planned, active, paused, completed, dropped", *status)
+	}
 	c, err := l.compile(q)
 	if err != nil {
 		return nil, err
+	}
+	if status != nil {
+		c.clauses = append(c.clauses, clause{"status",
+			`e.status = ? OR EXISTS (SELECT 1 FROM ` + tableRuns + ` sr WHERE sr.item_id = items.id AND sr.status = ?)`,
+			[]any{string(*status), string(*status)}})
 	}
 	whereSQL, whereArgs := c.where()
 	var total int

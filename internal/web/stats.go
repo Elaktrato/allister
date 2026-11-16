@@ -674,7 +674,9 @@ func statsTermCounts(loaded []statsKindRows, q statsQuery, which string) []libra
 			continue
 		}
 		for _, row := range l.rows {
-			if !statsDayInPeriod(row.Entry.FinishedOn, q.From, q.To) {
+			// StatsRows also returns entries that match the status through
+			// a past run only; the option counts are of display runs
+			if (q.Status != nil && row.Entry.Status != *q.Status) || !statsDayInPeriod(row.Entry.FinishedOn, q.From, q.To) {
 				continue
 			}
 			switch which {
@@ -777,12 +779,12 @@ func (s *server) buildStatsPage(ctx context.Context, q statsQuery) (*statsPage, 
 		rows := statsNarrow(l.rows, q)
 		inputs[i] = stats.Input{PluginID: l.kind.PluginID, Kind: l.kind.Kind, Rows: rows}
 		for _, row := range rows {
-			if row.Entry.Status == library.Completed && row.Entry.FinishedOn == nil {
+			if row.Entry.Status == library.Completed && row.Entry.FinishedOn == nil && (q.Status == nil || *q.Status == library.Completed) {
 				undated++
 			}
 		}
 	}
-	rep := stats.Build(inputs, stats.Options{From: q.From, To: q.To, Bucket: statsBucket(q.Period)})
+	rep := stats.Build(inputs, stats.Options{From: q.From, To: q.To, Bucket: statsBucket(q.Period), Status: q.Status})
 	if err := s.fillStatsPage(ctx, v, q, scope, rep); err != nil {
 		return nil, err
 	}

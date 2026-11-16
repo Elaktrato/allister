@@ -125,6 +125,91 @@ func loadRuns(ctx context.Context, q queryer, itemID int64) ([]Run, error) {
 	return runs, nil
 }
 
+// pastRunChunk bounds the item ids of one past-runs query (SQLite limits the
+// number of bound variables).
+const pastRunChunk = 10000
+
+// loadPastRuns sets PastRuns of every row to the entry's runs other than its
+// display run, newest first, with the values of the item's active progress
+// keys. It reads all rows' runs with one query (two for the progress values)
+// per chunk of items, not one per row.
+func (l *Library) loadPastRuns(ctx context.Context, rows []Row) error {
+	for start := 0; start < len(rows); start += pastRunChunk {
+		chunk := rows[start:min(start+pastRunChunk, len(rows))]
+		ids := make([]any, len(chunk))
+		byItem := make(map[int64]*Row, len(chunk))
+		for i := range chunk {
+			ids[i] = chunk[i].Item.ID
+			byItem[chunk[i].Item.ID] = &chunk[i]
+		}
+		in := `r.item_id IN (` + placeholders(len(ids)) + `)`
+		rrows, err := l.db.QueryContext(ctx, `SELECT r.item_id, `+runCols+` FROM `+tableRuns+` r WHERE `+in+` ORDER BY r.item_id, r.number DESC`, ids...)
+		if err != nil {
+			return fmt.Errorf("load past runs: %w", err)
+		}
+		index := map[int64]*Run{}
+		for rrows.Next() {
+			var itemID int64
+			var r Run
+			var st stateScan
+			var created string
+			if err := rrows.Scan(&itemID, &r.ID, &r.Number, &st.status, &st.rating, &r.Review, &st.started, &st.finished, &created, &st.updated); err != nil {
+				rrows.Close()
+				return fmt.Errorf("load past runs: %w", err)
+			}
+			var e Entry
+			if err := st.fill(&e); err != nil {
+				rrows.Close()
+				return err
+			}
+			if r.CreatedAt, err = time.Parse(time.RFC3339, created); err != nil {
+				rrows.Close()
+				return fmt.Errorf("stored run time %q: %w", created, err)
+			}
+			r.Status, r.Rating, r.StartedOn, r.FinishedOn, r.UpdatedAt = e.Status, e.Rating, e.StartedOn, e.FinishedOn, e.UpdatedAt
+			r.Progress = map[string]float64{}
+			row := byItem[itemID]
+			if r.ID == row.Entry.RunID {
+				continue
+			}
+			row.PastRuns = append(row.PastRuns, r)
+		}
+		if err := closeRows(rrows); err != nil {
+			return fmt.Errorf("load past runs: %w", err)
+		}
+		// the slices are complete now: index into them
+		for i := range chunk {
+			for j := range chunk[i].PastRuns {
+				index[chunk[i].PastRuns[j].ID] = &chunk[i].PastRuns[j]
+			}
+		}
+		if len(index) == 0 {
+			continue
+		}
+		prows, err := l.db.QueryContext(ctx, `SELECT r.item_id, p.run_id, p.key, p.value FROM `+tableRunProgress+` p
+			JOIN `+tableRuns+` r ON r.id = p.run_id WHERE `+in, ids...)
+		if err != nil {
+			return fmt.Errorf("load past run progress: %w", err)
+		}
+		for prows.Next() {
+			var itemID, runID int64
+			var k string
+			var v float64
+			if err := prows.Scan(&itemID, &runID, &k, &v); err != nil {
+				prows.Close()
+				return fmt.Errorf("load past run progress: %w", err)
+			}
+			if run, ok := index[runID]; ok && slices.Contains(byItem[itemID].Item.ProgressKeys, k) {
+				run.Progress[k] = v
+			}
+		}
+		if err := closeRows(prows); err != nil {
+			return fmt.Errorf("load past run progress: %w", err)
+		}
+	}
+	return nil
+}
+
 // StartRun starts the entry again: a new run n+1, active, started on the
 // calendar day of today (in today's own zone: the caller passes the
 // configured time zone's now), with the display run's rating, no progress
