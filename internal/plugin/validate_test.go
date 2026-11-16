@@ -89,6 +89,9 @@ func TestValidateRejects(t *testing.T) {
 		{"reserved id", tv, func(m *plugin.Manifest) {
 			m.ID = "settings"
 		}, `id: "settings" is reserved`},
+		{"reserved id lists", tv, func(m *plugin.Manifest) {
+			m.ID = "lists"
+		}, `id: "lists" is reserved`},
 		{"bad id slug uppercase", tv, func(m *plugin.Manifest) { m.ID = "Anime" }, `id: "Anime" is not a valid slug`},
 		{"bad id slug leading digit", tv, func(m *plugin.Manifest) { m.ID = "1tv" }, `is not a valid slug`},
 		{"bad id slug underscore", tv, func(m *plugin.Manifest) { m.ID = "my_tv" }, `is not a valid slug`},
@@ -725,5 +728,45 @@ func TestValidateKeyOptional(t *testing.T) {
 	m.Sources[0].KeyFields = []plugin.KeyField{{Name: "id", Label: "ID"}}
 	if err := plugin.Validate(m); err != nil {
 		t.Errorf("with key_fields: %v", err)
+	}
+}
+
+func TestKindRepeatLabels(t *testing.T) {
+	var k plugin.KindDef
+	if k.RepeatAction() != "Start again" || k.RepeatMarker() != "Again" {
+		t.Fatalf("defaults: %q %q", k.RepeatAction(), k.RepeatMarker())
+	}
+	k.Repeat = &plugin.RepeatDef{Action: "Rewatch", Marker: "Rewatching"}
+	if k.RepeatAction() != "Rewatch" || k.RepeatMarker() != "Rewatching" {
+		t.Fatalf("declared: %q %q", k.RepeatAction(), k.RepeatMarker())
+	}
+}
+
+func TestValidateRepeat(t *testing.T) {
+	long := strings.Repeat("é", 41)
+	for _, c := range []struct {
+		name string
+		r    plugin.RepeatDef
+		want string
+	}{
+		{"empty action", plugin.RepeatDef{Marker: "M"}, `kinds[0].repeat.action: required`},
+		{"empty marker", plugin.RepeatDef{Action: "A"}, `kinds[0].repeat.marker: required`},
+		{"multi line", plugin.RepeatDef{Action: "A\nB", Marker: "M"}, `kinds[0].repeat.action:`},
+		{"too long", plugin.RepeatDef{Action: "A", Marker: long}, `kinds[0].repeat.marker:`},
+	} {
+		m := plugintest.TVPlugin().Manifest()
+		m.Kinds = append([]plugin.KindDef(nil), m.Kinds...)
+		r := c.r
+		m.Kinds[0].Repeat = &r
+		err := plugin.Validate(m)
+		if err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%s: got %v, want %q", c.name, err, c.want)
+		}
+	}
+	m := plugintest.TVPlugin().Manifest()
+	m.Kinds = append([]plugin.KindDef(nil), m.Kinds...)
+	m.Kinds[0].Repeat = &plugin.RepeatDef{Action: strings.Repeat("é", 40), Marker: "M"}
+	if err := plugin.Validate(m); err != nil {
+		t.Errorf("valid repeat refused: %v", err)
 	}
 }

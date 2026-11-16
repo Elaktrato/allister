@@ -40,6 +40,7 @@ func gameKind() plugin.KindDef {
 		},
 		Genres:   plugin.TermDef{Enabled: true, Label: "Genres", Editable: true, Filterable: true},
 		Tags:     plugin.TermDef{Enabled: true, Label: "Tags", Editable: true, Filterable: true},
+		Repeat:   &plugin.RepeatDef{Action: "Replay", Marker: "Replaying"},
 		Statuses: gameStatuses,
 		Progress: plugin.ProgressSpec{
 			Eligible:     []plugin.ProgressDef{{Key: "playtime", Type: plugin.Duration, Label: "Playtime"}},

@@ -39,7 +39,7 @@ var (
 // reservedIDs are first URL segments owned by the core.
 var reservedIDs = map[string]bool{
 	"list": true, "people": true, "settings": true, "covers": true,
-	"static": true, "healthz": true, "api": true, "version": true,
+	"static": true, "healthz": true, "api": true, "version": true, "lists": true,
 }
 
 // reservedSourceIDs are the core's segments right after a plugin's prefix
@@ -383,6 +383,7 @@ func validateKind(p *problems, path string, k KindDef) {
 	validateProgress(p, path+".progress", k.Progress, fields)
 	validateColumns(p, path, k.Columns, fields)
 	validateStats(p, path+".stats", k)
+	validateRepeat(p, path+".repeat", k.Repeat)
 
 	for i, s := range k.Sections {
 		sp := fmt.Sprintf("%s.sections[%d]", path, i)
@@ -617,3 +618,23 @@ func sameSet(a, b []string) bool {
 }
 
 func finite(f float64) bool { return !math.IsNaN(f) && !math.IsInf(f, 0) }
+
+const maxRepeatLabelRunes = 40
+
+// validateRepeat checks a kind's optional repeat labels: both required,
+// single line, at most 40 characters.
+func validateRepeat(p *problems, path string, r *RepeatDef) {
+	if r == nil {
+		return
+	}
+	for _, f := range []struct{ name, v string }{{"action", r.Action}, {"marker", r.Marker}} {
+		switch {
+		case f.v == "":
+			p.add(path+"."+f.name, "required")
+		case !utf8.ValidString(f.v) || strings.IndexFunc(f.v, isControl) >= 0:
+			p.add(path+"."+f.name, "must be a single line without control characters")
+		case utf8.RuneCountInString(f.v) > maxRepeatLabelRunes:
+			p.add(path+"."+f.name, "longer than %d characters", maxRepeatLabelRunes)
+		}
+	}
+}

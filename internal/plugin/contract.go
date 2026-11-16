@@ -264,6 +264,32 @@ type KindDef struct {
 	// SeriesHint names the kind's own fields that already carry a series
 	// title and a position in it, so the core can propose series groups.
 	SeriesHint *SeriesHintDef `json:"series_hint,omitempty"`
+	// Repeat names the kind's wording for starting an entry again. Optional;
+	// the core falls back to neutral labels.
+	Repeat *RepeatDef `json:"repeat,omitempty"`
+}
+
+// RepeatDef holds a kind's labels for repeat runs: Action is the button that
+// starts the next run, Marker the badge on an active repeat run.
+type RepeatDef struct {
+	Action string `json:"action"`
+	Marker string `json:"marker"`
+}
+
+// RepeatAction is the label of the "start again" button.
+func (k KindDef) RepeatAction() string {
+	if k.Repeat != nil && k.Repeat.Action != "" {
+		return k.Repeat.Action
+	}
+	return "Start again"
+}
+
+// RepeatMarker is the badge text of an active repeat run.
+func (k KindDef) RepeatMarker() string {
+	if k.Repeat != nil && k.Repeat.Marker != "" {
+		return k.Repeat.Marker
+	}
+	return "Again"
 }
 
 // SeriesHintDef points at fields of the same kind: TitleField (a text field)

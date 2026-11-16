@@ -41,6 +41,7 @@ func movieKind() plugin.KindDef {
 		},
 		Genres:   plugin.TermDef{Enabled: true, Label: "Genres", Editable: true, Filterable: true},
 		Tags:     plugin.TermDef{Enabled: true, Label: "Tags", Editable: true, Filterable: true},
+		Repeat:   &plugin.RepeatDef{Action: "Rewatch", Marker: "Rewatching"},
 		Statuses: movieStatuses,
 		Progress: plugin.ProgressSpec{
 			Eligible:     []plugin.ProgressDef{{Key: "position", Type: plugin.Duration, Label: "Position"}},

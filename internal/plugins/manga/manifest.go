@@ -54,6 +54,7 @@ func manifest() plugin.Manifest {
 			},
 			Genres:   plugin.TermDef{Enabled: true, Label: "Genres", Editable: true, Filterable: true},
 			Tags:     plugin.TermDef{Enabled: true, Label: "Tags", Editable: true, Filterable: true},
+			Repeat:   &plugin.RepeatDef{Action: "Reread", Marker: "Rereading"},
 			Statuses: statusLabels,
 			Progress: plugin.ProgressSpec{
 				Eligible: []plugin.ProgressDef{
