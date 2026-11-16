@@ -25,6 +25,8 @@ CREATE TABLE entries (
     updated_at     TEXT NOT NULL,
     display_run_id INTEGER REFERENCES entry_runs(id) ON DELETE SET NULL
 );
+-- deleting a run sets display_run_id to NULL: the column needs an index
+CREATE INDEX entries_display_run ON entries(display_run_id);
 
 -- number is dense (1..n) per item.
 CREATE TABLE entry_runs (
@@ -143,6 +145,7 @@ CREATE VIEW display_progress AS
 -- unit notes, tags and lists are lost.
 DROP VIEW display_progress;
 DROP VIEW entry_state;
+DROP INDEX entries_display_run;
 DROP TABLE list_items;
 DROP TABLE lists;
 DROP TABLE entry_user_tags;
