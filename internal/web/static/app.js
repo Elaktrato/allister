@@ -116,4 +116,23 @@
       event.preventDefault();
     }
   });
+
+  // A spoiler (rendered notes and reviews) is hidden until clicked; Enter
+  // or Space on the focused spoiler does the same.
+  document.addEventListener("click", function (event) {
+    var spoiler = event.target.closest(".spoiler");
+    if (spoiler) {
+      spoiler.classList.toggle("revealed");
+    }
+  });
+  document.addEventListener("keydown", function (event) {
+    if (event.key !== "Enter" && event.key !== " ") {
+      return;
+    }
+    var spoiler = event.target.closest(".spoiler");
+    if (spoiler) {
+      event.preventDefault();
+      spoiler.classList.toggle("revealed");
+    }
+  });
 })();

@@ -45,6 +45,19 @@
     color: rgb(var(--al-accent-text));
   }
 
+  /* A spoiler is hidden until clicked (app.js toggles .revealed): the text
+     takes the colour of its own background. */
+  .spoiler {
+    cursor: pointer;
+    border-radius: 0.25rem;
+    background-color: rgb(var(--al-raised));
+    color: transparent;
+  }
+  .spoiler.revealed {
+    cursor: auto;
+    color: inherit;
+  }
+
   /* An icon is decorative: always aria-hidden="true" next to a text label.
      The box is one em square and clips, so a name the font lacks never
      spills out as text. Size an icon with a font-size-only class such as
