@@ -60,9 +60,9 @@ func (s *server) loadNote(w http.ResponseWriter, r *http.Request) (*noteTarget, 
 	}
 	def, ok := progressDef(t.kind, r.PathValue("key"))
 	raw := r.PathValue("unit")
-	var unit int64
+	var unit int
 	if isASCIIDigits(raw, maxIDDigits) {
-		unit, _ = strconv.ParseInt(raw, 10, 64)
+		unit, _ = strconv.Atoi(raw)
 	}
 	if !ok || !takesNotes(def.Type) || unit < 1 {
 		s.noteNotFound(w, r)
@@ -74,7 +74,7 @@ func (s *server) loadNote(w http.ResponseWriter, r *http.Request) (*noteTarget, 
 			return nil, false
 		}
 	}
-	return &noteTarget{runTarget: t, def: def, unit: int(unit)}, true
+	return &noteTarget{runTarget: t, def: def, unit: unit}, true
 }
 
 func (s *server) noteNotFound(w http.ResponseWriter, r *http.Request) {
