@@ -186,6 +186,14 @@ deleted. "Start again" is offered when the display run is completed.
   configured time zone), rating copied from the previous completed run,
   progress empty, review empty; logged as a status event with origin
   manual (counts as activity only as the heatmap already defines it).
+- **Moving a completed run back (owner decision).** When the entry
+  dialog changes a completed display run's status to planned, active or
+  paused, it asks first: "Start a <Action> instead?" Yes starts run n+1
+  as above (the dialog's other changes apply to the new run); "No,
+  correct this one" changes the current run in place (the fix for a
+  mistaken "completed"). The question is asked in the dialog (htmx
+  confirmation step, no inline script); the library itself allows both.
+  Imports never start runs: they update the display run as today.
 - Repeat count = completed runs; shown when >= 2 as "x<n>" (the builder
   picks the icon/wording).
 - The item page's run history: newest first; each run shows number,
@@ -288,7 +296,7 @@ On the item page, per run, collapsed by default:
   round trip). The existing top-level entry fields keep carrying the
   display run's values so the export stays readable.
 - Importers keep their `plugin` entry type; the core writes it into the
-  latest run (a new entry: run 1).
+  display run (a new entry: run 1), never starting a new run.
 
 ## What is left to the builder
 
