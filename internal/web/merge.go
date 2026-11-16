@@ -9,7 +9,9 @@ package web
 // page) searches the library for the other item.
 
 import (
+	"context"
 	"errors"
+	"log"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -235,9 +237,29 @@ func (s *server) getMerge(w http.ResponseWriter, r *http.Request, pluginID strin
 	s.render(w, r, "changes", v)
 }
 
+// afterMerge queues the survivor's jobs: the normal sync when a manual
+// survivor took over the other's source link (Deps.SyncJobs; it downloads
+// a remote cover too), else the cover-only job when the merge gave it a
+// remote cover (Deps.CoverJobs). A failed read is logged and ignored.
+func (s *server) afterMerge(ctx context.Context, t *mergeTarget) {
+	keep := t.keep.item
+	if keep.Source == manualSource && t.other.item.Source != manualSource {
+		s.enqueueSync(ctx, t.man.ID, keep.ID)
+		return
+	}
+	it, err := s.deps.Library.Item(ctx, keep.ID)
+	if err != nil || it == nil {
+		log.Printf("merge %s item %d: %v", logSafe(t.man.ID), keep.ID, err)
+		return
+	}
+	if isRemoteCover(it.CoverPath) && it.CoverPath != keep.CoverPath {
+		s.enqueueCover(ctx, t.man.ID, keep.ID)
+	}
+}
+
 // postMerge merges with the posted keys (unknown keys are ErrInvalid in the
-// library). A refusal (notes too long, ...) shows the page again with the
-// message (422).
+// library) and queues the survivor's jobs (afterMerge). A refusal (notes
+// too long, ...) shows the page again with the message (422).
 func (s *server) postMerge(w http.ResponseWriter, r *http.Request, pluginID string) {
 	if !parseForm(w, r) {
 		return
@@ -250,6 +272,7 @@ func (s *server) postMerge(w http.ResponseWriter, r *http.Request, pluginID stri
 	err := s.deps.Library.MergeItems(r.Context(), t.keep.item.ID, t.other.item.ID, keys)
 	switch {
 	case err == nil:
+		s.afterMerge(r.Context(), t)
 		//nolint:gosec // G710: a local path built by itemURL from the stored item, the title only in its query
 		http.Redirect(w, r, mergedURL(t.overview(), t.other.title), http.StatusSeeOther)
 	case errors.Is(err, library.ErrInvalid):
