@@ -597,7 +597,14 @@ func TestUpdatePastRunStatusLimited(t *testing.T) {
 	if got := displayRunOf(t, e, id); got != run1 {
 		t.Fatalf("display run = %d, want run 1", got)
 	}
-	wantInvalid(t, l.UpdateRun(bg, run2, RunUpdate{Status: Active, Rating: ip(8)}), "completed or dropped")
+	// run 1 is the display run now but still a past run (not the latest):
+	// making it active would leave an active run that nothing shows
+	for _, st := range []Status{Planned, Active, Paused} {
+		wantInvalid(t, l.UpdateRun(bg, run1, RunUpdate{Status: st, Rating: ip(8)}), "completed or dropped")
+	}
+	if got := displayRunOf(t, e, id); got != run1 {
+		t.Fatalf("display run = %d after refused edits, want run 1", got)
+	}
 	// a past run's dates, score, review and status
 	if err := l.UpdateRun(bg, run2, RunUpdate{Status: Completed, Rating: ip(5), Review: "second look",
 		StartedOn: new(day(2024, 3, 1)), FinishedOn: new(day(2024, 3, 9))}); err != nil {

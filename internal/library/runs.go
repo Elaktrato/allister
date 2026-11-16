@@ -217,9 +217,10 @@ func nullDay(t *time.Time) any {
 	return nil
 }
 
-// UpdateRun replaces a run's status, rating, review and dates. A run that is
-// not the display run (a past run, or an abandoned repeat) can only be
-// completed or dropped; the display run takes any status. Status and rating
+// UpdateRun replaces a run's status, rating, review and dates. A past run
+// (any run but the latest, even when it is the display run because the
+// latest is a dropped repeat) can only be completed or dropped; the latest
+// run takes any status. Status and rating
 // changes are logged as manual events on that run, and the display run is
 // recomputed. A stale id is ErrNoRun.
 func (l *Library) UpdateRun(ctx context.Context, runID int64, u RunUpdate) error {
@@ -232,20 +233,19 @@ func (l *Library) UpdateRun(ctx context.Context, runID int64, u RunUpdate) error
 	}
 	defer tx.Rollback()
 	var itemID int64
+	var number, latest int
 	var status string
 	var rating sql.NullInt64
-	err = tx.QueryRowContext(ctx, `SELECT item_id, status, rating FROM `+tableRuns+` WHERE id = ?`, runID).Scan(&itemID, &status, &rating)
+	err = tx.QueryRowContext(ctx, `SELECT item_id, number, status, rating,
+		(SELECT MAX(number) FROM `+tableRuns+` l WHERE l.item_id = r.item_id)
+		FROM `+tableRuns+` r WHERE id = ?`, runID).Scan(&itemID, &number, &status, &rating, &latest)
 	if errors.Is(err, sql.ErrNoRows) {
 		return ErrNoRun
 	}
 	if err != nil {
 		return fmt.Errorf("update run: %w", err)
 	}
-	displayID, err := displayRunTx(ctx, tx, itemID)
-	if err != nil {
-		return err
-	}
-	if runID != displayID && u.Status != Completed && u.Status != Dropped {
+	if number != latest && u.Status != Completed && u.Status != Dropped {
 		return invalid("a past run can only be completed or dropped, not %s", u.Status)
 	}
 	var newRating any
