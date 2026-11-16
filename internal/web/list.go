@@ -615,9 +615,9 @@ func (s *server) showList(w http.ResponseWriter, r *http.Request, m plugin.Manif
 		return
 	}
 	v.Dialog = dialog
+	// the duplicate check is an extra: a failure is logged and hides the link
 	if n, err := s.duplicateCount(r, m.ID); err != nil {
-		s.internalError(w, r, err)
-		return
+		log.Printf("duplicates of %s: %v", logSafe(m.ID), logSafe(err))
 	} else if n > 0 {
 		v.Duplicates, v.DuplicatesURL = n, duplicatesURL(m.ID)
 	}
