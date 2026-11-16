@@ -10,8 +10,15 @@
       <p class="text-slate-300">Rating: {{.Rating}}</p>
       {{range .Progress}}<p class="text-slate-300">{{.Label}}: {{.Value}}</p>{{end}}
       {{if .Comment}}<p class="mt-1 whitespace-pre-line break-words text-slate-400">{{.Comment}}</p>{{end}}
+      {{if or .RepeatMarker (ge .Repeats 2)}}<p class="mt-1 flex flex-wrap gap-1 text-xs">{{with .RepeatMarker}}<span class="rounded bg-slate-800 px-2 py-0.5 text-indigo-300">{{.}}</span>{{end}}{{if ge .Repeats 2}}<span title="{{.RepeatsTitle}}" class="rounded bg-slate-800 px-2 py-0.5 text-slate-300">x{{.Repeats}}</span>{{end}}</p>{{end}}
       <a href="{{.EditURL}}" hx-get="{{.EditHXURL}}" hx-target="#dialog-slot" hx-swap="innerHTML" class="mt-2 inline-block text-indigo-300 hover:underline">Edit</a>
     </div>
+    {{if .StartURL}}
+    <form method="post" action="{{.StartURL}}">
+      <input type="hidden" name="return" value="{{.Return}}">
+      <button type="submit" class="w-full rounded border border-slate-700 px-4 py-2 text-sm hover:bg-slate-800">{{.StartLabel}}</button>
+    </form>
+    {{end}}
     {{else}}
     <a href="{{.AddURL}}" hx-get="{{.AddURL}}" hx-target="#dialog-slot" hx-swap="innerHTML"
       class="block rounded bg-indigo-600 px-4 py-2 text-center font-medium hover:bg-indigo-500">Add to list</a>
@@ -58,7 +65,8 @@
       {{if .PartialSync}}<span title="Some details are still being downloaded in the background" class="mt-2 inline-block rounded bg-slate-800 px-2 py-0.5 text-xs text-amber-300">partially synced</span>{{end}}
     </div>
     {{range .Sections}}{{template "section" .}}{{end}}
+    {{with .Runs}}{{template "run_history" .}}{{end}}
   </div>
 </div>
-<div id="dialog-slot" data-swap-statuses="{{dialogStatuses}}">{{with .Dialog}}{{template "add_dialog" .}}{{end}}{{with .Match}}{{template "match_dialog" .}}{{end}}</div>
+<div id="dialog-slot" data-swap-statuses="{{dialogStatuses}}">{{with .Dialog}}{{template "add_dialog" .}}{{end}}{{with .Match}}{{template "match_dialog" .}}{{end}}{{with .RunDialog}}{{template "run_dialog" .}}{{end}}</div>
 {{end}}

@@ -232,10 +232,11 @@ func (s *server) postRefresh(w http.ResponseWriter, r *http.Request, pluginID st
 // unsaved item. Updated is the ?updated=N count of a finished refresh (nil
 // when the page was not reached that way).
 type itemExtras struct {
-	Dialog   *entryForm
-	Match    *matchView
-	UseCache bool
-	Updated  *int
+	Dialog    *entryForm
+	Match     *matchView
+	RunDialog *runDialog
+	UseCache  bool
+	Updated   *int
 	// CanonicalRedirect sends an unsaved item opened by an alias to its
 	// canonical URL (the plain overview GET only).
 	CanonicalRedirect bool
@@ -276,7 +277,7 @@ func (s *server) showItem(w http.ResponseWriter, r *http.Request, ref itemRef, x
 		}
 		v.Dialog = &f
 	}
-	v.Match = x.Match
+	v.Match, v.RunDialog = x.Match, x.RunDialog
 	if err := s.carrySeries(r, li, &v); err != nil {
 		s.internalError(w, r, err)
 		return

@@ -115,7 +115,7 @@ var pageNames = []string{"calendar", "stats", "settings", "settings_appearance",
 var pagePartials = map[string][]string{
 	"search":                {"templates/search_panel.html", "templates/search_results.html"},
 	"settings_plugins_page": {"templates/settings_plugins.html"},
-	"item":                  {"templates/sections.html", "templates/add_dialog.html", "templates/progress_inputs.html", "templates/match_dialog.html"},
+	"item":                  {"templates/sections.html", "templates/add_dialog.html", "templates/progress_inputs.html", "templates/match_dialog.html", "templates/run_history.html"},
 	"series":                {"templates/series_candidates.html"},
 	"list":                  {"templates/list_row.html", "templates/list_cards.html", "templates/series_rows.html", "templates/filter_bar.html", "templates/entry_dialog.html", "templates/progress_inputs.html"},
 	"manual_form":           {"templates/item_inputs.html", "templates/progress_inputs.html"},

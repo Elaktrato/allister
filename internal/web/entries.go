@@ -15,6 +15,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/allister/allister/internal/library"
 	"github.com/allister/allister/internal/plugin"
@@ -34,7 +35,20 @@ type entryDialog struct {
 	// there are several).
 	Combos []statusOpt
 	Error  string
+	// Ask is set while the dialog asks whether moving a completed run back
+	// starts a new run or corrects the current one (see postEdit).
+	Ask *runQuestion
 }
+
+// runQuestion is the confirm state of the entry dialog: the question and the
+// label of the button that starts a new run (run_choice=new).
+type runQuestion struct {
+	Completed, Action string
+}
+
+// runChoiceField is the entry dialog's answer to its question: "new" starts
+// the entry again, "correct" changes the completed run in place.
+const runChoiceField = "run_choice"
 
 // entryTarget is the item of an entry route with its list row.
 type entryTarget struct {
@@ -92,7 +106,6 @@ func (s *server) postIncrement(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ret := returnTarget(r.PostFormValue("return"), ref.PluginID)
-	home := ret == "/"
 	if err := s.deps.Library.Increment(r.Context(), ref.ID); err != nil {
 		if errors.Is(err, library.ErrNoEntry) {
 			s.entryNotFound(w, r)
@@ -101,6 +114,15 @@ func (s *server) postIncrement(w http.ResponseWriter, r *http.Request) {
 		s.internalError(w, r, err)
 		return
 	}
+	s.entryChanged(w, r, ret)
+}
+
+// entryChanged answers a change made from a list row or card (+1, start
+// again): 303 to the return path, for htmx the re-rendered row, or the card
+// when the form posted view=cards (with the home badge when the return path
+// is the home page).
+func (s *server) entryChanged(w http.ResponseWriter, r *http.Request, ret string) {
+	home := ret == "/"
 	if !isPartialRequest(r) {
 		http.Redirect(w, r, ret, http.StatusSeeOther)
 		return
@@ -316,13 +338,40 @@ func (s *server) postEdit(w http.ResponseWriter, r *http.Request) {
 	if msg == "" {
 		msg = perr
 	}
+	// moving a completed run back asks first: start a new run, or correct
+	// this one (run_choice). "new" writes the dialog's changes to the new
+	// run, so that entry is the one validated.
+	choice := r.PostFormValue(runChoiceField)
+	movesBack := t.row.Entry.Status == library.Completed && entry.Status != library.Completed && entry.Status != library.Dropped
+	startNew := movesBack && choice == "new"
+	var today time.Time // the new run's start, in the configured time zone
+	if startNew {
+		today = s.now().In(s.location(ctx))
+	}
 	if msg == "" {
 		for _, key := range clear {
 			if _, typed := entry.Progress[key]; !typed {
 				entry.Progress[key] = 0
 			}
 		}
+		if startNew {
+			entry = newRunEntry(t.row.Entry, entry, today)
+		}
 		msg = s.validateAgainstItem(t.kind, progressContext{Keys: keys, Fields: t.row.Item.Fields}, entry)
+	}
+	if msg == "" && movesBack && !startNew && choice != "correct" {
+		// the question; nothing is written
+		d := t.dialog(v, keys, ret, stored)
+		d.Ask = &runQuestion{Completed: statusLabel(t.kind, library.Completed), Action: t.kind.RepeatAction()}
+		s.editResponse(w, r, t, d, http.StatusOK)
+		return
+	}
+	if msg == "" && startNew {
+		entry.ItemID = t.row.Item.ID
+		var answered bool
+		if msg, answered = s.startAgainWith(w, r, entry, change, today, ret); answered {
+			return
+		}
 	}
 	if msg == "" {
 		entry.ItemID = t.row.Item.ID
@@ -362,4 +411,61 @@ func (s *server) postRemove(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.done(w, r, returnTarget(r.PostFormValue("return"), ref.PluginID))
+}
+
+// newRunEntry is what the entry dialog's "start again instead" writes to the
+// new run: the posted status, rating and notes, and of the dates and
+// progress only what the dialog CHANGED against the completed run (posted
+// e against the display run old). Unchanged values are the completed run's
+// and stay there: the new run keeps its own start (today), no finish and no
+// progress.
+func newRunEntry(old library.Entry, e library.Entry, today time.Time) library.Entry {
+	started := time.Date(today.Year(), today.Month(), today.Day(), 0, 0, 0, 0, time.UTC)
+	if fmtDay(e.StartedOn) == fmtDay(old.StartedOn) {
+		e.StartedOn = &started
+	}
+	if fmtDay(e.FinishedOn) == fmtDay(old.FinishedOn) {
+		e.FinishedOn = nil
+	}
+	progress := map[string]float64{}
+	for key, val := range e.Progress {
+		if prev, ok := old.Progress[key]; !ok || prev != val {
+			progress[key] = val
+		}
+	}
+	e.Progress = progress
+	return e
+}
+
+// startAgainWith starts the entry again (a new run, today) and writes e to
+// it. answered reports that the response is written; otherwise msg is a
+// user-facing refusal for the dialog. e was validated against the item
+// first, so the update after the start only fails on a race (another tab);
+// then the new run is deleted again.
+func (s *server) startAgainWith(w http.ResponseWriter, r *http.Request, e library.Entry, change []string, today time.Time, ret string) (msg string, answered bool) {
+	ctx := r.Context()
+	run, err := s.deps.Library.StartRun(ctx, e.ItemID, today)
+	switch {
+	case errors.Is(err, library.ErrNoEntry):
+		s.entryNotFound(w, r)
+		return "", true
+	case errors.Is(err, library.ErrInvalid):
+		return invalidMessage(err), false
+	case err != nil:
+		s.internalError(w, r, err)
+		return "", true
+	}
+	if uerr := s.deps.Library.UpdateEntry(ctx, e, change); uerr != nil {
+		if derr := s.deps.Library.DeleteRun(ctx, run.ID); derr != nil {
+			s.internalError(w, r, errors.Join(uerr, derr))
+			return "", true
+		}
+		if errors.Is(uerr, library.ErrInvalid) {
+			return invalidMessage(uerr), false
+		}
+		s.internalError(w, r, uerr)
+		return "", true
+	}
+	s.done(w, r, ret)
+	return "", true
 }

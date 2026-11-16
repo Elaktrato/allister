@@ -86,6 +86,13 @@ type entryView struct {
 	// EditHXURL loads the edit dialog into the overview and returns to it.
 	EditHXURL string
 	Progress  []progressView
+	// StartURL and StartLabel: the "start again" form (a completed
+	// display run only); Return is its return path, the overview.
+	StartURL, StartLabel, Return string
+	// the repeat marker and count of the list (see repeatBadges)
+	RepeatMarker string
+	Repeats      int
+	RepeatsTitle string
 }
 
 // partLink is a link to a neighbouring part of a series.
@@ -128,6 +135,10 @@ type itemView struct {
 	Sections     []sectionView
 	Dialog       *entryForm
 	Match        *matchView
+	// Runs is the run history of a listed item, newest first; RunDialog an
+	// open run form (no JavaScript).
+	Runs      []runView
+	RunDialog *runDialog
 }
 
 // itemView builds the overview of li. A failing credential read (the "Match
@@ -158,6 +169,14 @@ func (s *server) itemView(ctx context.Context, li *loadedItem) (itemView, error)
 		if li.entry != nil {
 			v.Entry = entrySummary(k, it, li.entry)
 			v.Entry.EditHXURL = v.Entry.EditURL + "?" + url.Values{"return": {overview}}.Encode()
+			if li.entry.Status == library.Completed {
+				v.Entry.StartURL = "/list/" + strconv.FormatInt(it.ID, 10) + "/runs"
+				v.Entry.StartLabel, v.Entry.Return = k.RepeatAction(), overview
+			}
+			var err error
+			if v.Runs, err = s.runHistory(ctx, k, it, li.entry, overview); err != nil {
+				return itemView{}, err
+			}
 			if err := s.seriesBlock(ctx, &v, li, lang); err != nil {
 				return itemView{}, err
 			}
@@ -246,6 +265,7 @@ func entrySummary(k plugin.KindDef, it *library.Item, e *library.Entry) *entryVi
 	if e.Rating != nil {
 		v.Rating = strconv.Itoa(*e.Rating)
 	}
+	v.RepeatMarker, v.Repeats, v.RepeatsTitle = repeatBadges(k, *e)
 	for _, key := range it.ProgressKeys {
 		for _, def := range k.Progress.Eligible {
 			if def.Key == key {

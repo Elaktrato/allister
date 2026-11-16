@@ -64,6 +64,13 @@ type rowView struct {
 	SeriesPos          int
 	// the plugin icon and kind label on a home page card ("" on the lists)
 	BadgeIcon, BadgeLabel string
+	// RepeatMarker is the kind's badge of an active repeat run (the
+	// display run is active and not the first); "" otherwise.
+	RepeatMarker string
+	// Repeats counts the completed runs, shown as "x<n>" from 2 on, with
+	// RepeatsTitle as its explanation.
+	Repeats      int
+	RepeatsTitle string
 }
 
 // headView is one cell of the table head: Href ("" when the column does
@@ -352,7 +359,20 @@ func (s *server) rowView(m plugin.Manifest, row library.Row, ret string, cols []
 		v.Score = strconv.Itoa(*e.Rating)
 		v.ScoreAttr = v.Score
 	}
+	v.RepeatMarker, v.Repeats, v.RepeatsTitle = repeatBadges(k, e)
 	return v
+}
+
+// repeatBadges are the repeat marker (an active repeat run) and the repeat
+// count with its title ("<Completed label> 2 times") of an entry.
+func repeatBadges(k plugin.KindDef, e library.Entry) (marker string, repeats int, title string) {
+	if e.Status == library.Active && e.RunNumber > 1 {
+		marker = k.RepeatMarker()
+	}
+	if e.Repeats >= 2 {
+		repeats, title = e.Repeats, statusLabel(k, library.Completed)+" "+strconv.Itoa(e.Repeats)+" times"
+	}
+	return marker, repeats, title
 }
 
 // unmatchedRowHint explains the "unmatched" badge.
