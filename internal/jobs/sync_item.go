@@ -29,6 +29,10 @@ type SyncPayload struct {
 	// PluginID names the item's plugin. It must match the stored item, and
 	// the queue pauses the job while the plugin is disabled (WithPluginGate).
 	PluginID string `json:"plugin_id"`
+	// CoverOnly limits the job to downloading the item's remote cover: it
+	// never asks the source, never touches the credits, the schedule or the
+	// sync state (taking a source's cover on "Update from source").
+	CoverOnly bool `json:"cover_only,omitempty"`
 }
 
 // SyncJobFor returns the web.Deps.SyncJobs entry of a plugin: the kind and
@@ -36,6 +40,14 @@ type SyncPayload struct {
 func SyncJobFor(pluginID string) func(itemID int64) (kind string, payload any) {
 	return func(itemID int64) (string, any) {
 		return KindSyncItem, SyncPayload{ItemID: itemID, PluginID: pluginID}
+	}
+}
+
+// CoverJobFor returns the kind and payload of a cover-only sync job of the
+// plugin's item itemID (see SyncPayload.CoverOnly).
+func CoverJobFor(pluginID string) func(itemID int64) (kind string, payload any) {
+	return func(itemID int64) (string, any) {
+		return KindSyncItem, SyncPayload{ItemID: itemID, PluginID: pluginID, CoverOnly: true}
 	}
 }
 
@@ -82,6 +94,9 @@ func SyncItem(deps SyncDeps) Handler {
 		if it.PluginID != p.PluginID {
 			return fmt.Errorf("sync item %d: job names plugin %q but the item belongs to plugin %q: %w",
 				it.ID, p.PluginID, it.PluginID, ErrPermanent)
+		}
+		if p.CoverOnly {
+			return downloadCoverOnly(ctx, deps, it)
 		}
 		pl, ok := deps.Registry.Get(it.PluginID)
 		if !ok {
@@ -206,6 +221,26 @@ func syncCoverOnly(ctx context.Context, deps SyncDeps, it *library.Item) error {
 		}
 	}
 	return setState(ctx, deps.Library, it.ID, "done")
+}
+
+// downloadCoverOnly downloads the item's remote cover and stores it; the
+// sync state is left as it is. A failed download keeps the URL and asks for
+// a later retry.
+func downloadCoverOnly(ctx context.Context, deps SyncDeps, it *library.Item) error {
+	if !isRemote(it.CoverPath) {
+		return nil
+	}
+	name, err := covers.Download(ctx, deps.HTTP, deps.CoversDir, it.CoverPath)
+	if err != nil {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		return fmt.Errorf("sync item %d: cover: %v: %w", it.ID, err, ErrRetryLater)
+	}
+	if err := setCover(ctx, deps, it.ID, it.CoverPath, name); err != nil {
+		return fmt.Errorf("sync item %d: %w", it.ID, err)
+	}
+	return nil
 }
 
 func setState(ctx context.Context, lib *library.Library, id int64, state string) error {

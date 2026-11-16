@@ -218,7 +218,7 @@ func (l *Library) UpdateDetails(ctx context.Context, itemID int64, u DetailsUpda
 		return err
 	}
 	if u.CoverPath != nil {
-		if _, err := tx.ExecContext(ctx, `UPDATE items SET cover_path = ? WHERE id = ?`, *u.CoverPath, itemID); err != nil {
+		if _, err := tx.ExecContext(ctx, `UPDATE items SET cover_path = ?, cover_source = '' WHERE id = ?`, *u.CoverPath, itemID); err != nil {
 			return fmt.Errorf("update details: %w", err)
 		}
 	}
@@ -309,14 +309,20 @@ func (l *Library) compareAndSet(ctx context.Context, what, query string, args ..
 
 // SetCoverPathIf replaces the item's cover with name only while it still
 // holds expected (compare-and-set), so a background download never
-// overwrites a cover the user changed meanwhile. It reports whether the
+// overwrites a cover the user changed meanwhile. A local file replacing a
+// remote URL (a download) records that URL as the cover's origin
+// (cover_source); any other replacement clears it. It reports whether the
 // cover was set; an unknown item or another current value is false, nil.
 func (l *Library) SetCoverPathIf(ctx context.Context, itemID int64, expected, name string) (bool, error) {
 	if err := checkImageRef("cover", name); err != nil {
 		return false, err
 	}
-	return l.compareAndSet(ctx, "set cover path", `UPDATE items SET cover_path = ?, updated_at = `+nowSQL+`
-		WHERE id = ? AND cover_path = ?`, name, itemID, expected)
+	origin := ""
+	if isRemoteRef(expected) && !isRemoteRef(name) {
+		origin = expected
+	}
+	return l.compareAndSet(ctx, "set cover path", `UPDATE items SET cover_path = ?, cover_source = ?, updated_at = `+nowSQL+`
+		WHERE id = ? AND cover_path = ?`, name, origin, itemID, expected)
 }
 
 // SetPersonImagePathIf is SetCoverPathIf for a person's image.

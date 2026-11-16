@@ -136,7 +136,7 @@ func (l *Library) SetCoverPath(ctx context.Context, itemID int64, path string) e
 	if err := checkImageRef("cover", path); err != nil {
 		return err
 	}
-	return l.setOne(ctx, "set cover path", `UPDATE items SET cover_path = ?, updated_at = `+nowSQL+` WHERE id = ?`, path, itemID)
+	return l.setOne(ctx, "set cover path", `UPDATE items SET cover_path = ?, cover_source = '', updated_at = `+nowSQL+` WHERE id = ?`, path, itemID)
 }
 
 // SetSyncState sets the item's sync state.
