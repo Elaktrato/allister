@@ -200,7 +200,7 @@ func (s *server) mergePage(r *http.Request, t *mergeTarget, ticked map[string]bo
 	if err != nil {
 		return changesView{}, err
 	}
-	in := plugin.ItemData{ItemSummary: plugin.ItemSummary{Fields: t.other.item.Fields}}
+	in := plugin.ItemData{ItemSummary: plugin.ItemSummary{Fields: t.other.item.Fields, CoverURL: t.other.item.CoverPath}}
 	rows := changeRows(t.kind, t.keep.item, in, changes)
 	if ticked != nil {
 		for i := range rows {

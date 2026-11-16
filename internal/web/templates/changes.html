@@ -27,11 +27,11 @@
       <div class="mt-2 grid gap-3 text-sm sm:grid-cols-2">
         <div class="min-w-0">
           <p class="text-xs uppercase tracking-wide text-slate-500">Current</p>
-          {{template "change_value" .Stored}}
+          {{if .Cover}}{{template "change_cover" .StoredCover}}{{else}}{{template "change_value" .Stored}}{{end}}
         </div>
         <div class="min-w-0">
           <p class="text-xs uppercase tracking-wide text-slate-500">From {{$.Source}}</p>
-          {{template "change_value" .Incoming}}
+          {{if .Cover}}{{template "change_cover" .IncomingCover}}{{else}}{{template "change_value" .Incoming}}{{end}}
         </div>
       </div>
       {{with .Added}}<p class="mt-2 break-words text-xs text-emerald-400">Added: {{range $i, $a := .}}{{if $i}}, {{end}}{{$a}}{{end}}</p>{{end}}
@@ -56,4 +56,9 @@
 </details>
 {{- else}}<p class="whitespace-pre-line break-words text-slate-300">{{.}}</p>{{end}}
 {{- end}}
+{{- end}}
+
+{{define "change_cover"}}
+{{- if .}}<img src="{{.}}" alt="" loading="lazy" class="mt-1 h-28 w-20 rounded object-cover">
+{{- else}}<p class="text-slate-500">(none)</p>{{end}}
 {{- end}}

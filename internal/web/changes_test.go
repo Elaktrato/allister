@@ -280,3 +280,12 @@ func TestUpdateNotice(t *testing.T) {
 		}
 	}
 }
+
+func TestRefreshShowsCoversAsThumbnails(t *testing.T) {
+	e, id := refreshEnv(t)
+	if err := e.lib.SetCoverPath(bg, id, "https://img.example/old.jpg"); err != nil {
+		t.Fatal(err)
+	}
+	e.tv.Data.CoverURL = "https://img.example/new.jpg"
+	mustContain(t, e.get("/tv/tvdata/1/refresh").Body.String(), `<img src="https://img.example/old.jpg"`, `<img src="https://img.example/new.jpg"`)
+}
