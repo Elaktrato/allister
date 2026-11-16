@@ -12,6 +12,7 @@
 <div data-card class="relative aspect-[2/3] overflow-hidden rounded-lg bg-slate-800">
   {{if .Cover}}<img src="{{.Cover}}" alt="" loading="lazy" class="absolute inset-0 h-full w-full object-cover">
   {{else}}<span class="absolute inset-0 flex items-center justify-center bg-slate-800" aria-hidden="true"><span class="icon text-[2rem] text-slate-500" aria-hidden="true">image</span></span>{{end}}
+  {{with .SelectID}}<label class="absolute top-0 left-0 p-2"><input type="checkbox" name="ids" value="{{.}}" form="bulk-form" data-bulk-row class="h-4 w-4 accent-indigo-500"><span class="sr-only">Select {{$.Title}}</span></label>{{end}}
   {{with .BadgeLabel}}<span class="absolute left-0 top-0 flex max-w-[70%] items-center gap-1 rounded-br-lg bg-slate-950/90 px-1.5 py-0.5 text-xs text-slate-300" title="{{.}}"><span class="icon text-[0.875rem]" aria-hidden="true">{{$.BadgeIcon}}</span><span class="truncate">{{.}}</span></span>{{end}}
   {{/* the status corner: a colored triangle, the label as its accessible name */}}
   <span class="absolute right-0 top-0 h-0 w-0 border-l-[1.5rem] border-t-[1.5rem] border-l-transparent{{template "status_corner" .StatusKey}}" title="{{.Status}}"><span class="sr-only">{{.Status}}</span></span>

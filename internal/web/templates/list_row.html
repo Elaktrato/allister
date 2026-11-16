@@ -1,5 +1,6 @@
 {{define "list_row"}}
 <tr data-row class="border-b border-slate-800 align-middle">
+  {{with .SelectID}}<td class="w-8 py-2 pr-3"><input type="checkbox" name="ids" value="{{.}}" form="bulk-form" data-bulk-row aria-label="Select {{$.Title}}" class="h-4 w-4 accent-indigo-500"></td>{{end}}
   <td class="w-14 py-2 pr-3">
     {{if .Cover}}<img src="{{.Cover}}" alt="" loading="lazy" class="h-20 w-14 rounded object-cover">
     {{else}}<span class="block h-20 w-14 rounded bg-slate-800" aria-hidden="true"></span>{{end}}

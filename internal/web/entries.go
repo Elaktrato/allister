@@ -165,6 +165,10 @@ func (s *server) answerChange(w http.ResponseWriter, r *http.Request, ret string
 	if mixed {
 		rv.BadgeIcon, rv.BadgeLabel = badge(t.man, t.kind)
 	}
+	// a row of the plugin's own list keeps its bulk edit checkbox
+	if u, err := url.Parse(ret); err == nil && u.Path == "/"+t.man.ID {
+		rv.SelectID = strconv.FormatInt(t.row.Item.ID, 10)
+	}
 	// a +1 from a card answers the card, one from the table the row
 	partial := "list_row"
 	if r.PostFormValue("view") == "cards" {

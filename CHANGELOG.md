@@ -6,6 +6,10 @@ How a release is cut: move the entries under "Unreleased" to a new `## vX.Y.Z - 
 
 ## Unreleased
 
+### Added
+
+- **Bulk edit in every list.** Tick rows or cards (or the whole page, or every entry the current filter matches) and set their status, add them to a custom list or a series, add or remove own tags, or remove them from your library in one step. A confirmation names the count first and asks again if it changed; afterwards the list says how many changed and why any were skipped. Bulk changes do not count as activity in the statistics heatmap.
+
 ## v0.4.0 - 2026-11-16
 
 ### Added

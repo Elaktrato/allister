@@ -74,6 +74,9 @@ type rowView struct {
 	// RepeatsTitle as its explanation.
 	Repeats      int
 	RepeatsTitle string
+	// SelectID is the item id of the row's bulk edit checkbox on a plugin's
+	// list ("" elsewhere: no checkbox).
+	SelectID string
 }
 
 // headView is one cell of the table head: Href ("" when the column does
@@ -120,6 +123,10 @@ type listView struct {
 	SeriesTab  bool
 	SeriesRows []seriesRowView
 	Search     seriesSearch
+	// Bulk is the bulk edit bar of the rows shown (nil without rows);
+	// BulkNotice reports an applied bulk change.
+	Bulk       *bulkBar
+	BulkNotice *bulkNotice
 }
 
 // seriesRowView is one series of the Series tab.
@@ -389,6 +396,20 @@ func unmatchedRowHint(m plugin.Manifest) string {
 	return "Added manually; not matched yet"
 }
 
+// listLibraryQuery is the library query of a parsed list request: the
+// plugin and kind, the status tab, the filters and sort, and the page. The
+// list page and a bulk change of everything a filter matches both use it,
+// so a filter selection is exactly what the list shows.
+func listLibraryQuery(m plugin.Manifest, k plugin.KindDef, lq listQuery) library.Query {
+	q := library.Query{PluginID: m.ID, Kind: k.Key, Page: lq.Page, PageSize: listPageSize}
+	lq.Filters.apply(k, &q)
+	if lq.Status != "" && lq.Status != "all" {
+		st := library.Status(lq.Status)
+		q.Status = &st
+	}
+	return q
+}
+
 // buildList loads the list page of a plugin for a parsed query.
 func (s *server) buildList(r *http.Request, m plugin.Manifest, lq listQuery) (listView, error) {
 	ctx := r.Context()
@@ -404,12 +425,7 @@ func (s *server) buildList(r *http.Request, m plugin.Manifest, lq listQuery) (li
 		lq.Tab = "" // no series: the normal list
 	}
 	f := lq.Filters
-	q := library.Query{PluginID: m.ID, Kind: k.Key, Page: lq.Page, PageSize: listPageSize}
-	f.apply(k, &q)
-	if lq.Status != "" && lq.Status != "all" {
-		st := library.Status(lq.Status)
-		q.Status = &st
-	}
+	q := listLibraryQuery(m, k, lq)
 	counts, err := s.deps.Library.Counts(ctx, q)
 	if errors.Is(err, library.ErrInvalid) && f.active() {
 		// parseFilters checks every part against the schema, so this is a
@@ -485,7 +501,14 @@ func (s *server) buildList(r *http.Request, m plugin.Manifest, lq listQuery) (li
 		v.Head.Columns = append(v.Head.Columns, h)
 	}
 	for _, row := range pg.Rows {
-		v.Rows = append(v.Rows, s.rowView(m, row, ret, cols))
+		rv := s.rowView(m, row, ret, cols)
+		rv.SelectID = strconv.FormatInt(row.Item.ID, 10)
+		v.Rows = append(v.Rows, rv)
+	}
+	if anyEntries {
+		if v.Bulk, err = s.bulkBar(ctx, m, k, lq, pg.PageNo, pg.Total); err != nil {
+			return listView{}, err
+		}
 	}
 	if err := s.markSeries(ctx, m, v.Rows, pg.Rows); err != nil {
 		return listView{}, err

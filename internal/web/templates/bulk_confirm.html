@@ -1,0 +1,30 @@
+{{/* The bulk edit confirmation: the count it will change and the action,
+      or (Error) the fields again with the message. The selection rides
+      along as hidden fields; expect is the count shown here. */}}
+{{define "title"}}{{.Title}} - Allister{{end}}
+{{define "content"}}
+<h1 class="mb-4 text-2xl font-semibold">{{.Title}}</h1>
+{{if .Changed}}<p role="alert" class="mb-4 max-w-2xl rounded border border-amber-700 bg-amber-950 p-3 text-amber-200">The selection changed since you looked: it now holds {{.CountText}}. Check the count and confirm again.</p>{{end}}
+{{if .Error}}<p role="alert" class="mb-4 max-w-2xl rounded border border-amber-700 bg-amber-950 p-3 text-amber-200">{{.Error}}</p>{{end}}
+<form method="post" action="{{.Bar.Action}}" class="max-w-2xl space-y-4">
+  <input type="hidden" name="list" value="{{.Bar.List}}">
+  <input type="hidden" name="scope" value="{{.Scope}}">
+  {{range .IDs}}<input type="hidden" name="ids" value="{{.}}">{{end}}
+  {{if .Error}}
+  <div class="flex flex-wrap items-center gap-3 text-sm">{{template "bulk_fields" .Bar}}</div>
+  <div class="flex flex-wrap items-center gap-3">
+    <button type="submit" class="rounded bg-indigo-600 px-4 py-2 font-medium hover:bg-indigo-500">Continue</button>
+    <a href="{{.CancelURL}}" class="text-indigo-300 hover:underline">Cancel</a>
+  </div>
+  {{else}}
+  <p class="text-slate-300">{{.Summary}}</p>
+  {{template "bulk_params" .Hidden}}
+  <input type="hidden" name="expect" value="{{.Count}}">
+  <input type="hidden" name="confirm" value="1">
+  <div class="flex flex-wrap items-center gap-3">
+    <button type="submit" class="rounded bg-indigo-600 px-4 py-2 font-medium hover:bg-indigo-500">{{.Submit}}</button>
+    <a href="{{.CancelURL}}" class="text-indigo-300 hover:underline">Cancel</a>
+  </div>
+  {{end}}
+</form>
+{{end}}
