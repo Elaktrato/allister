@@ -16,6 +16,11 @@ import (
 	"github.com/allister/allister/internal/plugin"
 	"github.com/allister/allister/internal/plugin/plugintest"
 	"github.com/allister/allister/internal/plugins/anime"
+	"github.com/allister/allister/internal/plugins/book"
+	"github.com/allister/allister/internal/plugins/game"
+	"github.com/allister/allister/internal/plugins/manga"
+	"github.com/allister/allister/internal/plugins/movie"
+	"github.com/allister/allister/internal/plugins/tv"
 )
 
 func TestServeDrainsInFlightRequestsOnShutdown(t *testing.T) {
@@ -244,5 +249,21 @@ func TestMALClientIDFallback(t *testing.T) {
 	}
 	if got, err := resolveSourceKeyField(ctx, stored(""), fallback, "anilist", "mal_client_id"); err != nil || got != "env-id" {
 		t.Fatalf("env: %q %v", got, err)
+	}
+}
+
+// Every shipped kind declares its own repeat labels instead of the core's
+// neutral defaults.
+func TestShippedKindsDeclareRepeat(t *testing.T) {
+	for _, p := range []plugin.Plugin{
+		anime.New(anime.Options{}), manga.New(manga.Options{}), book.New(book.Options{}),
+		tv.New(tv.Options{}), movie.New(movie.Options{}), game.New(game.Options{}),
+	} {
+		m := p.Manifest()
+		for _, k := range m.Kinds {
+			if k.Repeat == nil || k.Repeat.Action == "" || k.Repeat.Marker == "" {
+				t.Errorf("%s/%s: no repeat labels", m.ID, k.Key)
+			}
+		}
 	}
 }

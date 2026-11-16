@@ -56,6 +56,7 @@ func TestManifestJSONRoundTrip(t *testing.T) {
 			TitleFallback:  []string{"ja", "en"},
 			Columns:        []plugin.ColumnDef{{Key: "n", Label: "Number", Default: true, Hide: "md"}, {Key: "rating"}},
 			SeriesHint:     &plugin.SeriesHintDef{TitleField: "e", PositionField: "n"},
+			Repeat:         &plugin.RepeatDef{Action: "Redo", Marker: "Redoing"},
 			Stats: &plugin.StatsDef{
 				Time:  &plugin.StatsTimeDef{Label: "Time", DurationKey: "d", CompletedField: "n", UnitsKey: "x", PerUnitField: "n"},
 				Units: &plugin.StatsUnitsDef{Key: "x", LabelPlural: "Units"},

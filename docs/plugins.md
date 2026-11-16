@@ -61,7 +61,7 @@ type Exporter interface {
 | `Kinds` | One or more media kinds (below). At least one is required. |
 | `Sources`, `Importers`, `Exporters` | Optional declarations (below). |
 
-**Reserved ids.** Plugin ids `list`, `people`, `settings`, `covers`, `static`, `healthz`, `api` and `version` belong to the core's first URL segment. Source ids `manual`, `export`, `search` and `series` would be hidden by the core's own routes under `/{plugin}/` and are refused too. Kind, source, importer and exporter ids use the slug rule above. Field and progress keys use `^[a-z][a-z0-9_]{0,31}$`.
+**Reserved ids.** Plugin ids `list`, `people`, `settings`, `covers`, `static`, `healthz`, `api`, `version` and `lists` belong to the core's first URL segment. Source ids `manual`, `export`, `search` and `series` would be hidden by the core's own routes under `/{plugin}/` and are refused too. Kind, source, importer and exporter ids use the slug rule above. Field and progress keys use `^[a-z][a-z0-9_]{0,31}$`.
 
 ### Kinds
 
@@ -74,6 +74,7 @@ A `KindDef` describes one media kind:
 - `Fields`: the item schema (below).
 - `Genres`, `Tags`: `TermDef{Enabled, Label, Editable, Filterable}`. When enabled, items carry genres (names) and tags (a name, an optional rank from 0 to 100 and a spoiler flag) as dedicated, indexed rows. `Label` is required when enabled. `Editable` puts a text area in Edit details and the manual form (one term per line; tags as `Name:80!`, where `:80` is the rank and a trailing `!` marks a spoiler). `Filterable` adds a multi-select with counts from the user's own library and an any/all switch to the list. The core trims terms, removes case-insensitive duplicates and allows at most 60 characters per term, 50 genres and 100 tags per item.
 - `Statuses`: labels for the five fixed core status classes `planned`, `active`, `paused`, `completed` and `dropped` ("Plan to watch", "Watching", ...). All five labels are required. A plugin cannot add a status.
+- `Repeat`: optional `RepeatDef{Action, Marker}`, the kind's wording for repeat runs: `Action` labels the button that starts the entry again ("Rewatch", "Reread", "Replay"), `Marker` the badge on an active repeat run ("Rewatching"). Both are required when `Repeat` is set, single line, at most 40 characters. Without it the core says "Start again" and "Again". JSON `repeat`, omitted when unset. Every shipped plugin declares it.
 - `Progress`: see [Progress](#progress).
 - `Sections`: see [Sections](#sections).
 - `Stats`: optional, how the kind's time and units count on the Statistics page (see [Statistics](#statistics)). JSON `stats`, omitted when unset.
