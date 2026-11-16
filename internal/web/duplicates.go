@@ -62,11 +62,19 @@ func duplicateReason(m plugin.Manifest, k plugin.KindDef, reason string) string 
 	return "same " + strings.ToUpper(typ)
 }
 
-// duplicateSideOf builds one item of a pair.
+// errItemGone is duplicateSideOf's answer for an item deleted since the
+// pairs were read.
+var errItemGone = errors.New("item gone")
+
+// duplicateSideOf builds one item of a pair (errItemGone for an item that
+// no longer exists).
 func (s *server) duplicateSideOf(r *http.Request, m plugin.Manifest, id int64) (duplicateSide, plugin.KindDef, error) {
 	it, err := s.deps.Library.Item(r.Context(), id)
 	if err != nil {
 		return duplicateSide{}, plugin.KindDef{}, err
+	}
+	if it == nil {
+		return duplicateSide{}, plugin.KindDef{}, errItemGone
 	}
 	k, ok := kindDef(m, it.Kind)
 	if !ok {
@@ -108,23 +116,38 @@ func (s *server) getDuplicates(w http.ResponseWriter, r *http.Request, pluginID 
 		s.internalError(w, r, err)
 		return
 	}
-	v := duplicatesView{Heading: "Possible duplicates", ListURL: "/" + url.PathEscape(pluginID)}
+	rows, err := s.duplicateRows(r, m, pairs)
+	if err != nil {
+		s.internalError(w, r, err)
+		return
+	}
+	s.render(w, r, "duplicates", duplicatesView{Heading: "Possible duplicates", ListURL: "/" + url.PathEscape(pluginID), Rows: rows})
+}
+
+// duplicateRows builds the rows of the pairs; a pair whose item was
+// deleted meanwhile is left out.
+func (s *server) duplicateRows(r *http.Request, m plugin.Manifest, pairs []library.DuplicatePair) ([]duplicateRow, error) {
+	var rows []duplicateRow
 	for _, p := range pairs {
 		a, k, err := s.duplicateSideOf(r, m, p.A)
-		if err == nil {
-			var b duplicateSide
-			if b, _, err = s.duplicateSideOf(r, m, p.B); err == nil {
-				ida, idb := strconv.FormatInt(p.A, 10), strconv.FormatInt(p.B, 10)
-				v.Rows = append(v.Rows, duplicateRow{A: a, B: b, AID: ida, BID: idb, Reason: duplicateReason(m, k, p.Reason),
-					MergeURL: mergeURL(pluginID, p.A, p.B, a.manual, b.manual)})
-			}
+		if errors.Is(err, errItemGone) {
+			continue
 		}
 		if err != nil {
-			s.internalError(w, r, err)
-			return
+			return nil, err
 		}
+		b, _, err := s.duplicateSideOf(r, m, p.B)
+		if errors.Is(err, errItemGone) {
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		ida, idb := strconv.FormatInt(p.A, 10), strconv.FormatInt(p.B, 10)
+		rows = append(rows, duplicateRow{A: a, B: b, AID: ida, BID: idb, Reason: duplicateReason(m, k, p.Reason),
+			MergeURL: mergeURL(m.ID, p.A, p.B, a.manual, b.manual)})
 	}
-	s.render(w, r, "duplicates", v)
+	return rows, nil
 }
 
 func (s *server) postDuplicateDismiss(w http.ResponseWriter, r *http.Request, pluginID string) {

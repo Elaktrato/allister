@@ -81,3 +81,20 @@ func TestListLinksDuplicatesOnlyWhenPairsExist(t *testing.T) {
 		t.Fatal("link stays after the pair is dismissed")
 	}
 }
+
+// TestDuplicateRowsSkipAPairWhoseItemIsGone: an item deleted between
+// Duplicates and the side lookup drops its pair instead of failing.
+func TestDuplicateRowsSkipAPairWhoseItemIsGone(t *testing.T) {
+	fe := newFixtureEnv(t)
+	a, b := fe.twoBooksSameISBN(t)
+	m, _ := fe.reg.Manifest("book")
+	r := httptest.NewRequest("GET", "/book/duplicates", nil)
+	pairs := []library.DuplicatePair{{A: a, B: 999999, Reason: "id:isbn"}, {A: 999998, B: b, Reason: "id:isbn"}, {A: a, B: b, Reason: "id:isbn"}}
+	rows, err := fe.srv.duplicateRows(r, m, pairs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 1 || rows[0].AID != idStr(a) || rows[0].BID != idStr(b) {
+		t.Fatalf("rows = %+v, want only the pair of existing items", rows)
+	}
+}
