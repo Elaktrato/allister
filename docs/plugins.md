@@ -342,7 +342,7 @@ The core then does the rest, as a resumable job on the import page:
 type ExporterInfo struct{ ID, Name, Extension, MIME string } // all required
 ```
 
-`Export` receives every list entry of the plugin (titles, external ids, status, rating, active progress, dates, comment) and writes the file. The core serves it at `/{plugin}/export/{exporter}` as `<plugin>-<exporter>-<date><extension>`, linked from the list page and the plugin's row in Settings > Plugins. The whole list is built in memory, which is fine for a few thousand entries.
+`Export` receives every list entry of the plugin (`ExportEntry`: titles, external ids, the shown run's status, rating, every stored progress value and dates, the entry's notes, its `Runs` (`ExportRun`: number, status, rating, review, progress, dates), own tags (`UserTags`), the names of its custom lists (`Lists`) and its series) and writes the file. The core serves it at `/{plugin}/export/{exporter}` as `<plugin>-<exporter>-<date><extension>`, linked from the list page and the plugin's row in Settings > Plugins. The whole list is built in memory, which is fine for a few thousand entries.
 
 An export is the plugin's own interchange format. The **universal backup** (Settings > Backup) is separate and owned by the core. It covers every item of every installed plugin, including disabled ones, so a plugin needs no code for backups.
 

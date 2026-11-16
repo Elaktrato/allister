@@ -111,7 +111,10 @@ func TestRuntimeDataJSONRoundTrip(t *testing.T) {
 	roundTrip(t, "parseresult", plugin.ParseResult{Entries: []plugin.ParsedEntry{entry}, Skipped: []plugin.SkippedRow{{Line: 1, Reason: "r"}}, Ignored: 2})
 	roundTrip(t, "exportentry", plugin.ExportEntry{
 		Kind: "k", Titles: []plugin.Title{{Lang: "en", Text: "T"}}, ExternalIDs: map[string]string{"a": "b"},
-		Status: plugin.Dropped, Rating: iptr(7), Progress: map[string]float64{"p": 1}, StartedOn: &day, FinishedOn: &day, Comment: "c",
+		Status: plugin.Dropped, Rating: iptr(7), Progress: map[string]float64{"p": 1}, StartedOn: &day, FinishedOn: &day, Notes: "c",
+		Runs: []plugin.ExportRun{{Number: 1, Status: plugin.Completed, Rating: iptr(6), Review: "r", Progress: map[string]float64{"p": 3}, StartedOn: &day, FinishedOn: &day},
+			{Number: 2, Status: plugin.Dropped}},
+		UserTags: []string{"comfort"}, Lists: []string{"Favourites"}, Series: "S", SeriesPosition: 2,
 	})
 }
 
@@ -314,5 +317,24 @@ func TestProgressDefPluralLabel(t *testing.T) {
 	}
 	if got := (plugin.ProgressDef{Label: "Match", LabelPlural: "Matches"}).PluralLabel(); got != "Matches" {
 		t.Fatalf("declared plural = %q", got)
+	}
+}
+
+func TestExportEntryRunsTagsListsJSON(t *testing.T) {
+	b, err := json.Marshal(plugin.ExportEntry{Kind: "k", Notes: "n", Runs: []plugin.ExportRun{{Number: 1, Status: plugin.Active}},
+		UserTags: []string{"t"}, Lists: []string{"L"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{`"notes":"n"`, `"runs":[{"number":1,"status":"active"}]`, `"user_tags":["t"]`, `"lists":["L"]`} {
+		if !strings.Contains(string(b), want) {
+			t.Fatalf("json lacks %s: %s", want, b)
+		}
+	}
+	b, _ = json.Marshal(plugin.ExportEntry{Kind: "k"})
+	for _, not := range []string{"notes", "runs", "user_tags", "lists", "comment"} {
+		if strings.Contains(string(b), not) {
+			t.Fatalf("empty entry has %s: %s", not, b)
+		}
 	}
 }

@@ -16,6 +16,8 @@ How a release is cut: move the entries under "Unreleased" to a new `## vX.Y.Z - 
 ### Changed
 
 - A comment longer than 10,000 characters is refused with a message instead of being cut silently.
+- **Backups are format 2.** A backup now carries every run of an entry (with its progress, review, unit notes and change log), the entry's notes, your own tags and your custom lists. Older backups (format 1) still restore: each entry becomes its first run. Older Allister versions cannot read format 2 backups. Restoring a backup merges custom lists by name and adds nothing when repeated.
+- **JSON export version 2.** The per-plugin JSON export's `comment` is now `notes`, and each entry gains `runs`, `user_tags` and `lists`; the top-level status, rating, progress and dates stay those of the run the list shows.
 
 ## v0.3.0 - 2026-11-15
 

@@ -256,7 +256,7 @@ func jsonOf(t *testing.T, items ...any) []byte {
 		}
 		parts = append(parts, string(b))
 	}
-	return []byte(header("1") + strings.Join(parts, ",") + "]}")
+	return []byte(header("2") + strings.Join(parts, ",") + "]}")
 }
 
 func bookItem(id string) library.BackupItem {
@@ -316,7 +316,7 @@ func TestBackupRoundTripsAllPluginsIncludingDisabled(t *testing.T) {
 	}
 	data := a.archive()
 	d, files := open(t, data)
-	if d.Format != "allister.backup" || d.FormatVersion != 1 || d.CreatedAt != "2026-11-10T09:30:00Z" || len(d.Plugins) != 1 {
+	if d.Format != "allister.backup" || d.FormatVersion != 2 || d.CreatedAt != "2026-11-10T09:30:00Z" || len(d.Plugins) != 1 {
 		t.Fatalf("header = %+v", d)
 	}
 	if len(d.Items) != 454 {
@@ -499,7 +499,7 @@ func TestBackupIncludesEveryItemCover(t *testing.T) {
 func TestBackupRefusesNewerFormat(t *testing.T) {
 	item, _ := json.Marshal(bookItem("1"))
 	for _, tc := range []struct{ name, json, want string }{
-		{"newer", header("2") + string(item) + "]}", "format version 2"},
+		{"newer", header("3") + string(item) + "]}", "format version 3"},
 		{"zero", header("0") + string(item) + "]}", "format version 0"},
 		{"negative", header("-1") + string(item) + "]}", "format version -1"},
 		{"fraction", header("1.5") + string(item) + "]}", "format version"},
@@ -526,7 +526,7 @@ func TestBackupRefusesNewerFormat(t *testing.T) {
 	// the version message names the supported version too
 	e := newEnv(t)
 	_, err := e.restore(zipOf(t, entry{name: "backup.json", body: []byte(header("7") + "]}")}), Limits{}, nil)
-	if err == nil || !strings.Contains(err.Error(), "7") || !strings.Contains(err.Error(), "version 1") {
+	if err == nil || !strings.Contains(err.Error(), "7") || !strings.Contains(err.Error(), "versions 1 and 2") {
 		t.Fatalf("err = %v", err)
 	}
 }
@@ -620,7 +620,7 @@ func TestBackupReportsUnknownPluginRowsWithoutFailing(t *testing.T) {
 	badField := bookItem("f1")
 	badField.Fields = map[string]plugin.FieldValue{"mood": {Text: "x"}}
 	badProgress := bookItem("p1")
-	badProgress.Entry = &library.BackupEntry{Status: library.Active, Progress: map[string]float64{"chapter": 3}}
+	badProgress.Entry = &library.BackupEntry{Runs: []library.BackupRun{{Number: 1, Status: library.Active, Progress: map[string]float64{"chapter": 3}}}}
 	hostile := bookItem("h1")
 	hostile.Titles[0].Text = "evil\x1b[31m"
 	hostile2 := bookItem("h2")
@@ -1027,7 +1027,7 @@ func TestRestoreRefusesSeriesBeforeItems(t *testing.T) {
 func TestRestoreHostileSeriesMember(t *testing.T) {
 	listed := func(id string) string {
 		it := bookItem(id)
-		it.Entry = &library.BackupEntry{Status: library.Planned}
+		it.Entry = &library.BackupEntry{Runs: []library.BackupRun{{Number: 1, Status: library.Planned}}}
 		b, _ := json.Marshal(it)
 		return string(b)
 	}
@@ -1048,9 +1048,9 @@ func TestRestoreHostileSeriesMember(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			e := newEnv(t)
-			body := header("1") + listed("1") + `,` + listed("2") + `],"series":[` + c.series + `]}`
+			body := header("2") + listed("1") + `,` + listed("2") + `],"series":[` + c.series + `]}`
 			if c.name == "not a list" {
-				body = header("1") + listed("1") + `,` + listed("2") + `],"series":` + c.series + `}`
+				body = header("2") + listed("1") + `,` + listed("2") + `],"series":` + c.series + `}`
 			}
 			rep, err := e.restore(zipOf(t, entry{name: "backup.json", body: []byte(body)}), c.lim, nil)
 			if err != nil {
@@ -1072,7 +1072,7 @@ func TestRestoreHostileSeriesMember(t *testing.T) {
 	}
 	t.Run("duplicate series member", func(t *testing.T) {
 		e := newEnv(t)
-		body := header("1") + listed("1") + `],"series":[` + good + `],"series":[` + seriesJSON("u-2", "Again", "1") + `]}`
+		body := header("2") + listed("1") + `],"series":[` + good + `],"series":[` + seriesJSON("u-2", "Again", "1") + `]}`
 		rep, err := e.restore(zipOf(t, entry{name: "backup.json", body: []byte(body)}), Limits{}, nil)
 		if err != nil || !strings.Contains(rep.Aborted, `more than one "series"`) {
 			t.Fatalf("report = %+v, %v", rep, err)
