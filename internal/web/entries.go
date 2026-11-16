@@ -25,6 +25,14 @@ import (
 // combination: the keys of one allowed combination joined by commas.
 const progressKeysField = "progress_keys"
 
+// userTagField is the edit form's repeated own-tag input (one name each;
+// blank inputs are skipped).
+const userTagField = "user_tag"
+
+// blankTagInputs is the number of empty own-tag inputs the dialog offers
+// for new names.
+const blankTagInputs = 2
+
 // entryDialog is the data of entry_dialog.html.
 type entryDialog struct {
 	entryValues
@@ -35,6 +43,10 @@ type entryDialog struct {
 	// there are several).
 	Combos []statusOpt
 	Error  string
+	// TagInputs are the values of the own-tag inputs (the entry's names,
+	// then blankTagInputs empty ones); TagNames every existing own tag, the
+	// inputs' suggestions.
+	TagInputs, TagNames []string
 	// Ask is set while the dialog asks whether moving a completed run back
 	// starts a new run or corrects the current one (see postEdit).
 	Ask *runQuestion
@@ -268,6 +280,20 @@ func (t *entryTarget) dialog(v entryValues, keys []string, ret string, stored ma
 // one the return path names (its kind, status and page), else the first
 // page of the item's kind.
 func (s *server) editResponse(w http.ResponseWriter, r *http.Request, t *entryTarget, d entryDialog, code int) {
+	tags, err := s.deps.Library.UserTags(r.Context())
+	if err != nil {
+		s.internalError(w, r, err)
+		return
+	}
+	for _, tg := range tags {
+		d.TagNames = append(d.TagNames, tg.Name)
+	}
+	for _, name := range d.UserTags {
+		if strings.TrimSpace(name) != "" {
+			d.TagInputs = append(d.TagInputs, name)
+		}
+	}
+	d.TagInputs = append(d.TagInputs, make([]string, blankTagInputs)...)
 	if isPartialRequest(r) {
 		s.renderPartialStatus(w, code, "list", "entry_dialog", d)
 		return
@@ -290,7 +316,9 @@ func (s *server) getEdit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ret := returnTarget(r.URL.Query().Get("return"), t.man.ID)
-	d := t.dialog(entryFormValues(t.kind, t.row.Entry, stored), t.row.Item.ProgressKeys, ret, stored)
+	v := entryFormValues(t.kind, t.row.Entry, stored)
+	v.UserTags = t.row.UserTags
+	d := t.dialog(v, t.row.Item.ProgressKeys, ret, stored)
 	s.editResponse(w, r, t, d, http.StatusOK)
 }
 
@@ -351,6 +379,12 @@ func (s *server) postEdit(w http.ResponseWriter, r *http.Request) {
 		// a form without the review field (an older page) keeps the review
 		v.Review, entry.Review = t.row.Entry.Review, t.row.Entry.Review
 	}
+	// the own tags; a form without their inputs (an older page) keeps them
+	tags, tagsPosted := r.PostForm[userTagField]
+	v.UserTags = t.row.UserTags
+	if tagsPosted {
+		v.UserTags = tags
+	}
 	// moving a completed run back asks first: start a new run, or correct
 	// this one (run_choice). "new" writes the dialog's changes to the new
 	// run, so that entry is the one validated.
@@ -378,6 +412,20 @@ func (s *server) postEdit(w http.ResponseWriter, r *http.Request) {
 		d.Ask = &runQuestion{Completed: statusLabel(t.kind, library.Completed), Action: t.kind.RepeatAction()}
 		s.editResponse(w, r, t, d, http.StatusOK)
 		return
+	}
+	if msg == "" && tagsPosted {
+		// every other part is valid: a refused name is the last refusal,
+		// and nothing has been written yet
+		switch err := s.deps.Library.SetEntryTags(ctx, t.row.Item.ID, tags); {
+		case errors.Is(err, library.ErrNoEntry):
+			s.entryNotFound(w, r)
+			return
+		case errors.Is(err, library.ErrInvalid):
+			msg = invalidMessage(err)
+		case err != nil:
+			s.internalError(w, r, err)
+			return
+		}
 	}
 	if msg == "" && startNew {
 		entry.ItemID = t.row.Item.ID

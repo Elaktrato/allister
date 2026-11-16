@@ -336,8 +336,11 @@ func (s *server) rowView(m plugin.Manifest, row library.Row, ret string, cols []
 	}
 	for _, c := range cols {
 		cell := rowCell{Core: c.Core, Hide: c.Hide}
-		if c.Core == "" {
+		switch c.Core {
+		case "":
 			cell.Text, _ = fieldText(c.Field, it.Fields[c.Key])
+		case userTagsColumn: // drawn as a text cell
+			cell.Core, cell.Text = "", strings.Join(row.UserTags, ", ")
 		}
 		v.Cells = append(v.Cells, cell)
 	}
@@ -447,9 +450,21 @@ func (s *server) buildList(r *http.Request, m plugin.Manifest, lq listQuery) (li
 			return listView{}, err
 		}
 	}
+	var userTags []library.TermCount
+	hasUserTags := false
+	if anyEntries {
+		if hasUserTags, err = s.deps.Library.HasUserTags(ctx); err != nil {
+			return listView{}, err
+		}
+	}
+	if hasUserTags || len(f.UserTags) > 0 {
+		if userTags, err = s.deps.Library.UserTagTerms(ctx, q); err != nil {
+			return listView{}, err
+		}
+	}
 	ret := filteredListURL(m, k.Key, lq.Status, lq.View, pg.PageNo, f)
 	v := listView{Heading: k.LabelPlural, AnyEntries: anyEntries, Total: pg.Total, Filtered: f.narrows(), PushURL: ret, View: lq.View,
-		Filters:   buildFilterBar(m, k, lq, genres, tags),
+		Filters:   buildFilterBar(m, k, lq, genres, tags, userTags, hasUserTags),
 		SearchURL: "/" + url.PathEscape(m.ID) + "/search", EmptyNoun: lowerFirst(k.LabelPlural), Exports: s.exportLinks(m)}
 	v.Notice, v.NoticeMore = noticeKeys(lq.Rejected)
 	// the manual-add link only while the plugin has the manual route

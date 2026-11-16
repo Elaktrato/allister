@@ -42,6 +42,14 @@
       <textarea name="review" rows="3" maxlength="10000" class="mt-1 w-full rounded border border-slate-700 bg-slate-950 px-3 py-2">{{.Review}}</textarea>
       <span class="mt-1 block text-xs text-slate-400">Formatting: **bold**, *italic*, - lists, [links](https://…), ||spoilers||.</span>
     </label>
+    <fieldset class="text-sm">
+      <legend>Own tags</legend>
+      <div class="mt-1 flex flex-wrap gap-2">
+        {{range .TagInputs}}<input type="text" name="user_tag" value="{{.}}" list="user-tag-names" autocomplete="off" aria-label="Own tag"{{if not .}} placeholder="Add a tag"{{end}} class="w-36 rounded border border-slate-700 bg-slate-950 px-3 py-2">{{end}}
+      </div>
+      <datalist id="user-tag-names">{{range .TagNames}}<option value="{{.}}"></option>{{end}}</datalist>
+      <span class="mt-1 block text-xs text-slate-400">Your own labels, shared by every list. Clear a field to remove its tag.</span>
+    </fieldset>
     {{with .Ask}}
     {{/* the confirm state: moving a completed run back. The plain "correct"
           button comes first, so Enter keeps the edit as typed. */}}

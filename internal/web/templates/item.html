@@ -9,6 +9,7 @@
       <p class="font-semibold">{{.Status}}</p>
       <p class="text-slate-300">Rating: {{.Rating}}</p>
       {{range .Progress}}<p class="text-slate-300">{{.Label}}: {{.Value}}</p>{{end}}
+      {{with .UserTags}}<p class="mt-1 flex flex-wrap gap-1 text-xs"><span class="sr-only">Own tags:</span>{{range .}}<a href="{{.Href}}" class="rounded bg-slate-800 px-2 py-0.5 text-indigo-300 hover:underline">{{.Name}}</a>{{end}}</p>{{end}}
       {{if .Comment}}<div class="richtext mt-1 space-y-1 break-words text-slate-400">{{richtext .Comment}}</div>{{end}}
       {{if or .RepeatMarker (ge .Repeats 2)}}<p class="mt-1 flex flex-wrap gap-1 text-xs">{{with .RepeatMarker}}<span class="rounded bg-slate-800 px-2 py-0.5 text-indigo-300">{{.}}</span>{{end}}{{if ge .Repeats 2}}<span title="{{.RepeatsTitle}}" class="rounded bg-slate-800 px-2 py-0.5 text-slate-300">x{{.Repeats}}</span>{{end}}</p>{{end}}
       <a href="{{.EditURL}}" hx-get="{{.EditHXURL}}" hx-target="#dialog-slot" hx-swap="innerHTML" class="mt-2 inline-block text-indigo-300 hover:underline">Edit</a>

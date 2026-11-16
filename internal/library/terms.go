@@ -17,6 +17,11 @@ const (
 	maxTags      = 100
 )
 
+// termKey is the case-folded key of a genre, tag or own tag name (Unicode
+// lower case, so "Ä" and "ä" are one key): item_terms.term_key, and
+// user_tags.name_key / lists.name_key. Callers trim first.
+func termKey(s string) string { return strings.ToLower(s) }
+
 type termRow struct {
 	kind    string // "genre" or "tag"
 	term    string
@@ -52,7 +57,7 @@ func normalizeTerms(def plugin.KindDef, genres []string, tags []plugin.Tag) ([]t
 		if rank != nil && (*rank < 0 || *rank > 100) {
 			return invalid("rank of tag %q must be between 0 and 100", t)
 		}
-		key := strings.ToLower(t)
+		key := termKey(t)
 		if seen[kind+"\x00"+key] {
 			return nil
 		}

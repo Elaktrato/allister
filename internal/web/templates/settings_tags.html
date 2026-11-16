@@ -1,0 +1,32 @@
+{{define "title"}}Tags - Allister{{end}}
+{{define "content"}}
+<div class="md:flex md:items-start md:gap-8">
+  {{settingsTabsMarker}}
+  <div class="min-w-0 flex-1">
+    <h1 class="mb-2 text-2xl font-semibold">Tags</h1>
+    <p class="mb-6 max-w-xl text-sm text-slate-400">Your own tags, shared by every list. Set them in an entry's edit dialog. Renaming a tag onto the name of another one merges the two.</p>
+    {{if .Error}}
+    <div class="mb-4 max-w-2xl rounded border border-amber-700 bg-amber-950 p-3 text-amber-200" role="alert"><p>{{.Error}}</p></div>
+    {{end}}
+    {{if .Tags}}
+    <ul class="max-w-2xl divide-y divide-slate-800 rounded border border-slate-800 text-sm">
+      {{range .Tags}}
+      <li class="flex flex-wrap items-center gap-3 px-3 py-2">
+        <form method="post" action="{{.RenameURL}}" class="flex min-w-0 flex-1 flex-wrap items-center gap-3">
+          <label for="tag-{{.ID}}" class="sr-only">Name of the tag {{.Name}}</label>
+          <input id="tag-{{.ID}}" type="text" name="name" value="{{.Value}}" required autocomplete="off" class="min-w-0 flex-1 rounded-md border border-slate-700 bg-slate-900 px-3 py-1.5 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500">
+          <span class="text-slate-400">{{.Count}}</span>
+          <button type="submit" class="rounded-md border border-slate-700 px-3 py-1.5 hover:bg-slate-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500">Rename</button>
+        </form>
+        <form method="post" action="{{.DeleteURL}}" hx-post="{{.DeleteURL}}" hx-confirm="{{.Confirm}}">
+          <button type="submit" aria-label="Delete the tag {{.Name}}" title="Delete tag" class="rounded p-1.5 text-red-300 hover:bg-slate-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"><span class="icon text-[1.125rem]" aria-hidden="true">delete</span></button>
+        </form>
+      </li>
+      {{end}}
+    </ul>
+    {{else}}
+    <p class="text-sm text-slate-400">No own tags yet. Add them in an entry's edit dialog.</p>
+    {{end}}
+  </div>
+</div>
+{{end}}

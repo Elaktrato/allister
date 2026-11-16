@@ -39,6 +39,8 @@ type entryValues struct {
 	// and manual forms do not post it, a new run starts without one).
 	Review   string
 	Progress map[string]string
+	// UserTags are the entry's own tag names (the edit dialog only).
+	UserTags []string
 	// orphan is a non-empty shorthand value of a kind without a primary key.
 	orphan string
 }

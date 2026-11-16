@@ -85,10 +85,14 @@ CREATE TABLE unit_notes (
     PRIMARY KEY (run_id, progress_key, unit)
 );
 
--- The owner's own tags, shared across all plugins.
+-- The owner's own tags, shared across all plugins. name is kept as first
+-- typed; name_key is its case-folded form (the library's term key, the
+-- folding of item_terms.term_key, which unlike COLLATE NOCASE also folds
+-- letters beyond ASCII) and makes names unique case-insensitively.
 CREATE TABLE user_tags (
     id         INTEGER PRIMARY KEY,
-    name       TEXT NOT NULL UNIQUE COLLATE NOCASE,
+    name       TEXT NOT NULL,
+    name_key   TEXT NOT NULL UNIQUE,
     created_at TEXT NOT NULL
 );
 CREATE TABLE entry_user_tags (
@@ -99,10 +103,12 @@ CREATE TABLE entry_user_tags (
 CREATE INDEX entry_user_tags_tag ON entry_user_tags(tag_id);
 
 -- Custom, cross-plugin lists of entries. An entry removed from the library
--- leaves every list; deleting a list never touches entries.
+-- leaves every list; deleting a list never touches entries. name and
+-- name_key as for user_tags.
 CREATE TABLE lists (
     id           INTEGER PRIMARY KEY,
-    name         TEXT NOT NULL UNIQUE COLLATE NOCASE,
+    name         TEXT NOT NULL,
+    name_key     TEXT NOT NULL UNIQUE,
     manual_order INTEGER NOT NULL DEFAULT 0 CHECK (manual_order IN (0, 1)),
     created_at   TEXT NOT NULL,
     updated_at   TEXT NOT NULL

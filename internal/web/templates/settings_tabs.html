@@ -6,6 +6,7 @@
     <li>{{template "settings_tab" (tab "/settings" "General" "tune" .Current)}}</li>
     <li>{{template "settings_tab" (tab "/settings/appearance" "Appearance" "palette" .Current)}}</li>
     <li>{{template "settings_tab" (tab "/settings/plugins" "Plugins" "extension" .Current)}}</li>
+    <li>{{template "settings_tab" (tab "/settings/tags" "Tags" "label" .Current)}}</li>
     {{if .Import}}<li>{{template "settings_tab" (tab "/settings/import" "Import" "upload_file" .Current)}}</li>{{end}}
     <li>{{template "settings_tab" (tab "/settings/backup" "Backup" "backup" .Current)}}</li>
   </ul>

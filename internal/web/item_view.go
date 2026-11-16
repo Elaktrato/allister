@@ -93,7 +93,12 @@ type entryView struct {
 	RepeatMarker string
 	Repeats      int
 	RepeatsTitle string
+	// UserTags are the entry's own tags, each linking to the list filtered by it.
+	UserTags []tagLink
 }
+
+// tagLink is an own tag linking to its filtered list.
+type tagLink struct{ Name, Href string }
 
 // partLink is a link to a neighbouring part of a series.
 type partLink struct{ Title, Href string }
@@ -170,11 +175,18 @@ func (s *server) itemView(ctx context.Context, li *loadedItem) (itemView, error)
 		if li.entry != nil {
 			v.Entry = entrySummary(k, it, li.entry)
 			v.Entry.EditHXURL = v.Entry.EditURL + "?" + url.Values{"return": {overview}}.Encode()
+			tags, err := s.deps.Library.EntryTags(ctx, []int64{it.ID})
+			if err != nil {
+				return itemView{}, err
+			}
+			for _, name := range tags[it.ID] {
+				v.Entry.UserTags = append(v.Entry.UserTags, tagLink{Name: name,
+					Href: filteredListURL(m, d.Kind, "", "", 1, listFilters{UserTags: []string{name}})})
+			}
 			if li.entry.Status == library.Completed {
 				v.Entry.StartURL = "/list/" + strconv.FormatInt(it.ID, 10) + "/runs"
 				v.Entry.StartLabel, v.Entry.Return = k.RepeatAction(), overview
 			}
-			var err error
 			if v.Runs, err = s.runHistory(ctx, k, it, li.entry, overview); err != nil {
 				return itemView{}, err
 			}

@@ -335,7 +335,7 @@ type settingsTabsView struct {
 }
 
 // settingsSections are the paths of the settings section pages.
-var settingsSections = []string{"/settings", "/settings/appearance", "/settings/plugins", "/settings/import", "/settings/backup"}
+var settingsSections = []string{"/settings", "/settings/appearance", "/settings/plugins", "/settings/import", "/settings/tags", "/settings/backup"}
 
 // settingsSection is the section a settings path belongs to: the longest
 // section path it is or lies under, so a page answering a POST below its
