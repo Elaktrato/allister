@@ -1,0 +1,17 @@
+{{/* The read-only timeline of one run, loaded into the run history when its
+      timeline is opened. */}}
+{{define "timeline"}}
+{{if .Rows}}
+<ol class="space-y-1 text-sm">
+  {{range .Rows}}
+  <li class="flex flex-wrap items-baseline gap-x-3">
+    <time datetime="{{.WhenISO}}" class="text-slate-400">{{.When}}</time>
+    <span>{{.Text}}</span>
+    {{with .Origin}}<span class="rounded bg-slate-800 px-1.5 py-0.5 text-xs text-slate-300">{{.}}</span>{{end}}
+  </li>
+  {{end}}
+</ol>
+{{else}}
+<p class="text-sm text-slate-400">Nothing was logged for this run.</p>
+{{end}}
+{{end}}

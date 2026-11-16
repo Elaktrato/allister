@@ -6,6 +6,10 @@ How a release is cut: move the entries under "Unreleased" to a new `## vX.Y.Z - 
 
 ## Unreleased
 
+### Added
+
+- **Run timeline.** Each run in an entry's history has a collapsed, read-only timeline of its logged changes (progress steps and jumps, status and rating changes) with times in your time zone; imported and restored changes are marked. Plugins can declare an optional plural track label (`label_plural`).
+
 ## v0.3.0 - 2026-11-15
 
 ### Added

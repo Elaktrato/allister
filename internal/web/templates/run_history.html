@@ -24,6 +24,10 @@
         </span>
       </div>
       {{if .Review}}<p class="whitespace-pre-line break-words text-slate-400">{{.Review}}</p>{{end}}
+      <details hx-get="{{.TimelineURL}}" hx-trigger="toggle once" hx-target="find [data-timeline]" hx-swap="innerHTML">
+        <summary class="cursor-pointer text-slate-300 hover:underline">Timeline</summary>
+        <div data-timeline class="mt-1 text-slate-400" aria-live="polite">Loading…</div>
+      </details>
     </li>
     {{end}}
   </ol>
