@@ -118,11 +118,19 @@
   });
 
   // A spoiler (rendered notes and reviews) is hidden until clicked; Enter
-  // or Space on the focused spoiler does the same.
+  // or Space on the focused spoiler does the same. The click that reveals a
+  // spoiler never follows a link inside it (the reader has not seen the
+  // target yet); once revealed, its links work normally.
   document.addEventListener("click", function (event) {
     var spoiler = event.target.closest(".spoiler");
-    if (spoiler) {
-      spoiler.classList.toggle("revealed");
+    if (!spoiler) {
+      return;
+    }
+    if (!spoiler.classList.contains("revealed")) {
+      event.preventDefault();
+      spoiler.classList.add("revealed");
+    } else if (!event.target.closest("a")) {
+      spoiler.classList.remove("revealed");
     }
   });
   document.addEventListener("keydown", function (event) {
@@ -130,7 +138,7 @@
       return;
     }
     var spoiler = event.target.closest(".spoiler");
-    if (spoiler) {
+    if (spoiler && event.target === spoiler) {
       event.preventDefault();
       spoiler.classList.toggle("revealed");
     }
