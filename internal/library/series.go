@@ -187,36 +187,81 @@ type execer interface {
 	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
 }
 
-// renumberSeries rewrites the positions of a series densely (1..n, keeping the
-// order) and deletes the series when it has no parts left. It reports whether
-// the series still exists.
-func renumberSeries(ctx context.Context, tx execer, seriesID int64) (bool, error) {
-	rows, err := tx.QueryContext(ctx, `SELECT item_id FROM series_parts WHERE series_id = ? ORDER BY position, item_id`, seriesID)
+// orderedMembers is a table of members numbered densely by position within
+// an owner: the parts of a series, the places of a custom list. Both names
+// are constants of this package, never input.
+type orderedMembers struct{ table, owner string }
+
+var (
+	seriesMembers = orderedMembers{table: "series_parts", owner: "series_id"}
+	listMembers   = orderedMembers{table: "list_items", owner: "list_id"}
+)
+
+// renumber rewrites the owner's positions densely (1..n, keeping the order)
+// and returns the member item ids in that order.
+func (o orderedMembers) renumber(ctx context.Context, tx execer, ownerID int64) ([]int64, error) {
+	//nolint:gosec // G202: table and column names are package constants; values are bound
+	rows, err := tx.QueryContext(ctx, `SELECT item_id FROM `+o.table+` WHERE `+o.owner+` = ? ORDER BY position, item_id`, ownerID)
 	if err != nil {
-		return false, err
+		return nil, err
 	}
 	var items []int64
 	for rows.Next() {
 		var id int64
 		if err := rows.Scan(&id); err != nil {
 			rows.Close()
-			return false, err
+			return nil, err
 		}
 		items = append(items, id)
 	}
-	if err := rows.Err(); err != nil {
-		rows.Close()
+	if err := closeRows(rows); err != nil {
+		return nil, err
+	}
+	for i, id := range items {
+		//nolint:gosec // G202: table and column names are package constants; values are bound
+		if _, err := tx.ExecContext(ctx, `UPDATE `+o.table+` SET position = ? WHERE `+o.owner+` = ? AND item_id = ? AND position <> ?`, i+1, ownerID, id, i+1); err != nil {
+			return nil, err
+		}
+	}
+	return items, nil
+}
+
+// move moves the item one place up (delta -1) or down (+1) among the
+// owner's members, densely renumbered first. Moving past either end does
+// nothing (moved is false); found is false when the item is not a member.
+func (o orderedMembers) move(ctx context.Context, tx execer, ownerID, itemID int64, delta int) (found, moved bool, err error) {
+	items, err := o.renumber(ctx, tx, ownerID)
+	if err != nil {
+		return false, false, err
+	}
+	i := slices.Index(items, itemID)
+	if i < 0 {
+		return false, false, nil
+	}
+	j := i + delta
+	if j < 0 || j >= len(items) {
+		return true, false, nil
+	}
+	for _, p := range [][2]int{{i, j}, {j, i}} {
+		//nolint:gosec // G202: table and column names are package constants; values are bound
+		if _, err := tx.ExecContext(ctx, `UPDATE `+o.table+` SET position = ? WHERE `+o.owner+` = ? AND item_id = ?`, p[1]+1, ownerID, items[p[0]]); err != nil {
+			return true, false, err
+		}
+	}
+	return true, true, nil
+}
+
+// renumberSeries rewrites the positions of a series densely (1..n, keeping the
+// order) and deletes the series when it has no parts left. It reports whether
+// the series still exists.
+func renumberSeries(ctx context.Context, tx execer, seriesID int64) (bool, error) {
+	items, err := seriesMembers.renumber(ctx, tx, seriesID)
+	if err != nil {
 		return false, err
 	}
-	rows.Close()
 	if len(items) == 0 {
 		_, err := tx.ExecContext(ctx, `DELETE FROM series WHERE id = ?`, seriesID)
 		return false, err
-	}
-	for i, id := range items {
-		if _, err := tx.ExecContext(ctx, `UPDATE series_parts SET position = ? WHERE series_id = ? AND item_id = ? AND position <> ?`, i+1, seriesID, id, i+1); err != nil {
-			return false, err
-		}
 	}
 	_, err = tx.ExecContext(ctx, `UPDATE series SET updated_at = `+nowSQL+` WHERE id = ?`, seriesID)
 	return true, err
@@ -323,26 +368,15 @@ func (l *Library) MovePart(ctx context.Context, seriesID, itemID int64, delta in
 		return err
 	}
 	defer tx.Rollback()
-	var pos, total int
-	err = tx.QueryRowContext(ctx, `SELECT position FROM series_parts WHERE series_id = ? AND item_id = ?`, seriesID, itemID).Scan(&pos)
-	if errors.Is(err, sql.ErrNoRows) {
-		return ErrNoSeries
-	}
+	found, moved, err := seriesMembers.move(ctx, tx, seriesID, itemID, delta)
 	if err != nil {
 		return err
 	}
-	if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM series_parts WHERE series_id = ?`, seriesID).Scan(&total); err != nil {
-		return err
+	if !found {
+		return ErrNoSeries
 	}
-	target := pos + delta
-	if target < 1 || target > total {
+	if !moved {
 		return nil
-	}
-	if _, err := tx.ExecContext(ctx, `UPDATE series_parts SET position = ? WHERE series_id = ? AND position = ?`, pos, seriesID, target); err != nil {
-		return err
-	}
-	if _, err := tx.ExecContext(ctx, `UPDATE series_parts SET position = ? WHERE series_id = ? AND item_id = ?`, target, seriesID, itemID); err != nil {
-		return err
 	}
 	if _, err := renumberSeries(ctx, tx, seriesID); err != nil {
 		return err

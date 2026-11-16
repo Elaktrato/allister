@@ -24,6 +24,12 @@
     <a href="{{.AddURL}}" hx-get="{{.AddURL}}" hx-target="#dialog-slot" hx-swap="innerHTML"
       class="block rounded bg-indigo-600 px-4 py-2 text-center font-medium hover:bg-indigo-500">Add to list</a>
     {{end}}
+    {{if .AddToListURL}}
+    <form method="post" action="{{.AddToListURL}}">
+      <button type="submit" class="w-full rounded bg-indigo-600 px-4 py-2 font-medium hover:bg-indigo-500">Add to list “{{.ListName}}”</button>
+    </form>
+    {{end}}
+    {{with .ListPicker}}{{template "list_picker" .}}{{end}}
     {{if .AddToSeriesURL}}
     <form method="post" action="{{.AddToSeriesURL}}">
       <button type="submit" class="w-full rounded bg-indigo-600 px-4 py-2 font-medium hover:bg-indigo-500">Add to series “{{.SeriesTitle}}”</button>

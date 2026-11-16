@@ -122,8 +122,14 @@ type itemView struct {
 	MakeSeries     *makeSeriesView
 	AddToSeriesURL string
 	SeriesTitle    string
-	PartialSync    bool
-	Entry          *entryView
+	// AddToListURL (with ListName) when the overview was reached from a
+	// search into a custom list; ListPicker is the "Lists" form of a listed
+	// entry.
+	AddToListURL string
+	ListName     string
+	ListPicker   *listPickerView
+	PartialSync  bool
+	Entry        *entryView
 	// AddURL opens the add dialog (items not in the list).
 	AddURL string
 	// MatchURL, MatchLabel and UnmatchedHint: a manual item that can be
