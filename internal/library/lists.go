@@ -354,11 +354,13 @@ func (l *Library) MoveInList(ctx context.Context, listID, itemID int64, delta in
 	return tx.Commit()
 }
 
-// SetListsOfItem makes the item's entry a member of exactly the lists
-// listIDs (repeats ignored): it leaves the others and is appended to the
-// ones it was not in. Nothing changes when a list is unknown (ErrNoList) or
-// the item has no entry (ErrNoEntry).
-func (l *Library) SetListsOfItem(ctx context.Context, itemID int64, listIDs []int64) error {
+// SetListsOfItem saves the item's membership of the lists shown on a form:
+// each shown list (and each member list, which counts as shown) the entry
+// is in but that is not in member is left, each member list it is not in
+// is joined (appended, in the given order; repeats ignored). Lists not shown
+// keep their membership, and an unknown id (a list deleted meanwhile) is
+// ignored. ErrNoEntry, with nothing changed, when the item has no entry.
+func (l *Library) SetListsOfItem(ctx context.Context, itemID int64, shown, member []int64) error {
 	tx, err := l.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("set lists: %w", err)
@@ -368,11 +370,12 @@ func (l *Library) SetListsOfItem(ctx context.Context, itemID int64, listIDs []in
 		return err
 	}
 	want := map[int64]bool{}
-	for _, id := range listIDs {
-		if _, err := listOrder(ctx, tx, id); err != nil {
-			return err
-		}
+	for _, id := range member {
 		want[id] = true
+	}
+	scope := map[int64]bool{}
+	for _, id := range append(slices.Clone(shown), member...) {
+		scope[id] = true
 	}
 	rows, err := tx.QueryContext(ctx, `SELECT list_id FROM list_items WHERE item_id = ?`, itemID)
 	if err != nil {
@@ -395,6 +398,9 @@ func (l *Library) SetListsOfItem(ctx context.Context, itemID int64, listIDs []in
 			delete(want, id)
 			continue
 		}
+		if !scope[id] {
+			continue
+		}
 		if _, err := tx.ExecContext(ctx, `DELETE FROM list_items WHERE list_id = ? AND item_id = ?`, id, itemID); err != nil {
 			return fmt.Errorf("set lists: %w", err)
 		}
@@ -405,12 +411,19 @@ func (l *Library) SetListsOfItem(ctx context.Context, itemID int64, listIDs []in
 			return err
 		}
 	}
-	for _, id := range listIDs { // in the given order, each once
-		if want[id] {
-			delete(want, id)
-			if err := joinList(ctx, tx, id, itemID); err != nil {
-				return err
-			}
+	for _, id := range member { // in the given order, each once
+		if !want[id] {
+			continue
+		}
+		delete(want, id)
+		switch _, err := listOrder(ctx, tx, id); {
+		case errors.Is(err, ErrNoList):
+			continue // deleted meanwhile
+		case err != nil:
+			return err
+		}
+		if err := joinList(ctx, tx, id, itemID); err != nil {
+			return err
 		}
 	}
 	return tx.Commit()
