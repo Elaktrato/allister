@@ -138,7 +138,7 @@ type itemView struct {
 	// DetailsURL opens "Edit details" (every saved item); it returns to
 	// the overview.
 	DetailsURL string
-	// UpdateURL, UpdateLabel: the "Update from source" form of a saved item
+	// UpdateURL, UpdateLabel: the "Update from source" link of a saved item
 	// whose source is declared, implemented and not manual.
 	UpdateURL, UpdateLabel string
 	// UpdateNotice reports a finished refresh (?updated=N).
@@ -344,15 +344,15 @@ func sourceName(m plugin.Manifest, id string) string {
 }
 
 // updateNotice is the message of a finished "Update from source": the number
-// of added fields, or that nothing was missing.
+// of parts written, or that nothing was.
 func updateNotice(n int, source string) string {
 	switch n {
 	case 0:
-		return "Nothing new; every source field is already filled."
+		return "Nothing was updated."
 	case 1:
-		return "1 field added from " + source + "."
+		return "Updated 1 value from " + source + "."
 	}
-	return strconv.Itoa(n) + " fields added from " + source + "."
+	return "Updated " + strconv.Itoa(n) + " values from " + source + "."
 }
 
 // sourceLink is the "View on ..." link of the item's external page (https

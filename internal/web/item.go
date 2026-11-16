@@ -56,6 +56,7 @@ func (s *server) coreRoutes(pluginID string) routeSet {
 		reg.Handle("POST /manual/new", func(w http.ResponseWriter, r *http.Request) { s.postManualNew(w, r, pluginID) })
 		reg.Handle("GET /{source}/{id}/edit", func(w http.ResponseWriter, r *http.Request) { s.getDetails(w, r, pluginID) })
 		reg.Handle("POST /{source}/{id}/edit", func(w http.ResponseWriter, r *http.Request) { s.postDetails(w, r, pluginID) })
+		reg.Handle("GET /{source}/{id}/refresh", func(w http.ResponseWriter, r *http.Request) { s.getRefresh(w, r, pluginID) })
 		reg.Handle("POST /{source}/{id}/refresh", func(w http.ResponseWriter, r *http.Request) { s.postRefresh(w, r, pluginID) })
 		reg.Handle("GET /{source}/{id}/match", func(w http.ResponseWriter, r *http.Request) { s.getMatch(w, r, pluginID) })
 		reg.Handle("GET /{source}/{id}/match/search", func(w http.ResponseWriter, r *http.Request) { s.getMatchSearch(w, r, pluginID) })
@@ -171,58 +172,6 @@ func updatedCount(r *http.Request) *int {
 		return nil
 	}
 	return &n
-}
-
-// postRefresh is "Update from source": it asks the item's source for its
-// details once and fills in only the fields the item does not have yet
-// (library.FillMissingFields), so local edits, imported data and earlier
-// refreshes survive. Manual items, unsaved items and sources the plugin does
-// not declare or provide have no action (404). Source failures use the same
-// mapping as the overview. Success redirects to the overview with ?updated=N.
-func (s *server) postRefresh(w http.ResponseWriter, r *http.Request, pluginID string) {
-	m, ref, ok := s.addRef(w, r, pluginID)
-	if !ok {
-		return
-	}
-	it, k, err := s.findSaved(r.Context(), m, ref)
-	switch {
-	case errors.Is(err, errAmbiguousKind):
-		s.itemFail(w, r, m, ref.Source, err, "")
-		return
-	case err != nil:
-		s.internalError(w, r, err)
-		return
-	}
-	if it == nil || it.Source == manualSource || !hasSource(m, it.Source) {
-		s.errorPage(w, r, http.StatusNotFound, "Not found", "There is no such item.", "")
-		return
-	}
-	src := s.source(m.ID, it.Source)
-	if src == nil {
-		s.errorPage(w, r, http.StatusNotFound, "Not found", "There is no such item.", "")
-		return
-	}
-	overview := itemURL(m, it.Source, it.SourceID, k.Key)
-	d, err := src.Details(r.Context(), k.Key, it.SourceID)
-	if err != nil {
-		s.itemFail(w, r, m, it.Source, err, overview)
-		return
-	}
-	added, err := s.deps.Library.FillMissingFields(r.Context(), it.ID, d.Fields)
-	if err != nil {
-		switch {
-		case errors.Is(err, library.ErrNoEntry):
-			s.itemFail(w, r, m, it.Source, errNoSuchItem, "")
-		case errors.Is(err, library.ErrInvalid):
-			// a source answer the library cannot store is the same bad gateway
-			// as an unusable answer
-			s.itemFail(w, r, m, it.Source, fmt.Errorf("%w: %w", plugin.ErrBadResponse, err), overview)
-		default:
-			s.internalError(w, r, err)
-		}
-		return
-	}
-	http.Redirect(w, r, updatedURL(overview, len(added)), http.StatusSeeOther)
 }
 
 // itemExtras are the dialogs an overview can be rendered with (no
