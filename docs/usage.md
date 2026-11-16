@@ -107,7 +107,7 @@ The universal backup includes these settings and the uploaded fonts. A restore s
 
 **Custom lists.** Named collections across plugins at `/lists` and `/lists/{id}`, with `sort=position|title|added|status`. The sidebar links them under the plugins. Deleting a list keeps its entries.
 
-**Backups and exports.** Backups are format 2 and carry runs, notes, own tags and custom lists; older format 1 backups still restore (each entry becomes run 1), older Allister versions cannot read format 2. The JSON export is version 2 (`comment` became `notes`; entries gain `runs`, `user_tags` and `lists`).
+**Backups and exports.** Backups are format 2 and carry runs, notes, own tags and custom lists; older format 1 backups still restore (each entry becomes run 1), older Allister versions cannot read format 2. The JSON export is version 2 (`comment` became `notes`; entries gain `runs`, `user_tags` and `lists`). Backups also keep the identities a merge kept (aliases), the pairs hidden as "Not a duplicate" and where a downloaded cover came from (see Backups above).
 
 ## Managing entries
 
