@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/allister/allister/internal/covers"
+	"github.com/allister/allister/internal/textfmt"
 )
 
 // templateFuncs is the one FuncMap shared by every page template set.
@@ -23,6 +24,8 @@ var templateFuncs = template.FuncMap{
 	// dialogStatuses is the dialog slot's data-swap-statuses value: the
 	// statuses app.js allows the slot to swap (dialogSwapStatuses).
 	"dialogStatuses": dialogStatuses,
+	// richtext renders the safe formatting language of notes and reviews.
+	"richtext": textfmt.Render,
 	// coverSrc maps a stored image value to a URL (see covers.Src).
 	"coverSrc": covers.Src,
 	// langLabel is the human label of a language tag.
