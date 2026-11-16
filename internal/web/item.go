@@ -264,8 +264,13 @@ func (s *server) showItem(w http.ResponseWriter, r *http.Request, ref itemRef, x
 	if x.Updated != nil && li.saved != nil {
 		v.UpdateNotice = updateNotice(*x.Updated, sourceName(m, li.data.Source))
 	}
-	if li.saved != nil && r.URL.Query().Get("notice") == noticeSeriesAttach {
-		v.UpdateNotice = "The entry was added to your list, but could not be put into the series."
+	if li.saved != nil {
+		switch r.URL.Query().Get("notice") {
+		case noticeSeriesAttach:
+			v.UpdateNotice = "The entry was added to your list, but could not be put into the series."
+		case noticeListAttach:
+			v.UpdateNotice = "The entry was added to your list, but could not be put into the custom list."
+		}
 	}
 	if x.Dialog != nil {
 		pc := progressContext{Keys: li.kind.Progress.Defaults, Fields: li.data.Fields}
@@ -280,38 +285,66 @@ func (s *server) showItem(w http.ResponseWriter, r *http.Request, ref itemRef, x
 		v.Dialog = &f
 	}
 	v.Match, v.RunDialog, v.NoteDialog = x.Match, x.RunDialog, x.NoteDialog
-	if err := s.carrySeries(r, li, &v); err != nil {
+	if err := s.carryAdd(r, li, &v); err != nil {
 		s.internalError(w, r, err)
 		return
+	}
+	if li.saved != nil && li.entry != nil {
+		d := li.data
+		if v.ListPicker, err = s.listPicker(r, li.saved.ID, itemURL(li.man, d.Source, d.ID, d.Kind)); err != nil {
+			s.internalError(w, r, err)
+			return
+		}
 	}
 	s.renderStatus(w, r, status, "item", v)
 }
 
-// carrySeries keeps a ?series= parameter (a search into a series) on the add
-// links of the overview, and offers an entry that is already listed and in no
-// series to join it. An unknown series, or one of another kind, is ignored.
-func (s *server) carrySeries(r *http.Request, li *loadedItem, v *itemView) error {
-	uid := seriesParam(r)
-	if uid == "" {
-		return nil
+// carryAdd keeps a ?series= and a ?list= parameter (a search into a series
+// or a custom list) on the add links of the overview, and offers an entry
+// that is already listed to join them (the series only when it is in none).
+// An unknown series, or one of another kind, and an unknown list are
+// ignored.
+func (s *server) carryAdd(r *http.Request, li *loadedItem, v *itemView) error {
+	ctx := r.Context()
+	var carry addCarry
+	var ser *library.Series
+	if uid := seriesParam(r); uid != "" {
+		got, err := s.deps.Library.SeriesByUID(ctx, li.man.ID, uid)
+		switch {
+		case errors.Is(err, library.ErrNoSeries):
+		case err != nil:
+			return err
+		case got.Kind == li.kind.Key:
+			ser, carry.series = got, uid
+		}
 	}
-	ser, err := s.deps.Library.SeriesByUID(r.Context(), li.man.ID, uid)
-	if errors.Is(err, library.ErrNoSeries) || (err == nil && ser.Kind != li.kind.Key) {
-		return nil
-	}
-	if err != nil {
-		return err
+	var lst library.List
+	if id := listParam(r); id > 0 {
+		got, err := s.deps.Library.CustomList(ctx, id)
+		switch {
+		case errors.Is(err, library.ErrNoList):
+		case err != nil:
+			return err
+		default:
+			lst, carry.list = got, id
+		}
 	}
 	if v.AddURL != "" {
-		v.AddURL = withSeriesParam(v.AddURL, uid)
+		v.AddURL = carry.on(v.AddURL)
 	}
 	if v.Dialog != nil {
-		v.Dialog.Action = withSeriesParam(v.Dialog.Action, uid)
+		v.Dialog.Action = carry.on(v.Dialog.Action)
 	}
-	if li.saved != nil && li.entry != nil && v.Series == nil {
-		d := li.data
-		v.AddToSeriesURL = withSeriesParam(itemAction(li.man, d.Source, d.ID, d.Kind, "add", nil), uid)
-		v.SeriesTitle = ser.Title
+	if li.saved == nil || li.entry == nil {
+		return nil
+	}
+	d := li.data
+	add := itemAction(li.man, d.Source, d.ID, d.Kind, "add", nil)
+	if ser != nil && v.Series == nil {
+		v.AddToSeriesURL, v.SeriesTitle = addCarry{series: carry.series}.on(add), ser.Title
+	}
+	if carry.list > 0 {
+		v.AddToListURL, v.ListName = addCarry{list: carry.list}.on(add), lst.Name
 	}
 	return nil
 }

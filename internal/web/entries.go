@@ -131,8 +131,8 @@ func (s *server) postIncrement(w http.ResponseWriter, r *http.Request) {
 
 // entryChanged answers a change made from a list row or card (+1, start
 // again): 303 to the return path, for htmx the re-rendered row, or the card
-// when the form posted view=cards (with the home badge when the return path
-// is the home page).
+// when the form posted view=cards (with the plugin badge when the return
+// path is the home page or a custom list).
 func (s *server) entryChanged(w http.ResponseWriter, r *http.Request, ret string) {
 	s.answerChange(w, r, ret, false)
 }
@@ -140,7 +140,8 @@ func (s *server) entryChanged(w http.ResponseWriter, r *http.Request, ret string
 // answerChange is entryChanged; offerNote adds the +1 answer's link to a
 // note on the unit just logged (see noteOffer).
 func (s *server) answerChange(w http.ResponseWriter, r *http.Request, ret string, offerNote bool) {
-	home := ret == "/"
+	// the home page and a custom list mix plugins: their cards carry a badge
+	mixed := ret == "/" || listReturn(ret)
 	if !isPartialRequest(r) {
 		http.Redirect(w, r, ret, http.StatusSeeOther)
 		return
@@ -158,7 +159,7 @@ func (s *server) answerChange(w http.ResponseWriter, r *http.Request, ret string
 	if offerNote {
 		rv.NoteURL, rv.NoteLabel = t.noteOffer(ret)
 	}
-	if home {
+	if mixed {
 		rv.BadgeIcon, rv.BadgeLabel = badge(t.man, t.kind)
 	}
 	// a +1 from a card answers the card, one from the table the row

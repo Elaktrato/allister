@@ -46,10 +46,11 @@ func parseFormLimit(w http.ResponseWriter, r *http.Request, limit int64) bool {
 }
 
 // returnTarget is the return URL of an entry action: the literal "/" (the
-// home page's cards) or else safeReturn's plugin-scoped path.
+// home page's cards), a custom list page (listReturn) or else safeReturn's
+// plugin-scoped path.
 func returnTarget(raw, pluginID string) string {
-	if raw == "/" {
-		return "/"
+	if raw == "/" || listReturn(raw) {
+		return raw
 	}
 	return safeReturn(raw, pluginID)
 }

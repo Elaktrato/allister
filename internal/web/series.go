@@ -284,10 +284,20 @@ func (s *server) attachToSeries(w http.ResponseWriter, r *http.Request, t *addTa
 	}
 }
 
-// addFinished ends a successful add of item: to the series when the add
-// targeted one (attached now, after the add has its final item), else to the
-// plugin's list.
-func (s *server) addFinished(w http.ResponseWriter, r *http.Request, t *addTarget, item int64, ser *library.Series) {
+// addFinished ends a successful add of item: joined to the custom list when
+// the add targeted one, then to the series when it targeted one (attached
+// now, after the add has its final item), else to the custom list, else to
+// the plugin's list.
+func (s *server) addFinished(w http.ResponseWriter, r *http.Request, t *addTarget, item int64, ser *library.Series, lst *library.List) {
+	if lst != nil {
+		if !s.joinAfterAdd(w, r, lst, item, t.overviewURL()) {
+			return
+		}
+		if ser == nil {
+			s.redirectAfterAdd(w, r, customListURL(lst.ID))
+			return
+		}
+	}
 	if ser == nil {
 		s.redirectAfterAdd(w, r, "/"+url.PathEscape(t.man.ID))
 		return
@@ -370,13 +380,7 @@ func (s *server) postSeriesMove(w http.ResponseWriter, r *http.Request, m plugin
 		return
 	}
 	id, ok := formItemID(r.PathValue("item"))
-	delta := 0
-	switch r.PostFormValue("dir") {
-	case "up":
-		delta = -1
-	case "down":
-		delta = 1
-	}
+	delta := moveDelta(r.PostFormValue("dir"))
 	if !ok || delta == 0 {
 		s.errorPage(w, r, http.StatusNotFound, "Not found", "There is no such part.", "")
 		return

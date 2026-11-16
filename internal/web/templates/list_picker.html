@@ -1,0 +1,19 @@
+{{/* The item page's "Lists" form: every custom list with a checkbox
+      (checked = the entry is in it), saved at once. */}}
+{{define "list_picker"}}
+<form method="post" action="{{.Action}}" class="space-y-2 rounded border border-slate-800 bg-slate-900 p-3 text-sm">
+  <input type="hidden" name="return" value="{{.Return}}">
+  <fieldset class="space-y-1">
+    <legend class="font-semibold">Lists</legend>
+    {{range .Lists}}
+    <label class="flex items-center gap-2 break-words"><input type="checkbox" name="list" value="{{.ID}}"{{if .Member}} checked{{end}}> {{.Name}}</label>
+    {{else}}
+    <p class="text-slate-400">No lists yet.</p>
+    {{end}}
+  </fieldset>
+  <div class="flex flex-wrap items-center gap-3">
+    {{if .Lists}}<button type="submit" class="rounded border border-slate-700 px-3 py-1.5 hover:bg-slate-800">Save lists</button>{{end}}
+    <a href="/lists#new-list" class="text-indigo-300 hover:underline">New list</a>
+  </div>
+</form>
+{{end}}

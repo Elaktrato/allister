@@ -11,6 +11,7 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -46,8 +47,11 @@ type searchView struct {
 	// EmptyHint and ManualURL are fixed per plugin, source and kind.
 	Heading, Action, Placeholder, EmptyHint, ManualURL string
 	Query                                              string
-	// Series is the uid of the series results are added into ("" for none).
+	// Series is the uid of the series results are added into ("" for none),
+	// List the id of the custom list ("" for none); carry is both.
 	Series   string
+	List     string
+	carry    addCarry
 	Searched bool
 	Results  []searchCard
 	// Message is a user-facing error; Retry says whether to offer a retry
@@ -234,19 +238,19 @@ func (s *server) search(w http.ResponseWriter, r *http.Request, pluginID string)
 		return
 	}
 	q := cleanQuery(qs.Get("q"))
-	uid := seriesParam(r)
-	v := searchView{Series: uid,
+	carry := carriedAdd(r)
+	v := searchView{Series: carry.series, carry: carry,
 		Heading:     "Search " + lowerFirst(k.LabelPlural),
 		Action:      "/" + url.PathEscape(m.ID) + "/search",
 		Placeholder: "Search " + si.Name + "…",
 		EmptyHint:   "Type a title to search " + si.Name + ".",
-		ManualURL:   withSeriesParam(manualPath(m, k.Key), uid),
+		ManualURL:   carry.on(manualPath(m, k.Key)),
 		Query:       q,
 	}
-	v.RetryURL = v.Action + "?q=" + url.QueryEscape(q)
-	if uid != "" {
-		v.RetryURL += "&series=" + url.QueryEscape(uid)
+	if carry.list > 0 {
+		v.List = strconv.FormatInt(carry.list, 10)
 	}
+	v.RetryURL = carry.on(v.Action + "?q=" + url.QueryEscape(q))
 	validSources := sourcesForKind(m, k.Key)
 	if len(validSources) > 1 {
 		for _, x := range validSources {
@@ -333,7 +337,7 @@ func (s *server) runSearch(r *http.Request, m plugin.Manifest, si plugin.SourceI
 			Cover: covers.Src(httpURL(it.CoverURL)),
 			// the source that was asked (matched against the manifest), not
 			// what the result claims
-			Href: withSeriesParam(itemURL(m, si.ID, it.ID, k.Key), v.Series),
+			Href: v.carry.on(itemURL(m, si.ID, it.ID, k.Key)),
 		}
 		var meta []string
 		for _, fd := range k.Fields {

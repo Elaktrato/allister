@@ -1,0 +1,29 @@
+{{/* The custom lists overview: every list with its progress line, and the
+      "New list" form. */}}
+{{define "title"}}Lists - Allister{{end}}
+{{define "content"}}
+<div class="max-w-2xl space-y-6">
+  <div>
+    <h1 class="text-3xl font-semibold">Lists</h1>
+    <p class="mt-1 text-sm text-slate-400">Your own collections across every plugin: a franchise, a challenge, anything no list tracks on its own.</p>
+  </div>
+  {{if .Lists}}
+  <ul class="divide-y divide-slate-800 rounded border border-slate-800 bg-slate-900">
+    {{range .Lists}}
+    <li class="flex flex-wrap items-baseline gap-x-3 px-3 py-2"><a href="{{.Href}}" class="min-w-0 break-words font-medium text-indigo-300 hover:underline">{{.Name}}</a><span class="ml-auto text-sm text-slate-400">{{.Progress}}</span></li>
+    {{end}}
+  </ul>
+  {{else}}
+  <p class="text-sm text-slate-400">No lists yet.</p>
+  {{end}}
+  <section id="new-list" class="space-y-2">
+    <h2 class="text-lg font-semibold">New list</h2>
+    {{if .Error}}<div class="rounded border border-amber-700 bg-amber-950 p-3 text-amber-200" role="alert"><p>{{.Error}}</p></div>{{end}}
+    <form method="post" action="/lists" class="flex gap-2">
+      <label for="new-list-name" class="sr-only">Name of the new list</label>
+      <input id="new-list-name" type="text" name="name" value="{{.Name}}" maxlength="80" required autocomplete="off" placeholder="Name" class="min-w-0 flex-1 rounded border border-slate-700 bg-slate-900 px-3 py-2 text-sm">
+      <button type="submit" class="rounded bg-indigo-600 px-4 py-2 font-medium hover:bg-indigo-500">Create</button>
+    </form>
+  </section>
+</div>
+{{end}}
