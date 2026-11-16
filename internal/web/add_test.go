@@ -143,14 +143,20 @@ func TestAddOtherValidationErrors(t *testing.T) {
 
 func TestAddBlankProgressAndDatesAndCommentCap(t *testing.T) {
 	e := newEnv(t)
-	// runes, not bytes, are counted (the cut lands among the multi-byte ones)
-	f := url.Values{"status": {"planned"}, "progress": {""}, "comment": {strings.Repeat("a", library.MaxNotesRunes-10) + strings.Repeat("あ", 500)}}
+	// runes, not bytes, are counted; a comment above the cap is refused, not cut
+	long := strings.Repeat("a", library.MaxNotesRunes-10) + strings.Repeat("あ", 10)
+	f := url.Values{"status": {"planned"}, "progress": {""}, "comment": {long + "あ"}}
+	if rec := e.post(f, true); rec.Code != 422 || !strings.Contains(rec.Body.String(), "longer than 10000 characters") {
+		t.Fatalf("over the cap: %d", rec.Code)
+	}
+	assertNothingSaved(t, e)
+	f.Set("comment", long)
 	if rec := e.post(f, true); rec.Code != 204 {
 		t.Fatalf("got %d", rec.Code)
 	}
 	sv, _ := findBySource(context.Background(), e.lib, anilist.AniList, "1535")
 	en, _ := getEntry(context.Background(), e.lib, sv.ID)
-	if en.Progress != 0 || en.StartedOn != nil || len([]rune(en.Comment)) != library.MaxNotesRunes || !strings.HasSuffix(en.Comment, "ああ") {
+	if en.Progress != 0 || en.StartedOn != nil || en.Comment != long {
 		t.Fatalf("%+v", en)
 	}
 }

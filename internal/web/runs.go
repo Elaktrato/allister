@@ -177,7 +177,7 @@ func (s *server) getRunEdit(w http.ResponseWriter, r *http.Request) {
 // postRunEdit replaces the run's status, rating, dates and review; the
 // library refuses a status a past run cannot take (422 with the form).
 func (s *server) postRunEdit(w http.ResponseWriter, r *http.Request) {
-	if !parseForm(w, r) {
+	if !parseTextForm(w, r) {
 		return
 	}
 	t, ok := s.loadRun(w, r)

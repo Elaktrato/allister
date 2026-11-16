@@ -11,12 +11,28 @@ import (
 // used by add, edit and manual create); the schema-generated item forms are
 // in details.go.
 
-const maxFormBytes = 64 << 10
+// maxFormBytes caps an ordinary form body. maxTextFormBytes caps the forms
+// that carry long texts (the entry's notes and the run's review, 10,000
+// runes each, or a unit note): 10,000 four-byte runes are about 120 KB
+// url-encoded, so both texts and the other fields fit with room to spare.
+const (
+	maxFormBytes     = 64 << 10
+	maxTextFormBytes = 512 << 10
+)
 
 // parseForm limits the body to maxFormBytes and parses it. On failure it has
 // written the response (413 for an oversized body, else 400) and returns false.
 func parseForm(w http.ResponseWriter, r *http.Request) bool {
-	r.Body = http.MaxBytesReader(w, r.Body, maxFormBytes)
+	return parseFormLimit(w, r, maxFormBytes)
+}
+
+// parseTextForm is parseForm for the forms with long texts (maxTextFormBytes).
+func parseTextForm(w http.ResponseWriter, r *http.Request) bool {
+	return parseFormLimit(w, r, maxTextFormBytes)
+}
+
+func parseFormLimit(w http.ResponseWriter, r *http.Request, limit int64) bool {
+	r.Body = http.MaxBytesReader(w, r.Body, limit)
 	if err := r.ParseForm(); err != nil {
 		var tooBig *http.MaxBytesError
 		if errors.As(err, &tooBig) {

@@ -35,7 +35,10 @@ const progressShorthand = "progress"
 // into the dialog on errors. Progress is keyed by progress key.
 type entryValues struct {
 	Status, Rating, StartedOn, FinishedOn, Comment string
-	Progress                                       map[string]string
+	// Review is the display run's review (the edit dialog only; the add
+	// and manual forms do not post it, a new run starts without one).
+	Review   string
+	Progress map[string]string
 	// orphan is a non-empty shorthand value of a kind without a primary key.
 	orphan string
 }
@@ -69,17 +72,15 @@ type progressContext struct {
 	Fields map[string]plugin.FieldValue
 }
 
-// readEntryValues reads the raw form values. The comment is trimmed and
-// capped at library.MaxNotesRunes. A repeated parameter counts with its
+// readEntryValues reads the raw form values. The comment (the entry's
+// notes) and the review are trimmed; their length is the library's check
+// (library.MaxNotesRunes, library.MaxReviewRunes). A repeated parameter counts with its
 // FIRST value (PostFormValue). When both progress.<primary> and the
 // progressShorthand are sent, the explicit progress.<primary> wins.
 func readEntryValues(kind plugin.KindDef, r *http.Request) entryValues {
 	get := func(k string) string { return strings.TrimSpace(r.PostFormValue(k)) }
 	v := entryValues{Status: get("status"), Rating: get("rating"), StartedOn: get("started_on"),
-		FinishedOn: get("finished_on"), Comment: get("comment"), Progress: map[string]string{}}
-	if rs := []rune(v.Comment); len(rs) > library.MaxNotesRunes {
-		v.Comment = strings.TrimSpace(string(rs[:library.MaxNotesRunes]))
-	}
+		FinishedOn: get("finished_on"), Comment: get("comment"), Review: get("review"), Progress: map[string]string{}}
 	for name := range r.PostForm {
 		if key, ok := strings.CutPrefix(name, progressField); ok {
 			v.Progress[key] = get(name)
@@ -159,11 +160,11 @@ func parseProgress(def plugin.ProgressDef, raw string) (float64, string) {
 // is known. Field names: status (a core status class), rating (blank or
 // 0..10), progress.<key> per active progress key (plus the
 // progressShorthand), started_on and finished_on (YYYY-MM-DD calendar days,
-// stored as the UTC midnight of the typed day) and comment. msg is a
+// stored as the UTC midnight of the typed day), comment and review. msg is a
 // user-facing message, non-empty on error.
 func (s *server) parseEntryForm(kind plugin.KindDef, keys []string, r *http.Request) (entryValues, library.Entry, string) {
 	v := readEntryValues(kind, r)
-	e := library.Entry{Status: library.Status(v.Status), Notes: v.Comment, Progress: map[string]float64{}}
+	e := library.Entry{Status: library.Status(v.Status), Notes: v.Comment, Review: v.Review, Progress: map[string]float64{}}
 	if !slices.Contains(library.Statuses(), e.Status) {
 		return v, e, "Please choose a status."
 	}
@@ -528,7 +529,7 @@ func (s *server) getAdd(w http.ResponseWriter, r *http.Request, pluginID string)
 // totals, then save.
 func (s *server) postAdd(w http.ResponseWriter, r *http.Request, pluginID string) {
 	m, ref, ok := s.addRef(w, r, pluginID)
-	if !ok || !parseForm(w, r) {
+	if !ok || !parseTextForm(w, r) {
 		return
 	}
 	ctx := r.Context()

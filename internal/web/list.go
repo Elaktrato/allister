@@ -57,6 +57,9 @@ type rowView struct {
 	UnmatchedHint      string
 	Return             string
 	IncrementURL       string
+	// NoteURL and NoteLabel: the "Note on <Label> <n>" link of a +1 answer
+	// (the unit just logged); "" everywhere else.
+	NoteURL, NoteLabel string
 	EditURL, RemoveURL string
 	RemoveConfirm      string
 	// the part badge "N · <series>" on the kind tabs (Series "" for an entry in no series)

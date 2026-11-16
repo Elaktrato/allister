@@ -24,6 +24,7 @@
         <button type="submit" class="rounded bg-slate-800 px-2 py-0.5 text-sm hover:bg-slate-700" aria-label="{{$.IncrementLabel}}">+1</button>
       </form>
       {{end}}
+      {{with $.NoteURL}}<a href="{{.}}" hx-get="{{.}}" hx-target="#dialog-slot" hx-swap="innerHTML" class="text-xs text-indigo-300 hover:underline">{{$.NoteLabel}}</a>{{end}}
     </span>
   </td>
   {{- else if eq .Core "rating"}}
