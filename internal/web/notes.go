@@ -127,7 +127,7 @@ func (s *server) postUnitNote(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	d := noteDialog{Body: strings.TrimSpace(r.PostFormValue("body"))}
+	d := noteDialog{Body: lfBreaks(strings.TrimSpace(r.PostFormValue("body")))}
 	ret := t.runReturn(r.PostFormValue("return"))
 	err := s.deps.Library.SetUnitNote(r.Context(), t.run.ID, t.def.Key, t.unit, d.Body)
 	switch {

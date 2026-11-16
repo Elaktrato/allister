@@ -186,7 +186,7 @@ func (s *server) postRunEdit(w http.ResponseWriter, r *http.Request) {
 	}
 	get := func(k string) string { return strings.TrimSpace(r.PostFormValue(k)) }
 	status := get("status")
-	d := runDialog{Rating: get("rating"), StartedOn: get("started_on"), FinishedOn: get("finished_on"), Review: get("review")}
+	d := runDialog{Rating: get("rating"), StartedOn: get("started_on"), FinishedOn: get("finished_on"), Review: lfBreaks(get("review"))}
 	ret := t.runReturn(r.PostFormValue("return"))
 	u, msg := parseRunForm(status, d)
 	if msg == "" {

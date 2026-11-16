@@ -96,13 +96,18 @@ func requiredFor(fd plugin.FieldDef, it *library.Item) bool {
 	return fd.Required && (it == nil || hasValue(it.Fields[fd.Key]))
 }
 
-// cmpText is a text as compared with its rendering: CRLF and lone CR become
-// LF on BOTH sides, because the HTML parser turns them into LF inside a
-// textarea (a stored "A\r\nB" comes back as "A\nB"). It is used for the
-// comparison only; kept and changed values are never rewritten by it.
-func cmpText(s string) string {
+// lfBreaks turns CRLF and lone CR into LF. Browsers submit textarea line
+// breaks as CRLF; the notes, review and unit-note handlers store them as LF
+// so a break counts once against the rune limits.
+func lfBreaks(s string) string {
 	return strings.ReplaceAll(strings.ReplaceAll(s, "\r\n", "\n"), "\r", "\n")
 }
+
+// cmpText is a text as compared with its rendering: CRLF and lone CR become
+// LF on BOTH sides (lfBreaks), because the HTML parser turns them into LF
+// inside a textarea (a stored "A\r\nB" comes back as "A\nB"). It is used
+// for the comparison only; kept and changed values are never rewritten by it.
+func cmpText(s string) string { return lfBreaks(s) }
 
 // sameRendered reports whether a posted text equals the rendering of a
 // stored value: line breaks compared normalised (cmpText), surrounding
