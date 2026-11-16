@@ -53,9 +53,12 @@ type entryDialog struct {
 }
 
 // runQuestion is the confirm state of the entry dialog: the question and the
-// label of the button that starts a new run (run_choice=new).
+// label of the button that starts a new run (run_choice=new). OnlyNew drops
+// the "correct" answer: the shown run is an earlier run behind a dropped
+// repeat, which only the latest run may leave completed.
 type runQuestion struct {
 	Completed, Action string
+	OnlyNew           bool
 }
 
 // runChoiceField is the entry dialog's answer to its question: "new" starts
@@ -392,6 +395,20 @@ func (s *server) postEdit(w http.ResponseWriter, r *http.Request) {
 	choice := r.PostFormValue(runChoiceField)
 	movesBack := t.row.Entry.Status == library.Completed && entry.Status != library.Completed && entry.Status != library.Dropped
 	startNew := movesBack && choice == "new"
+	pastRun := false // the shown run is not the latest run
+	if movesBack {
+		runs, err := s.deps.Library.Runs(ctx, t.row.Item.ID)
+		if err != nil {
+			s.internalError(w, r, err)
+			return
+		}
+		pastRun = len(runs) > 0 && runs[0].Number != t.row.Entry.RunNumber
+	}
+	if msg == "" && movesBack && pastRun && choice == "correct" {
+		// a forged answer the question never offered: refused before
+		// anything (tags included) is written
+		msg = "This is an earlier run behind a dropped repeat: it can only be completed or dropped. Start it again instead."
+	}
 	var today time.Time // the new run's start, in the configured time zone
 	if startNew {
 		today = s.now().In(s.location(ctx))
@@ -410,7 +427,7 @@ func (s *server) postEdit(w http.ResponseWriter, r *http.Request) {
 	if msg == "" && movesBack && !startNew && choice != "correct" {
 		// the question; nothing is written
 		d := t.dialog(v, keys, ret, stored)
-		d.Ask = &runQuestion{Completed: statusLabel(t.kind, library.Completed), Action: t.kind.RepeatAction()}
+		d.Ask = &runQuestion{Completed: statusLabel(t.kind, library.Completed), Action: t.kind.RepeatAction(), OnlyNew: pastRun}
 		s.editResponse(w, r, t, d, http.StatusOK)
 		return
 	}
