@@ -71,7 +71,9 @@ it:
 
 ## Constraints
 
-- One new migration, **00020** (dismissed duplicate pairs). No other schema
+- One new migration, **00020**: dismissed duplicate pairs, source aliases of
+  merged items, and the `bulk` event origin (the `entry_events` CHECK
+  constraint is rebuilt; see Bulk edit). No other schema
   change is expected; if the builder needs one, it goes in 00020 too.
 - Every write goes through the library and its validation (text hygiene,
   field bounds, the runs rules: older runs only completed or dropped, the
@@ -101,7 +103,11 @@ it:
   withCredits bool) ([]Change, error)`: one `Change` per differing part, with
   a stable key (`field.<key>`, `titles`, `genres`, `tags`, `cover`,
   `relations`, `credits`), a label (the field's label from the manifest), the
-  stored and the incoming value for display, and `StoredEmpty`. Compared
+  stored and the incoming value for display, and `StoredEmpty`. **A missing
+  or empty incoming value is never a difference** (Claude's call): a source
+  that leaves a field out or returns an empty list (an optional Magazine,
+  IGDB estimates, a failed People call) never offers to clear stored data;
+  the cost is that a source removing a value does not come through. Compared
   after the same normalisation the library applies on save (so a value that
   would be stored identically is not a difference). Non-editable fields are
   included (a source is allowed to change them); unknown keys from a source
@@ -145,10 +151,19 @@ it:
 - Actions, each one transaction through the same library calls the single
   dialogs use: set status (as a correction of the display run: no question,
   no new run; refused rows, e.g. a past display run behind a dropped
-  repeat, are skipped and counted), add to a custom list, add or remove own
-  tags, add to a series (series rules apply: same plugin and kind, an entry
-  in another series is skipped and counted), remove from the library
+  repeat, are skipped and counted; **owner decision**: setting Completed also
+  sets the finish date to today (configured time zone) where it is empty and
+  moves progress to the total where the total is known; Active sets the
+  start date to today where empty), add to a custom list, add or remove own
+  tags, add to an existing series (series rules apply: same plugin and kind,
+  an entry in another series is skipped and counted; new parts are appended
+  in the list's current sort order; creating a series stays a single-entry
+  action — Claude's call), remove from the library
   (confirmation names the count).
+- **Bulk changes are logged with a new event origin `bulk`** (owner
+  decision), which the activity heatmap does not count, so one bulk action
+  does not put a spike on today; statistics still count the entries by their
+  finish dates.
 - After applying: the list reloads with a notice ("Changed 118, skipped 2:
   …").
 - Routes: `POST /{plugin}/bulk` with `action`, `ids` or the filter, and a
@@ -157,10 +172,12 @@ it:
 
 ## Duplicate finder
 
-- `GET /{plugin}/duplicates`: pairs of items of the same plugin and kind
-  where an external id type/value is shared, or the normalised display
-  title (case and Unicode folded, punctuation and whitespace collapsed) and
-  the year field (where the kind has one) are equal. Each pair shows both
+- `GET /{plugin}/duplicates`: pairs of items of the same plugin and kind,
+  at least one of them in the library (Claude's call), where an external id
+  type/value is shared, or the normalised display title (case and Unicode
+  folded, punctuation and whitespace collapsed) is equal and, for kinds with
+  a year field, both have the same year (an item without a year never
+  matches by title — Claude's call, to keep false positives down). Each pair shows both
   items (cover, title, source, status) and the reason ("same ISBN",
   "same title and year").
 - "Not a duplicate" stores the pair (migration 00020:
@@ -176,17 +193,28 @@ it:
   relations and credits).
 - Applying, in one transaction: the ticked item changes on the survivor;
   then the other item's entry data moves to the survivor:
-  - **Runs** of both are combined in date order (started date, then
-    created) and renumbered; if more than one would be planned/active/paused,
+  - **Runs** of both are combined in date order (the started date, or the
+    run's creation date when it has none) and renumbered; if more than one would be planned/active/paused,
     every one but the latest becomes dropped (older runs may only be
-    completed or dropped). Unit notes and events move with their runs;
+    completed or dropped). Moved progress values keep their keys (a key the
+    survivor does not track is kept as an inactive value) and are bounded
+    only by the absolute maximum, never by the survivor's total, as a
+    restore does (Claude's call: a merge never fails half-way on a total).
+    Unit notes and events move with their runs (events keep their origin);
     the other item's orphan events move too. The display run is refreshed.
   - **Notes**: both kept, the other's appended after a divider line.
   - **Own tags** and **custom list** memberships: union (lists keep the
     survivor's place; the other's place is used when only it was a member).
   - **Series**: the survivor keeps its own; when only the other item is a
     part, the survivor takes its place.
-  - The other item's **external ids** that the survivor lacks are added.
+  - The other item's **external ids** that the survivor lacks are added,
+    and its own source and source id are kept as an **alias** of the
+    survivor (00020 `item_aliases(item_id, source, source_id)`; Claude's
+    call): adding, matching or importing that source item afterwards finds
+    the survivor instead of recreating the duplicate. When the survivor is a
+    manual item and the other is sourced, the survivor takes over the other's
+    source link (as matching does) and keeps its own manual identity as no
+    alias.
   - When only the other item is in the library, the survivor is added with
     that entry.
 - Then the other item is deleted. The result page is the survivor's
@@ -194,7 +222,7 @@ it:
 
 ## Backup and export
 
-- `dismissed_duplicates` goes into the backup (pairs by item identity, as
+- `dismissed_duplicates` and `item_aliases` go into the backup (pairs by item identity, as
   series and lists do) and restores by merge; no change to the export.
 
 ## What is left to the builder
