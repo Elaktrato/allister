@@ -69,18 +69,19 @@ func (l *Library) ItemChanges(ctx context.Context, itemID int64, in plugin.ItemD
 // number of parts written and bumps the item's updated_at when that is above
 // zero. Every selected value is validated before the first write; an unknown
 // key or an incoming value that cannot be stored is ErrInvalid and nothing is
-// written. Taking the cover stores the incoming URL and marks the item's sync
-// pending, so the cover download fetches it (as after an add). ErrNoEntry for
-// an unknown item.
-func (l *Library) ApplyChanges(ctx context.Context, itemID int64, in plugin.ItemData, credits []plugin.Credit, withCredits bool, keys []string) (int, error) {
+// written. It returns the keys written, in Change order. Taking the cover
+// stores the incoming value and never touches the sync state: a caller that
+// wants a remote cover downloaded enqueues a cover-only job when "cover" is
+// among the written keys. ErrNoEntry for an unknown item.
+func (l *Library) ApplyChanges(ctx context.Context, itemID int64, in plugin.ItemData, credits []plugin.Credit, withCredits bool, keys []string) ([]string, error) {
 	tx, err := l.db.BeginTx(ctx, nil)
 	if err != nil {
-		return 0, fmt.Errorf("apply changes: %w", err)
+		return nil, fmt.Errorf("apply changes: %w", err)
 	}
 	defer tx.Rollback()
 	def, parts, err := l.changeParts(ctx, tx, itemID, in, credits, withCredits)
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
 	known := map[string]bool{"titles": true, "genres": true, "tags": true, "cover": true, "relations": true, "credits": true}
 	for _, fd := range def.Fields {
@@ -89,7 +90,7 @@ func (l *Library) ApplyChanges(ctx context.Context, itemID int64, in plugin.Item
 	selected := map[string]bool{}
 	for _, k := range keys {
 		if !known[k] {
-			return 0, invalid("unknown change %q", k)
+			return nil, invalid("unknown change %q", k)
 		}
 		selected[k] = true
 	}
@@ -99,7 +100,7 @@ func (l *Library) ApplyChanges(ctx context.Context, itemID int64, in plugin.Item
 			continue
 		}
 		if p.err != nil {
-			return 0, p.err
+			return nil, p.err
 		}
 		if p.differs {
 			todo = append(todo, p)
@@ -107,18 +108,22 @@ func (l *Library) ApplyChanges(ctx context.Context, itemID int64, in plugin.Item
 	}
 	for _, p := range todo {
 		if err := p.write(ctx, tx); err != nil {
-			return 0, err
+			return nil, err
 		}
 	}
 	if len(todo) > 0 {
 		if _, err := tx.ExecContext(ctx, `UPDATE items SET updated_at = `+nowSQL+` WHERE id = ?`, itemID); err != nil {
-			return 0, fmt.Errorf("apply changes: %w", err)
+			return nil, fmt.Errorf("apply changes: %w", err)
 		}
 	}
 	if err := tx.Commit(); err != nil {
-		return 0, fmt.Errorf("apply changes: %w", err)
+		return nil, fmt.Errorf("apply changes: %w", err)
 	}
-	return len(todo), nil
+	applied := make([]string, len(todo))
+	for i, p := range todo {
+		applied[i] = p.change.Key
+	}
+	return applied, nil
 }
 
 // changeParts loads the item through q and builds its comparable parts in
@@ -151,7 +156,11 @@ func (l *Library) changeParts(ctx context.Context, q queryer, itemID int64, in p
 	if p, ok := tagsPart(def, it, in.Tags); ok {
 		parts = append(parts, p)
 	}
-	if p, ok := coverPart(it, in.CoverURL); ok {
+	var coverSource string
+	if err := q.QueryRowContext(ctx, `SELECT cover_source FROM items WHERE id = ?`, itemID).Scan(&coverSource); err != nil {
+		return plugin.KindDef{}, nil, fmt.Errorf("item changes: %w", err)
+	}
+	if p, ok := coverPart(it, coverSource, in.CoverURL); ok {
 		parts = append(parts, p)
 	}
 	if p, ok := relationsPart(it, in.Relations); ok {
@@ -412,7 +421,26 @@ func isRemoteRef(s string) bool {
 	return strings.HasPrefix(l, "http://") || strings.HasPrefix(l, "https://")
 }
 
-func coverPart(it *Item, in string) (changePart, bool) {
+// coverDiffers is the cover rule: a stored URL differs from another incoming
+// value; a local file differs only from a URL other than the one it was
+// downloaded from (origin), and never when its origin is unknown (a cover
+// downloaded before origins were recorded, or set by hand); an empty stored
+// cover differs from any incoming one.
+func coverDiffers(stored, origin, in string) bool {
+	switch {
+	case in == stored:
+		return false
+	case stored == "":
+		return true
+	case isRemoteRef(stored):
+		return in != stored
+	case origin != "":
+		return in != origin
+	}
+	return false
+}
+
+func coverPart(it *Item, origin, in string) (changePart, bool) {
 	if in == "" {
 		return changePart{}, false
 	}
@@ -422,9 +450,9 @@ func coverPart(it *Item, in string) (changePart, bool) {
 	id := it.ID
 	return changePart{
 		change:  Change{Key: "cover", Label: "Cover", Stored: coverText(it.CoverPath), Incoming: coverText(in), StoredEmpty: it.CoverPath == ""},
-		differs: in != it.CoverPath,
+		differs: coverDiffers(it.CoverPath, origin, in),
 		write: func(ctx context.Context, tx *sql.Tx) error {
-			if _, err := tx.ExecContext(ctx, `UPDATE items SET cover_path = ?, sync_state = 'pending' WHERE id = ?`, in, id); err != nil {
+			if _, err := tx.ExecContext(ctx, `UPDATE items SET cover_path = ?, cover_source = '' WHERE id = ?`, in, id); err != nil {
 				return fmt.Errorf("apply changes: %w", err)
 			}
 			return nil

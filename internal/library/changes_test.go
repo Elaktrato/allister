@@ -149,7 +149,7 @@ func TestItemChangesListsAndOrder(t *testing.T) {
 		t.Fatalf("cover = %+v", *c)
 	}
 	// a local cover file shows as such
-	if _, err := e.db.Exec(`UPDATE items SET cover_path = 'abc.jpg' WHERE id = ?`, id); err != nil {
+	if _, err := e.db.Exec(`UPDATE items SET cover_path = 'abc.jpg', cover_source = 'https://img.example/c1.jpg' WHERE id = ?`, id); err != nil {
 		t.Fatal(err)
 	}
 	cs, _ = e.lib.ItemChanges(ctx, id, in, nil, false)
@@ -182,9 +182,9 @@ func TestItemChangesTagsAndCredits(t *testing.T) {
 	if cr.StoredEmpty || !slices.Equal(cr.Added, []string{"director: Ben"}) || len(cr.Removed) != 0 {
 		t.Fatalf("credits = %+v", *cr)
 	}
-	n, err := e.lib.ApplyChanges(ctx, id, in, credits, true, []string{"tags", "credits"})
-	if err != nil || n != 2 {
-		t.Fatalf("apply = %d, %v", n, err)
+	applied, err := e.lib.ApplyChanges(ctx, id, in, credits, true, []string{"credits", "tags"})
+	if err != nil || !slices.Equal(applied, []string{"tags", "credits"}) {
+		t.Fatalf("apply = %v, %v", applied, err)
 	}
 	it, _ := e.lib.Item(ctx, id)
 	if len(it.Tags) != 1 || it.Tags[0].Name != "Time Travel" || it.Tags[0].Rank == nil || *it.Tags[0].Rank != 80 {
@@ -229,9 +229,9 @@ func TestApplyChangesWritesOnlySelected(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	n, err := e.lib.ApplyChanges(ctx, id, in, nil, false, []string{"field.pages", "genres"})
-	if err != nil || n != 2 {
-		t.Fatalf("apply = %d, %v", n, err)
+	applied, err := e.lib.ApplyChanges(ctx, id, in, nil, false, []string{"genres", "field.pages"})
+	if err != nil || !slices.Equal(applied, []string{"field.pages", "genres"}) {
+		t.Fatalf("apply = %v, %v", applied, err)
 	}
 	after, _ := e.lib.Item(ctx, id)
 	want := *before
@@ -262,9 +262,9 @@ func TestApplyChangesSkipsKeysNoLongerDiffering(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	n, err := e.lib.ApplyChanges(ctx, id, in, nil, false, []string{"field.pages", "field.isbn"})
-	if err != nil || n != 1 {
-		t.Fatalf("apply = %d, %v", n, err)
+	applied, err := e.lib.ApplyChanges(ctx, id, in, nil, false, []string{"field.pages", "field.isbn"})
+	if err != nil || !slices.Equal(applied, []string{"field.isbn"}) {
+		t.Fatalf("apply = %v, %v", applied, err)
 	}
 	it, _ := e.lib.Item(ctx, id)
 	if it.Fields["isbn"].Text != "999" || *it.Fields["pages"].Num != 500 {
@@ -303,19 +303,142 @@ func TestApplyChangesInvalidWritesNothing(t *testing.T) {
 	}
 }
 
-func TestApplyChangesCoverSetsSyncPending(t *testing.T) {
-	e := newEnv(t)
-	id := changesBook(t, e)
-	if _, err := e.db.Exec(`UPDATE items SET cover_path = 'abc.jpg', sync_state = 'done' WHERE id = ?`, id); err != nil {
+// coverSource reads the recorded origin of the item's local cover.
+func coverSource(t *testing.T, e *env, id int64) string {
+	t.Helper()
+	var s string
+	if err := e.db.QueryRow(`SELECT cover_source FROM items WHERE id = ?`, id).Scan(&s); err != nil {
 		t.Fatal(err)
 	}
-	in := plugin.ItemData{ItemSummary: plugin.ItemSummary{CoverURL: "https://img.example/new.jpg"}}
-	n, err := e.lib.ApplyChanges(ctx, id, in, nil, false, []string{"cover"})
-	if err != nil || n != 1 {
-		t.Fatalf("apply = %d, %v", n, err)
+	return s
+}
+
+func TestApplyChangesCoverKeepsSyncStateAndCredits(t *testing.T) {
+	e := newEnv(t)
+	d := plugin.ItemData{ItemSummary: plugin.ItemSummary{Source: "tvdata", ID: "1", Kind: "show", Titles: []plugin.Title{{Lang: "en", Text: "S1"}},
+		CoverURL: "https://img.example/old.jpg"}}
+	id := mustSave(t, e.lib, "tv", "show", d, WithSyncState("done"))
+	if err := e.lib.SaveCredits(ctx, id, []plugin.Credit{{Role: "actor", Person: plugin.PersonRef{ID: "p1", Name: "Anna"}}}); err != nil {
+		t.Fatal(err)
+	}
+	credsBefore, _ := e.lib.Credits(ctx, id)
+	if ok, err := e.lib.SetCoverPathIf(ctx, id, "https://img.example/old.jpg", "old.jpg"); err != nil || !ok {
+		t.Fatalf("set cover = %v, %v", ok, err)
+	}
+	in := plugin.ItemData{ItemSummary: plugin.ItemSummary{CoverURL: "https://img.example/new.jpg", Titles: []plugin.Title{{Lang: "en", Text: "S2"}}}}
+	other := []plugin.Credit{{Role: "actor", Person: plugin.PersonRef{ID: "p2", Name: "Ben"}}}
+	applied, err := e.lib.ApplyChanges(ctx, id, in, other, true, []string{"cover", "titles"})
+	if err != nil || !slices.Equal(applied, []string{"titles", "cover"}) {
+		t.Fatalf("apply = %v, %v", applied, err)
 	}
 	it, _ := e.lib.Item(ctx, id)
-	if it.CoverPath != "https://img.example/new.jpg" || it.SyncState != "pending" {
+	if it.CoverPath != "https://img.example/new.jpg" || it.SyncState != "done" {
 		t.Fatalf("cover = %q, sync = %q", it.CoverPath, it.SyncState)
+	}
+	if src := coverSource(t, e, id); src != "" {
+		t.Fatalf("cover source = %q, want cleared for a URL", src)
+	}
+	if credsAfter, _ := e.lib.Credits(ctx, id); !reflect.DeepEqual(credsBefore, credsAfter) {
+		t.Fatalf("credits changed: %+v", credsAfter)
+	}
+}
+
+func TestItemChangesCoverRule(t *testing.T) {
+	e := newEnv(t)
+	id := changesBook(t, e) // cover https://img.example/c1.jpg
+	cover := func(in string) *Change {
+		t.Helper()
+		cs, err := e.lib.ItemChanges(ctx, id, plugin.ItemData{ItemSummary: plugin.ItemSummary{CoverURL: in}}, nil, false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return changeByKey(cs, "cover")
+	}
+	set := func(path, source string) {
+		t.Helper()
+		if _, err := e.db.Exec(`UPDATE items SET cover_path = ?, cover_source = ? WHERE id = ?`, path, source, id); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// stored is a URL: differs only when the incoming URL differs
+	if c := cover("https://img.example/c1.jpg"); c != nil {
+		t.Fatalf("same URL = %+v", *c)
+	}
+	if c := cover("https://img.example/c9.jpg"); c == nil || c.StoredEmpty {
+		t.Fatalf("other URL = %+v", c)
+	}
+	// stored is a local file with a recorded origin: compared with the origin
+	set("c1.jpg", "https://img.example/c1.jpg")
+	if c := cover("https://img.example/c1.jpg"); c != nil {
+		t.Fatalf("same origin = %+v", *c)
+	}
+	if c := cover("https://img.example/c9.jpg"); c == nil || c.Stored != "local cover" || c.StoredEmpty {
+		t.Fatalf("other origin = %+v", c)
+	}
+	// a local file without a recorded origin (downloaded before 00020): never
+	set("c1.jpg", "")
+	if c := cover("https://img.example/c9.jpg"); c != nil {
+		t.Fatalf("unknown origin = %+v", *c)
+	}
+	// stored empty: any incoming cover is a difference
+	set("", "")
+	if c := cover("https://img.example/c9.jpg"); c == nil || !c.StoredEmpty || c.Stored != "" {
+		t.Fatalf("empty = %+v", c)
+	}
+}
+
+func TestCoverSourceFollowsTheCover(t *testing.T) {
+	e := newEnv(t)
+	id := changesBook(t, e)
+	// a download of the remote cover records where it came from
+	if ok, err := e.lib.SetCoverPathIf(ctx, id, "https://img.example/c1.jpg", "c1.jpg"); err != nil || !ok {
+		t.Fatalf("set = %v, %v", ok, err)
+	}
+	if src := coverSource(t, e, id); src != "https://img.example/c1.jpg" {
+		t.Fatalf("after download = %q", src)
+	}
+	// a cover set by hand forgets it
+	if err := e.lib.UpdateDetails(ctx, id, DetailsUpdate{Titles: bookData("c1").Titles, Fields: map[string]plugin.FieldValue{"author": {Text: "Frank Herbert"}},
+		CoverPath: sp("upload.jpg")}); err != nil {
+		t.Fatal(err)
+	}
+	if src := coverSource(t, e, id); src != "" {
+		t.Fatalf("after edit = %q", src)
+	}
+	if ok, err := e.lib.SetCoverPathIf(ctx, id, "upload.jpg", "c2.jpg"); err != nil || !ok || coverSource(t, e, id) != "" {
+		t.Fatalf("local to local = %v, %v, %q", ok, err, coverSource(t, e, id))
+	}
+	if _, err := e.db.Exec(`UPDATE items SET cover_source = 'https://x.example/a.jpg' WHERE id = ?`, id); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.lib.SetCoverPath(ctx, id, "https://img.example/c3.jpg"); err != nil || coverSource(t, e, id) != "" {
+		t.Fatalf("set cover path = %v, %q", err, coverSource(t, e, id))
+	}
+	// an edit that keeps the cover (nil) keeps the origin
+	if _, err := e.lib.SetCoverPathIf(ctx, id, "https://img.example/c3.jpg", "c3.jpg"); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.lib.UpdateDetails(ctx, id, DetailsUpdate{Titles: bookData("c1").Titles, Fields: map[string]plugin.FieldValue{"author": {Text: "Frank Herbert"}}}); err != nil {
+		t.Fatal(err)
+	}
+	if src := coverSource(t, e, id); src != "https://img.example/c3.jpg" {
+		t.Fatalf("after edit without cover = %q", src)
+	}
+}
+
+func TestApplyChangesWithoutCreditsKeepsCredits(t *testing.T) {
+	e := newEnv(t)
+	id := tvItem(t, e.lib, "1")
+	if err := e.lib.SaveCredits(ctx, id, []plugin.Credit{{Role: "actor", Person: plugin.PersonRef{ID: "p1", Name: "Anna"}}}); err != nil {
+		t.Fatal(err)
+	}
+	before, _ := e.lib.Credits(ctx, id)
+	in := plugin.ItemData{ItemSummary: plugin.ItemSummary{Titles: []plugin.Title{{Lang: "en", Text: "New"}}}}
+	other := []plugin.Credit{{Role: "actor", Person: plugin.PersonRef{ID: "p2", Name: "Ben"}}}
+	if applied, err := e.lib.ApplyChanges(ctx, id, in, other, true, []string{"titles"}); err != nil || len(applied) != 1 {
+		t.Fatalf("apply = %v, %v", applied, err)
+	}
+	if after, _ := e.lib.Credits(ctx, id); !reflect.DeepEqual(before, after) {
+		t.Fatalf("credits changed: %+v", after)
 	}
 }

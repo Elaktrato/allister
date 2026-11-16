@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -530,5 +531,70 @@ func TestSyncItemPersonImageCompareAndSet(t *testing.T) {
 	}
 	if f := coverDirFiles(t, e.deps.CoversDir); len(f) != 0 {
 		t.Fatalf("downloaded file left behind: %v", f)
+	}
+}
+
+func TestSyncItemCoverOnlyLeavesCreditsAndSchedule(t *testing.T) {
+	for _, peopleErr := range []error{nil, plugin.ErrNotFound} {
+		e := newSyncEnv(t)
+		ctx := context.Background()
+		cover := e.srv.URL + "/ok/cover"
+		id := e.save(t, "tvdata", cover)
+		if err := e.lib.SaveCredits(ctx, id, []plugin.Credit{{Role: "actor", Person: plugin.PersonRef{ID: "p1", Name: "P1"}}}); err != nil {
+			t.Fatal(err)
+		}
+		before, _ := e.lib.Credits(ctx, id)
+		e.src.Credits = []plugin.Credit{{Role: "director", Person: person("p9", "")}}
+		if peopleErr != nil {
+			e.src.Errs = map[string]error{plugintest.OpPeople: peopleErr}
+		}
+		b, _ := json.Marshal(SyncPayload{ItemID: id, PluginID: "tv", CoverOnly: true})
+		if err := SyncItem(e.deps)(ctx, b); err != nil {
+			t.Fatal(err)
+		}
+		s := e.saved(t, id)
+		if !isLocal(s.CoverPath) || s.SyncState != "pending" {
+			t.Fatalf("%v: cover = %q, sync = %q", peopleErr, s.CoverPath, s.SyncState)
+		}
+		var src string
+		if err := e.d.QueryRow(`SELECT cover_source FROM items WHERE id = ?`, id).Scan(&src); err != nil || src != cover {
+			t.Fatalf("cover source = %q, %v", src, err)
+		}
+		if after, _ := e.lib.Credits(ctx, id); !reflect.DeepEqual(before, after) {
+			t.Fatalf("%v: credits changed: %+v", peopleErr, after)
+		}
+		if n := e.src.Calls(plugintest.OpPeople) + e.src.Calls(plugintest.OpSchedule); n != 0 {
+			t.Fatalf("%v: source calls = %d", peopleErr, n)
+		}
+	}
+}
+
+func TestSyncItemCoverOnlyFailureKeepsStateAndRetries(t *testing.T) {
+	e := newSyncEnv(t)
+	id := e.save(t, "tvdata", e.srv.URL+"/missing")
+	b, _ := json.Marshal(SyncPayload{ItemID: id, PluginID: "tv", CoverOnly: true})
+	if err := SyncItem(e.deps)(context.Background(), b); !errors.Is(err, ErrRetryLater) {
+		t.Fatalf("err = %v", err)
+	}
+	if s := e.saved(t, id); s.SyncState != "pending" || s.CoverPath != e.srv.URL+"/missing" {
+		t.Fatalf("%+v", s)
+	}
+	// a local cover has nothing to download
+	if _, err := e.d.Exec(`UPDATE items SET cover_path = 'x.jpg' WHERE id = ?`, id); err != nil {
+		t.Fatal(err)
+	}
+	if err := SyncItem(e.deps)(context.Background(), b); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestCoverJobFor(t *testing.T) {
+	kind, p := CoverJobFor("tv")(42)
+	if kind != KindSyncItem || p != (SyncPayload{ItemID: 42, PluginID: "tv", CoverOnly: true}) {
+		t.Fatalf("got %q %+v", kind, p)
+	}
+	b, _ := json.Marshal(p)
+	if string(b) != `{"item_id":42,"plugin_id":"tv","cover_only":true}` {
+		t.Fatalf("payload json %s", b)
 	}
 }

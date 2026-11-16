@@ -1,6 +1,11 @@
 -- +goose Up
--- Managing entries: merged-away source identities, dismissed duplicate pairs
--- and the bulk event origin.
+-- Managing entries: merged-away source identities, dismissed duplicate pairs,
+-- the bulk event origin and the origin of a downloaded cover.
+
+-- The remote URL a local cover file was downloaded from ('' when unknown or
+-- when the cover is a URL or was set by hand), so a source's cover URL can be
+-- compared with a downloaded cover.
+ALTER TABLE items ADD COLUMN cover_source TEXT NOT NULL DEFAULT '';
 
 -- A merge keeps the identity of the item that was merged away, so a lookup by
 -- that source identity finds the survivor.
@@ -49,7 +54,9 @@ CREATE INDEX entry_events_time ON entry_events(origin, occurred_at);
 CREATE INDEX entry_events_run ON entry_events(run_id);
 
 -- +goose Down
--- Bulk events are deleted; the aliases and dismissed pairs are lost.
+-- Bulk events are deleted; the aliases, dismissed pairs and cover origins
+-- are lost.
+ALTER TABLE items DROP COLUMN cover_source;
 DROP TABLE dismissed_duplicates;
 DROP TABLE item_aliases;
 

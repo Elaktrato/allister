@@ -84,6 +84,12 @@ func TestManagingMigration(t *testing.T) {
 	if _, err := d.Exec(`INSERT INTO item_aliases(item_id, plugin_id, kind, source, source_id) VALUES(99, 'p', 'k', 's', 'y')`); err == nil {
 		t.Fatal("alias of unknown item accepted")
 	}
+	// items.cover_source: empty for existing items, holds a cover's origin
+	if n := rowCount(t, d, `SELECT COUNT(*) FROM items WHERE cover_source = ''`); n != 2 {
+		t.Fatalf("cover_source default: %d rows empty, want 2", n)
+	}
+	mustExec(t, d, `UPDATE items SET cover_source = 'https://img.example/a.jpg' WHERE id = 2`)
+
 	mustExec(t, d, `DELETE FROM items WHERE id = 1`)
 	if n := rowCount(t, d, `SELECT COUNT(*) FROM item_aliases`) + rowCount(t, d, `SELECT COUNT(*) FROM dismissed_duplicates`); n != 0 {
 		t.Fatalf("rows did not cascade: %d", n)
@@ -106,6 +112,12 @@ func TestManagingMigrationDown(t *testing.T) {
 		if n := rowCount(t, d, `SELECT COUNT(*) FROM sqlite_master WHERE name = ?`, tbl); n != 0 {
 			t.Fatalf("%s survived down", tbl)
 		}
+	}
+	if n := rowCount(t, d, `SELECT COUNT(*) FROM pragma_table_info('items') WHERE name = 'cover_source'`); n != 0 {
+		t.Fatal("items.cover_source survived down")
+	}
+	if n := rowCount(t, d, `SELECT COUNT(*) FROM items`); n != 2 {
+		t.Fatalf("items after down = %d, want 2", n)
 	}
 	if n := rowCount(t, d, `SELECT COUNT(*) FROM entry_events`); n != 3 {
 		t.Fatalf("events after down = %d, want 3 (bulk deleted)", n)

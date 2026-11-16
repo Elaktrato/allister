@@ -65,7 +65,7 @@ func (l *Library) ConvertToSource(ctx context.Context, itemID int64, d plugin.It
 		return fmt.Errorf("convert item: %w", err)
 	}
 
-	if _, err := tx.ExecContext(ctx, `UPDATE items SET source = ?, source_id = ?, cover_path = ?, external_url = ?,
+	if _, err := tx.ExecContext(ctx, `UPDATE items SET source = ?, source_id = ?, cover_path = ?, cover_source = '', external_url = ?,
 		sync_state = 'pending', updated_at = `+nowSQL+` WHERE id = ?`,
 		p.source, p.sourceID, d.CoverURL, d.ExternalURL, itemID); err != nil {
 		return fmt.Errorf("convert item: %w", err)
