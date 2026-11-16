@@ -890,9 +890,12 @@ func (s *server) fillStatsPage(ctx context.Context, v *statsPage, q statsQuery, 
 	if !v.AllMedia && len(rep.Kinds) == 1 {
 		total = rep.Kinds[0].Totals
 	}
-	v.Empty = total.Entries == 0
+	// time and units of earlier runs show even when no entry's display run is
+	// in the selection
+	hasContent := total.Entries > 0 || total.TimeSeconds > 0 || total.Units > 0
+	v.Empty = !hasContent
 	switch {
-	case total.Entries > 0:
+	case hasContent:
 		v.AnyEntries = true
 	case statsNarrows(q):
 		any, err := s.statsAnyEntries(ctx, scope)
@@ -910,7 +913,7 @@ func (s *server) fillStatsPage(ctx context.Context, v *statsPage, q statsQuery, 
 	}
 	// a time total of zero means one of two different things: every entry's
 	// value is unknown (a gap to fill) or every value is a known zero
-	noTime := v.HasTime && total.Entries > 0 && total.TimeEntries == 0
+	noTime := v.HasTime && total.Entries > 0 && total.TimeEntries == 0 && total.TimeSeconds == 0
 	v.NoTime = noTime && total.MissingTime == total.Entries
 	v.KnownZeroTime = noTime && total.MissingTime == 0
 	v.Cards = statsCards(total, v.HasTime, v.HasUnits)
