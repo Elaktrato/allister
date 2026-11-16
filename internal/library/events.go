@@ -19,18 +19,20 @@ const (
 	eventRating   = "rating"
 )
 
-// EventOrigin says who made an entry change: the user (manual), an import or
-// a backup restore. The activity heatmap counts only manual changes.
+// EventOrigin says who made an entry change: the user (manual), an import,
+// a backup restore or a bulk edit. The activity heatmap counts only manual
+// changes.
 type EventOrigin string
 
 const (
 	OriginManual  EventOrigin = "manual"
 	OriginImport  EventOrigin = "import"
 	OriginRestore EventOrigin = "restore"
+	OriginBulk    EventOrigin = "bulk"
 )
 
 func validOrigin(o EventOrigin) bool {
-	return o == OriginManual || o == OriginImport || o == OriginRestore
+	return o == OriginManual || o == OriginImport || o == OriginRestore || o == OriginBulk
 }
 
 // entryOptions carries the options of one entry write.
