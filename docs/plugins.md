@@ -142,6 +142,7 @@ type ProgressDef struct {
 	Key        string       // unique within the kind
 	Type       ProgressType
 	Label      string       // "Episode", "Page", "Position"
+	LabelPlural string      // optional plural: "Episodes"
 	TotalField string       // optional: a number field holding the total
 }
 type ProgressSpec struct {
@@ -155,6 +156,7 @@ type ProgressSpec struct {
 Rules enforced by `Validate`:
 
 - Each eligible key is unique, has a label and a known type. The same type may appear more than once under different keys (a TV kind: `count` Season, `count` Episode, `duration` Position).
+- `LabelPlural` is optional (single line, at most 40 characters; JSON `label_plural`). The run timeline uses it for ranges ("Episodes 5-7"); without it the core adds an "s" to `Label`.
 - `TotalField` must name a **number** field of the kind, and is not allowed on `percent`.
 - When anything is eligible, `Defaults` and at least one combination are required. Every key in them must be eligible and listed once, no combination may be empty, and `Defaults` must equal one of the combinations (as a set).
 - `PrimaryKey`, when set, must be an eligible `count` or `pages` track.
@@ -342,7 +344,7 @@ The core then does the rest, as a resumable job on the import page:
 type ExporterInfo struct{ ID, Name, Extension, MIME string } // all required
 ```
 
-`Export` receives every list entry of the plugin (`ExportEntry`: titles, external ids, the shown run's status, rating, every stored progress value and dates, the entry's notes, its `Runs` (`ExportRun`: number, status, rating, review, progress, dates), own tags (`UserTags`), the names of its custom lists (`Lists`) and its series) and writes the file. The core serves it at `/{plugin}/export/{exporter}` as `<plugin>-<exporter>-<date><extension>`, linked from the list page and the plugin's row in Settings > Plugins. The whole list is built in memory, which is fine for a few thousand entries.
+`Export` receives every list entry of the plugin (`ExportEntry`: titles, external ids, the shown run's status, rating, every stored progress value and dates, the entry's notes, its `Runs` (`ExportRun`: number, status, rating, review, progress, dates), own tags (`UserTags`), the names of its custom lists (`Lists`) and its series) and writes the file. The core serves it at `/{plugin}/export/{exporter}` as `<plugin>-<exporter>-<date><extension>`, linked from the list page and the plugin's row in Settings > Plugins. The whole list is built in memory, which is fine for a few thousand entries. **Contract change:** `ExportEntry`'s `comment` is now `notes`, and it gained `runs`, `user_tags` and `lists`; its top-level status, rating, progress and dates are those of the run the list shows. `ContractVersion` was not bumped, so an exporter written against the old shape must be updated by hand.
 
 An export is the plugin's own interchange format. The **universal backup** (Settings > Backup) is separate and owned by the core. It covers every item of every installed plugin, including disabled ones, so a plugin needs no code for backups.
 

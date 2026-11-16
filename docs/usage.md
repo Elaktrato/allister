@@ -93,6 +93,20 @@ Invalid stored values (for example after editing the database) fall back to the 
 
 The universal backup includes these settings and the uploaded fonts. A restore stores the fonts like uploads (same checks and limits) and applies the settings only when the installation has no appearance settings of its own; everything refused is listed in the restore summary.
 
+## Runs, notes, tags and lists
+
+**Runs.** Every entry is a series of runs: each viewing, reading or playthrough has its own status, rating, review, progress and dates. The item page's run history lists them newest first, with a link to each run's timeline. **Start again** (the plugin's own word: Rewatch, Reread, Replay) starts a new run: active, started today, your last rating carried over, progress and review empty. Moving a completed entry back to planned, active or paused in the Edit dialog asks "<Action> instead?": that starts a new run with the dialog's values, while "No, correct this one" fixes the current run in place. Only the latest run can be set back to planned, active or paused; an older run can only be completed or dropped, and can be edited or deleted from the run history (deleting asks first and renumbers the later runs). Lists, cards, filters, +1, the Edit dialog and statistics use the run the entry shows: the latest run, except that an abandoned (dropped) repeat leaves the entry showing its latest completed run, so a rewatch you gave up on does not turn a finished show into a dropped one. A paused repeat stays paused. Repeated entries carry a marker on an active repeat ("Rewatching") and "x2" once two runs are completed. Imports never start runs; they update the run the entry shows. Statistics count every run: time and units of earlier runs count in the period they were logged or finished in, while entry counts and score distribution count each entry once, by the run it shows.
+
+**Timeline.** Each run's history has a collapsed, read-only timeline (`/list/{id}/runs/{run}/timeline`, loaded when opened) of its logged changes: progress steps and jumps, status and rating changes, and unit notes at their unit. Times use your time zone; imported and restored changes are marked.
+
+**Notes and formatting.** An entry has notes, each run a review (10,000 characters each), and any unit of a run can carry a note (2,000 characters). They take simple formatting: `**bold**`, `*italic*`, lists (lines starting with `- ` or `1. `), `[text](https://...)` links (https only) and `||spoiler||`, which stays hidden until you click it. Anything else, including HTML, is shown as plain text.
+
+**Own tags.** Label entries of any plugin with your own tags in the Edit dialog. Filter every list with `ut=<tag>` (repeat for several; `ut_all=1` requires all, the default is any), show them as a table column, and rename, merge or delete them under Settings > Tags.
+
+**Custom lists.** Named collections across plugins at `/lists` and `/lists/{id}`, with `sort=position|title|added|status`. The sidebar links them under the plugins. Deleting a list keeps its entries.
+
+**Backups and exports.** Backups are format 2 and carry runs, notes, own tags and custom lists; older format 1 backups still restore (each entry becomes run 1), older Allister versions cannot read format 2. The JSON export is version 2 (`comment` became `notes`; entries gain `runs`, `user_tags` and `lists`).
+
 ## URLs
 
 | URL | Page |
@@ -137,6 +151,9 @@ The universal backup includes these settings and the uploaded fonts. A restore s
 | `/game/manual/new`, `/game/manual/{id}` | Create and open manual games; `/edit` edits details, `/match` matches a source |
 | `/game/export/json` | The games JSON export |
 | `POST /settings/plugins/{source}/key` | Save a source's API key (`key`, or `field.<name>` for each named field) or remove the stored values (`remove=1`) and redirect back (see [API keys](#api-keys)) |
+| `POST /list/{id}/runs` | Start again: a new run on the entry (see [Runs](#runs-notes-tags-and-lists)) |
+| `/list/{id}/runs/{run}/edit`, `POST /list/{id}/runs/{run}/delete` | Edit or delete a run from the run history; an older run offers only completed and dropped |
+| `/list/{id}/runs/{run}/timeline` | The read-only timeline of one run (an HTML fragment) |
 | `/list/{id}/edit` | The list entry's Edit dialog (status, rating, progress, dates, notes, the review of the run the entry shows, and own tags: one input per tag, suggesting your existing tags; a new name creates the tag, a cleared input removes it) |
 | `/list/{id}/runs/{run}/notes/{key}/{unit}` | The note on one unit (1-based) of a count or pages track of a run (at most 2,000 characters; saving it empty deletes it). Opened from the run's timeline and after a +1 ("Note on <unit>"). Notes, reviews and unit notes take `**bold**`, `*italic*`, `- ` and `1. ` lists, `[text](https://...)` links and `\|\|spoiler\|\|` spans |
 | `/people/{id}` | Person page |
