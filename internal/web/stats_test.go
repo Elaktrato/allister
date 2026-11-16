@@ -805,3 +805,45 @@ func TestStatsPageHeatmapFollowsMediaFilter(t *testing.T) {
 	mustContain(t, book, "2025-07-01: 1 activity event")
 	mustNotContain(t, book, "2025-06-15: 2 activity events")
 }
+
+// rewatchedAnime saves an anime completed on 2025-06-01 (one episode of 24
+// minutes) and starts it again; the new run is the display run.
+func (e *env) rewatchedAnime(t *testing.T) (itemID int64, run library.Run) {
+	t.Helper()
+	a := animeMedia("rw", "Rewatched")
+	a.Duration = ip(24)
+	id := e.addStatsAnime(t, a, listEntry{Status: library.Completed, Progress: 1, FinishedOn: day(2025, 6, 1)})
+	run, err := e.lib.StartRun(context.Background(), id, time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return id, run
+}
+
+// TestStatsPageShowsTimeOfPastRunsOnly: a view whose only contribution is the
+// time of an earlier run is not the empty state.
+func TestStatsPageShowsTimeOfPastRunsOnly(t *testing.T) {
+	e := newStatsEnv(t)
+	_, run := e.rewatchedAnime(t)
+	if err := e.lib.UpdateRun(context.Background(), run.ID, library.RunUpdate{Status: library.Completed, FinishedOn: day(2026, 3, 1)}); err != nil {
+		t.Fatal(err)
+	}
+	// 2025 holds only the first run: no entry finished then, but 24 minutes
+	b := e.get("/stats?media=anime/anime&from=2025-01-01&to=2025-12-31").Body.String()
+	mustNotContain(t, b, "No entries match these filters")
+	if got := statValue(t, b, "time"); got != "24m" {
+		t.Errorf("2025 time = %q, want 24m", got)
+	}
+	mustNotContain(t, b, "No time is recorded for these entries yet")
+
+	// status=completed with an active rewatch: the display run is excluded,
+	// the completed run counts
+	e2 := newStatsEnv(t)
+	e2.rewatchedAnime(t)
+	b = e2.get("/stats?media=anime/anime&status=completed").Body.String()
+	mustNotContain(t, b, "No entries match these filters")
+	if got := statValue(t, b, "time"); got != "24m" {
+		t.Errorf("completed time = %q, want 24m", got)
+	}
+	mustNotContain(t, b, "No time is recorded for these entries yet")
+}
