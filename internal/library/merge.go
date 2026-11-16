@@ -42,6 +42,8 @@ const notesDivider = "\n\n---\n\n"
 //   - Series: the survivor keeps its own; when only the other is a part, the
 //     survivor takes its place.
 //   - External ids of the types the survivor lacks are added.
+//   - The other item's dismissed duplicate pairs ("Not a duplicate") move
+//     to the survivor; a pair of the two items themselves is dropped.
 //   - The other item's identity becomes an alias of the survivor (so
 //     ItemBySource and the duplicate check find the survivor), and its own
 //     aliases move along, unless it is a manual item. A manual survivor of a
@@ -76,6 +78,15 @@ func (l *Library) MergeItems(ctx context.Context, keepID, otherID int64, keys []
 			keepID, other.PluginID, other.Kind, other.Source, other.SourceID); err != nil {
 			return fmt.Errorf("merge items: alias: %w", err)
 		}
+	}
+	// the other item's "Not a duplicate" pairs hold for the survivor (its
+	// own rows go with its deletion); a pair with the survivor itself goes
+	if _, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO dismissed_duplicates(item_a, item_b, dismissed_at)
+		SELECT min(?1, partner), max(?1, partner), dismissed_at FROM (
+			SELECT CASE WHEN item_a = ?2 THEN item_b ELSE item_a END AS partner, dismissed_at
+			FROM dismissed_duplicates WHERE item_a = ?2 OR item_b = ?2)
+		WHERE partner <> ?1`, keepID, otherID); err != nil {
+		return fmt.Errorf("merge items: dismissed duplicates: %w", err)
 	}
 	lists, err := mergeIDsTx(ctx, tx, `SELECT list_id FROM list_items WHERE item_id = ?`, otherID)
 	if err != nil {

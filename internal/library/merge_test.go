@@ -644,3 +644,38 @@ func TestMergeComparesLocalCoversByStoredValue(t *testing.T) {
 		t.Fatalf("cover = %q from %q, want the other's file with its origin", path, source)
 	}
 }
+
+func TestMergeKeepsTheOtherItemsDismissedPairs(t *testing.T) {
+	e := newEnv(t)
+	keep := mergeBook(t, e, "books", "k", "Dune", nil, true, "")
+	other := mergeBook(t, e, "books", "o", "Dune", nil, true, "")
+	x := mergeBook(t, e, "books", "x", "Dune", nil, true, "")
+	y := mergeBook(t, e, "books", "y", "Dune", nil, true, "")
+	for _, p := range [][2]int64{{other, x}, {y, other}, {keep, y}, {keep, other}} {
+		if err := e.lib.DismissDuplicate(bg, p[0], p[1]); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := e.lib.MergeItems(bg, keep, other, nil); err != nil {
+		t.Fatal(err)
+	}
+	pair := func(a, b int64) string { return fmt.Sprintf("%d-%d", min(a, b), max(a, b)) }
+	var got []string
+	rows, err := e.db.Query(`SELECT item_a, item_b FROM dismissed_duplicates ORDER BY item_a, item_b`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var a, b int64
+		if err := rows.Scan(&a, &b); err != nil {
+			t.Fatal(err)
+		}
+		got = append(got, pair(a, b))
+	}
+	want := []string{pair(keep, x), pair(keep, y)}
+	slices.Sort(want)
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("dismissed pairs = %v, want %v", got, want)
+	}
+}
