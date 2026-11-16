@@ -103,7 +103,7 @@ func (l *Library) scheduleQuery(ctx context.Context, extra string, args []any, l
 	rows, err := l.db.QueryContext(ctx, `SELECT a.item_id, i.plugin_id, i.kind, i.source, i.source_id, a.season, a.number, a.airs_at
 		FROM airings a
 		JOIN items i ON i.id = a.item_id
-		JOIN entries e ON e.item_id = a.item_id
+		JOIN `+viewEntryState+` e ON e.item_id = a.item_id
 		WHERE e.status = ?`+extra+`
 		ORDER BY a.airs_at, a.item_id, a.season, a.number LIMIT ?`, append(append([]any{string(Active)}, args...), limit)...)
 	if err != nil {
@@ -165,7 +165,7 @@ func (l *Library) scheduleQuery(ctx context.Context, extra string, args []any, l
 // or is older than the cutoff, with the plugin and source to ask.
 func (l *Library) StaleSchedules(ctx context.Context, olderThan time.Time) ([]StaleSchedule, error) {
 	rows, err := l.db.QueryContext(ctx, `SELECT e.item_id, i.plugin_id, i.source
-		FROM entries e
+		FROM `+viewEntryState+` e
 		JOIN items i ON i.id = e.item_id
 		LEFT JOIN item_schedules s ON s.item_id = e.item_id
 		WHERE e.status = ? AND (s.synced_at IS NULL OR s.synced_at < ?)

@@ -70,15 +70,15 @@ type progressContext struct {
 }
 
 // readEntryValues reads the raw form values. The comment is trimmed and
-// capped at library.MaxCommentRunes. A repeated parameter counts with its
+// capped at library.MaxNotesRunes. A repeated parameter counts with its
 // FIRST value (PostFormValue). When both progress.<primary> and the
 // progressShorthand are sent, the explicit progress.<primary> wins.
 func readEntryValues(kind plugin.KindDef, r *http.Request) entryValues {
 	get := func(k string) string { return strings.TrimSpace(r.PostFormValue(k)) }
 	v := entryValues{Status: get("status"), Rating: get("rating"), StartedOn: get("started_on"),
 		FinishedOn: get("finished_on"), Comment: get("comment"), Progress: map[string]string{}}
-	if rs := []rune(v.Comment); len(rs) > library.MaxCommentRunes {
-		v.Comment = strings.TrimSpace(string(rs[:library.MaxCommentRunes]))
+	if rs := []rune(v.Comment); len(rs) > library.MaxNotesRunes {
+		v.Comment = strings.TrimSpace(string(rs[:library.MaxNotesRunes]))
 	}
 	for name := range r.PostForm {
 		if key, ok := strings.CutPrefix(name, progressField); ok {
@@ -163,7 +163,7 @@ func parseProgress(def plugin.ProgressDef, raw string) (float64, string) {
 // user-facing message, non-empty on error.
 func (s *server) parseEntryForm(kind plugin.KindDef, keys []string, r *http.Request) (entryValues, library.Entry, string) {
 	v := readEntryValues(kind, r)
-	e := library.Entry{Status: library.Status(v.Status), Comment: v.Comment, Progress: map[string]float64{}}
+	e := library.Entry{Status: library.Status(v.Status), Notes: v.Comment, Progress: map[string]float64{}}
 	if !slices.Contains(library.Statuses(), e.Status) {
 		return v, e, "Please choose a status."
 	}

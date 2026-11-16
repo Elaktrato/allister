@@ -19,7 +19,7 @@ func TestExportJSONViaRoute(t *testing.T) {
 	e := newEnv(t)
 	d := anime.ItemData(e.fp.anime)
 	_, err := e.lib.AddToList(context.Background(), "anime", "anime", d, library.Entry{Status: library.Active, Rating: ip(9),
-		Progress: map[string]float64{"episode": 5}, Comment: "c <b>"})
+		Progress: map[string]float64{"episode": 5}, Notes: "c <b>"})
 	if err != nil {
 		t.Fatal(err)
 	}

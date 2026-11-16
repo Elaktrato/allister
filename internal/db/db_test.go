@@ -54,7 +54,7 @@ func TestOpenCreatesSchema(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer d.Close()
-	for _, tbl := range append([]string{"settings", "jobs", "imports", "import_rows", "entries", "entry_progress"}, genericTables...) {
+	for _, tbl := range append([]string{"settings", "jobs", "imports", "import_rows", "entries", "entry_runs", "run_progress"}, genericTables...) {
 		if tableCount(t, d, tbl) != 1 {
 			t.Errorf("table %s missing", tbl)
 		}
@@ -103,12 +103,13 @@ func TestForeignKeyCascade(t *testing.T) {
 	defer d.Close()
 	mustExec(t, d, `INSERT INTO items(id, plugin_id, kind, source, source_id) VALUES(1,'anime','anime','anilist','1')`)
 	mustExec(t, d, `INSERT INTO item_titles(item_id, lang, text) VALUES(1,'en','X')`)
-	mustExec(t, d, `INSERT INTO entries(item_id, status, updated_at) VALUES(1,'active','2024-01-01T00:00:00Z')`)
+	mustExec(t, d, `INSERT INTO entries(item_id, added_at, updated_at) VALUES(1,'2024-01-01T00:00:00Z','2024-01-01T00:00:00Z')`)
+	mustExec(t, d, `INSERT INTO entry_runs(item_id, number, status, created_at, updated_at) VALUES(1,1,'active','2024-01-01T00:00:00Z','2024-01-01T00:00:00Z')`)
 	if _, err := d.Exec(`INSERT INTO item_titles(item_id, lang, text) VALUES(99,'en','orphan')`); err == nil {
 		t.Fatal("expected FK violation")
 	}
 	mustExec(t, d, `DELETE FROM items WHERE id=1`)
-	for _, tbl := range []string{"item_titles", "entries"} {
+	for _, tbl := range []string{"item_titles", "entries", "entry_runs"} {
 		if n := rowCount(t, d, `SELECT count(*) FROM `+tbl); n != 0 {
 			t.Errorf("%s rows=%d", tbl, n)
 		}

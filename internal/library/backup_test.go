@@ -45,13 +45,13 @@ func richShow(t *testing.T, e *env, id string) int64 {
 	d.Relations = []plugin.Relation{{Kind: "sequel", Item: plugin.ItemSummary{Source: "tvdata", ID: "s2", Kind: "show",
 		Titles: []plugin.Title{{Lang: "en", Text: "Season 2"}}, CoverURL: "https://img.example/s2.jpg", URL: "https://tv.example/show/s2"}}}
 	d.CoverURL = "abc123.jpg"
-	itemID, err := e.lib.AddToList(bg, "tv", "show", d, Entry{Status: Active, Rating: ip(8), Comment: "line one\nline two",
+	itemID, err := e.lib.AddToList(bg, "tv", "show", d, Entry{Status: Active, Rating: ip(8), Notes: "line one\nline two",
 		StartedOn: tp(day(2024, 3, 5)), Progress: map[string]float64{"episode": 3}}, WithProgressKeys([]string{"episode", "position"}))
 	if err != nil {
 		t.Fatal(err)
 	}
 	// position 90 stays stored after switching to season+episode (inactive)
-	if err := e.lib.UpsertEntry(bg, Entry{ItemID: itemID, Status: Active, Rating: ip(8), Comment: "line one\nline two",
+	if err := e.lib.UpsertEntry(bg, Entry{ItemID: itemID, Status: Active, Rating: ip(8), Notes: "line one\nline two",
 		StartedOn: tp(day(2024, 3, 5)), Progress: map[string]float64{"episode": 3, "position": 90}}); err != nil {
 		t.Fatal(err)
 	}
@@ -73,9 +73,7 @@ func richShow(t *testing.T, e *env, id string) int64 {
 	if _, err := e.db.Exec(`UPDATE items SET created_at = '2023-01-02T03:04:05Z', updated_at = '2023-02-03T04:05:06Z' WHERE id = ?`, itemID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := e.db.Exec(`UPDATE entries SET updated_at = '2024-04-05T06:07:08Z' WHERE item_id = ?`, itemID); err != nil {
-		t.Fatal(err)
-	}
+	setEntryUpdated(t, e.db, "2024-04-05T06:07:08Z", itemID)
 	return itemID
 }
 

@@ -915,7 +915,7 @@ func TestListHostileTitleEscaped(t *testing.T) {
 	e := newFixtureEnv(t)
 	d := tvShow("1", `<script>alert(1)</script>`)
 	d.Fields["type"] = plugin.FieldValue{Text: "series"}
-	e.addFixture(t, "tv", "show", d, library.Entry{Status: library.Active, Comment: "<b>x</b>"})
+	e.addFixture(t, "tv", "show", d, library.Entry{Status: library.Active, Notes: "<b>x</b>"})
 	b := e.get("/tv?view=table").Body.String()
 	mustContain(t, b, "&lt;script&gt;alert(1)&lt;/script&gt;")
 	mustNotContain(t, b, "<script>alert(1)")

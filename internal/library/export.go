@@ -36,11 +36,11 @@ func (l *Library) ExportEntries(ctx context.Context, pluginID, kind string) ([]p
 		where += ` AND i.kind = ?`
 		args = append(args, kind)
 	}
-	from := ` FROM items i JOIN ` + tableEntries + ` e ON e.item_id = i.id WHERE ` + where
+	from := ` FROM items i JOIN ` + viewEntryState + ` e ON e.item_id = i.id WHERE ` + where
 
 	var out []plugin.ExportEntry
 	byID := map[int64]int{}
-	rows, err := l.db.QueryContext(ctx, `SELECT i.id, i.kind, e.status, e.rating, e.comment, e.started_on, e.finished_on`+from+` ORDER BY i.id`, args...)
+	rows, err := l.db.QueryContext(ctx, `SELECT i.id, i.kind, e.status, e.rating, e.notes, e.started_on, e.finished_on`+from+` ORDER BY i.id`, args...)
 	if err != nil {
 		return nil, fmt.Errorf("export entries: %w", err)
 	}
@@ -96,7 +96,7 @@ func (l *Library) ExportEntries(ctx context.Context, pluginID, kind string) ([]p
 		}); err != nil {
 		return nil, err
 	}
-	prows, err := l.db.QueryContext(ctx, `SELECT p.item_id, p.key, p.value FROM `+tableEntryProgress+` p WHERE p.item_id IN (SELECT i.id`+from+`)`, args...)
+	prows, err := l.db.QueryContext(ctx, `SELECT p.item_id, p.key, p.value FROM `+viewDisplayProgress+` p WHERE p.item_id IN (SELECT i.id`+from+`)`, args...)
 	if err != nil {
 		return nil, fmt.Errorf("export entries: %w", err)
 	}

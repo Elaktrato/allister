@@ -34,12 +34,12 @@ func (e *env) itemOf(t *testing.T, id int64) *library.Item {
 	return it
 }
 
-// storedProgress reads a progress value straight from the table (active or
-// retained); ok is false when there is none.
+// storedProgress reads a progress value of the display run straight from the
+// database (active or retained); ok is false when there is none.
 func (e *env) storedProgress(t *testing.T, id int64, key string) (float64, bool) {
 	t.Helper()
 	var v float64
-	err := e.d.QueryRow(`SELECT value FROM entry_progress WHERE item_id = ? AND key = ?`, id, key).Scan(&v)
+	err := e.d.QueryRow(`SELECT value FROM display_progress WHERE item_id = ? AND key = ?`, id, key).Scan(&v)
 	if err != nil {
 		return 0, false
 	}
@@ -124,7 +124,7 @@ func TestEditFixtureDialogPrefill(t *testing.T) {
 	paged := bookItem("1", "Paged")
 	paged.Fields["pages"] = plugin.FieldValue{Num: num(300)}
 	id := e.addFixture(t, "book", "book", paged, library.Entry{Status: library.Active, Progress: map[string]float64{"pages": 12},
-		StartedOn: day(2024, 1, 2), Comment: "c"})
+		StartedOn: day(2024, 1, 2), Notes: "c"})
 	rec := e.do("GET", "/list/"+idStr(id)+"/edit", nil, true)
 	if rec.Code != 200 {
 		t.Fatal(rec.Code)
@@ -329,7 +329,7 @@ func TestRemoveFixtureCascades(t *testing.T) {
 		t.Fatal("item remains")
 	}
 	var n int
-	for _, tb := range []string{"entries", "entry_progress", "item_titles", "credits"} {
+	for _, tb := range []string{"entries", "entry_runs", "item_titles", "credits"} {
 		if err := e.d.QueryRow(`SELECT COUNT(*) FROM `+tb+` WHERE item_id = ?`, id).Scan(&n); err != nil || n != 0 {
 			t.Fatalf("%s: %d %v", tb, n, err)
 		}

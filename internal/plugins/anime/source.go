@@ -12,8 +12,9 @@ import (
 
 // Limits of the importer (the source's limits live in mapping.go).
 const (
-	// maxCommentRunes mirrors the library's entry comment limit
-	// (library.MaxCommentRunes, internal/library/entries.go).
+	// maxCommentRunes is the importer's comment limit; it stays below the
+	// library's entry notes limit (library.MaxNotesRunes,
+	// internal/library/entries.go).
 	maxCommentRunes = 2000
 )
 

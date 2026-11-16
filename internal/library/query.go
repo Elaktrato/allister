@@ -232,7 +232,7 @@ type compiled struct {
 	unmatched      clause
 }
 
-const fromSQL = ` FROM items JOIN ` + tableEntries + ` e ON e.item_id = items.id`
+const fromSQL = ` FROM items JOIN ` + viewEntryState + ` e ON e.item_id = items.id`
 
 // where renders the conditions, skipping the named clauses.
 func (c *compiled) where(skip ...string) (string, []any) {
@@ -657,7 +657,7 @@ func (c *compiled) compileProgress(st ProgressState) error {
 
 const (
 	activeSQL = `EXISTS (SELECT 1 FROM json_each(items.progress_keys) j WHERE j.value = ?)`
-	valueSQL  = `COALESCE((SELECT p.value FROM ` + tableEntryProgress + ` p WHERE p.item_id = items.id AND p.key = ?), 0)`
+	valueSQL  = `COALESCE((SELECT p.value FROM ` + viewDisplayProgress + ` p WHERE p.item_id = items.id AND p.key = ?), 0)`
 )
 
 // totalSQL returns the SQL of a track's total and of "is bounded" and the
@@ -709,7 +709,7 @@ func (c *compiled) orderBy(s Sort, lang string) (string, []any, error) {
 		if key == "" {
 			return "", nil, filterErr("progress", "the kind has no primary progress to sort by")
 		}
-		expr = `CASE WHEN ` + activeSQL + ` THEN (SELECT p.value FROM ` + tableEntryProgress + ` p WHERE p.item_id = items.id AND p.key = ?) END`
+		expr = `CASE WHEN ` + activeSQL + ` THEN (SELECT p.value FROM ` + viewDisplayProgress + ` p WHERE p.item_id = items.id AND p.key = ?) END`
 		args, nullsLast = []any{key, key}, true
 	case SortField:
 		var fd *plugin.FieldDef
@@ -852,7 +852,7 @@ func (l *Library) loadRows(ctx context.Context, unmatched clause, whereSQL strin
 	args = append(args, limit, offset)
 	//nolint:gosec // G202: the query builder joins constant SQL and placeholders; values are bound
 	rows, err := l.db.QueryContext(ctx, `SELECT items.id, items.plugin_id, items.kind, items.source, items.source_id, items.cover_path,
-		items.external_url, items.sync_state, items.progress_keys, e.status, e.rating, e.comment, e.started_on, e.finished_on, e.updated_at,
+		items.external_url, items.sync_state, items.progress_keys, `+stateCols+`,
 		(`+unmatched.sql+`), (items.sync_state <> 'done')`+fromSQL+whereSQL+order+` LIMIT ? OFFSET ?`, args...)
 	if err != nil {
 		return nil, fmt.Errorf("list: %w", err)
@@ -861,12 +861,12 @@ func (l *Library) loadRows(ctx context.Context, unmatched clause, whereSQL strin
 	var ids []any
 	for rows.Next() {
 		var r Row
-		var pk, status, updated string
-		var rating sql.NullInt64
-		var started, finished sql.NullString
-		if err := rows.Scan(&r.Item.ID, &r.Item.PluginID, &r.Item.Kind, &r.Item.Source, &r.Item.SourceID, &r.Item.CoverPath,
-			&r.Item.ExternalURL, &r.Item.SyncState, &pk, &status, &rating, &r.Entry.Comment, &started, &finished, &updated,
-			&r.Flags.Unmatched, &r.Flags.PartialSync); err != nil {
+		var pk string
+		var st stateScan
+		dest := []any{&r.Item.ID, &r.Item.PluginID, &r.Item.Kind, &r.Item.Source, &r.Item.SourceID, &r.Item.CoverPath,
+			&r.Item.ExternalURL, &r.Item.SyncState, &pk}
+		dest = append(append(dest, st.dest(&r.Entry)...), &r.Flags.Unmatched, &r.Flags.PartialSync)
+		if err := rows.Scan(dest...); err != nil {
 			rows.Close()
 			return nil, fmt.Errorf("list: %w", err)
 		}
@@ -876,7 +876,7 @@ func (l *Library) loadRows(ctx context.Context, unmatched clause, whereSQL strin
 		}
 		r.Entry.ItemID = r.Item.ID
 		r.Entry.Progress = map[string]float64{}
-		if err := r.Entry.fill(status, rating, started, finished, updated); err != nil {
+		if err := st.fill(&r.Entry); err != nil {
 			rows.Close()
 			return nil, err
 		}
@@ -1001,7 +1001,7 @@ func (l *Library) loadRowParts(ctx context.Context, ids []any, byID map[int64]*R
 	}); err != nil {
 		return err
 	}
-	return query("progress", `SELECT item_id, key, value FROM `+tableEntryProgress+in, func(r *sql.Rows) error {
+	return query("progress", `SELECT item_id, key, value FROM `+viewDisplayProgress+in, func(r *sql.Rows) error {
 		var id int64
 		var k string
 		var v float64

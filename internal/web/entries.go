@@ -156,7 +156,7 @@ func progressText(def plugin.ProgressDef, val float64) string {
 // stored progress values (active and retained), rating blank when unrated.
 func entryFormValues(k plugin.KindDef, e library.Entry, stored map[string]float64) entryValues {
 	v := entryValues{Status: string(e.Status), StartedOn: fmtDay(e.StartedOn), FinishedOn: fmtDay(e.FinishedOn),
-		Comment: e.Comment, Progress: map[string]string{}}
+		Comment: e.Notes, Progress: map[string]string{}}
 	if e.Rating != nil {
 		v.Rating = strconv.Itoa(*e.Rating)
 	}

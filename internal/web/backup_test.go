@@ -376,7 +376,7 @@ func TestBackupRoundTripsRealAnimePlugin(t *testing.T) {
 	a := newEnv(t)
 	d := anime.ItemData(a.fp.anime)
 	id, err := a.lib.AddToList(context.Background(), "anime", "anime", d, library.Entry{Status: library.Active, Rating: ip(9),
-		Progress: map[string]float64{"episode": 5}, Comment: "c <b>"})
+		Progress: map[string]float64{"episode": 5}, Notes: "c <b>"})
 	if err != nil {
 		t.Fatal(err)
 	}

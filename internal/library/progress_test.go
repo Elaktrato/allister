@@ -93,7 +93,7 @@ func TestIncrementCapsAtTotalAndNoPrimary(t *testing.T) {
 	if err := l.Increment(bg, id); err != nil {
 		t.Fatal(err)
 	}
-	if n := count(t, e.db, `SELECT count(*) FROM entry_progress WHERE item_id = ?`, id); n != 0 {
+	if n := count(t, e.db, `SELECT count(*) FROM display_progress WHERE item_id = ?`, id); n != 0 {
 		t.Fatalf("rows = %d", n)
 	}
 	// kind without a primary key: no-op
@@ -104,14 +104,12 @@ func TestIncrementCapsAtTotalAndNoPrimary(t *testing.T) {
 	if err := l.Increment(bg, nid); err != nil {
 		t.Fatal(err)
 	}
-	if n := count(t, e.db, `SELECT count(*) FROM entry_progress WHERE item_id = ?`, nid); n != 0 {
+	if n := count(t, e.db, `SELECT count(*) FROM display_progress WHERE item_id = ?`, nid); n != 0 {
 		t.Fatalf("rows = %d", n)
 	}
 	// the entry is touched when the progress moves
 	id = addBook(t, l, "i8", nil, Entry{Status: Active})
-	if _, err := e.db.Exec(`UPDATE entries SET updated_at = '2000-01-01T00:00:00Z'`); err != nil {
-		t.Fatal(err)
-	}
+	setEntryUpdated(t, e.db, "2000-01-01T00:00:00Z")
 	if err := l.Increment(bg, id); err != nil {
 		t.Fatal(err)
 	}
@@ -164,7 +162,7 @@ func TestSetActiveProgressRetainsInactiveValues(t *testing.T) {
 	}
 	// the value stays in the table but is hidden from the entry
 	var v float64
-	if err := e.db.QueryRow(`SELECT value FROM entry_progress WHERE item_id = ? AND key = 'pages'`, id).Scan(&v); err != nil || v != 120 {
+	if err := e.db.QueryRow(`SELECT value FROM display_progress WHERE item_id = ? AND key = 'pages'`, id).Scan(&v); err != nil || v != 120 {
 		t.Fatalf("retained = %v, %v", v, err)
 	}
 	if got := progressOf(t, l, id); len(got) != 0 {
@@ -185,7 +183,7 @@ func TestSetActiveProgressRetainsInactiveValues(t *testing.T) {
 	if got := progressOf(t, l, id); got["pages"] != 120 || len(got) != 1 {
 		t.Fatalf("progress = %v", got)
 	}
-	if n := count(t, e.db, `SELECT count(*) FROM entry_progress WHERE item_id = ?`, id); n != 2 {
+	if n := count(t, e.db, `SELECT count(*) FROM display_progress WHERE item_id = ?`, id); n != 2 {
 		t.Fatalf("rows = %d, want pages and percent retained", n)
 	}
 	// a set equals a combination regardless of order
@@ -327,7 +325,7 @@ func TestProgressStateFiltersAgreeWithHelpers(t *testing.T) {
 			}
 			all[k] = *v
 			// direct insert: bypasses validation so inactive and out-of-range values exist
-			if _, err := e.db.Exec(`INSERT INTO entry_progress(item_id,key,value) VALUES (?,?,?)`, id, k, *v); err != nil {
+			if _, err := e.db.Exec(`INSERT INTO run_progress(run_id,key,value) SELECT display_run_id, ?, ? FROM entries WHERE item_id = ?`, k, *v, id); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -495,7 +493,7 @@ func TestUpdateEntrySwitchesCombinationAndWritesAtomically(t *testing.T) {
 	if err := l.UpdateEntry(bg, Entry{ItemID: id, Status: Active, Progress: map[string]float64{"episode": 5}}, []string{"episode"}); err != nil {
 		t.Fatal(err)
 	}
-	if n := count(t, e.db, `SELECT count(*) FROM entry_progress WHERE item_id = ? AND key = 'position' AND value = 600`, id); n != 1 {
+	if n := count(t, e.db, `SELECT count(*) FROM display_progress WHERE item_id = ? AND key = 'position' AND value = 600`, id); n != 1 {
 		t.Fatal("position not retained")
 	}
 }
@@ -555,15 +553,15 @@ func TestUpdateEntryRetainedValueIsTheEventBaseline(t *testing.T) {
 func TestUpdateEntryRollsBackOnError(t *testing.T) {
 	e := newEnv(t)
 	l := e.lib
-	id := addShow(t, l, "ur", fp(10), Entry{Status: Active, Progress: map[string]float64{"episode": 2}, Comment: "old"})
+	id := addShow(t, l, "ur", fp(10), Entry{Status: Active, Progress: map[string]float64{"episode": 2}, Notes: "old"})
 	snapshot := func() string {
 		var pk string
 		if err := e.db.QueryRow(`SELECT progress_keys || updated_at FROM items WHERE id = ?`, id).Scan(&pk); err != nil {
 			t.Fatal(err)
 		}
 		en := mustEntry(t, l, id)
-		return fmt.Sprintf("%s %v %s %v %d", pk, en.Status, en.Comment, en.Progress,
-			count(t, e.db, `SELECT count(*) FROM entry_progress WHERE item_id = ?`, id))
+		return fmt.Sprintf("%s %v %s %v %d", pk, en.Status, en.Notes, en.Progress,
+			count(t, e.db, `SELECT count(*) FROM display_progress WHERE item_id = ?`, id))
 	}
 	before := snapshot()
 	for name, c := range map[string]struct {
@@ -571,11 +569,11 @@ func TestUpdateEntryRollsBackOnError(t *testing.T) {
 		keys []string
 		want string
 	}{
-		"above the new total":             {Entry{Status: Completed, Comment: "new", Progress: map[string]float64{"season": 1, "episode": 11}}, []string{"season", "episode"}, "above the total"},
-		"key outside the new combination": {Entry{Status: Completed, Comment: "new", Progress: map[string]float64{"position": 5}}, []string{"season", "episode"}, "not active"},
-		"ineligible combination":          {Entry{Status: Completed, Comment: "new"}, []string{"season", "position"}, "combination"},
-		"empty combination":               {Entry{Status: Completed, Comment: "new"}, []string{}, "combination"},
-		"bad status":                      {Entry{Status: "watching", Comment: "new"}, []string{"season", "episode"}, "status"},
+		"above the new total":             {Entry{Status: Completed, Notes: "new", Progress: map[string]float64{"season": 1, "episode": 11}}, []string{"season", "episode"}, "above the total"},
+		"key outside the new combination": {Entry{Status: Completed, Notes: "new", Progress: map[string]float64{"position": 5}}, []string{"season", "episode"}, "not active"},
+		"ineligible combination":          {Entry{Status: Completed, Notes: "new"}, []string{"season", "position"}, "combination"},
+		"empty combination":               {Entry{Status: Completed, Notes: "new"}, []string{}, "combination"},
+		"bad status":                      {Entry{Status: "watching", Notes: "new"}, []string{"season", "episode"}, "status"},
 		"finish before start": {Entry{Status: Completed, StartedOn: tp(day(2024, 2, 1)), FinishedOn: tp(day(2024, 1, 1))},
 			[]string{"season", "episode"}, "before the start"},
 	} {
@@ -631,7 +629,7 @@ func TestUpdateEntryZeroClearsOnlyGivenKeys(t *testing.T) {
 	if got := progressOf(t, l, id); got["episode"] != 0 || got["season"] != 3 || len(got) != 2 {
 		t.Fatalf("progress %v", got)
 	}
-	if n := count(t, e.db, `SELECT count(*) FROM entry_progress WHERE item_id = ? AND key = 'position' AND value = 600`, id); n != 1 {
+	if n := count(t, e.db, `SELECT count(*) FROM display_progress WHERE item_id = ? AND key = 'position' AND value = 600`, id); n != 1 {
 		t.Fatal("retained position touched")
 	}
 }

@@ -32,7 +32,7 @@ func lockedBook(t *testing.T, e *env) int64 {
 	d.Genres = []string{"Sci-Fi"}
 	d.ExternalIDs = map[string]string{"isbn": "978"}
 	d.Relations = []plugin.Relation{{Kind: "sequel", Item: plugin.ItemSummary{Source: "books", ID: "r1"}}}
-	id, err := e.lib.AddToList(bg, "locked", "book", d, Entry{Status: Active, Rating: ip(7), Comment: "c", Progress: map[string]float64{"pages": 12}})
+	id, err := e.lib.AddToList(bg, "locked", "book", d, Entry{Status: Active, Rating: ip(7), Notes: "c", Progress: map[string]float64{"pages": 12}})
 	if err != nil {
 		t.Fatal(err)
 	}

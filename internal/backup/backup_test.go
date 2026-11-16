@@ -289,7 +289,7 @@ func itemCount(t *testing.T, e *env) int {
 func TestBackupRoundTripsAllPluginsIncludingDisabled(t *testing.T) {
 	a := newEnv(t)
 	cover := a.saveCover(1)
-	a.book("1", cover, &library.Entry{Status: library.Completed, Rating: ip(9), Comment: "great\nbook",
+	a.book("1", cover, &library.Entry{Status: library.Completed, Rating: ip(9), Notes: "great\nbook",
 		StartedOn: ptime(time.Date(2024, 1, 2, 0, 0, 0, 0, time.UTC)), FinishedOn: ptime(time.Date(2024, 2, 3, 0, 0, 0, 0, time.UTC)),
 		Progress: map[string]float64{"pages": 300}})
 	// unmatched manual item with an external id and an uploaded cover

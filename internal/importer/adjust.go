@@ -27,10 +27,10 @@ func buildEntry(kind plugin.KindDef, item *library.Item, e plugin.ParsedEntry) (
 			notes = append(notes, n)
 		}
 	}
-	en := library.Entry{Status: library.Status(e.Status), Comment: e.Comment, Progress: map[string]float64{}}
-	if utf8.RuneCountInString(en.Comment) > library.MaxCommentRunes {
-		en.Comment = string([]rune(en.Comment)[:library.MaxCommentRunes])
-		notes = append(notes, fmt.Sprintf("comment cut to %d characters", library.MaxCommentRunes))
+	en := library.Entry{Status: library.Status(e.Status), Notes: e.Comment, Progress: map[string]float64{}}
+	if utf8.RuneCountInString(en.Notes) > library.MaxNotesRunes {
+		en.Notes = string([]rune(en.Notes)[:library.MaxNotesRunes])
+		notes = append(notes, fmt.Sprintf("comment cut to %d characters", library.MaxNotesRunes))
 	}
 	if e.Rating != nil {
 		if *e.Rating < 0 || *e.Rating > 10 {
