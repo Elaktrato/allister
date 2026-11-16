@@ -183,3 +183,17 @@ func TestMergeDefaultSurvivorIsTheSourcedItem(t *testing.T) {
 	mustContain(t, fe.get("/book/merge/pick?keep="+idStr(manual)+"&q=earth").Body.String(),
 		`/book/merge?keep=`+idStr(sourced)+`&amp;other=`+idStr(manual))
 }
+
+func TestMergePageShowsCoversAsThumbnails(t *testing.T) {
+	fe := newFixtureEnv(t)
+	a, b := fe.mergePair(t)
+	if err := fe.lib.SetCoverPath(bg, a, "keep.jpg"); err != nil {
+		t.Fatal(err)
+	}
+	if err := fe.lib.SetCoverPath(bg, b, "other.jpg"); err != nil {
+		t.Fatal(err)
+	}
+	body := fe.get("/book/merge?" + mergeQuery(a, b)).Body.String()
+	mustContain(t, body, `value="cover"`, `<img src="/covers/keep.jpg"`, `<img src="/covers/other.jpg"`)
+	mustNotContain(t, body, "local cover")
+}

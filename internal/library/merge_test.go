@@ -600,3 +600,47 @@ func TestMergeChangesOffersWhatMergeItemsApplies(t *testing.T) {
 		}
 	}
 }
+
+func TestMergeComparesLocalCoversByStoredValue(t *testing.T) {
+	e := newEnv(t)
+	keep := mergeBook(t, e, "books", "k", "Dune", nil, true, "")
+	other := mergeBook(t, e, "books", "o", "Dune", nil, true, "")
+	// the survivor's local cover has no recorded origin (set by hand or
+	// downloaded before origins were recorded)
+	mustExec(t, e.db, `UPDATE items SET cover_path = 'keep.jpg', cover_source = '' WHERE id = ?`, keep)
+	mustExec(t, e.db, `UPDATE items SET cover_path = 'other.jpg', cover_source = 'https://img.example/o.jpg' WHERE id = ?`, other)
+	got, err := e.lib.MergeChanges(bg, keep, other)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cover *Change
+	for i := range got {
+		if got[i].Key == "cover" {
+			cover = &got[i]
+		}
+	}
+	if cover == nil {
+		t.Fatalf("changes = %+v, want a cover row for two different local covers", got)
+	}
+	// the same local file is no difference
+	mustExec(t, e.db, `UPDATE items SET cover_path = 'other.jpg' WHERE id = ?`, keep)
+	if got, err = e.lib.MergeChanges(bg, keep, other); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range got {
+		if c.Key == "cover" {
+			t.Fatalf("same local cover offered: %+v", c)
+		}
+	}
+	mustExec(t, e.db, `UPDATE items SET cover_path = 'keep.jpg' WHERE id = ?`, keep)
+	if err := e.lib.MergeItems(bg, keep, other, []string{"cover"}); err != nil {
+		t.Fatal(err)
+	}
+	var path, source string
+	if err := e.db.QueryRow(`SELECT cover_path, cover_source FROM items WHERE id = ?`, keep).Scan(&path, &source); err != nil {
+		t.Fatal(err)
+	}
+	if path != "other.jpg" || source != "https://img.example/o.jpg" {
+		t.Fatalf("cover = %q from %q, want the other's file with its origin", path, source)
+	}
+}

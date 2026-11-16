@@ -15,6 +15,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/allister/allister/internal/covers"
 	"github.com/allister/allister/internal/library"
 	"github.com/allister/allister/internal/plugin"
 )
@@ -35,11 +36,14 @@ type changesView struct {
 
 // changeRow is one differing part. Stored and Incoming are display texts;
 // Added and Removed the entries of a list part. Checked: the box starts
-// ticked (the stored side is empty).
+// ticked (the stored side is empty). Cover marks the cover row, whose sides
+// show as thumbnails (StoredCover and IncomingCover, image URLs or "").
 type changeRow struct {
 	Key, Label, Stored, Incoming string
 	Checked                      bool
 	Added, Removed               []string
+	Cover                        bool
+	StoredCover, IncomingCover   string
 }
 
 // foldRunes is the length above which a value is shown shortened, with the
@@ -63,12 +67,15 @@ func foldText(s string) string {
 
 // changeRows turns the library's changes into rows; field values are
 // formatted like the overview formats them (units, dates), from the stored
-// item and the incoming data.
+// item and the incoming data; the cover row shows both images.
 func changeRows(k plugin.KindDef, it *library.Item, in plugin.ItemData, changes []library.Change) []changeRow {
 	rows := make([]changeRow, 0, len(changes))
 	for _, c := range changes {
 		row := changeRow{Key: c.Key, Label: c.Label, Stored: c.Stored, Incoming: c.Incoming, Checked: c.StoredEmpty,
 			Added: c.Added, Removed: c.Removed}
+		if c.Key == "cover" {
+			row.Cover, row.StoredCover, row.IncomingCover = true, covers.Src(it.CoverPath), covers.Src(in.CoverURL)
+		}
 		if key, ok := strings.CutPrefix(c.Key, "field."); ok {
 			if fd, ok := fieldDef(k, key); ok {
 				if sv, has := it.Fields[key]; has {

@@ -47,7 +47,13 @@ type listItem struct{ key, label string }
 // difference). ErrNoEntry for an unknown item, ErrInvalid when an incoming
 // value cannot be stored.
 func (l *Library) ItemChanges(ctx context.Context, itemID int64, in plugin.ItemData, credits []plugin.Credit, withCredits bool) ([]Change, error) {
-	_, parts, err := l.changeParts(ctx, l.db, itemID, in, credits, withCredits)
+	return l.itemChanges(ctx, itemID, in, credits, withCredits, nil)
+}
+
+// itemChanges is ItemChanges with a merge's cover rule (mc, nil for an
+// update from a source).
+func (l *Library) itemChanges(ctx context.Context, itemID int64, in plugin.ItemData, credits []plugin.Credit, withCredits bool, mc *mergeCover) ([]Change, error) {
+	_, parts, err := l.changeParts(ctx, l.db, itemID, in, credits, withCredits, mc)
 	if err != nil {
 		return nil, err
 	}
@@ -79,7 +85,7 @@ func (l *Library) ApplyChanges(ctx context.Context, itemID int64, in plugin.Item
 		return nil, fmt.Errorf("apply changes: %w", err)
 	}
 	defer tx.Rollback()
-	applied, err := l.applyChangesTx(ctx, tx, itemID, in, credits, withCredits, keys)
+	applied, err := l.applyChangesTx(ctx, tx, itemID, in, credits, withCredits, keys, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -90,9 +96,9 @@ func (l *Library) ApplyChanges(ctx context.Context, itemID int64, in plugin.Item
 }
 
 // applyChangesTx is ApplyChanges inside tx (a merge applies the other item's
-// data in its own transaction).
-func (l *Library) applyChangesTx(ctx context.Context, tx *sql.Tx, itemID int64, in plugin.ItemData, credits []plugin.Credit, withCredits bool, keys []string) ([]string, error) {
-	def, parts, err := l.changeParts(ctx, tx, itemID, in, credits, withCredits)
+// data in its own transaction, with its cover rule mc; nil otherwise).
+func (l *Library) applyChangesTx(ctx context.Context, tx *sql.Tx, itemID int64, in plugin.ItemData, credits []plugin.Credit, withCredits bool, keys []string, mc *mergeCover) ([]string, error) {
+	def, parts, err := l.changeParts(ctx, tx, itemID, in, credits, withCredits, mc)
 	if err != nil {
 		return nil, err
 	}
@@ -136,10 +142,16 @@ func (l *Library) applyChangesTx(ctx context.Context, tx *sql.Tx, itemID int64, 
 	return applied, nil
 }
 
+// mergeCover is the cover rule of a merge: the incoming cover is another
+// item's stored value (a URL or a local file), compared by that value, and
+// taking it keeps that item's recorded origin (source).
+type mergeCover struct{ source string }
+
 // changeParts loads the item through q and builds its comparable parts in
 // Change order. Only database errors and ErrNoEntry are returned; the
-// validation error of an incoming value is kept on its part.
-func (l *Library) changeParts(ctx context.Context, q queryer, itemID int64, in plugin.ItemData, credits []plugin.Credit, withCredits bool) (plugin.KindDef, []changePart, error) {
+// validation error of an incoming value is kept on its part. mc, when set,
+// is a merge's cover rule.
+func (l *Library) changeParts(ctx context.Context, q queryer, itemID int64, in plugin.ItemData, credits []plugin.Credit, withCredits bool, mc *mergeCover) (plugin.KindDef, []changePart, error) {
 	it, err := loadItem(ctx, q, `id = ?`, itemID)
 	if err != nil {
 		return plugin.KindDef{}, nil, err
@@ -170,7 +182,7 @@ func (l *Library) changeParts(ctx context.Context, q queryer, itemID int64, in p
 	if err := q.QueryRowContext(ctx, `SELECT cover_source FROM items WHERE id = ?`, itemID).Scan(&coverSource); err != nil {
 		return plugin.KindDef{}, nil, fmt.Errorf("item changes: %w", err)
 	}
-	if p, ok := coverPart(it, coverSource, in.CoverURL); ok {
+	if p, ok := coverPart(it, coverSource, in.CoverURL, mc); ok {
 		parts = append(parts, p)
 	}
 	if p, ok := relationsPart(it, in.Relations); ok {
@@ -450,7 +462,10 @@ func coverDiffers(stored, origin, in string) bool {
 	return false
 }
 
-func coverPart(it *Item, origin, in string) (changePart, bool) {
+// coverPart is the cover part; with a merge's rule (mc) the covers differ
+// whenever their stored values do, and the write keeps the incoming item's
+// origin.
+func coverPart(it *Item, origin, in string, mc *mergeCover) (changePart, bool) {
 	if in == "" {
 		return changePart{}, false
 	}
@@ -458,11 +473,15 @@ func coverPart(it *Item, origin, in string) (changePart, bool) {
 		return changePart{change: Change{Key: "cover", Label: "Cover"}, err: err}, true
 	}
 	id := it.ID
+	differs, source := coverDiffers(it.CoverPath, origin, in), ""
+	if mc != nil {
+		differs, source = in != it.CoverPath, mc.source
+	}
 	return changePart{
 		change:  Change{Key: "cover", Label: "Cover", Stored: coverText(it.CoverPath), Incoming: coverText(in), StoredEmpty: it.CoverPath == ""},
-		differs: coverDiffers(it.CoverPath, origin, in),
+		differs: differs,
 		write: func(ctx context.Context, tx *sql.Tx) error {
-			if _, err := tx.ExecContext(ctx, `UPDATE items SET cover_path = ?, cover_source = '' WHERE id = ?`, in, id); err != nil {
+			if _, err := tx.ExecContext(ctx, `UPDATE items SET cover_path = ?, cover_source = ? WHERE id = ?`, in, source, id); err != nil {
 				return fmt.Errorf("apply changes: %w", err)
 			}
 			return nil

@@ -21,7 +21,9 @@ const notesDivider = "\n\n---\n\n"
 //   - keys name the parts of the other item's data (Change keys, see
 //     ApplyChanges) that replace the survivor's. Credits are compared only
 //     when both items' people come from the same source: a person id means
-//     nothing to another source.
+//     nothing to another source. Covers are compared by their stored values
+//     (a local file differs from another file), and taking the other's
+//     cover keeps its recorded origin.
 //   - The other item's runs join the survivor's, ordered by start day (the
 //     run's creation day when it has none; on a tie the survivor's first,
 //     then by their own number) and renumbered 1..n. Of the planned, active
@@ -95,7 +97,7 @@ func (l *Library) MergeItems(ctx context.Context, keepID, otherID int64, keys []
 			return fmt.Errorf("merge items: source link: %w", err)
 		}
 	}
-	if _, err := l.applyChangesTx(ctx, tx, keepID, in, credits, p.withCredits(), keys); err != nil {
+	if _, err := l.applyChangesTx(ctx, tx, keepID, in, credits, p.withCredits(), keys, &mergeCover{source: p.coverSource}); err != nil {
 		return err
 	}
 	if err := tx.Commit(); err != nil {
@@ -113,7 +115,7 @@ func (l *Library) MergeChanges(ctx context.Context, keepID, otherID int64) ([]Ch
 	if err != nil {
 		return nil, err
 	}
-	return l.ItemChanges(ctx, keepID, p.in, p.credits, p.withCredits())
+	return l.itemChanges(ctx, keepID, p.in, p.credits, p.withCredits(), &mergeCover{source: p.coverSource})
 }
 
 // mergePair is the survivor and the other item of a merge, with the other
@@ -122,6 +124,7 @@ type mergePair struct {
 	keep, other *Item
 	in          plugin.ItemData
 	credits     []plugin.Credit
+	coverSource string // the other item's cover origin
 }
 
 // withCredits: the survivor's people come from the other item's source
@@ -152,7 +155,11 @@ func loadMergePair(ctx context.Context, q queryer, keepID, otherID int64) (merge
 	case keep.PluginID != other.PluginID || keep.Kind != other.Kind:
 		return mergePair{}, invalid("only items of the same kind can be merged")
 	}
-	return mergePair{keep: keep, other: other, in: in, credits: credits}, nil
+	var coverSource string
+	if err := q.QueryRowContext(ctx, `SELECT cover_source FROM items WHERE id = ?`, otherID).Scan(&coverSource); err != nil {
+		return mergePair{}, fmt.Errorf("merge items: %w", err)
+	}
+	return mergePair{keep: keep, other: other, in: in, credits: credits, coverSource: coverSource}, nil
 }
 
 // itemDataTx reads the item through q as incoming data for ApplyChanges:
