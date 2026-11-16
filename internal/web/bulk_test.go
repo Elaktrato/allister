@@ -11,6 +11,18 @@ import (
 	"github.com/allister/allister/internal/plugin/plugintest"
 )
 
+// bulkApply posts a confirmed bulk change, expects the redirect to the list
+// with the notice parameter and returns the list page it leads to.
+func (fe *fixtureEnv) bulkApply(t *testing.T, v url.Values) string {
+	t.Helper()
+	rec := fe.do("POST", "/book/bulk", v, false)
+	loc := rec.Header().Get("Location")
+	if rec.Code != http.StatusSeeOther || !strings.HasPrefix(loc, "/book") || !strings.Contains(loc, "bulk=") {
+		t.Fatalf("apply: %d %q %s", rec.Code, loc, rec.Body.String())
+	}
+	return fe.get(loc).Body.String()
+}
+
 // bulkBooks adds books titled titles with the given statuses (one each).
 func (fe *fixtureEnv) bulkBooks(t *testing.T, titles []string, st []library.Status) []int64 {
 	t.Helper()
@@ -86,11 +98,7 @@ func TestBulkConfirmWithAStaleCountAsksAgain(t *testing.T) {
 	}
 	// the matching count confirms
 	v.Set("expect", "2")
-	rec = fe.do("POST", "/book/bulk", v, false)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("code %d", rec.Code)
-	}
-	mustContain(t, rec.Body.String(), "Changed 2, skipped 0")
+	mustContain(t, fe.bulkApply(t, v), "Changed 2, skipped 0")
 	for i, id := range ids {
 		e, _ := fe.lib.Entry(bg, id)
 		if (e.Status == library.Dropped) != (i < 2) {
@@ -111,12 +119,14 @@ func TestBulkStatusAppliesAndReportsSkips(t *testing.T) {
 	v.Set("confirm", "1")
 	v.Set("expect", "3")
 	rec = fe.do("POST", "/book/bulk", v, false)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("code %d %s", rec.Code, rec.Body.String())
+	// Post/Redirect/Get: the list with the counts in its URL
+	if loc := rec.Header().Get("Location"); rec.Code != http.StatusSeeOther || loc != "/book?bulk=2.1&status=all&view=table" {
+		t.Fatalf("got %d %q %s", rec.Code, loc, rec.Body.String())
 	}
-	body := rec.Body.String()
-	// the list reloads with the notice
-	mustContain(t, body, "Changed 2, skipped 1", "Other Show: not in this list", `data-replace-url="/book?status=all&amp;view=table"`, `id="list-rows"`)
+	body := fe.get(rec.Header().Get("Location")).Body.String()
+	// the list shows the notice and puts its own URL back in the address bar
+	mustContain(t, body, "Changed 2, skipped 1", `data-replace-url="/book?status=all&amp;view=table"`, `id="list-rows"`)
+	mustNotContain(t, body, "not in this list")
 	today := fe.now.Format("2006-01-02")
 	for _, id := range ids {
 		e, _ := fe.lib.Entry(bg, id)
@@ -136,9 +146,26 @@ func TestBulkNoticeListsFiveSkips(t *testing.T) {
 	for i := range 7 {
 		v.Add("ids", idStr(fe.addFixture(t, "tv", "show", tvShow("x"+strconv.Itoa(i), "Show "+strconv.Itoa(i)), library.Entry{Status: library.Planned})))
 	}
-	body := fe.do("POST", "/book/bulk", v, false).Body.String()
-	mustContain(t, body, "Changed 0, skipped 7", "Show 0: not in this list", "Show 4: not in this list", "…and 2 more")
-	mustNotContain(t, body, "Show 5: not in this list")
+	mustContain(t, fe.bulkApply(t, v), "Changed 0, skipped 7")
+}
+
+func TestBulkApplyOverHtmxRedirects(t *testing.T) {
+	fe := newFixtureEnv(t)
+	ids := fe.bulkBooks(t, []string{"Alpha"}, []library.Status{library.Active})
+	v := url.Values{"ids": {idStr(ids[0])}, "action": {"status"}, "to_status": {"completed"}, "confirm": {"1"}, "expect": {"1"}}
+	rec := fe.do("POST", "/book/bulk", v, true)
+	if rec.Code != http.StatusNoContent || rec.Header().Get("HX-Redirect") != "/book?bulk=1.0&view=cards" {
+		t.Fatalf("got %d %q", rec.Code, rec.Header().Get("HX-Redirect"))
+	}
+}
+
+func TestBulkNoticeParameterIsChecked(t *testing.T) {
+	fe := newFixtureEnv(t)
+	fe.bulkBooks(t, []string{"Alpha"}, []library.Status{library.Active})
+	for _, q := range []string{"bulk=x", "bulk=1", "bulk=1.2.3", "bulk=-1.0", "bulk=99999999999.0"} {
+		mustNotContain(t, fe.get("/book?"+q).Body.String(), "Changed ")
+	}
+	mustContain(t, fe.get("/book?bulk=3.0").Body.String(), "Changed 3, skipped 0")
 }
 
 func TestBulkRemoveConfirmNamesTheCount(t *testing.T) {
@@ -152,7 +179,7 @@ func TestBulkRemoveConfirmNamesTheCount(t *testing.T) {
 	}
 	v.Set("confirm", "1")
 	v.Set("expect", "2")
-	mustContain(t, fe.do("POST", "/book/bulk", v, false).Body.String(), "Changed 2, skipped 0")
+	mustContain(t, fe.bulkApply(t, v), "Changed 2, skipped 0")
 	if e, _ := fe.lib.Entry(bg, ids[0]); e != nil {
 		t.Fatal("not removed")
 	}
@@ -246,9 +273,9 @@ func TestBulkTagsAndListApply(t *testing.T) {
 	}
 	mustContain(t, fe.get("/book?view=table").Body.String(), `<option value="`+strconv.FormatInt(l.ID, 10)+`">Shelf</option>`)
 	v := url.Values{"ids": {idStr(ids[0]), idStr(ids[1])}, "action": {"list"}, "to_list": {strconv.FormatInt(l.ID, 10)}, "confirm": {"1"}, "expect": {"2"}}
-	mustContain(t, fe.do("POST", "/book/bulk", v, false).Body.String(), "Changed 2, skipped 0")
+	mustContain(t, fe.bulkApply(t, v), "Changed 2, skipped 0")
 	v = url.Values{"ids": {idStr(ids[0]), idStr(ids[1])}, "action": {"tags"}, "add_tags": {"Cozy, Reread"}, "confirm": {"1"}, "expect": {"2"}}
-	mustContain(t, fe.do("POST", "/book/bulk", v, false).Body.String(), "Changed 2, skipped 0")
+	mustContain(t, fe.bulkApply(t, v), "Changed 2, skipped 0")
 	rows, err := fe.lib.ListRows(bg, l.ID, "", nil)
 	if err != nil || len(rows) != 2 {
 		t.Fatalf("list rows %d %v", len(rows), err)

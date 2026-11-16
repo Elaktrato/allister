@@ -8,8 +8,10 @@ package web
 // time, so the selection is what the list shows. The
 // first post answers a confirmation naming the count; the confirmation
 // posts confirm=1 with expect, the count the owner saw: a count that
-// changed since is shown again and nothing is written. Applying answers the
-// list with the notice "Changed N, skipped M". Each action is one
+// changed since is shown again and nothing is written. Applying redirects
+// (Post/Redirect/Get; HX-Redirect for htmx) to the list with
+// bulk=<changed>.<skipped>, which the list shows as the notice "Changed N,
+// skipped M" (the skip reasons are not shown). Each action is one
 // transaction of the library's Bulk* calls.
 
 import (
@@ -24,9 +26,6 @@ import (
 	"github.com/allister/allister/internal/library"
 	"github.com/allister/allister/internal/plugin"
 )
-
-// bulkSkipsShown is the number of skipped entries the notice names.
-const bulkSkipsShown = 5
 
 // reasonNotInThisList is the skip reason of an id of another plugin.
 const reasonNotInThisList = "not in this list"
@@ -50,12 +49,42 @@ type bulkBar struct {
 }
 
 // bulkNotice reports an applied bulk change on the reloaded list;
-// ReplaceURL is the list's canonical URL (app.js puts it in the address bar).
+// ReplaceURL is the list's canonical URL without the notice (app.js puts it
+// in the address bar).
 type bulkNotice struct {
 	Text       string
-	Skips      []string // "<title>: <reason>", at most bulkSkipsShown
-	More       int      // skipped entries beyond Skips
 	ReplaceURL string
+}
+
+// maxBulkCount bounds each number of the bulk notice parameter.
+const maxBulkCount = 1_000_000_000
+
+// bulkNoticeOf reads the list's bulk=<changed>.<skipped> parameter (nil when
+// it is absent or malformed); ret is the list's canonical URL.
+func bulkNoticeOf(r *http.Request, ret string) *bulkNotice {
+	changed, skipped, ok := strings.Cut(r.URL.Query().Get("bulk"), ".")
+	if !ok || !isASCIIDigits(changed, 10) || !isASCIIDigits(skipped, 10) {
+		return nil
+	}
+	c, err1 := strconv.Atoi(changed)
+	k, err2 := strconv.Atoi(skipped)
+	if err1 != nil || err2 != nil || c > maxBulkCount || k > maxBulkCount {
+		return nil
+	}
+	return &bulkNotice{Text: "Changed " + strconv.Itoa(c) + ", skipped " + strconv.Itoa(k), ReplaceURL: ret}
+}
+
+// bulkDoneURL is the list URL after a bulk change: list with the notice
+// parameter of res.
+func bulkDoneURL(list string, res library.BulkResult) string {
+	u, err := url.Parse(list)
+	if err != nil {
+		return list
+	}
+	q := u.Query()
+	q.Set("bulk", strconv.Itoa(res.Changed)+"."+strconv.Itoa(len(res.Skipped)))
+	u.RawQuery = q.Encode()
+	return u.String()
 }
 
 // bulkConfirmView is the data of bulk_confirm.html: the question with the
@@ -407,51 +436,5 @@ func (s *server) postBulk(w http.ResponseWriter, r *http.Request, pluginID strin
 		return
 	}
 	res.Skipped = append(dropped, res.Skipped...)
-	v, err := s.buildList(r, m, lq)
-	if err != nil {
-		s.internalError(w, r, err)
-		return
-	}
-	if v.BulkNotice, err = s.noticeOfBulk(ctx, m, k, res, v.PushURL); err != nil {
-		s.internalError(w, r, err)
-		return
-	}
-	s.render(w, r, "list", v)
-}
-
-// noticeOfBulk words a bulk result: the counts and the first skipped
-// entries by title with their reasons.
-func (s *server) noticeOfBulk(ctx context.Context, m plugin.Manifest, k plugin.KindDef, res library.BulkResult, ret string) (*bulkNotice, error) {
-	n := &bulkNotice{Text: "Changed " + strconv.Itoa(res.Changed) + ", skipped " + strconv.Itoa(len(res.Skipped)), ReplaceURL: ret}
-	for i, sk := range res.Skipped {
-		if i == bulkSkipsShown {
-			n.More = len(res.Skipped) - i
-			break
-		}
-		title, err := s.bulkTitle(ctx, m, k, sk.ItemID)
-		if err != nil {
-			return nil, err
-		}
-		n.Skips = append(n.Skips, title+": "+sk.Reason)
-	}
-	return n, nil
-}
-
-// bulkTitle is the shown title of an item (in its own plugin's title
-// language when it belongs to another plugin).
-func (s *server) bulkTitle(ctx context.Context, m plugin.Manifest, k plugin.KindDef, id int64) (string, error) {
-	it, err := s.deps.Library.Item(ctx, id)
-	if errors.Is(err, library.ErrNoEntry) || (err == nil && it == nil) {
-		return "#" + strconv.FormatInt(id, 10), nil
-	}
-	if err != nil {
-		return "", err
-	}
-	if other, ok := s.deps.Registry.Manifest(it.PluginID); ok && other.ID != m.ID && len(other.Kinds) > 0 {
-		m, k = other, other.Kinds[0]
-	}
-	if t := s.resolveTitle(ctx, m, k, it.Kind, it.Titles); t != "" {
-		return t, nil
-	}
-	return "(untitled)", nil
+	s.redirectAfterAdd(w, r, bulkDoneURL(cv.CancelURL, res))
 }
