@@ -316,7 +316,7 @@ func TestBackupRoundTripsAllPluginsIncludingDisabled(t *testing.T) {
 	}
 	data := a.archive()
 	d, files := open(t, data)
-	if d.Format != "allister.backup" || d.FormatVersion != 2 || d.CreatedAt != "2026-11-10T09:30:00Z" || len(d.Plugins) != 1 {
+	if d.Format != "allister.backup" || d.FormatVersion != 3 || d.CreatedAt != "2026-11-10T09:30:00Z" || len(d.Plugins) != 1 {
 		t.Fatalf("header = %+v", d)
 	}
 	if len(d.Items) != 454 {
@@ -499,7 +499,7 @@ func TestBackupIncludesEveryItemCover(t *testing.T) {
 func TestBackupRefusesNewerFormat(t *testing.T) {
 	item, _ := json.Marshal(bookItem("1"))
 	for _, tc := range []struct{ name, json, want string }{
-		{"newer", header("3") + string(item) + "]}", "format version 3"},
+		{"newer", header("4") + string(item) + "]}", "format version 4"},
 		{"zero", header("0") + string(item) + "]}", "format version 0"},
 		{"negative", header("-1") + string(item) + "]}", "format version -1"},
 		{"fraction", header("1.5") + string(item) + "]}", "format version"},
@@ -526,7 +526,7 @@ func TestBackupRefusesNewerFormat(t *testing.T) {
 	// the version message names the supported version too
 	e := newEnv(t)
 	_, err := e.restore(zipOf(t, entry{name: "backup.json", body: []byte(header("7") + "]}")}), Limits{}, nil)
-	if err == nil || !strings.Contains(err.Error(), "7") || !strings.Contains(err.Error(), "versions 1 and 2") {
+	if err == nil || !strings.Contains(err.Error(), "7") || !strings.Contains(err.Error(), "versions 1 to 3") {
 		t.Fatalf("err = %v", err)
 	}
 }

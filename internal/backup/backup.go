@@ -2,9 +2,9 @@
 // with backup.json (every item of every plugin, enabled or not, with its
 // parts and list entry) and covers/<name> for every local item cover.
 //
-// Archive format (format "allister.backup", format_version 2):
+// Archive format (format "allister.backup", format_version 3):
 //
-//	backup.json  {"format": "allister.backup", "format_version": 2,
+//	backup.json  {"format": "allister.backup", "format_version": 3,
 //	              "created_at": "<RFC 3339 UTC>",
 //	              "plugins": [{"id": ..., "version": ...}],   (informational)
 //	              "appearance": {...},                        (optional)
@@ -36,9 +36,12 @@
 // state with a comment (library.BackupEntry). A restore reads format 1 too:
 // its entry (library.BackupEntryV1) becomes run 1, the comment the notes.
 //
-// The aliases (identities kept by a merge) and dismissed duplicate pairs
-// were added without a new format version: an older Allister skips them as
-// unknown members, and a backup without them restores as before.
+// Format 3 added the event origin "bulk" (a change made for several items at
+// once); an older Allister refuses such an event, so it refuses the format
+// instead of dropping those items. Format 3 also carries the aliases
+// (identities kept by a merge), the dismissed duplicate pairs and the
+// covers' origins; a backup without them restores as before. A restore
+// reads formats 1, 2 and 3.
 //
 // In backup.json "format" and "format_version" must come before "items",
 // "series", "lists", "aliases" and "dismissed_duplicates" after it, and each
@@ -87,7 +90,7 @@ const (
 	Format = "allister.backup"
 	// FormatVersion is the backup format version this code writes. A
 	// restore reads it and every older version (MinFormatVersion on).
-	FormatVersion = 2
+	FormatVersion = 3
 	// MinFormatVersion is the oldest format version a restore reads.
 	MinFormatVersion = 1
 	// MaxListed caps every row list of a Report.
@@ -597,7 +600,7 @@ func (rs *restorer) decode(ctx context.Context, dec *json.Decoder) error {
 			return reject("%s.", notBackup)
 		}
 		if !haveVersion {
-			return reject("This backup has no format version; this version of Allister restores backups of format versions %d and %d.", MinFormatVersion, FormatVersion)
+			return reject("This backup has no format version; this version of Allister restores backups of format versions %d to %d.", MinFormatVersion, FormatVersion)
 		}
 		for v := MinFormatVersion; v <= FormatVersion; v++ {
 			if version == fmt.Sprint(v) {
@@ -605,7 +608,7 @@ func (rs *restorer) decode(ctx context.Context, dec *json.Decoder) error {
 				return nil
 			}
 		}
-		return reject("This backup has format version %s; this version of Allister restores only format versions %d and %d. Use a newer Allister to restore it.",
+		return reject("This backup has format version %s; this version of Allister restores only format versions %d to %d. Use a newer Allister to restore it.",
 			clip(version, 20), MinFormatVersion, FormatVersion)
 	}
 	seen := map[string]bool{}

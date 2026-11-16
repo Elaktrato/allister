@@ -52,7 +52,7 @@ func TestBackupRoundTripKeepsAliasesAndDismissedPairs(t *testing.T) {
 	_, files := open(t, data)
 	body := string(files["backup.json"])
 	lists, aliases, dismissed := strings.Index(body, `"lists":[`), strings.Index(body, `"aliases":[`), strings.Index(body, `"dismissed_duplicates":[`)
-	if lists < 0 || aliases < lists || dismissed < aliases || !strings.Contains(body, `"format_version":2`) {
+	if lists < 0 || aliases < lists || dismissed < aliases || !strings.Contains(body, `"format_version":3`) {
 		t.Fatalf("aliases or dismissed_duplicates missing or out of order: %s", body)
 	}
 

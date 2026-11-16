@@ -111,7 +111,7 @@ func TestBackupFormat2RestoreTwiceAddsNothing(t *testing.T) {
 	a.listOf("Empty")
 	data := a.archive()
 	d, files := open(t, data)
-	if d.FormatVersion != 2 {
+	if d.FormatVersion != FormatVersion {
 		t.Fatalf("format = %d", d.FormatVersion)
 	}
 	body := string(files["backup.json"])
@@ -199,4 +199,41 @@ func TestRestoreListsMember(t *testing.T) {
 			t.Fatalf("report = %+v", rep)
 		}
 	})
+}
+
+// TestBackupFormat3KeepsBulkEvents: a bulk change's events round-trip; the
+// archive says format 3, so an Allister that does not know the origin
+// "bulk" refuses the file instead of dropping those items.
+func TestBackupFormat3KeepsBulkEvents(t *testing.T) {
+	a := newEnv(t)
+	one := a.book("1", "", &library.Entry{Status: library.Planned})
+	if _, err := a.lib.BulkSetStatus(bg, []int64{one}, library.Active, time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC)); err != nil {
+		t.Fatal(err)
+	}
+	q := `SELECT count(*) FROM entry_events WHERE origin = 'bulk'`
+	n := a.count(q)
+	if n == 0 {
+		t.Fatal("no bulk event to back up")
+	}
+	data := a.archive()
+	if d, _ := open(t, data); d.FormatVersion != 3 {
+		t.Fatalf("format = %d, want 3", d.FormatVersion)
+	}
+	b := newEnv(t)
+	if rep := mustRestore(t, b, data); rep.Created != 1 || len(rep.Notes) != 0 {
+		t.Fatalf("report = %+v", rep)
+	}
+	if got := b.count(q); got != n {
+		t.Fatalf("restored bulk events = %d, want %d", got, n)
+	}
+}
+
+func TestRestoreReadsFormats1To3(t *testing.T) {
+	for _, v := range []string{"1", "2", "3"} {
+		e := newEnv(t)
+		body := `{"format":"allister.backup","format_version":` + v + `,"items":[]}`
+		if _, err := e.restore(zipOf(t, entry{name: "backup.json", body: []byte(body)}), Limits{}, nil); err != nil {
+			t.Fatalf("format %s: %v", v, err)
+		}
+	}
 }
