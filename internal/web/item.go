@@ -235,8 +235,10 @@ type itemExtras struct {
 	Dialog    *entryForm
 	Match     *matchView
 	RunDialog *runDialog
-	UseCache  bool
-	Updated   *int
+	// NoteDialog is the unit note form (notes.go)
+	NoteDialog *noteDialog
+	UseCache   bool
+	Updated    *int
 	// CanonicalRedirect sends an unsaved item opened by an alias to its
 	// canonical URL (the plain overview GET only).
 	CanonicalRedirect bool
@@ -277,7 +279,7 @@ func (s *server) showItem(w http.ResponseWriter, r *http.Request, ref itemRef, x
 		}
 		v.Dialog = &f
 	}
-	v.Match, v.RunDialog = x.Match, x.RunDialog
+	v.Match, v.RunDialog, v.NoteDialog = x.Match, x.RunDialog, x.NoteDialog
 	if err := s.carrySeries(r, li, &v); err != nil {
 		s.internalError(w, r, err)
 		return

@@ -35,8 +35,12 @@
         <input type="date" name="finished_on" value="{{.FinishedOn}}" class="mt-1 w-full rounded border border-slate-700 bg-slate-950 px-3 py-2">
       </label>
     </div>
-    <label class="block text-sm">Comment
+    <label class="block text-sm">Notes
       <textarea name="comment" rows="3" maxlength="10000" class="mt-1 w-full rounded border border-slate-700 bg-slate-950 px-3 py-2">{{.Comment}}</textarea>
+    </label>
+    <label class="block text-sm">Review
+      <textarea name="review" rows="3" maxlength="10000" class="mt-1 w-full rounded border border-slate-700 bg-slate-950 px-3 py-2">{{.Review}}</textarea>
+      <span class="mt-1 block text-xs text-slate-400">Formatting: **bold**, *italic*, - lists, [links](https://…), ||spoilers||.</span>
     </label>
     {{with .Ask}}
     {{/* the confirm state: moving a completed run back. The plain "correct"

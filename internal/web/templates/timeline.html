@@ -8,6 +8,12 @@
     <time datetime="{{.WhenISO}}" class="text-slate-400">{{.When}}</time>
     <span>{{.Text}}</span>
     {{with .Origin}}<span class="rounded bg-slate-800 px-1.5 py-0.5 text-xs text-slate-300">{{.}}</span>{{end}}
+    {{if .Note}}
+    <a href="{{.NoteURL}}" hx-get="{{.NoteURL}}" hx-target="#dialog-slot" hx-swap="innerHTML" aria-label="Edit: {{.Text}}" class="text-xs text-indigo-300 hover:underline">Edit</a>
+    <div class="richtext basis-full space-y-1 break-words text-slate-300">{{richtext .Note}}</div>
+    {{else if .NoteURL}}
+    <a href="{{.NoteURL}}" hx-get="{{.NoteURL}}" hx-target="#dialog-slot" hx-swap="innerHTML" aria-label="{{.NoteLabel}}" class="text-xs text-indigo-300 hover:underline">Add note</a>
+    {{end}}
   </li>
   {{end}}
 </ol>

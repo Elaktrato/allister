@@ -58,6 +58,20 @@
     color: inherit;
   }
 
+  /* Formatted notes and reviews (internal/textfmt): lists keep their
+     markers, links are underlined. */
+  .richtext ul {
+    list-style: disc;
+    padding-left: 1.25rem;
+  }
+  .richtext ol {
+    list-style: decimal;
+    padding-left: 1.25rem;
+  }
+  .richtext a {
+    text-decoration: underline;
+  }
+
   /* An icon is decorative: always aria-hidden="true" next to a text label.
      The box is one em square and clips, so a name the font lacks never
      spills out as text. Size an icon with a font-size-only class such as

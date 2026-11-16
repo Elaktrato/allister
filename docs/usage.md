@@ -126,7 +126,8 @@ The universal backup includes these settings and the uploaded fonts. A restore s
 | `/game/manual/new`, `/game/manual/{id}` | Create and open manual games; `/edit` edits details, `/match` matches a source |
 | `/game/export/json` | The games JSON export |
 | `POST /settings/plugins/{source}/key` | Save a source's API key (`key`, or `field.<name>` for each named field) or remove the stored values (`remove=1`) and redirect back (see [API keys](#api-keys)) |
-| `/list/{id}/edit` | The list entry's Edit dialog (status, rating, progress, dates, comment) |
+| `/list/{id}/edit` | The list entry's Edit dialog (status, rating, progress, dates, notes, and the review of the run the entry shows) |
+| `/list/{id}/runs/{run}/notes/{key}/{unit}` | The note on one unit (1-based) of a count or pages track of a run (at most 2,000 characters; saving it empty deletes it). Opened from the run's timeline and after a +1 ("Note on <unit>"). Notes, reviews and unit notes take `**bold**`, `*italic*`, `- ` and `1. ` lists, `[text](https://...)` links and `\|\|spoiler\|\|` spans |
 | `/people/{id}` | Person page |
 | `/settings`, `/settings/appearance`, `/settings/plugins`, `/settings/import`, `/settings/backup` | Settings sections: General (time zone, links to each plugin's settings), Appearance (see [Appearance](#appearance)), Plugins (API keys, switching plugins on and off), Import, Backup and restore |
 | `/settings/plugins/{id}` | A plugin's settings: title language, home view and status, and table columns (see [Plugin settings](#plugin-settings)) |

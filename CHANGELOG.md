@@ -9,6 +9,11 @@ How a release is cut: move the entries under "Unreleased" to a new `## vX.Y.Z - 
 ### Added
 
 - **Run timeline.** Each run in an entry's history has a collapsed, read-only timeline of its logged changes (progress steps and jumps, status and rating changes) with times in your time zone; imported and restored changes are marked. Plugins can declare an optional plural track label (`label_plural`).
+- **Notes, reviews and unit notes.** The Edit dialog holds the entry's notes and the review of the current run (10,000 characters each; past runs' reviews are edited in the run history). Add a short note to a single unit (an episode, a page, ...) from a run's timeline or from the "Note on ..." link after a +1; notes show in the timeline at their unit. Notes and reviews take simple formatting: bold, italic, lists, https links and spoilers that stay hidden until clicked.
+
+### Changed
+
+- A comment longer than 10,000 characters is refused with a message instead of being cut silently.
 
 ## v0.3.0 - 2026-11-15
 

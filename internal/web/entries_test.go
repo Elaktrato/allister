@@ -114,7 +114,13 @@ func TestRowHelperSharedByPageAndIncrement(t *testing.T) {
 	id := e.addFixture(t, "tv", "show", tvWithEpisodes("1", "Shared", 10), library.Entry{Status: library.Active, Progress: map[string]float64{"episode": 2}})
 	inc := strings.TrimSpace(e.do("POST", "/list/"+idStr(id)+"/increment", url.Values{"return": {"/tv?view=table"}}, true).Body.String())
 	page := rowOf(t, e.get("/tv?view=table").Body.String(), "Shared")
-	if inc != page {
+	// the +1 answer only adds the link to a note on the unit just logged
+	link := noteURLOf(id, e.runsOf(t, id)[0], "episode", 3) + "?return=%2Ftv%3Fview%3Dtable"
+	note := "<a href=\"" + link + "\" hx-get=\"" + link + "\" hx-target=\"#dialog-slot\" hx-swap=\"innerHTML\" class=\"text-xs text-indigo-300 hover:underline\">Note on Episode 3</a>"
+	if !strings.Contains(inc, note) {
+		t.Fatalf("no note link in the increment row:\n%s", inc)
+	}
+	if inc = strings.Replace(inc, note, "", 1); inc != page {
 		t.Fatalf("increment row differs from the page row:\n%s\n---\n%s", inc, page)
 	}
 }

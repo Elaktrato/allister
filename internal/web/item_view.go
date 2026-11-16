@@ -136,9 +136,10 @@ type itemView struct {
 	Dialog       *entryForm
 	Match        *matchView
 	// Runs is the run history of a listed item, newest first; RunDialog an
-	// open run form (no JavaScript).
-	Runs      []runView
-	RunDialog *runDialog
+	// open run form, NoteDialog an open unit note form (no JavaScript).
+	Runs       []runView
+	RunDialog  *runDialog
+	NoteDialog *noteDialog
 }
 
 // itemView builds the overview of li. A failing credential read (the "Match

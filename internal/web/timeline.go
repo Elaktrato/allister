@@ -4,7 +4,10 @@ package web
 // answers the fragment the item page's run history loads when a run's
 // timeline is opened. The wording comes from the plugin's labels: a count or
 // pages step reads "<Label> 5", a jump "<LabelPlural> 5-7"; other changes
-// show their values. Times are in the configured time zone.
+// show their values. A unit note reads "Note on <Label> 5" with its
+// formatted text and an edit link; a forward count or pages step without a
+// note on the unit it reached offers one. Times are in the configured time
+// zone.
 
 import (
 	"math"
@@ -24,6 +27,10 @@ type timelineRow struct {
 	When, WhenISO string // local time shown; UTC RFC 3339 for the time element
 	Text          string
 	Origin        string // "" for a manual change, else the marker ("Imported", "Restored")
+	Note          string // a unit note's text (rendered with richtext)
+	// NoteURL is the note form of the row's unit: "Edit" on a note, "Add
+	// note" (NoteLabel names the unit for screen readers) on a step.
+	NoteURL, NoteLabel string
 }
 
 // timelineData is the data of the timeline template.
@@ -41,14 +48,28 @@ func (s *server) getTimeline(w http.ResponseWriter, r *http.Request) {
 		s.internalError(w, r, err)
 		return
 	}
-	s.renderPartial(w, "item", "timeline", timelineData{Rows: timelineRows(t.kind, entries, s.location(r.Context()))})
+	ret := t.overview()
+	link := func(key string, unit int) string { return unitNoteLink(t.row.Item.ID, t.run.ID, key, unit, ret) }
+	s.renderPartial(w, "item", "timeline", timelineData{Rows: timelineRows(t.kind, entries, s.location(r.Context()), link)})
 }
 
-// timelineRows words the entries (already oldest first) for kind k.
-func timelineRows(k plugin.KindDef, entries []library.TimelineEntry, loc *time.Location) []timelineRow {
+// timelineRows words the entries (already oldest first) for kind k; link
+// is the note form of one unit.
+func timelineRows(k plugin.KindDef, entries []library.TimelineEntry, loc *time.Location, link func(key string, unit int) string) []timelineRow {
+	noted := map[string]bool{} // "key/unit" of the run's notes
+	for _, e := range entries {
+		if e.Note != nil {
+			noted[e.Key+"/"+strconv.Itoa(e.Note.Unit)] = true
+		}
+	}
 	rows := make([]timelineRow, 0, len(entries))
 	for _, e := range entries {
 		row := timelineRow{When: e.At.In(loc).Format(timelineStamp), WhenISO: e.At.UTC().Format(time.RFC3339), Text: timelineText(k, e)}
+		if e.Note != nil {
+			row.Note, row.NoteURL = e.Note.Body, link(e.Key, e.Note.Unit)
+		} else if unit, def, ok := steppedUnit(k, e); ok && !noted[e.Key+"/"+strconv.Itoa(unit)] {
+			row.NoteURL, row.NoteLabel = link(e.Key, unit), "Add a note on "+unitLabel(def, unit)
+		}
 		switch e.Origin {
 		case library.OriginImport:
 			row.Origin = "Imported"
@@ -69,8 +90,34 @@ func timelineText(k plugin.KindDef, e library.TimelineEntry) string {
 		return "Status: " + statusText(k, e.OldText) + " → " + statusText(k, e.NewText)
 	case "rating":
 		return "Rating: " + ratingText(e.From) + " → " + ratingText(e.To)
+	case "note":
+		if e.Note == nil {
+			break
+		}
+		def, ok := progressDef(k, e.Key)
+		if !ok {
+			def = plugin.ProgressDef{Key: e.Key, Label: e.Key}
+		}
+		return "Note on " + unitLabel(def, e.Note.Unit)
 	}
 	return e.Type
+}
+
+// steppedUnit is the unit a forward progress step of a count or pages track
+// reached (the last one of a jump), the one a note can be added to.
+func steppedUnit(k plugin.KindDef, e library.TimelineEntry) (int, plugin.ProgressDef, bool) {
+	if e.Type != "progress" || e.To == nil {
+		return 0, plugin.ProgressDef{}, false
+	}
+	def, ok := progressDef(k, e.Key)
+	from := 0.0
+	if e.From != nil {
+		from = *e.From
+	}
+	if !ok || !takesNotes(def.Type) || !isWhole(*e.To) || *e.To <= from || *e.To < 1 || *e.To > maxUnit {
+		return 0, def, false
+	}
+	return int(*e.To), def, true
 }
 
 func statusText(k plugin.KindDef, v string) string {

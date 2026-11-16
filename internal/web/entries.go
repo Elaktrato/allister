@@ -3,10 +3,10 @@ package web
 // The generic entry routes, core routes guarded by the plugin of the item
 // {id} (itemPluginGuard): POST /list/{id}/increment (+1 on the primary
 // progress), GET|POST /list/{id}/edit (the list entry: status, rating,
-// dates, comment, progress values and the active progress combination
-// among the kind's allowed ones) and POST /list/{id}/remove (deletes the
-// item). They never change the item's own data; the edit may only switch
-// its active progress combination.
+// dates, notes, the display run's review, progress values and the active
+// progress combination among the kind's allowed ones) and POST
+// /list/{id}/remove (deletes the item). They never change the item's own
+// data; the edit may only switch its active progress combination.
 
 import (
 	"errors"
@@ -114,7 +114,7 @@ func (s *server) postIncrement(w http.ResponseWriter, r *http.Request) {
 		s.internalError(w, r, err)
 		return
 	}
-	s.entryChanged(w, r, ret)
+	s.answerChange(w, r, ret, true)
 }
 
 // entryChanged answers a change made from a list row or card (+1, start
@@ -122,6 +122,12 @@ func (s *server) postIncrement(w http.ResponseWriter, r *http.Request) {
 // when the form posted view=cards (with the home badge when the return path
 // is the home page).
 func (s *server) entryChanged(w http.ResponseWriter, r *http.Request, ret string) {
+	s.answerChange(w, r, ret, false)
+}
+
+// answerChange is entryChanged; offerNote adds the +1 answer's link to a
+// note on the unit just logged (see noteOffer).
+func (s *server) answerChange(w http.ResponseWriter, r *http.Request, ret string, offerNote bool) {
 	home := ret == "/"
 	if !isPartialRequest(r) {
 		http.Redirect(w, r, ret, http.StatusSeeOther)
@@ -137,6 +143,9 @@ func (s *server) entryChanged(w http.ResponseWriter, r *http.Request, ret string
 		return
 	}
 	rv := rvs[0]
+	if offerNote {
+		rv.NoteURL, rv.NoteLabel = t.noteOffer(ret)
+	}
 	if home {
 		rv.BadgeIcon, rv.BadgeLabel = badge(t.man, t.kind)
 	}
@@ -178,7 +187,7 @@ func progressText(def plugin.ProgressDef, val float64) string {
 // stored progress values (active and retained), rating blank when unrated.
 func entryFormValues(k plugin.KindDef, e library.Entry, stored map[string]float64) entryValues {
 	v := entryValues{Status: string(e.Status), StartedOn: fmtDay(e.StartedOn), FinishedOn: fmtDay(e.FinishedOn),
-		Comment: e.Notes, Progress: map[string]string{}}
+		Comment: e.Notes, Review: e.Review, Progress: map[string]string{}}
 	if e.Rating != nil {
 		v.Rating = strconv.Itoa(*e.Rating)
 	}
@@ -299,7 +308,7 @@ func (s *server) getEdit(w http.ResponseWriter, r *http.Request) {
 // The save is last-write-wins: the dialog posts the values it loaded, so a
 // +1 made meanwhile (another tab) is overwritten by the posted value.
 func (s *server) postEdit(w http.ResponseWriter, r *http.Request) {
-	if !parseForm(w, r) {
+	if !parseTextForm(w, r) {
 		return
 	}
 	t, ok := s.loadEntry(w, r)
@@ -337,6 +346,10 @@ func (s *server) postEdit(w http.ResponseWriter, r *http.Request) {
 	v, entry, perr := s.parseEntryForm(t.kind, keys, r)
 	if msg == "" {
 		msg = perr
+	}
+	if _, posted := r.PostForm["review"]; !posted {
+		// a form without the review field (an older page) keeps the review
+		v.Review, entry.Review = t.row.Entry.Review, t.row.Entry.Review
 	}
 	// moving a completed run back asks first: start a new run, or correct
 	// this one (run_choice). "new" writes the dialog's changes to the new
@@ -414,11 +427,11 @@ func (s *server) postRemove(w http.ResponseWriter, r *http.Request) {
 }
 
 // newRunEntry is what the entry dialog's "start again instead" writes to the
-// new run: the posted status, rating and notes, and of the dates and
-// progress only what the dialog CHANGED against the completed run (posted
-// e against the display run old). Unchanged values are the completed run's
-// and stay there: the new run keeps its own start (today), no finish and no
-// progress.
+// new run: the posted status, rating and notes, and of the dates, the
+// review and the progress only what the dialog CHANGED against the
+// completed run (posted e against the display run old). Unchanged values are
+// the completed run's and stay there: the new run keeps its own start
+// (today), no finish, no review and no progress.
 func newRunEntry(old library.Entry, e library.Entry, today time.Time) library.Entry {
 	started := time.Date(today.Year(), today.Month(), today.Day(), 0, 0, 0, 0, time.UTC)
 	if fmtDay(e.StartedOn) == fmtDay(old.StartedOn) {
@@ -426,6 +439,9 @@ func newRunEntry(old library.Entry, e library.Entry, today time.Time) library.En
 	}
 	if fmtDay(e.FinishedOn) == fmtDay(old.FinishedOn) {
 		e.FinishedOn = nil
+	}
+	if e.Review == old.Review {
+		e.Review = ""
 	}
 	progress := map[string]float64{}
 	for key, val := range e.Progress {

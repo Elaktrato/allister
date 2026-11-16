@@ -23,7 +23,7 @@
           {{end}}
         </span>
       </div>
-      {{if .Review}}<p class="whitespace-pre-line break-words text-slate-400">{{.Review}}</p>{{end}}
+      {{if .Review}}<div class="richtext space-y-1 break-words text-slate-400">{{richtext .Review}}</div>{{end}}
       <details hx-get="{{.TimelineURL}}" hx-trigger="toggle once" hx-target="find [data-timeline]" hx-swap="innerHTML">
         <summary class="cursor-pointer text-slate-300 hover:underline">Timeline</summary>
         <div data-timeline class="mt-1 text-slate-400" aria-live="polite">Loading…</div>
@@ -32,6 +32,29 @@
     {{end}}
   </ol>
 </section>
+{{end}}
+
+{{/* The note on one unit of a run (count or pages track); an empty note
+      is deleted. */}}
+{{define "unit_note_dialog"}}
+<div data-dialog class="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-black/70 p-4" role="dialog" aria-modal="true" aria-labelledby="note-dialog-title">
+  <form method="post" action="{{.Action}}" hx-post="{{.Action}}" hx-target="#dialog-slot" hx-swap="innerHTML"
+    class="w-full max-w-md space-y-4 rounded border border-slate-700 bg-slate-900 p-5">
+    <input type="hidden" name="return" value="{{.Return}}">
+    <h2 id="note-dialog-title" class="text-xl font-semibold">{{.Heading}}</h2>
+    {{if .Error}}
+    <div class="rounded border border-amber-700 bg-amber-950 p-3 text-amber-200" role="alert"><p>{{.Error}}</p></div>
+    {{end}}
+    <label class="block text-sm">Note
+      <textarea name="body" rows="4" maxlength="{{.MaxBody}}" class="mt-1 w-full rounded border border-slate-700 bg-slate-950 px-3 py-2">{{.Body}}</textarea>
+      <span class="mt-1 block text-xs text-slate-400">Formatting: **bold**, *italic*, - lists, [links](https://…), ||spoilers||. An empty note is deleted.</span>
+    </label>
+    <div class="flex justify-end gap-3">
+      <a href="{{.CancelURL}}" data-dialog-close class="rounded px-4 py-2 hover:bg-slate-800">Cancel</a>
+      <button type="submit" class="rounded bg-indigo-600 px-4 py-2 font-medium hover:bg-indigo-500">Save</button>
+    </div>
+  </form>
+</div>
 {{end}}
 
 {{define "run_dialog"}}
