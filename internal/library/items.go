@@ -376,24 +376,31 @@ func insertParts(ctx context.Context, tx *sql.Tx, id int64, p *prepared) error {
 			return fmt.Errorf("save external ids: %w", err)
 		}
 	}
-	for i, r := range p.rels {
+	if err := insertRelations(ctx, tx, id, p.rels); err != nil {
+		return err
+	}
+	return insertTerms(ctx, tx, id, p.terms)
+}
+
+func insertRelations(ctx context.Context, tx *sql.Tx, id int64, rels []relRow) error {
+	for i, r := range rels {
 		if _, err := tx.ExecContext(ctx, `INSERT INTO `+tableRelations+`
 			(item_id, seq, kind, source, source_id, kind_item, cover_url, url, titles_json, fields_json)
 			VALUES (?,?,?,?,?,?,?,?,?,?)`, id, i, r.kind, r.source, r.sourceID, r.kindItem, r.coverURL, r.url, r.titles, r.fields); err != nil {
 			return fmt.Errorf("save relations: %w", err)
 		}
 	}
-	return insertTerms(ctx, tx, id, p.terms)
+	return nil
 }
 
 // Item returns the item with all its parts, or nil, nil when absent.
 func (l *Library) Item(ctx context.Context, id int64) (*Item, error) {
-	return l.loadItem(ctx, `id = ?`, id)
+	return loadItem(ctx, l.db, `id = ?`, id)
 }
 
 // ItemBySource returns the item with the given identity, or nil, nil.
 func (l *Library) ItemBySource(ctx context.Context, pluginID, kind, source, sourceID string) (*Item, error) {
-	return l.loadItem(ctx, `plugin_id = ? AND kind = ? AND source = ? AND source_id = ?`, pluginID, kind, source, sourceID)
+	return loadItem(ctx, l.db, `plugin_id = ? AND kind = ? AND source = ? AND source_id = ?`, pluginID, kind, source, sourceID)
 }
 
 // ItemByPluginSource returns the plugin's items of every kind with the given
@@ -433,15 +440,15 @@ func (l *Library) ItemByPluginSource(ctx context.Context, pluginID, source, sour
 // ItemByExternalID returns the (oldest) item of the plugin kind that carries
 // the external id, or nil, nil.
 func (l *Library) ItemByExternalID(ctx context.Context, pluginID, kind, idType, value string) (*Item, error) {
-	return l.loadItem(ctx, `id = (SELECT i.id FROM items i JOIN external_ids e ON e.item_id = i.id
+	return loadItem(ctx, l.db, `id = (SELECT i.id FROM items i JOIN external_ids e ON e.item_id = i.id
 		WHERE i.plugin_id = ? AND i.kind = ? AND e.type = ? AND e.value = ? ORDER BY i.id LIMIT 1)`,
 		pluginID, kind, idType, value)
 }
 
-func (l *Library) loadItem(ctx context.Context, where string, args ...any) (*Item, error) {
+func loadItem(ctx context.Context, q queryer, where string, args ...any) (*Item, error) {
 	var it Item
 	var pk string
-	err := l.db.QueryRowContext(ctx, `SELECT id, plugin_id, kind, source, source_id, cover_path, external_url, sync_state, progress_keys
+	err := q.QueryRowContext(ctx, `SELECT id, plugin_id, kind, source, source_id, cover_path, external_url, sync_state, progress_keys
 		FROM items WHERE `+where+` LIMIT 1`, args...).Scan(
 		&it.ID, &it.PluginID, &it.Kind, &it.Source, &it.SourceID, &it.CoverPath, &it.ExternalURL, &it.SyncState, &pk)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -453,15 +460,15 @@ func (l *Library) loadItem(ctx context.Context, where string, args ...any) (*Ite
 	if err := json.Unmarshal([]byte(pk), &it.ProgressKeys); err != nil {
 		return nil, fmt.Errorf("load item: progress keys: %w", err)
 	}
-	if err := l.loadParts(ctx, &it); err != nil {
+	if err := loadParts(ctx, q, &it); err != nil {
 		return nil, err
 	}
 	return &it, nil
 }
 
 // loadParts reads the child tables of the item: one query per table.
-func (l *Library) loadParts(ctx context.Context, it *Item) error {
-	rows, err := l.db.QueryContext(ctx, `SELECT lang, text FROM item_titles WHERE item_id = ? ORDER BY rowid`, it.ID)
+func loadParts(ctx context.Context, q queryer, it *Item) error {
+	rows, err := q.QueryContext(ctx, `SELECT lang, text FROM item_titles WHERE item_id = ? ORDER BY rowid`, it.ID)
 	if err != nil {
 		return fmt.Errorf("load titles: %w", err)
 	}
@@ -478,7 +485,7 @@ func (l *Library) loadParts(ctx context.Context, it *Item) error {
 	}
 
 	acc := newFieldAcc()
-	rows, err = l.db.QueryContext(ctx, `SELECT key, vtype, text, num, date FROM item_fields WHERE item_id = ? ORDER BY key, seq`, it.ID)
+	rows, err = q.QueryContext(ctx, `SELECT key, vtype, text, num, date FROM item_fields WHERE item_id = ? ORDER BY key, seq`, it.ID)
 	if err != nil {
 		return fmt.Errorf("load fields: %w", err)
 	}
@@ -513,7 +520,7 @@ func (l *Library) loadParts(ctx context.Context, it *Item) error {
 		it.Fields = acc.vals
 	}
 
-	rows, err = l.db.QueryContext(ctx, `SELECT type, value FROM external_ids WHERE item_id = ?`, it.ID)
+	rows, err = q.QueryContext(ctx, `SELECT type, value FROM external_ids WHERE item_id = ?`, it.ID)
 	if err != nil {
 		return fmt.Errorf("load external ids: %w", err)
 	}
@@ -532,7 +539,7 @@ func (l *Library) loadParts(ctx context.Context, it *Item) error {
 		return fmt.Errorf("load external ids: %w", err)
 	}
 
-	rows, err = l.db.QueryContext(ctx, `SELECT kind, source, source_id, kind_item, cover_url, url, titles_json, fields_json
+	rows, err = q.QueryContext(ctx, `SELECT kind, source, source_id, kind_item, cover_url, url, titles_json, fields_json
 		FROM `+tableRelations+` WHERE item_id = ? ORDER BY seq`, it.ID)
 	if err != nil {
 		return fmt.Errorf("load relations: %w", err)
@@ -564,7 +571,7 @@ func (l *Library) loadParts(ctx context.Context, it *Item) error {
 		return fmt.Errorf("load relations: %w", err)
 	}
 
-	rows, err = l.db.QueryContext(ctx, `SELECT kind, term, rank, spoiler FROM item_terms WHERE item_id = ? ORDER BY kind, seq`, it.ID)
+	rows, err = q.QueryContext(ctx, `SELECT kind, term, rank, spoiler FROM item_terms WHERE item_id = ? ORDER BY kind, seq`, it.ID)
 	if err != nil {
 		return fmt.Errorf("load terms: %w", err)
 	}

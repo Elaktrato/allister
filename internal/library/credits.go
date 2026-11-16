@@ -152,7 +152,12 @@ func upsertPerson(ctx context.Context, tx *sql.Tx, pluginID, source string, p pl
 
 // Credits returns the item's credits ordered by seq with people resolved.
 func (l *Library) Credits(ctx context.Context, itemID int64) ([]SavedCredit, error) {
-	rows, err := l.db.QueryContext(ctx, `SELECT c.seq, c.role, c.detail, c.counterpart_role,
+	return loadCredits(ctx, l.db, itemID)
+}
+
+// loadCredits is Credits read through q (the database or a transaction).
+func loadCredits(ctx context.Context, q queryer, itemID int64) ([]SavedCredit, error) {
+	rows, err := q.QueryContext(ctx, `SELECT c.seq, c.role, c.detail, c.counterpart_role,
 		p.id, p.plugin_id, p.source, p.source_id, p.name, p.image_path, p.external_url,
 		w.id, w.plugin_id, w.source, w.source_id, w.name, w.image_path, w.external_url
 		FROM credits c
