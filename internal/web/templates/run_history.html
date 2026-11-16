@@ -26,7 +26,7 @@
       {{if .Review}}<div class="richtext space-y-1 break-words text-slate-400">{{richtext .Review}}</div>{{end}}
       <details hx-get="{{.TimelineURL}}" hx-trigger="toggle once" hx-target="find [data-timeline]" hx-swap="innerHTML">
         <summary class="cursor-pointer text-slate-300 hover:underline">Timeline</summary>
-        <div data-timeline class="mt-1 text-slate-400" aria-live="polite">Loading…</div>
+        <div data-timeline class="mt-1 text-slate-400" aria-live="polite">Loading… <noscript><a href="{{.TimelineURL}}" class="text-indigo-300 hover:underline">Open the timeline</a></noscript></div>
       </details>
     </li>
     {{end}}
