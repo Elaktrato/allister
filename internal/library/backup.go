@@ -16,7 +16,7 @@ import (
 	"github.com/allister/allister/internal/plugin"
 )
 
-// Backup records (format_version 2 of the universal backup; BackupEntryV1 is
+// Backup records (format_version 3 of the universal backup; BackupEntryV1 is
 // the entry of format 1). The JSON names are part of the backup format:
 // change them only together with the format version. sync_state is
 // deliberately not stored: a restore decides it.
@@ -1126,7 +1126,7 @@ func restoreEvents(p *prepared, events []BackupEvent) ([]BackupEvent, error) {
 			return nil, invalid("event type %q must be one of progress, status, rating", truncateRunes(ev.Type, 40))
 		}
 		if !validOrigin(EventOrigin(ev.Origin)) {
-			return nil, invalid("event origin %q must be one of manual, import, restore", truncateRunes(ev.Origin, 40))
+			return nil, invalid("event origin %q must be one of manual, import, restore, bulk", truncateRunes(ev.Origin, 40))
 		}
 		stamp, err := restoreStamp("event occurred_at", ev.OccurredAt)
 		if err != nil {

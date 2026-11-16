@@ -289,10 +289,10 @@ func TestBackupRestoreAppliesAppearanceOnlyAfterTheHeader(t *testing.T) {
 	file := hex.EncodeToString(sum[:]) + ".woff2"
 	look := `{"preset":"forest","palette":null,"font":"upload-1","font_scale":"large","fonts":[{"id":1,"name":"Sneaky","file":"` + file + `","format":"woff2"}]}`
 	for name, head := range map[string]string{
-		"appearance first, newer version": `{"appearance":` + look + `,"format":"` + Format + `","format_version":3,"items":[]}`,
+		"appearance first, newer version": `{"appearance":` + look + `,"format":"` + Format + `","format_version":4,"items":[]}`,
 		"appearance first, wrong format":  `{"appearance":` + look + `,"format":"something.else","format_version":1,"items":[]}`,
-		"appearance first, no items, v3":  `{"appearance":` + look + `,"format":"` + Format + `","format_version":3}`,
-		"header first, newer version":     `{"format":"` + Format + `","format_version":3,"appearance":` + look + `,"items":[]}`,
+		"appearance first, no items, v4":  `{"appearance":` + look + `,"format":"` + Format + `","format_version":4}`,
+		"header first, newer version":     `{"format":"` + Format + `","format_version":4,"appearance":` + look + `,"items":[]}`,
 		"appearance first, no version":    `{"appearance":` + look + `,"format":"` + Format + `","items":[]}`,
 	} {
 		data := zipOf(t, entry{name: "backup.json", body: []byte(head)}, entry{name: "fonts/" + file, body: good})
