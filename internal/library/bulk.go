@@ -12,6 +12,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 	"time"
@@ -147,7 +148,8 @@ func (l *Library) bulk(ctx context.Context, what string, ids []int64, check func
 // with a known total to that total (unbounded tracks stay); Active sets the
 // start date to today where it is empty; other statuses change the status
 // only. Rows the library refuses (a past display run behind a dropped
-// repeat, dates out of order) are skipped. The changes are logged with the
+// repeat, dates out of order) are skipped, and so is a row that already has
+// the status and needs no fill ("already <status>", nothing written). The changes are logged with the
 // bulk origin. An unknown status is ErrInvalid.
 func (l *Library) BulkSetStatus(ctx context.Context, ids []int64, st Status, today time.Time) (BulkResult, error) {
 	if !validStatus(st) {
@@ -188,6 +190,10 @@ func (l *Library) BulkSetStatus(ctx context.Context, ids []int64, st Status, tod
 			if e.StartedOn == nil {
 				e.StartedOn = &today
 			}
+		}
+		// the fills only replace a nil date, so the pointers tell a change
+		if old.Status == st && e.StartedOn == old.StartedOn && e.FinishedOn == old.FinishedOn && maps.Equal(e.Progress, old.Progress) {
+			return "already " + string(st), nil
 		}
 		if err := l.ValidateEntry(def, it, e); err != nil {
 			return "", err

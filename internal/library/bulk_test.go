@@ -380,3 +380,35 @@ func TestMatchingIDsFollowsTheTitleLanguage(t *testing.T) {
 		}
 	}
 }
+
+// A row that already has the status and needs no fill is skipped untouched.
+func TestBulkSetStatusSkipsRowsThatAlreadyHaveTheStatus(t *testing.T) {
+	e := newEnv(t)
+	today := day(2026, 11, 16)
+	done := addBook(t, e.lib, "d", fp(100), Entry{Status: Completed, FinishedOn: tp(day(2026, 3, 4)), Progress: map[string]float64{"pages": 100}})
+	// completed, but the finish date is empty: filled, so changed
+	undated := addBook(t, e.lib, "u", fp(100), Entry{Status: Completed, Progress: map[string]float64{"pages": 100}})
+	dropped := addBook(t, e.lib, "x", nil, Entry{Status: Dropped})
+	mustExec(t, e.db, `UPDATE `+tableEntries+` SET updated_at = '2020-01-01T00:00:00Z'`)
+	mustExec(t, e.db, `UPDATE `+tableRuns+` SET updated_at = '2020-01-01T00:00:00Z'`)
+	res, err := e.lib.BulkSetStatus(bg, []int64{done, undated}, Completed, today)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Changed != 1 || len(res.Skipped) != 1 {
+		t.Fatalf("result = %+v", res)
+	}
+	wantSkipped(t, res, done, "already completed")
+	if res, err = e.lib.BulkSetStatus(bg, []int64{dropped}, Dropped, today); err != nil || res.Changed != 0 {
+		t.Fatalf("dropped: %+v %v", res, err)
+	}
+	wantSkipped(t, res, dropped, "already dropped")
+	for _, id := range []int64{done, dropped} {
+		if n := count(t, e.db, `SELECT count(*) FROM `+tableRuns+` WHERE item_id = ? AND updated_at <> '2020-01-01T00:00:00Z'`, id); n != 0 {
+			t.Fatalf("item %d: run updated_at bumped", id)
+		}
+		if n := count(t, e.db, `SELECT count(*) FROM `+tableEntries+` WHERE item_id = ? AND updated_at <> '2020-01-01T00:00:00Z'`, id); n != 0 {
+			t.Fatalf("item %d: entry updated_at bumped", id)
+		}
+	}
+}
