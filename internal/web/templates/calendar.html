@@ -1,20 +1,37 @@
 {{define "title"}}Calendar - Allister{{end}}
 {{define "content"}}
-<div class="mb-5 flex flex-wrap items-center gap-3">
-  <h1 class="text-3xl font-semibold">Calendar</h1>
-  <div class="ml-auto flex items-center gap-1 text-sm">
-    <a href="{{.PrevURL}}" hx-get="{{.PrevURL}}" hx-target="#calendar-grid" hx-push-url="true" aria-label="Previous month" class="rounded p-1.5 text-slate-400 hover:bg-slate-800 hover:text-slate-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"><span class="icon text-[1.125rem]" aria-hidden="true">chevron_left</span></a>
-    <span class="min-w-40 text-center font-medium">{{.MonthLabel}}</span>
-    <a href="{{.NextURL}}" hx-get="{{.NextURL}}" hx-target="#calendar-grid" hx-push-url="true" aria-label="Next month" class="rounded p-1.5 text-slate-400 hover:bg-slate-800 hover:text-slate-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"><span class="icon text-[1.125rem]" aria-hidden="true">chevron_right</span></a>
-    <a href="{{.TodayURL}}" hx-get="{{.TodayURL}}" hx-target="#calendar-grid" hx-push-url="true" class="ml-1 rounded-md border border-slate-700 px-2.5 py-1 text-slate-300 hover:bg-slate-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500">Today</a>
-  </div>
-</div>
+<h1 class="mb-5 text-3xl font-semibold">Calendar</h1>
 {{template "calendar_grid" .}}
 {{end}}
 
 {{/* the month grid; htmx month links swap this region alone */}}
 {{define "calendar_grid"}}
-<div id="calendar-grid" class="overflow-x-auto">
+<div id="calendar-grid">
+  <div class="mb-4 flex flex-wrap items-center gap-3 text-sm">
+    <div class="flex items-center gap-1" role="group" aria-label="View">
+      <a href="{{.MonthURL}}" hx-get="{{.MonthURL}}" hx-target="#calendar-grid" hx-push-url="true"{{if eq .View "month"}} aria-current="true"{{end}} class="rounded-md border border-slate-700 px-2.5 py-1 hover:bg-slate-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500{{if eq .View "month"}} bg-slate-800 text-slate-200{{else}} text-slate-400{{end}}">Month</a>
+      <a href="{{.WeekURL}}" hx-get="{{.WeekURL}}" hx-target="#calendar-grid" hx-push-url="true"{{if eq .View "week"}} aria-current="true"{{end}} class="rounded-md border border-slate-700 px-2.5 py-1 hover:bg-slate-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500{{if eq .View "week"}} bg-slate-800 text-slate-200{{else}} text-slate-400{{end}}">Week</a>
+    </div>
+    {{if .Plugins}}
+    <form action="/calendar" method="get" hx-get="/calendar" hx-target="#calendar-grid" hx-push-url="true" hx-trigger="change" class="flex items-center gap-2">
+      {{if eq .View "week"}}<input type="hidden" name="view" value="week">{{end}}
+      <input type="hidden" name="{{.PositionName}}" value="{{.PositionValue}}">
+      <label for="calendar-plugin" class="sr-only">Plugin</label>
+      <select id="calendar-plugin" name="plugin" class="rounded-md border border-slate-700 bg-slate-900 px-2 py-1 text-slate-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500">
+        <option value="">All plugins</option>
+        {{range .Plugins}}<option value="{{.ID}}"{{if .Selected}} selected{{end}}>{{.Name}}</option>{{end}}
+      </select>
+      <noscript><button type="submit" class="rounded-md border border-slate-700 px-2.5 py-1 text-slate-300">Apply</button></noscript>
+    </form>
+    {{end}}
+    <div class="ml-auto flex items-center gap-1">
+      <a href="{{.PrevURL}}" hx-get="{{.PrevURL}}" hx-target="#calendar-grid" hx-push-url="true" aria-label="Previous {{.View}}" class="rounded p-1.5 text-slate-400 hover:bg-slate-800 hover:text-slate-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"><span class="icon text-[1.125rem]" aria-hidden="true">chevron_left</span></a>
+      <span class="min-w-40 text-center font-medium">{{.Label}}</span>
+      <a href="{{.NextURL}}" hx-get="{{.NextURL}}" hx-target="#calendar-grid" hx-push-url="true" aria-label="Next {{.View}}" class="rounded p-1.5 text-slate-400 hover:bg-slate-800 hover:text-slate-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"><span class="icon text-[1.125rem]" aria-hidden="true">chevron_right</span></a>
+      <a href="{{.TodayURL}}" hx-get="{{.TodayURL}}" hx-target="#calendar-grid" hx-push-url="true" class="ml-1 rounded-md border border-slate-700 px-2.5 py-1 text-slate-300 hover:bg-slate-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500">Today</a>
+    </div>
+  </div>
+  <div class="overflow-x-auto">
   <table class="w-full table-fixed border-collapse text-left text-sm">
     <thead>
       <tr class="text-xs uppercase tracking-wide text-slate-500">
@@ -22,21 +39,29 @@
       </tr>
     </thead>
     <tbody>
+      {{if eq .View "week"}}
+      <tr>{{template "calendar_cells" .Week}}</tr>
+      {{else}}
       {{range .Weeks}}
-      <tr>
-        {{range .}}
-        <td class="h-24 border-b border-slate-800/60 px-1.5 py-1.5 align-top{{if not .InMonth}} opacity-40{{end}}">
-          <div class="mb-1 text-xs {{if .Today}}inline-flex h-5 w-5 items-center justify-center rounded-full bg-indigo-600 font-semibold{{else}}text-slate-400{{end}}">{{.Day}}</div>
-          <div class="flex flex-col gap-1">
-            {{range .Releases}}
-            <a href="{{.Href}}" class="truncate rounded bg-slate-800 px-1.5 py-0.5 text-xs text-indigo-300 hover:bg-slate-700" title="{{.Title}} — {{if .Season}}S{{.Season}}E{{.Number}}{{else}}{{.Label}} {{.Number}}{{end}}"><time datetime="{{.At.Format "2006-01-02T15:04:05Z07:00"}}" >{{.At.Format "15:04"}}</time>{{if .Season}} <span class="font-mono">S{{.Season}}E{{.Number}}</span>{{end}} {{.Title}}</a>
-            {{end}}
-          </div>
-        </td>
-        {{end}}
-      </tr>
+      <tr>{{template "calendar_cells" .}}</tr>
+      {{end}}
       {{end}}
     </tbody>
   </table>
+  </div>
 </div>
+{{end}}
+
+{{/* one row of day cells; the week view's days carry a date label */}}
+{{define "calendar_cells"}}
+{{range .}}
+<td class="calendar-day h-24 border-b border-slate-800/60 px-1.5 py-1.5 align-top{{if not .InMonth}} opacity-40{{end}}">
+  <div class="mb-1 text-xs {{if .Today}}inline-flex h-5 items-center justify-center rounded-full bg-indigo-600 px-1.5 font-semibold{{else}}text-slate-400{{end}}">{{if .Label}}{{.Label}}{{else}}{{.Day}}{{end}}</div>
+  <div class="flex flex-col gap-1">
+    {{range .Releases}}
+    <a href="{{.Href}}" class="truncate rounded bg-slate-800 px-1.5 py-0.5 text-xs text-indigo-300 hover:bg-slate-700" title="{{.Title}} — {{if .Season}}S{{.Season}}E{{.Number}}{{else}}{{.Label}} {{.Number}}{{end}}"><time datetime="{{.At.Format "2006-01-02T15:04:05Z07:00"}}">{{.At.Format "15:04"}}</time>{{if .Season}} <span class="font-mono">S{{.Season}}E{{.Number}}</span>{{end}} {{.Title}}</a>
+    {{end}}
+  </div>
+</td>
+{{end}}
 {{end}}
