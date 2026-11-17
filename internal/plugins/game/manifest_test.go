@@ -276,3 +276,15 @@ func TestGameKindStats(t *testing.T) {
 		t.Fatalf("stats = %+v", k.Stats)
 	}
 }
+
+func TestManifestLength(t *testing.T) {
+	k := New(Options{}).Manifest().Kinds[0]
+	want := []plugin.LengthDef{
+		{Key: "time_main", Label: "Main story", Field: "time_main"},
+		{Key: "time_extra", Label: "Main + extras", Field: "time_extra"},
+		{Key: "time_complete", Label: "Completionist", Field: "time_complete"},
+	}
+	if !reflect.DeepEqual(k.Length, want) {
+		t.Fatalf("length = %+v", k.Length)
+	}
+}

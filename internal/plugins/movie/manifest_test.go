@@ -227,3 +227,11 @@ func TestMovieKindStats(t *testing.T) {
 		t.Fatalf("stats = %+v", k.Stats)
 	}
 }
+
+func TestManifestLength(t *testing.T) {
+	k := New(Options{}).Manifest().Kinds[0]
+	want := []plugin.LengthDef{{Key: "runtime", Label: "Runtime", Field: "runtime"}}
+	if !reflect.DeepEqual(k.Length, want) {
+		t.Fatalf("length = %+v", k.Length)
+	}
+}

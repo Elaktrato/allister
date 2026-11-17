@@ -75,6 +75,7 @@ A `KindDef` describes one media kind:
 - `Genres`, `Tags`: `TermDef{Enabled, Label, Editable, Filterable}`. When enabled, items carry genres (names) and tags (a name, an optional rank from 0 to 100 and a spoiler flag) as dedicated, indexed rows. `Label` is required when enabled. `Editable` puts a text area in Edit details and the manual form (one term per line; tags as `Name:80!`, where `:80` is the rank and a trailing `!` marks a spoiler). `Filterable` adds a multi-select with counts from the user's own library and an any/all switch to the list. The core trims terms, removes case-insensitive duplicates and allows at most 60 characters per term, 50 genres and 100 tags per item.
 - `Statuses`: labels for the five fixed core status classes `planned`, `active`, `paused`, `completed` and `dropped` ("Plan to watch", "Watching", ...). All five labels are required. A plugin cannot add a status.
 - `Repeat`: optional `RepeatDef{Action, Marker}`, the kind's wording for repeat runs: `Action` labels the button that starts the entry again ("Rewatch", "Reread", "Replay"), `Marker` the badge on an active repeat run ("Rewatching"). Both are required when `Repeat` is set, single line, at most 40 characters. Without it the core says "Start again" and "Again". JSON `repeat`, omitted when unset. Every shipped plugin declares it.
+- `Length`: optional list of `LengthDef{Key, Label, Field, UnitsField, PerUnitField}`, the measures of how long an entry is. `Key` is a slug, unique within the kind, and `Label` is required. Valid shapes: `Field` alone (a number field in minutes); `UnitsField` with `PerUnitField` (units times minutes per unit); `UnitsField` alone (a plain unit count, not minutes). Every named field must be a **number** field of the kind. `InMinutes()` is true for the first two shapes. JSON `length`, omitted when empty; adding it needs no contract version bump.
 - `Progress`: see [Progress](#progress).
 - `Sections`: see [Sections](#sections).
 - `Stats`: optional, how the kind's time and units count on the Statistics page (see [Statistics](#statistics)). JSON `stats`, omitted when unset.
@@ -150,6 +151,7 @@ type ProgressSpec struct {
 	Defaults     []string   // the active keys of a new item
 	Combinations [][]string // every allowed set of active keys
 	PrimaryKey   string     // the "+1" track; "" hides +1
+	GroupKey     string     // optional: a count track grouping the primary track's units
 }
 ```
 
@@ -159,6 +161,7 @@ Rules enforced by `Validate`:
 - `TotalField` must name a **number** field of the kind, and is not allowed on `percent`.
 - When anything is eligible, `Defaults` and at least one combination are required. Every key in them must be eligible and listed once, no combination may be empty, and `Defaults` must equal one of the combinations (as a set).
 - `PrimaryKey`, when set, must be an eligible `count` or `pages` track.
+- `GroupKey`, when set, must be an eligible `count` track other than `PrimaryKey`. It marks the track that groups the primary track's units (a TV release's season maps to it). Optional, JSON `group_key`, omitted when empty; adding it needs no contract version bump.
 - `ResetOnPrimary` is for a track that belongs to the release the +1 advances: the TV position is cleared when the episode increments. It is not set on the primary track.
 
 `LabelPlural` is optional data (JSON `label_plural`, not validated): the run timeline uses it for ranges ("Episodes 5-7"); without it the core adds an "s" to `Label`.

@@ -770,3 +770,81 @@ func TestValidateRepeat(t *testing.T) {
 		t.Errorf("valid repeat refused: %v", err)
 	}
 }
+
+func TestValidateLength(t *testing.T) {
+	tests := []struct {
+		name   string
+		length []plugin.LengthDef
+		want   string // empty: valid
+	}{
+		{"field", []plugin.LengthDef{{Key: "total", Label: "Total", Field: "year"}}, ""},
+		{"units and per unit", []plugin.LengthDef{{Key: "total", Label: "Total", UnitsField: "episodes", PerUnitField: "year"}}, ""},
+		{"units alone", []plugin.LengthDef{{Key: "eps", Label: "Episodes", UnitsField: "episodes"}}, ""},
+		{"unknown field", []plugin.LengthDef{{Key: "a", Label: "A", Field: "nope"}}, `kinds[0].length[0].field: no field "nope"`},
+		{"non number field", []plugin.LengthDef{{Key: "a", Label: "A", Field: "type"}}, `kinds[0].length[0].field: field "type" is not a number field`},
+		{"unknown units field", []plugin.LengthDef{{Key: "a", Label: "A", UnitsField: "nope"}}, `kinds[0].length[0].units_field: no field "nope"`},
+		{"non number per unit", []plugin.LengthDef{{Key: "a", Label: "A", UnitsField: "episodes", PerUnitField: "type"}}, `kinds[0].length[0].per_unit_field: field "type" is not a number field`},
+		{"field with units", []plugin.LengthDef{{Key: "a", Label: "A", Field: "year", UnitsField: "episodes"}}, `kinds[0].length[0]`},
+		{"per unit without units", []plugin.LengthDef{{Key: "a", Label: "A", PerUnitField: "year"}}, `kinds[0].length[0].per_unit_field: needs units_field`},
+		{"nothing set", []plugin.LengthDef{{Key: "a", Label: "A"}}, `kinds[0].length[0]`},
+		{"duplicate key", []plugin.LengthDef{{Key: "a", Label: "A", Field: "year"}, {Key: "a", Label: "B", Field: "year"}}, `kinds[0].length[1].key: duplicate "a"`},
+		{"bad key", []plugin.LengthDef{{Key: "A b", Label: "A", Field: "year"}}, `kinds[0].length[0].key`},
+		{"empty label", []plugin.LengthDef{{Key: "a", Field: "year"}}, `kinds[0].length[0].label: required`},
+	}
+	for _, tc := range tests {
+		m := tv()
+		m.Kinds[0].Length = tc.length
+		err := plugin.Validate(m)
+		if tc.want == "" {
+			if err != nil {
+				t.Errorf("%s: %v", tc.name, err)
+			}
+			continue
+		}
+		if err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("%s: %v, want %q", tc.name, err, tc.want)
+		}
+	}
+}
+
+func TestValidateGroupKey(t *testing.T) {
+	tests := []struct {
+		name, key, want string
+	}{
+		{"valid", "season", ""},
+		{"none", "", ""},
+		{"unknown track", "nope", `kinds[0].progress.group_key: "nope" is not an eligible progress key`},
+		{"same as primary", "episode", `kinds[0].progress.group_key: must differ from the primary key`},
+		{"not a count", "position", `kinds[0].progress.group_key: "position" must be a count progress`},
+	}
+	for _, tc := range tests {
+		m := tv()
+		m.Kinds[0].Progress.GroupKey = tc.key
+		err := plugin.Validate(m)
+		if tc.want == "" {
+			if err != nil {
+				t.Errorf("%s: %v", tc.name, err)
+			}
+			continue
+		}
+		if err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("%s: %v, want %q", tc.name, err, tc.want)
+		}
+	}
+}
+
+func TestLengthInMinutes(t *testing.T) {
+	for _, tc := range []struct {
+		d    plugin.LengthDef
+		want bool
+	}{
+		{plugin.LengthDef{Field: "a"}, true},
+		{plugin.LengthDef{UnitsField: "a", PerUnitField: "b"}, true},
+		{plugin.LengthDef{UnitsField: "a"}, false},
+		{plugin.LengthDef{}, false},
+	} {
+		if got := tc.d.InMinutes(); got != tc.want {
+			t.Errorf("%+v: InMinutes = %v", tc.d, got)
+		}
+	}
+}

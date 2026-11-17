@@ -39,9 +39,13 @@ func showKind() plugin.KindDef {
 			{Key: "started_on", Label: "Started", Type: plugin.FieldDate, Show: true, Editable: true},
 			{Key: "ended_on", Label: "Ended", Type: plugin.FieldDate, Show: true, Editable: true},
 		},
-		Genres:   plugin.TermDef{Enabled: true, Label: "Genres", Editable: true, Filterable: true},
-		Tags:     plugin.TermDef{Enabled: true, Label: "Tags", Editable: true, Filterable: true},
-		Repeat:   &plugin.RepeatDef{Action: "Rewatch", Marker: "Rewatching"},
+		Genres: plugin.TermDef{Enabled: true, Label: "Genres", Editable: true, Filterable: true},
+		Tags:   plugin.TermDef{Enabled: true, Label: "Tags", Editable: true, Filterable: true},
+		Repeat: &plugin.RepeatDef{Action: "Rewatch", Marker: "Rewatching"},
+		Length: []plugin.LengthDef{
+			{Key: "total", Label: "Total time", UnitsField: "episodes", PerUnitField: "runtime"},
+			{Key: "episodes", Label: "Episodes", UnitsField: "episodes"},
+		},
 		Statuses: showStatuses,
 		Progress: plugin.ProgressSpec{
 			Eligible: []plugin.ProgressDef{
@@ -52,6 +56,7 @@ func showKind() plugin.KindDef {
 			Defaults:     []string{"season", "episode", "position"},
 			Combinations: [][]string{{"season", "episode", "position"}, {"season", "episode"}, {"episode"}, {"episode", "position"}},
 			PrimaryKey:   "episode",
+			GroupKey:     "season",
 		},
 		Stats: &plugin.StatsDef{
 			Time:  &plugin.StatsTimeDef{Label: "Watchtime", UnitsKey: "episode", PerUnitField: "runtime"},

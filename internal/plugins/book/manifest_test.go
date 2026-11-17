@@ -158,3 +158,11 @@ func TestGoogleBooksKeyIsOptional(t *testing.T) {
 	}
 	t.Fatal("no google books source")
 }
+
+func TestManifestDeclaresNoLength(t *testing.T) {
+	for _, k := range New(Options{}).Manifest().Kinds {
+		if len(k.Length) != 0 {
+			t.Fatalf("%s length = %+v", k.Key, k.Length)
+		}
+	}
+}

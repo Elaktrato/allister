@@ -384,6 +384,7 @@ func validateKind(p *problems, path string, k KindDef) {
 	validateColumns(p, path, k.Columns, fields)
 	validateStats(p, path+".stats", k)
 	validateRepeat(p, path+".repeat", k.Repeat)
+	validateLength(p, path+".length", k.Length, fields)
 
 	for i, s := range k.Sections {
 		sp := fmt.Sprintf("%s.sections[%d]", path, i)
@@ -515,6 +516,60 @@ func validateProgress(p *problems, path string, ps ProgressSpec, fields map[stri
 			p.add(path+".primary_key", "%q is not an eligible progress key", ps.PrimaryKey)
 		case t != Count && t != Pages:
 			p.add(path+".primary_key", "%q must be a count or pages progress, not %s", ps.PrimaryKey, t)
+		}
+	}
+	if ps.GroupKey != "" {
+		t, ok := types[ps.GroupKey]
+		switch {
+		case !ok:
+			p.add(path+".group_key", "%q is not an eligible progress key", ps.GroupKey)
+		case ps.GroupKey == ps.PrimaryKey:
+			p.add(path+".group_key", "must differ from the primary key")
+		case t != Count:
+			p.add(path+".group_key", "%q must be a count progress, not %s", ps.GroupKey, t)
+		}
+	}
+}
+
+// validateLength checks a kind's length measures: unique slug keys, labels,
+// and one of the three valid shapes over existing number fields.
+func validateLength(p *problems, path string, defs []LengthDef, fields map[string]FieldType) {
+	seen := map[string]bool{}
+	number := func(at, name string) {
+		switch t, ok := fields[name]; {
+		case !ok:
+			p.add(at, "no field %q", name)
+		case t != FieldNumber:
+			p.add(at, "field %q is not a number field", name)
+		}
+	}
+	for i, d := range defs {
+		dp := fmt.Sprintf("%s[%d]", path, i)
+		if !keyRe.MatchString(d.Key) {
+			p.add(dp+".key", "%q is not a valid key", d.Key)
+		} else if seen[d.Key] {
+			p.add(dp+".key", "duplicate %q", d.Key)
+		}
+		seen[d.Key] = true
+		if d.Label == "" {
+			p.add(dp+".label", "required")
+		}
+		switch {
+		case d.Field != "" && (d.UnitsField != "" || d.PerUnitField != ""):
+			p.add(dp, "field cannot be combined with units_field or per_unit_field")
+		case d.Field == "" && d.UnitsField == "" && d.PerUnitField == "":
+			p.add(dp, "needs field, or units_field (with an optional per_unit_field)")
+		case d.UnitsField == "" && d.PerUnitField != "":
+			p.add(dp+".per_unit_field", "needs units_field")
+		}
+		if d.Field != "" {
+			number(dp+".field", d.Field)
+		}
+		if d.UnitsField != "" {
+			number(dp+".units_field", d.UnitsField)
+		}
+		if d.PerUnitField != "" {
+			number(dp+".per_unit_field", d.PerUnitField)
 		}
 	}
 }

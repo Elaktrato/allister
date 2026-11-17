@@ -48,6 +48,10 @@ func manifest() plugin.Manifest {
 			Genres: plugin.TermDef{Enabled: true, Label: "Genres", Editable: true, Filterable: true},
 			Tags:   plugin.TermDef{Enabled: true, Label: "Tags", Editable: true, Filterable: true},
 			Repeat: &plugin.RepeatDef{Action: "Rewatch", Marker: "Rewatching"},
+			Length: []plugin.LengthDef{
+				{Key: "total", Label: "Total time", UnitsField: "episodes", PerUnitField: "duration"},
+				{Key: "episodes", Label: "Episodes", UnitsField: "episodes"},
+			},
 			Statuses: plugin.StatusLabels{
 				Planned: "Plan to watch", Active: "Watching", Paused: "Paused", Completed: "Completed", Dropped: "Dropped",
 			},
