@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/allister/allister/internal/library"
+	"github.com/allister/allister/internal/plugin"
 )
 
 // stamp sets the entry's update time (the library stamps "now" in whole
@@ -78,7 +79,7 @@ func TestHomeInProgressSpansPluginsInUpdateOrder(t *testing.T) {
 	e.stamp(t, p, base.Add(9*time.Hour))
 
 	body := e.get("/").Body.String()
-	sec := section(t, body, "In progress")
+	sec := section(t, body, "Up next")
 	ia, ib, ic := strings.Index(sec, "Dark"), strings.Index(sec, "Earthsea"), strings.Index(sec, "Light")
 	if ia < 0 || ib < ia || ic < ib {
 		t.Fatalf("order dark=%d earthsea=%d light=%d", ia, ib, ic)
@@ -92,7 +93,7 @@ func TestHomeInProgressLimit(t *testing.T) {
 	for i := 0; i < 15; i++ {
 		e.addFixture(t, "tv", "show", tvShow(fmt.Sprint(i), fmt.Sprintf("Show%02d", i)), library.Entry{Status: library.Active})
 	}
-	sec := section(t, e.get("/").Body.String(), "In progress")
+	sec := section(t, e.get("/").Body.String(), "Up next")
 	if n := strings.Count(sec, "<div data-card class"); n != 12 {
 		t.Fatalf("cards: %d", n)
 	}
@@ -196,7 +197,7 @@ func TestHomeSectionOrder(t *testing.T) {
 	e.tvSeries(t, "Saga")
 	b := e.get("/").Body.String()
 	last := -1
-	for _, h := range []string{"In progress", "Coming up", "Series in progress", "Recently updated"} {
+	for _, h := range []string{"Up next", "Coming up", "Series in progress", "Recently updated"} {
 		i := strings.Index(b, ">"+h+"</h2>")
 		if i < 0 || i < last {
 			t.Fatalf("section %q at %d (previous %d)", h, i, last)
@@ -301,7 +302,7 @@ func TestHomeOneLinkPerKindWithPluralLabel(t *testing.T) {
 	e := newFixtureEnv(t)
 	e.addFixture(t, "tv", "show", tvShow("1", "Dark"), library.Entry{Status: library.Active})
 	e.addFixture(t, "book", "book", bookItem("b", "Earthsea"), library.Entry{Status: library.Active})
-	sec := section(t, e.get("/").Body.String(), "In progress")
+	sec := section(t, e.get("/").Body.String(), "Up next")
 	mustContain(t, sec, "All active in Shows", "All active in Books")
 }
 
@@ -309,4 +310,99 @@ func TestHomeSeriesBar(t *testing.T) {
 	e := newFixtureEnv(t)
 	e.tvSeries(t, "Saga") // 1 of 3 completed
 	mustContain(t, section(t, e.get("/").Body.String(), "Series in progress"), `style="width: 33%"`)
+}
+
+// upNextShow is a tv fixture with an episode total (0: unbounded).
+func upNextShow(id, title string, episodes float64) plugin.ItemData {
+	d := tvShow(id, title)
+	if episodes > 0 {
+		d.Fields["episodes"] = plugin.FieldValue{Num: &episodes}
+	}
+	return d
+}
+
+func TestHomeUpNextHeading(t *testing.T) {
+	e := newFixtureEnv(t)
+	e.addFixture(t, "tv", "show", tvShow("1", "Dark"), library.Entry{Status: library.Active})
+	b := e.get("/").Body.String()
+	mustContain(t, b, `id="home-active"`, ">Up next</h2>")
+	mustNotContain(t, b, ">In progress</h2>")
+}
+
+func TestHomeCardsShowNextUnit(t *testing.T) {
+	e := newFixtureEnv(t)
+	e.addFixture(t, "tv", "show", upNextShow("1", "Dark", 10), library.Entry{Status: library.Active, Progress: map[string]float64{"episode": 6}})
+	e.addFixture(t, "tv", "show", tvShow("2", "Light"), library.Entry{Status: library.Active})
+	e.addFixture(t, "book", "book", bookItem("b", "Earthsea"), library.Entry{Status: library.Active, Progress: map[string]float64{"pages": 41}})
+	body := e.get("/").Body.String()
+	mustContain(t, cardOf(t, body, "Dark"), "Episode 7")
+	mustContain(t, cardOf(t, body, "Light"), "Episode 1")
+	mustContain(t, cardOf(t, body, "Earthsea"), "Page 42")
+}
+
+func TestHomeNextHiddenForDurationAndAtTotal(t *testing.T) {
+	e := newFixtureEnv(t)
+	e.addFixture(t, "tv", "show", upNextShow("1", "Done Show", 10), library.Entry{Status: library.Active, Progress: map[string]float64{"episode": 10}})
+	body := e.get("/").Body.String()
+	mustNotContain(t, cardOf(t, body, "Done Show"), "Episode 11", "data-next")
+	// a duration or percent primary track has no next unit
+	k := plugin.KindDef{Progress: plugin.ProgressSpec{PrimaryKey: "position",
+		Eligible: []plugin.ProgressDef{{Key: "position", Type: plugin.Duration, Label: "Position"}}}}
+	if got := nextLabel(k, []string{"position"}, library.Entry{Progress: map[string]float64{"position": 5}}, nil); got != "" {
+		t.Fatalf("duration next label %q", got)
+	}
+}
+
+func TestHomeAiredHint(t *testing.T) {
+	e := newFixtureEnv(t)
+	now := time.Date(2026, 11, 10, 12, 0, 0, 0, time.UTC)
+	e.now = &now
+	ctx := context.Background()
+	aired := func(id int64, n int) {
+		var as []library.Airing
+		for i := 1; i <= n; i++ {
+			as = append(as, library.Airing{Number: i, AirsAt: now.Add(-time.Duration(i) * time.Hour)})
+		}
+		if err := e.lib.SaveSchedule(ctx, id, as, now); err != nil {
+			t.Fatal(err)
+		}
+	}
+	two := e.addFixture(t, "tv", "show", tvShow("1", "Two Aired"), library.Entry{Status: library.Active, Progress: map[string]float64{"episode": 1}})
+	aired(two, 3)
+	none := e.addFixture(t, "tv", "show", tvShow("2", "None Aired"), library.Entry{Status: library.Active, Progress: map[string]float64{"episode": 3}})
+	aired(none, 3)
+	rep := e.addFixture(t, "tv", "show", tvShow("3", "Rerun"), library.Entry{Status: library.Completed})
+	aired(rep, 3)
+	if _, err := e.lib.StartRun(ctx, rep, now); err != nil {
+		t.Fatal(err)
+	}
+	body := e.get("/").Body.String()
+	mustContain(t, cardOf(t, body, "Two Aired"), "2 aired")
+	mustNotContain(t, cardOf(t, body, "None Aired"), "aired")
+	mustNotContain(t, cardOf(t, body, "Rerun"), "aired")
+}
+
+func TestHomeRewatchMarkerKept(t *testing.T) {
+	e := newFixtureEnv(t)
+	ctx := context.Background()
+	id := completedShow(t, e.env, "1", "Again Show")
+	if _, err := e.lib.StartRun(ctx, id, *day(2026, 1, 1)); err != nil {
+		t.Fatal(err)
+	}
+	body := e.get("/").Body.String()
+	mustContain(t, cardOf(t, body, "Again Show"), ">Again<")
+	mustContain(t, section(t, body, "Up next"), "All active in Shows")
+}
+
+func TestListCardsUnchanged(t *testing.T) {
+	e := newFixtureEnv(t)
+	now := time.Date(2026, 11, 10, 12, 0, 0, 0, time.UTC)
+	e.now = &now
+	id := e.addFixture(t, "tv", "show", tvShow("1", "Dark"), library.Entry{Status: library.Active, Progress: map[string]float64{"episode": 1}})
+	if err := e.lib.SaveSchedule(context.Background(), id, []library.Airing{{Number: 2, AirsAt: now.Add(-time.Hour)}, {Number: 3, AirsAt: now.Add(-2 * time.Hour)}}, now); err != nil {
+		t.Fatal(err)
+	}
+	card := cardOf(t, e.get("/tv?view=cards").Body.String(), "Dark")
+	mustNotContain(t, card, "aired", "Episode 2", "data-next")
+	mustContain(t, cardOf(t, e.get("/").Body.String(), "Dark"), "2 aired", "Episode 2")
 }

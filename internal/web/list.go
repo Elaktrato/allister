@@ -74,6 +74,10 @@ type rowView struct {
 	// RepeatsTitle as its explanation.
 	Repeats      int
 	RepeatsTitle string
+	// NextLabel ("<unit> <n>") and Aired (releases aired beyond the
+	// progress) are set by the home page's Up next cards only.
+	NextLabel string
+	Aired     int
 	// SelectID is the item id of the row's bulk edit checkbox on a plugin's
 	// list ("" elsewhere: no checkbox).
 	SelectID string

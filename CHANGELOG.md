@@ -8,6 +8,7 @@ How a release is cut: move the entries under "Unreleased" to a new `## vX.Y.Z - 
 
 ### Added
 
+- **Up next on the home page.** The home page's active cards (formerly In progress) name the next unit to watch, read or play (for example the next episode or page) and show "N aired" when stored schedules know of releases beyond your progress. The plugin lists' cards are unchanged.
 - **Mark watched on the calendar.** Releases that have aired and lie beyond your progress get a check button in the month and week view that sets your progress to that release (season and episode where the item has both). It never lowers progress, a double click changes nothing, and it counts as activity in the statistics.
 - **Calendar week view and plugin filter.** The calendar has a Month/Week toggle (the week starts on Monday, in your time zone) and a plugin select that narrows either view to one plugin.
 - **No repeat run while airing.** An item with upcoming releases cannot be started again (button and "<Action> instead?" are hidden with a note; the request answers 422), so airings always belong to the first run. It can be started again once it has finished airing.
