@@ -297,7 +297,7 @@ func TestCalendarPluginFilter(t *testing.T) {
 		body := rec.Body.String()
 		mustContain(t, body, `id="calendar-grid"`, `hx-target="#calendar-grid"`)
 		mustNotContain(t, body, "<html", "<header")
-		if v := rec.Header().Get("Vary"); !strings.Contains(v, "HX-Request") || !strings.Contains(v, "HX-Target") {
+		if v := rec.Header().Get("Vary"); v != "HX-Request, HX-Target, HX-History-Restore-Request" {
 			t.Fatalf("Vary = %q", v)
 		}
 	}
