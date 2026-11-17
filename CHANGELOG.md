@@ -6,6 +6,14 @@ How a release is cut: move the entries under "Unreleased" to a new `## vX.Y.Z - 
 
 ## Unreleased
 
+### Fixed
+
+- **Calendar plugin select keeps keyboard focus** after you change it, and the grid no longer nests a second copy of itself in the page.
+- **No empty `plugin=` in the calendar address** after choosing "All plugins".
+- **Mark watched is no longer offered when it cannot change anything**, for example when your progress is already at the total and a stored release is numbered above it.
+- **Clearer entry dialog for a still airing item** whose shown run is an earlier one: it says there is nothing to answer instead of asking to correct the current run with no button for it.
+- **Pick filter links:** Clear filters also clears the length filter, and the view, sort, status and page links of a list keep it.
+
 ## v0.5.0 - 2026-11-17
 
 ### Added
