@@ -99,9 +99,12 @@ const malFormatsQuery = `query ($ids: [Int], $type: MediaType) {
 // malFormatsChunk is the number of MAL ids sent per request (the Page size).
 const malFormatsChunk = 50
 
+// scheduleQuery reads the newest 50 airings: Media.airingSchedule is capped at
+// 25 nodes counted from the oldest air date, which would drop the recent and
+// upcoming episodes of a long-running show.
 const scheduleQuery = `query ($id: Int) {
-  Media(id: $id, type: ANIME) {
-    airingSchedule { nodes { episode airingAt } }
+  Page(page: 1, perPage: 50) {
+    airingSchedules(mediaId: $id, sort: TIME_DESC) { episode airingAt }
   }
 }`
 
@@ -421,23 +424,21 @@ func relationKind(relType string) (string, bool) {
 }
 
 // AiringSchedule returns the known air dates of an anime's episodes (the
-// Media.airingSchedule nodes; airingAt is a Unix timestamp in seconds).
+// newest 50 Page.airingSchedules; airingAt is a Unix timestamp in seconds).
 func (c *Client) AiringSchedule(ctx context.Context, id string) ([]Airing, error) {
 	n, err := parseID(id)
 	if err != nil {
 		return nil, err
 	}
 	var out struct {
-		Media struct {
-			AiringSchedule struct {
-				Nodes []Airing
-			}
+		Page struct {
+			AiringSchedules []Airing
 		}
 	}
 	if err := c.do(ctx, scheduleQuery, map[string]any{"id": n}, &out); err != nil {
 		return nil, err
 	}
-	return out.Media.AiringSchedule.Nodes, nil
+	return out.Page.AiringSchedules, nil
 }
 
 // MediaList returns the anime list of an AniList user (all of the account's
