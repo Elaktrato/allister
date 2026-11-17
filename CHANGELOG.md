@@ -8,6 +8,7 @@ How a release is cut: move the entries under "Unreleased" to a new `## vX.Y.Z - 
 
 ### Fixed
 
+- **Plugin authors: `group_key` now needs a `primary_key`.** A manifest that sets `group_key` without a primary progress track is refused at load (it had no defined meaning). No bundled plugin is affected.
 - **Calendar plugin select keeps keyboard focus** after you change it, and the grid no longer nests a second copy of itself in the page.
 - **No empty `plugin=` in the calendar address** after choosing "All plugins".
 - **Mark watched is no longer offered when it cannot change anything**, for example when your progress is already at the total and a stored release is numbered above it.
