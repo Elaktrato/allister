@@ -92,4 +92,5 @@ Exact markup and wording; the aired-count query shape; whether the calendar's we
 6. The aired hint and the Next line come only from stored schedules and the primary progress track; none for duration/percent tracks.
 7. An unknown calendar plugin id is ignored.
 8. A repeat run already in progress when new airings appear keeps the hint and Mark watched suppressed; the "still airing" test is "a stored airing after now"; the pick's status default and the button's explicit status; `?plugin=` plugin-level; `LengthDef` unit derived from the fields set; a new injectable `rand` field.
-9. v0.4.0 is tagged after #35 is merged **(owner)**; the `CHANGELOG.md` Unreleased items from projects 1 to 3 fold into the v0.4.0 section at that point.
+9. The season-aware comparison needs the core to know which progress track groups the primary one, so `ProgressSpec.GroupKey` (optional, data only; TV declares `season`) is added next to `Length`.
+10. v0.4.0 is tagged after #35 is merged **(owner)**; the `CHANGELOG.md` Unreleased items from projects 1 to 3 fold into the v0.4.0 section at that point.
