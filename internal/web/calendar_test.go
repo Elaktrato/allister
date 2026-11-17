@@ -541,6 +541,29 @@ func TestMarkWatchedTotalBelowRelease(t *testing.T) {
 	}
 }
 
+// TestCalendarMarkWatchedHiddenAtTotal: with progress at the total and a stored
+// release numbered above it, Mark watched would only clamp to what is already
+// stored, so no button is offered (it used to come back after every click).
+func TestCalendarMarkWatchedHiddenAtTotal(t *testing.T) {
+	e := newFixtureEnv(t)
+	now := time.Date(2026, 11, 11, 12, 0, 0, 0, time.UTC)
+	e.now = &now
+	d := tvShow("7", "Short")
+	d.Fields["episodes"] = plugin.FieldValue{Num: num(2)}
+	id := e.addFixture(t, "tv", "show", d, library.Entry{Status: library.Active, Progress: map[string]float64{"episode": 1}})
+	if err := e.lib.SaveSchedule(context.Background(), id, []library.Airing{{Number: 3, AirsAt: now.Add(-time.Hour)}}, now); err != nil {
+		t.Fatal(err)
+	}
+	// below the total the button clamps to it and is offered once
+	action := fmt.Sprintf(`action="/list/%d/watched"`, id)
+	mustContain(t, e.get("/calendar?month=2026-11").Body.String(), action)
+	rec := e.do("POST", fmt.Sprintf("/list/%d/watched", id), watchForm(0, 3, "/calendar"), false)
+	if rec.Code != 303 || episodeOf(t, e, id) != 2 {
+		t.Fatalf("%d, episode %v", rec.Code, episodeOf(t, e, id))
+	}
+	mustNotContain(t, e.get("/calendar?month=2026-11").Body.String(), action)
+}
+
 // TestCalendarMarkWatchedSeasonAboveTotal: a release of a season above the
 // item's season total gets no button, and a forged post answers 422.
 func TestCalendarMarkWatchedSeasonAboveTotal(t *testing.T) {
