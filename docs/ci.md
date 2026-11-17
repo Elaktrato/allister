@@ -1,6 +1,6 @@
 # CI, security checks and releases
 
-Allister's checks run on GitHub Actions and, identically, on your machine: every workflow step calls `scripts/ci.sh <check>`, which runs each tool from a container image pinned by digest (or builds it from the pinned `tools/` module). Only Docker is needed locally. The branches are `main` (releases are tagged here) and `dev` (integration).
+Allister's checks run on GitHub Actions and, identically, on your machine: every workflow step calls `scripts/ci.sh <check>`, which runs each tool from a container image pinned by digest (or builds it from the pinned `tools/` module). Only Docker is needed locally. Work lands on `main` through pull requests from feature branches, and releases are tagged on `main`. A `dev` branch from the early days still exists, is stale and unused (see the end of this file).
 
 ## Workflows
 
@@ -163,3 +163,5 @@ These live in the repository settings, not in files. State on 2026-11-15:
 - **Branch ruleset `main and dev`** (strict, no bypass): pull request required (zero approvals, squash or rebase merge), status checks required and up to date with the base branch (`Lint`, `Security advisories`, `Test`, `Dockerfile and workflows`, `Secret scan`, `Image build, smoke test and scan`, `Analyze (Go)`, `Dependency review`), linear history, no force pushes, no deletion. With it, nothing is pushed to `main` directly: push a branch and merge its pull request on GitHub.
 - **Still to do by hand:** after the first release the workflow publishes, set the GHCR package's visibility and link it to the repository (Package settings).
 - **CODEOWNERS** is not included: it only names reviewers by GitHub account, which adds nothing for a single maintainer. When there are more, add `.github/CODEOWNERS` with `* @<account>` and require code owner review in the ruleset.
+
+**The `dev` branch.** It was meant as an integration branch but was never used after the first weeks: it is dozens of commits behind `main` and carries old merge commits, which the linear-history rule would refuse to replay. The workflows and the ruleset still name it, which is harmless. To retire it, delete the branch on GitHub (the ruleset blocks deletion, so remove it from the `main and dev` ruleset's targets first), then drop `dev` from the workflow triggers and this file.
