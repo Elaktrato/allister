@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -207,7 +208,8 @@ func TestParseCalendarWeek(t *testing.T) {
 		{"garbage is the current week", "nope", now, time.Date(2026, 11, 9, 0, 0, 0, 0, berlin)},
 		{"empty is the current week", "", now, time.Date(2026, 11, 9, 0, 0, 0, 0, berlin)},
 		{"impossible date is the current week", "2026-02-31", now, time.Date(2026, 11, 9, 0, 0, 0, 0, berlin)},
-		{"DST end week keeps local midnight", "2026-10-28", now, time.Date(2026, 10, 26, 0, 0, 0, 0, berlin)},
+		{"DST end week keeps local midnight", "2026-10-22", now, time.Date(2026, 10, 19, 0, 0, 0, 0, berlin)}, // the clocks go back on its Sunday, 25 Oct
+		{"the week after the DST end", "2026-10-28", now, time.Date(2026, 10, 26, 0, 0, 0, 0, berlin)},
 		{"DST start week keeps local midnight", "2026-03-29", now, time.Date(2026, 3, 23, 0, 0, 0, 0, berlin)},
 		{"year boundary goes back a year", "2027-01-01", now, time.Date(2026, 12, 28, 0, 0, 0, 0, berlin)},
 		{"current week across the new year", "", time.Date(2027, 1, 2, 9, 0, 0, 0, berlin), time.Date(2026, 12, 28, 0, 0, 0, 0, berlin)},
@@ -236,8 +238,7 @@ func scheduleEnv(t *testing.T) *fixtureEnv {
 			t.Fatal(err)
 		}
 	}
-	save(show, 3, time.Date(2026, 11, 12, 18, 30, 0, 0, time.UTC))
-	// a second show release on the Sunday and the book on the Monday
+	// two show releases (Thursday and Sunday) and the book on the Monday
 	if err := e.lib.SaveSchedule(context.Background(), show, []library.Airing{
 		{Number: 3, AirsAt: time.Date(2026, 11, 12, 18, 30, 0, 0, time.UTC)},
 		{Number: 4, AirsAt: time.Date(2026, 11, 15, 23, 30, 0, 0, time.UTC)},
@@ -373,7 +374,7 @@ func TestCalendarMarkWatchedButton(t *testing.T) {
 		mustContain(t, b, `name="number" value="1"`, `name="number" value="2"`, `aria-label="Mark Dark Episode 2 watched"`)
 		mustNotContain(t, b, `name="number" value="3"`)
 		// the form returns to the very view it was on
-		mustContain(t, b, `name="return" value="`+strings.ReplaceAll(strings.ReplaceAll(u, "&", "&amp;"), "?", "?")+`"`)
+		mustContain(t, b, `name="return" value="`+strings.ReplaceAll(u, "&", "&amp;")+`"`)
 	}
 	// progress at or beyond a release hides its button
 	e, id := watchEnv(t, 1)
@@ -689,4 +690,54 @@ func TestCalendarNoEmptyPluginInPushedURL(t *testing.T) {
 	}
 	// the form of the select has no empty option value named plugin besides All
 	mustContain(t, e.get("/calendar").Body.String(), `<option value="">All plugins</option>`)
+}
+
+// TestCalendarWeekAcrossDSTChange: the week of 19 to 25 Oct 2026 contains the
+// day the clocks go back (Europe/Berlin, 25 Oct 03:00 to 02:00). It still has
+// seven cells, and each release sits on its local day, also around the change
+// and across the midnight that ends the week.
+func TestCalendarWeekAcrossDSTChange(t *testing.T) {
+	e := newFixtureEnv(t)
+	now := time.Date(2026, 10, 21, 12, 0, 0, 0, time.UTC)
+	e.now = &now
+	if rec := e.do("POST", "/settings/time-zone", url.Values{"time_zone": {"Europe/Berlin"}}, false); rec.Code != 303 {
+		t.Fatalf("%d", rec.Code)
+	}
+	for i, r := range []struct {
+		title string
+		at    time.Time
+	}{
+		{"Alpha", time.Date(2026, 10, 18, 23, 30, 0, 0, time.UTC)},  // Mon 19 Oct 01:30 CEST
+		{"Bravo", time.Date(2026, 10, 24, 22, 30, 0, 0, time.UTC)},  // Sun 25 Oct 00:30 CEST
+		{"Charlie", time.Date(2026, 10, 25, 1, 30, 0, 0, time.UTC)}, // Sun 25 Oct 02:30 CET, after the change
+		{"Delta", time.Date(2026, 10, 25, 23, 30, 0, 0, time.UTC)},  // Mon 26 Oct 00:30 CET, next week
+		{"Echo", time.Date(2026, 10, 21, 21, 30, 0, 0, time.UTC)},   // Wed 21 Oct 23:30 CEST
+	} {
+		id := e.addFixture(t, "tv", "show", tvShow(fmt.Sprint(i), r.title), library.Entry{Status: library.Active})
+		if err := e.lib.SaveSchedule(context.Background(), id, []library.Airing{{Number: 1, AirsAt: r.at}}, now); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cells := func(url string) []string {
+		parts := strings.Split(e.get(url).Body.String(), `class="calendar-day`)
+		return parts[1:]
+	}
+	week := cells("/calendar?view=week&week=2026-10-19")
+	if len(week) != 7 {
+		t.Fatalf("%d day cells, want 7", len(week))
+	}
+	want := map[int][]string{0: {"Alpha"}, 2: {"Echo"}, 6: {"Bravo", "Charlie"}}
+	for i, c := range week {
+		for _, title := range []string{"Alpha", "Bravo", "Charlie", "Delta", "Echo"} {
+			if has, wanted := strings.Contains(c, ">"+title+"<") || strings.Contains(c, " "+title+"</a>"), slices.Contains(want[i], title); has != wanted {
+				t.Errorf("day %d: %s present = %v, want %v", i, title, has, wanted)
+			}
+		}
+	}
+	mustContain(t, e.get("/calendar?view=week&week=2026-10-19").Body.String(), "19 – 25 Oct 2026")
+	// the next week starts with Delta on its Monday
+	next := cells("/calendar?view=week&week=2026-10-26")
+	if len(next) != 7 || !strings.Contains(next[0], "Delta") {
+		t.Fatalf("next week: %d cells, Monday has Delta = %v", len(next), len(next) > 0 && strings.Contains(next[0], "Delta"))
+	}
 }
