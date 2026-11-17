@@ -784,11 +784,11 @@ func TestValidateLength(t *testing.T) {
 		{"non number field", []plugin.LengthDef{{Key: "a", Label: "A", Field: "type"}}, `kinds[0].length[0].field: field "type" is not a number field`},
 		{"unknown units field", []plugin.LengthDef{{Key: "a", Label: "A", UnitsField: "nope"}}, `kinds[0].length[0].units_field: no field "nope"`},
 		{"non number per unit", []plugin.LengthDef{{Key: "a", Label: "A", UnitsField: "episodes", PerUnitField: "type"}}, `kinds[0].length[0].per_unit_field: field "type" is not a number field`},
-		{"field with units", []plugin.LengthDef{{Key: "a", Label: "A", Field: "year", UnitsField: "episodes"}}, `kinds[0].length[0]`},
+		{"field with units", []plugin.LengthDef{{Key: "a", Label: "A", Field: "year", UnitsField: "episodes"}}, `kinds[0].length[0]: field cannot be combined with units_field or per_unit_field`},
 		{"per unit without units", []plugin.LengthDef{{Key: "a", Label: "A", PerUnitField: "year"}}, `kinds[0].length[0].per_unit_field: needs units_field`},
-		{"nothing set", []plugin.LengthDef{{Key: "a", Label: "A"}}, `kinds[0].length[0]`},
+		{"nothing set", []plugin.LengthDef{{Key: "a", Label: "A"}}, `kinds[0].length[0]: needs field, or units_field (with an optional per_unit_field)`},
 		{"duplicate key", []plugin.LengthDef{{Key: "a", Label: "A", Field: "year"}, {Key: "a", Label: "B", Field: "year"}}, `kinds[0].length[1].key: duplicate "a"`},
-		{"bad key", []plugin.LengthDef{{Key: "A b", Label: "A", Field: "year"}}, `kinds[0].length[0].key`},
+		{"bad key", []plugin.LengthDef{{Key: "A b", Label: "A", Field: "year"}}, `kinds[0].length[0].key: "A b" is not a valid key`},
 		{"empty label", []plugin.LengthDef{{Key: "a", Field: "year"}}, `kinds[0].length[0].label: required`},
 	}
 	for _, tc := range tests {
@@ -804,6 +804,21 @@ func TestValidateLength(t *testing.T) {
 		if err == nil || !strings.Contains(err.Error(), tc.want) {
 			t.Errorf("%s: %v, want %q", tc.name, err, tc.want)
 		}
+	}
+}
+
+func TestValidateGroupKeyNeedsPrimaryKey(t *testing.T) {
+	m := tv()
+	m.Kinds[0].Progress.PrimaryKey = ""
+	m.Kinds[0].Progress.GroupKey = "season"
+	err := plugin.Validate(m)
+	want := `kinds[0].progress.group_key: needs a primary_key`
+	if err == nil || !strings.Contains(err.Error(), want) {
+		t.Fatalf("%v, want %q", err, want)
+	}
+	m.Kinds[0].Progress.GroupKey = ""
+	if err := plugin.Validate(m); err != nil {
+		t.Fatalf("no primary and no group key is valid: %v", err)
 	}
 }
 

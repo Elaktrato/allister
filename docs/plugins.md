@@ -161,7 +161,7 @@ Rules enforced by `Validate`:
 - `TotalField` must name a **number** field of the kind, and is not allowed on `percent`.
 - When anything is eligible, `Defaults` and at least one combination are required. Every key in them must be eligible and listed once, no combination may be empty, and `Defaults` must equal one of the combinations (as a set).
 - `PrimaryKey`, when set, must be an eligible `count` or `pages` track.
-- `GroupKey`, when set, must be an eligible `count` track other than `PrimaryKey`. It marks the track that groups the primary track's units (a TV release's season maps to it). Optional, JSON `group_key`, omitted when empty; adding it needs no contract version bump.
+- `GroupKey`, when set, needs a `PrimaryKey` and must be an eligible `count` track other than it. It marks the track that groups the primary track's units (a TV release's season maps to it). Optional, JSON `group_key`, omitted when empty; adding it needs no contract version bump.
 - `ResetOnPrimary` is for a track that belongs to the release the +1 advances: the TV position is cleared when the episode increments. It is not set on the primary track.
 
 `LabelPlural` is optional data (JSON `label_plural`, not validated): the run timeline uses it for ranges ("Episodes 5-7"); without it the core adds an "s" to `Label`.
