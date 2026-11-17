@@ -9,6 +9,7 @@ import (
 	"math"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/allister/allister/internal/plugin"
 )
@@ -463,6 +464,157 @@ func (l *Library) StoredProgress(ctx context.Context, itemID int64) (map[string]
 	}
 	if err := closeRows(rows); err != nil {
 		return nil, fmt.Errorf("stored progress: %w", err)
+	}
+	return out, nil
+}
+
+// MarkReleaseWatched records that the viewer has seen the stored airing
+// (season, number) of the item: it sets the kind's primary progress to number
+// (never above the total) and, for a kind with a group track and a release
+// with a season, the group track to season. It never lowers progress: a
+// release that is not Beyond the display run's progress is a no-op
+// (changed=false, nothing written), as is a second identical call. It is one
+// transaction like Increment: the tracks marked ResetOnPrimary are cleared,
+// and every moved track is logged as a manual progress event.
+//
+// It returns ErrNoEntry without an entry and ErrInvalid when (season, number)
+// is not a stored airing of the item, has not aired yet (airs_at after now),
+// the display run is a repeat run (airings cannot say what a rewatch has
+// seen), the entry is not active, or a track the release sets is not active.
+func (l *Library) MarkReleaseWatched(ctx context.Context, itemID int64, season, number int, now time.Time) (changed bool, err error) {
+	tx, err := l.db.BeginTx(ctx, nil)
+	if err != nil {
+		return false, fmt.Errorf("mark release watched: %w", err)
+	}
+	defer tx.Rollback()
+	pluginID, kindKey, active, hasEntry, err := itemMeta(ctx, tx, itemID)
+	if err != nil {
+		return false, err
+	}
+	if !hasEntry {
+		return false, ErrNoEntry
+	}
+	def, err := l.kindDef(pluginID, kindKey)
+	if err != nil {
+		return false, err
+	}
+	var airs string
+	err = tx.QueryRowContext(ctx, `SELECT airs_at FROM airings WHERE item_id = ? AND season = ? AND number = ?`,
+		itemID, season, number).Scan(&airs)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, invalid("the release is not a scheduled release of this item")
+	}
+	if err != nil {
+		return false, fmt.Errorf("mark release watched: %w", err)
+	}
+	at, err := time.Parse(scheduleLayout, airs)
+	if err != nil {
+		return false, fmt.Errorf("mark release watched: %w", err)
+	}
+	if at.After(now) {
+		return false, invalid("the release has not aired yet")
+	}
+	runID, err := displayRunTx(ctx, tx, itemID)
+	if err != nil {
+		return false, err
+	}
+	var runNumber int
+	var status string
+	if err := tx.QueryRowContext(ctx, `SELECT number, status FROM `+tableRuns+` WHERE id = ?`, runID).Scan(&runNumber, &status); err != nil {
+		return false, fmt.Errorf("mark release watched: %w", err)
+	}
+	if runNumber > 1 {
+		return false, invalid("a repeat run cannot be marked from the schedule")
+	}
+	if status != string(Active) {
+		return false, invalid("only an active entry can be marked from the schedule")
+	}
+	if !MarkableTracks(def, active, season) {
+		return false, invalid("the progress tracks of this release are not active for the item")
+	}
+	progress, err := runProgressTx(ctx, tx, runID)
+	if err != nil {
+		return false, err
+	}
+	if !Beyond(def, progress, season, number) {
+		return false, nil
+	}
+	it, _, err := l.txItem(ctx, tx, itemID)
+	if err != nil {
+		return false, err
+	}
+	key := def.Progress.PrimaryKey
+	pd, _ := progressDef(def, key)
+	value := float64(number)
+	if total, bounded := progressBound(pd, it); bounded {
+		value = math.Min(value, total)
+	}
+	type move struct {
+		key      string
+		old, new float64
+	}
+	var moves []move
+	if gk := def.Progress.GroupKey; gk != "" && season > 0 && float64(season) > progress[gk] {
+		moves = append(moves, move{gk, progress[gk], float64(season)})
+		// a new group starts its primary count again: the value is the
+		// release's number even when that is below the old primary value
+		moves = append(moves, move{key, progress[key], value})
+	} else if value > progress[key] {
+		moves = append(moves, move{key, progress[key], value})
+	}
+	moves = slices.DeleteFunc(moves, func(m move) bool { return m.new == m.old })
+	if len(moves) == 0 {
+		return false, nil
+	}
+	for _, m := range moves {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO `+tableRunProgress+`(run_id, key, value) VALUES (?, ?, ?)
+			ON CONFLICT(run_id, key) DO UPDATE SET value = excluded.value`, runID, m.key, m.new); err != nil {
+			return false, fmt.Errorf("mark release watched: %w", err)
+		}
+	}
+	for _, d := range def.Progress.Eligible {
+		if !d.ResetOnPrimary || d.Key == key || !slices.Contains(active, d.Key) {
+			continue
+		}
+		if _, err := tx.ExecContext(ctx, `DELETE FROM `+tableRunProgress+` WHERE run_id = ? AND key = ?`, runID, d.Key); err != nil {
+			return false, fmt.Errorf("mark release watched: reset %s: %w", d.Key, err)
+		}
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE `+tableRuns+` SET updated_at = `+nowSQL+` WHERE id = ?`, runID); err != nil {
+		return false, fmt.Errorf("mark release watched: %w", err)
+	}
+	if err := refreshDisplayRun(ctx, tx, itemID); err != nil {
+		return false, err
+	}
+	for _, m := range moves {
+		if err := insertEvent(ctx, tx, itemID, runID, eventProgress, m.key, &m.old, &m.new, "", "", OriginManual); err != nil {
+			return false, err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return false, fmt.Errorf("mark release watched: %w", err)
+	}
+	return true, nil
+}
+
+// runProgressTx reads every stored progress value of a run inside tx.
+func runProgressTx(ctx context.Context, tx *sql.Tx, runID int64) (map[string]float64, error) {
+	rows, err := tx.QueryContext(ctx, `SELECT key, value FROM `+tableRunProgress+` WHERE run_id = ?`, runID)
+	if err != nil {
+		return nil, fmt.Errorf("run progress: %w", err)
+	}
+	out := map[string]float64{}
+	for rows.Next() {
+		var k string
+		var v float64
+		if err := rows.Scan(&k, &v); err != nil {
+			rows.Close()
+			return nil, fmt.Errorf("run progress: %w", err)
+		}
+		out[k] = v
+	}
+	if err := closeRows(rows); err != nil {
+		return nil, fmt.Errorf("run progress: %w", err)
 	}
 	return out, nil
 }

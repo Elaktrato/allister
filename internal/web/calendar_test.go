@@ -3,6 +3,7 @@ package web
 import (
 	"context"
 	"fmt"
+	"net/http/httptest"
 	"net/url"
 	"strings"
 	"testing"
@@ -321,4 +322,221 @@ func TestCalendarPluginSelectListsScheduleCapable(t *testing.T) {
 	mustNotContain(t, b, `<option value="book"`)
 	e = scheduleEnv(t)
 	mustContain(t, e.get("/calendar?plugin=book").Body.String(), `<option value="tv">`, `<option value="book" selected>`)
+}
+
+// watchEnv has one active show with episodes 1 and 2 aired (Nov 9 and 10) and
+// episode 3 still to air (Nov 12), now being Wednesday 2026-11-11.
+func watchEnv(t *testing.T, progress float64) (*fixtureEnv, int64) {
+	t.Helper()
+	e := newFixtureEnv(t)
+	now := time.Date(2026, 11, 11, 12, 0, 0, 0, time.UTC)
+	e.now = &now
+	en := library.Entry{Status: library.Active}
+	if progress > 0 {
+		en.Progress = map[string]float64{"episode": progress}
+	}
+	id := e.addFixture(t, "tv", "show", tvShow("1", "Dark"), en)
+	if err := e.lib.SaveSchedule(context.Background(), id, []library.Airing{
+		{Number: 1, AirsAt: time.Date(2026, 11, 9, 18, 0, 0, 0, time.UTC)},
+		{Number: 2, AirsAt: time.Date(2026, 11, 10, 18, 0, 0, 0, time.UTC)},
+		{Number: 3, AirsAt: time.Date(2026, 11, 12, 18, 0, 0, 0, time.UTC)},
+	}, now); err != nil {
+		t.Fatal(err)
+	}
+	return e, id
+}
+
+func watchForm(season, number int, ret string) url.Values {
+	return url.Values{"season": {fmt.Sprint(season)}, "number": {fmt.Sprint(number)}, "return": {ret}}
+}
+
+func episodeOf(t *testing.T, e *fixtureEnv, id int64) float64 {
+	t.Helper()
+	en, err := e.lib.Entry(context.Background(), id)
+	if err != nil || en == nil {
+		t.Fatalf("entry: %v %v", en, err)
+	}
+	return en.Progress["episode"]
+}
+
+// TestCalendarMarkWatchedButton: the button is offered only for aired
+// releases beyond the progress of an active entry on its first run.
+func TestCalendarMarkWatchedButton(t *testing.T) {
+	for _, u := range []string{"/calendar?month=2026-11", "/calendar?view=week&week=2026-11-09"} {
+		e, id := watchEnv(t, 0)
+		b := e.get(u).Body.String()
+		action := fmt.Sprintf(`action="/list/%d/watched"`, id)
+		if n := strings.Count(b, action); n != 2 { // episodes 1 and 2, not the unaired 3
+			t.Fatalf("%s: %d buttons, want 2:\n%s", u, n, b)
+		}
+		mustContain(t, b, `name="number" value="1"`, `name="number" value="2"`, `aria-label="Mark Dark Episode 2 watched"`)
+		mustNotContain(t, b, `name="number" value="3"`)
+		// the form returns to the very view it was on
+		mustContain(t, b, `name="return" value="`+strings.ReplaceAll(strings.ReplaceAll(u, "&", "&amp;"), "?", "?")+`"`)
+	}
+	// progress at or beyond a release hides its button
+	e, id := watchEnv(t, 1)
+	b := e.get("/calendar?month=2026-11").Body.String()
+	if n := strings.Count(b, fmt.Sprintf(`action="/list/%d/watched"`, id)); n != 1 {
+		t.Fatalf("%d buttons, want 1 (episode 2 only)", n)
+	}
+	mustNotContain(t, b, `name="number" value="1"`)
+	e, _ = watchEnv(t, 2)
+	mustNotContain(t, e.get("/calendar?month=2026-11").Body.String(), "/watched")
+	// a repeat run offers none
+	e, _ = watchEnv(t, 0)
+	rep := e.addFixture(t, "tv", "show", tvShow("9", "Rerun"), library.Entry{Status: library.Completed})
+	if _, err := e.lib.StartRun(context.Background(), rep, time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.lib.SaveSchedule(context.Background(), rep, []library.Airing{{Number: 1, AirsAt: time.Date(2026, 11, 9, 18, 0, 0, 0, time.UTC)}}, *e.now); err != nil {
+		t.Fatal(err)
+	}
+	b = e.get("/calendar?month=2026-11").Body.String()
+	mustContain(t, b, "Rerun")
+	mustNotContain(t, b, fmt.Sprintf(`action="/list/%d/watched"`, rep))
+}
+
+func TestPostListWatched(t *testing.T) {
+	e, id := watchEnv(t, 0)
+	path := fmt.Sprintf("/list/%d/watched", id)
+	back := "/calendar?month=2026-11"
+	rec := e.do("POST", path, watchForm(0, 2, back), false)
+	if rec.Code != 303 || rec.Header().Get("Location") != back {
+		t.Fatalf("%d %q", rec.Code, rec.Header().Get("Location"))
+	}
+	if got := episodeOf(t, e, id); got != 2 {
+		t.Fatalf("episode = %v, want 2", got)
+	}
+	countEvents := func() int {
+		var n int
+		if err := e.d.QueryRow(`SELECT COUNT(*) FROM entry_events WHERE item_id = ?`, id).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	if countEvents() != 1 {
+		t.Fatalf("%d events, want 1", countEvents())
+	}
+	// a double submit and an older release change nothing and still succeed
+	for _, n := range []int{2, 1} {
+		if rec := e.do("POST", path, watchForm(0, n, back), false); rec.Code != 303 {
+			t.Fatalf("repeat %d: %d", n, rec.Code)
+		}
+	}
+	if episodeOf(t, e, id) != 2 || countEvents() != 1 {
+		t.Fatalf("a repeat changed the entry: episode %v, %d events", episodeOf(t, e, id), countEvents())
+	}
+	// forged: an unaired release, one that was never stored, a season that does not exist
+	for _, f := range []url.Values{watchForm(0, 3, back), watchForm(0, 99, back), watchForm(2, 1, back)} {
+		if rec := e.do("POST", path, f, false); rec.Code != 422 {
+			t.Fatalf("%v: %d, want 422", f, rec.Code)
+		}
+	}
+	if episodeOf(t, e, id) != 2 {
+		t.Fatal("a forged release moved the progress")
+	}
+	// malformed numbers
+	for _, f := range []url.Values{{"season": {"0"}}, {"season": {"x"}, "number": {"1"}}, {"season": {"0"}, "number": {"1.5"}}} {
+		if rec := e.do("POST", path, f, false); rec.Code != 400 {
+			t.Fatalf("%v: %d, want 400", f, rec.Code)
+		}
+	}
+	// unknown item and an item without entry
+	if rec := e.do("POST", "/list/9999/watched", watchForm(0, 1, back), false); rec.Code != 404 {
+		t.Fatalf("unknown item: %d", rec.Code)
+	}
+	// a paused entry is refused
+	if err := e.lib.UpsertEntry(context.Background(), library.Entry{ItemID: id, Status: library.Paused, Progress: map[string]float64{"episode": 2}}); err != nil {
+		t.Fatal(err)
+	}
+	if rec := e.do("POST", path, watchForm(0, 2, back), false); rec.Code != 422 {
+		t.Fatalf("paused: %d", rec.Code)
+	}
+}
+
+func TestPostListWatchedReturnIsSameSite(t *testing.T) {
+	for raw, want := range map[string]string{
+		"/calendar?view=week&week=2026-11-09": "/calendar?view=week&week=2026-11-09",
+		"/calendar":                           "/calendar",
+		"":                                    "/calendar",
+		"//evil.example/x":                    "/calendar",
+		"https://evil.example/":               "/calendar",
+		"/\\evil.example":                     "/calendar",
+		"evil":                                "/calendar",
+		"/a\r\nSet-Cookie: x=1":               "/calendar",
+	} {
+		e, id := watchEnv(t, 0)
+		rec := e.do("POST", fmt.Sprintf("/list/%d/watched", id), watchForm(0, 1, raw), false)
+		if rec.Code != 303 || rec.Header().Get("Location") != want {
+			t.Errorf("return %q: %d %q, want %q", raw, rec.Code, rec.Header().Get("Location"), want)
+		}
+	}
+}
+
+func TestPostListWatchedHTMXGrid(t *testing.T) {
+	e, id := watchEnv(t, 0)
+	// without the grid target the answer is the redirect
+	if rec := e.do("POST", fmt.Sprintf("/list/%d/watched", id), watchForm(0, 1, "/calendar"), true); rec.Code != 303 {
+		t.Fatalf("htmx without target: %d", rec.Code)
+	}
+	form := watchForm(0, 2, "/calendar?view=week&week=2026-11-09")
+	r := httptest.NewRequest("POST", fmt.Sprintf("/list/%d/watched", id), strings.NewReader(form.Encode()))
+	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	r.Header.Set("HX-Request", "true")
+	r.Header.Set("HX-Target", "calendar-grid")
+	rec := httptest.NewRecorder()
+	e.h.ServeHTTP(rec, r)
+	body := rec.Body.String()
+	if rec.Code != 200 {
+		t.Fatalf("%d", rec.Code)
+	}
+	mustContain(t, body, `id="calendar-grid"`, "9 – 15 Nov 2026")
+	mustNotContain(t, body, "<html", "<header")
+	// both aired episodes are now at or below the progress: no button left
+	mustNotContain(t, body, "/watched")
+	if episodeOf(t, e, id) != 2 {
+		t.Fatalf("episode = %v", episodeOf(t, e, id))
+	}
+}
+
+// TestPostListWatchedDisabledPlugin: the guard answers 404 before anything is
+// written when the item's plugin is disabled.
+func TestPostListWatchedDisabledPlugin(t *testing.T) {
+	e, id := watchEnv(t, 0)
+	if err := e.reg.SetEnabled(context.Background(), "tv", false); err != nil {
+		t.Fatal(err)
+	}
+	if rec := e.do("POST", fmt.Sprintf("/list/%d/watched", id), watchForm(0, 2, "/calendar"), false); rec.Code != 404 {
+		t.Fatalf("disabled: %d", rec.Code)
+	}
+	if err := e.reg.SetEnabled(context.Background(), "tv", true); err != nil {
+		t.Fatal(err)
+	}
+	if episodeOf(t, e, id) != 0 {
+		t.Fatal("a disabled plugin's POST changed progress")
+	}
+}
+
+// TestMarkWatchedTotalBelowRelease: a release numbered above the item's total
+// sets the total, never more.
+func TestMarkWatchedTotalBelowRelease(t *testing.T) {
+	e := newFixtureEnv(t)
+	now := time.Date(2026, 11, 11, 12, 0, 0, 0, time.UTC)
+	e.now = &now
+	d := tvShow("7", "Short")
+	d.Fields["episodes"] = plugin.FieldValue{Num: num(2)}
+	id := e.addFixture(t, "tv", "show", d, library.Entry{Status: library.Active, Progress: map[string]float64{"episode": 1}})
+	if err := e.lib.SaveSchedule(context.Background(), id, []library.Airing{{Number: 3, AirsAt: now.Add(-time.Hour)}}, now); err != nil {
+		t.Fatal(err)
+	}
+	if rec := e.do("POST", fmt.Sprintf("/list/%d/watched", id), watchForm(0, 3, "/calendar"), false); rec.Code != 303 {
+		t.Fatalf("%d", rec.Code)
+	}
+	if got := episodeOf(t, e, id); got != 2 {
+		t.Fatalf("episode = %v, want the total 2", got)
+	}
+	if rec := e.do("POST", fmt.Sprintf("/list/%d/watched", id), watchForm(0, 3, "/calendar"), false); rec.Code != 303 || episodeOf(t, e, id) != 2 {
+		t.Fatal("the second post changed something")
+	}
 }

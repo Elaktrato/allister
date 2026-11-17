@@ -3,6 +3,7 @@ package library
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -33,6 +34,8 @@ type ScheduledEntry struct {
 	// RunNumber and Progress describe the entry's display run.
 	RunNumber int
 	Progress  map[string]float64
+	// ProgressKeys are the item's active progress tracks.
+	ProgressKeys []string
 }
 
 // StaleSchedule names an active entry whose schedule was never stored or is
@@ -103,7 +106,7 @@ func (l *Library) ScheduleBetween(ctx context.Context, from, to time.Time, sourc
 // WHERE terms (constant SQL, bound args), titles included.
 func (l *Library) scheduleQuery(ctx context.Context, extra string, args []any, limit int) ([]ScheduledEntry, error) {
 	//nolint:gosec // G202: constant SQL fragments; values are bound
-	rows, err := l.db.QueryContext(ctx, `SELECT a.item_id, i.plugin_id, i.kind, i.source, i.source_id, a.season, a.number, a.airs_at, e.run_number
+	rows, err := l.db.QueryContext(ctx, `SELECT a.item_id, i.plugin_id, i.kind, i.source, i.source_id, a.season, a.number, a.airs_at, e.run_number, i.progress_keys
 		FROM airings a
 		JOIN items i ON i.id = a.item_id
 		JOIN `+viewEntryState+` e ON e.item_id = a.item_id
@@ -116,10 +119,14 @@ func (l *Library) scheduleQuery(ctx context.Context, extra string, args []any, l
 	ids := map[int64]bool{}
 	for rows.Next() {
 		var e ScheduledEntry
-		var airs string
-		if err := rows.Scan(&e.ItemID, &e.PluginID, &e.Kind, &e.Source, &e.SourceID, &e.Season, &e.Number, &airs, &e.RunNumber); err != nil {
+		var airs, keys string
+		if err := rows.Scan(&e.ItemID, &e.PluginID, &e.Kind, &e.Source, &e.SourceID, &e.Season, &e.Number, &airs, &e.RunNumber, &keys); err != nil {
 			rows.Close()
 			return nil, fmt.Errorf("schedule entries: %w", err)
+		}
+		if err := decodeKeys(keys, &e.ProgressKeys); err != nil {
+			rows.Close()
+			return nil, err
 		}
 		if e.AirsAt, err = time.Parse(scheduleLayout, airs); err != nil {
 			rows.Close()
@@ -215,6 +222,19 @@ func Beyond(def plugin.KindDef, progress map[string]float64, season, number int)
 		}
 	}
 	return float64(number) > n
+}
+
+// MarkableTracks reports whether every progress track that marking the release
+// of season watched sets is active: the primary track (a count or pages
+// track), and the group track when the kind has one and the release carries a
+// season. A kind without a primary track has nothing to set.
+func MarkableTracks(def plugin.KindDef, active []string, season int) bool {
+	ps := def.Progress
+	pd, ok := progressDef(def, ps.PrimaryKey)
+	if ps.PrimaryKey == "" || !ok || !slices.Contains(active, ps.PrimaryKey) || (pd.Type != plugin.Count && pd.Type != plugin.Pages) {
+		return false
+	}
+	return ps.GroupKey == "" || season <= 0 || slices.Contains(active, ps.GroupKey)
 }
 
 // AiredCounts returns, per listed item, how many stored releases have aired

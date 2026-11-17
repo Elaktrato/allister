@@ -30,6 +30,7 @@ type routeSet func(reg routeRegistrar)
 // plugin of the item {id} decides whether they answer.
 func (s *server) entryRoutes(reg routeRegistrar) {
 	reg.Handle("POST /list/{id}/increment", s.postIncrement)
+	reg.Handle("POST /list/{id}/watched", s.postWatched)
 	reg.Handle("GET /list/{id}/edit", s.getEdit)
 	reg.Handle("POST /list/{id}/edit", s.postEdit)
 	reg.Handle("POST /list/{id}/remove", s.postRemove)
