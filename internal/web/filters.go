@@ -530,7 +530,7 @@ func buildFilterBar(m plugin.Manifest, k plugin.KindDef, lq listQuery, genres, t
 	if len(m.Kinds) > 1 {
 		b.Kind = k.Key
 	}
-	if f.active() {
+	if f.active() || lq.Length.active() {
 		b.ClearURL = listURL(m, k.Key, lq.Status, lq.View, 1)
 	}
 	for _, im := range m.Importers {
