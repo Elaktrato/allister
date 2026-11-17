@@ -23,6 +23,25 @@ const (
 // ErrNoRun: the run does not exist (any more).
 var ErrNoRun = errors.New("library: no such run")
 
+// ErrStillAiring: an item with an upcoming release cannot be started again
+// (it wraps ErrInvalid). Stored airings therefore belong to the first run.
+var ErrStillAiring = fmt.Errorf("%w: still airing: it has upcoming releases", ErrInvalid)
+
+// StillAiring reports whether the item has a stored airing after now.
+func (l *Library) StillAiring(ctx context.Context, itemID int64) (bool, error) {
+	return stillAiring(ctx, l.db, itemID)
+}
+
+// stillAiring reads StillAiring through q (a database or a transaction). The
+// stored times use scheduleLayout, which sorts like nowSQL.
+func stillAiring(ctx context.Context, q queryer, itemID int64) (bool, error) {
+	var found bool
+	if err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM airings WHERE item_id = ? AND airs_at > `+nowSQL+`)`, itemID).Scan(&found); err != nil {
+		return false, fmt.Errorf("still airing: %w", err)
+	}
+	return found, nil
+}
+
 // Run is one viewing / reading / playthrough of an entry: its own status,
 // rating, review, calendar-day dates and progress. Number is dense (1..n)
 // per entry. Progress holds the values of the item's ACTIVE progress keys
@@ -215,7 +234,8 @@ func (l *Library) loadPastRuns(ctx context.Context, rows []Row) error {
 // calendar day of today (in today's own zone: the caller passes the
 // configured time zone's now), with the display run's rating, no progress
 // and no review. It is refused (ErrInvalid) unless the display run is
-// completed, and ErrNoEntry for an item without an entry. The start is
+// completed or while the item has an upcoming release (ErrStillAiring), and
+// ErrNoEntry for an item without an entry. The start is
 // logged as a manual status event completed -> active on the new run, which
 // becomes the display run. It returns the new run.
 func (l *Library) StartRun(ctx context.Context, itemID int64, today time.Time) (Run, error) {
@@ -241,6 +261,11 @@ func (l *Library) StartRun(ctx context.Context, itemID int64, today time.Time) (
 	}
 	if Status(status) != Completed {
 		return Run{}, invalid("only a completed entry can be started again (it is %s)", status)
+	}
+	if airing, err := stillAiring(ctx, tx, itemID); err != nil {
+		return Run{}, err
+	} else if airing {
+		return Run{}, ErrStillAiring
 	}
 	res, err := tx.ExecContext(ctx, `INSERT INTO `+tableRuns+`(item_id, number, status, rating, review, started_on, created_at, updated_at)
 		VALUES (?,?,?,?,'',?,`+nowSQL+`,`+nowSQL+`)`, itemID, last+1, string(Active), rating, started)

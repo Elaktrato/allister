@@ -323,3 +323,56 @@ func TestRunRoutesRefuseStaleAndForeignRuns(t *testing.T) {
 		t.Fatal("refused run routes changed the database")
 	}
 }
+
+// airing stores one airing of item id at at.
+func (e *env) airing(t *testing.T, id int64, at time.Time) {
+	t.Helper()
+	if err := e.lib.SaveSchedule(context.Background(), id, []library.Airing{{Number: 1, AirsAt: at}}, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+}
+
+const stillAiringNote = "Still airing: it can be started again once it has finished airing."
+
+func TestStartRunStillAiring422(t *testing.T) {
+	e := newFixtureEnv(t, repeatLabels)
+	id := completedShow(t, e.env, "1", "Airing Show")
+	e.airing(t, id, *day(2999, 1, 1))
+	rec := e.do("POST", "/list/"+idStr(id)+"/runs", url.Values{"return": {"/tv"}}, false)
+	if rec.Code != 422 {
+		t.Fatal(rec.Code, rec.Body.String())
+	}
+	mustContain(t, rec.Body.String(), "Still airing: it has upcoming releases.")
+	// the entry dialog's run_choice=new
+	form := url.Values{"status": {"active"}, "rating": {"8"}, "progress.episode": {"10"}, "run_choice": {"new"}, "return": {"/tv"}}
+	rec = e.do("POST", "/list/"+idStr(id)+"/edit", form, true)
+	if rec.Code != 422 {
+		t.Fatal(rec.Code, rec.Body.String())
+	}
+	mustContain(t, rec.Body.String(), "Still airing: it has upcoming releases.")
+	if n := len(e.runsOf(t, id)); n != 1 {
+		t.Fatalf("%d runs", n)
+	}
+	// the question offers only "correct", with the note
+	form.Del("run_choice")
+	rec = e.do("POST", "/list/"+idStr(id)+"/edit", form, true)
+	if rec.Code != 200 {
+		t.Fatal(rec.Code)
+	}
+	mustContain(t, rec.Body.String(), `name="run_choice" value="correct"`, stillAiringNote)
+	mustNotContain(t, rec.Body.String(), `value="new"`, "Watch again instead")
+}
+
+func TestStartAgainHiddenWhileAiring(t *testing.T) {
+	e := newFixtureEnv(t, repeatLabels)
+	id := completedShow(t, e.env, "1", "Hidden Show")
+	e.airing(t, id, *day(2999, 1, 1))
+	b := e.get("/tv/tvdata/1").Body.String()
+	mustContain(t, b, stillAiringNote)
+	mustNotContain(t, b, `action="/list/`+idStr(id)+`/runs"`, "Watch again")
+	// past airings only: offered again
+	e.airing(t, id, *day(2000, 1, 1))
+	b = e.get("/tv/tvdata/1").Body.String()
+	mustContain(t, b, `action="/list/`+idStr(id)+`/runs"`, "Watch again")
+	mustNotContain(t, b, stillAiringNote)
+}

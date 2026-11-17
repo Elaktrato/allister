@@ -19,6 +19,8 @@
       <input type="hidden" name="return" value="{{.Return}}">
       <button type="submit" class="w-full rounded border border-slate-700 px-4 py-2 text-sm hover:bg-slate-800">{{.StartLabel}}</button>
     </form>
+    {{else if .StillAiring}}
+    <p class="text-sm text-slate-400">Still airing: it can be started again once it has finished airing.</p>
     {{end}}
     {{else}}
     <a href="{{.AddURL}}" hx-get="{{.AddURL}}" hx-target="#dialog-slot" hx-swap="innerHTML"

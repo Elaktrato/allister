@@ -84,6 +84,9 @@ func (s *server) postStartRun(w http.ResponseWriter, r *http.Request) {
 	case errors.Is(err, library.ErrNoEntry):
 		s.entryNotFound(w, r)
 		return
+	case errors.Is(err, library.ErrStillAiring):
+		s.errorPage(w, r, http.StatusUnprocessableEntity, "Cannot start again", invalidMessage(err), "")
+		return
 	case errors.Is(err, library.ErrInvalid):
 		s.errorPage(w, r, http.StatusBadRequest, "Cannot start again", invalidMessage(err), "")
 		return

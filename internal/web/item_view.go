@@ -89,6 +89,9 @@ type entryView struct {
 	// StartURL and StartLabel: the "start again" form (a completed
 	// display run only); Return is its return path, the overview.
 	StartURL, StartLabel, Return string
+	// StillAiring: a completed entry with upcoming releases, shown with a
+	// note instead of the start again form.
+	StillAiring bool
 	// the repeat marker and count of the list (see repeatBadges)
 	RepeatMarker string
 	Repeats      int
@@ -191,6 +194,11 @@ func (s *server) itemView(ctx context.Context, li *loadedItem) (itemView, error)
 					Href: filteredListURL(m, it.Kind, "all", "", 1, listFilters{UserTags: []string{name}})})
 			}
 			if li.entry.Status == library.Completed {
+				if v.Entry.StillAiring, err = s.deps.Library.StillAiring(ctx, it.ID); err != nil {
+					return itemView{}, err
+				}
+			}
+			if li.entry.Status == library.Completed && !v.Entry.StillAiring {
 				v.Entry.StartURL = "/list/" + strconv.FormatInt(it.ID, 10) + "/runs"
 				v.Entry.StartLabel, v.Entry.Return = k.RepeatAction(), overview
 			}
