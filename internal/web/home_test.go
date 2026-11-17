@@ -406,3 +406,29 @@ func TestListCardsUnchanged(t *testing.T) {
 	mustNotContain(t, card, "aired", "Episode 2", "data-next")
 	mustContain(t, cardOf(t, e.get("/").Body.String(), "Dark"), "2 aired", "Episode 2")
 }
+
+func TestHomeIncrementSwapKeepsNextAndAired(t *testing.T) {
+	e := newFixtureEnv(t)
+	now := time.Date(2026, 11, 10, 12, 0, 0, 0, time.UTC)
+	e.now = &now
+	id := e.addFixture(t, "tv", "show", tvShow("1", "Dark"), library.Entry{Status: library.Active, Progress: map[string]float64{"episode": 1}})
+	var as []library.Airing
+	for i := 1; i <= 4; i++ {
+		as = append(as, library.Airing{Number: i, AirsAt: now.Add(-time.Duration(i) * time.Hour)})
+	}
+	if err := e.lib.SaveSchedule(context.Background(), id, as, now); err != nil {
+		t.Fatal(err)
+	}
+	post := func(ret string) string {
+		rec := e.do("POST", fmt.Sprintf("/list/%d/increment", id), url.Values{"return": {ret}, "view": {"cards"}}, true)
+		if rec.Code != http.StatusOK {
+			t.Fatal(rec.Code)
+		}
+		return rec.Body.String()
+	}
+	b := post("/")
+	mustContain(t, b, "Episode 3", "2 aired")
+	// the list's swapped card stays plain
+	b = post("/tv")
+	mustNotContain(t, b, "aired", "data-next")
+}

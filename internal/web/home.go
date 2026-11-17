@@ -132,6 +132,14 @@ func nextLabel(k plugin.KindDef, keys []string, e library.Entry, fields map[stri
 	return progressLabel(k) + " " + strconv.Itoa(int(cur)+1)
 }
 
+// applyUpNext sets the Up next fields of a home card: the next unit and the
+// releases aired beyond progress (absent from aired: none). The home page and
+// the +1 answer on a home card share it.
+func applyUpNext(rv *rowView, k plugin.KindDef, row library.Row, aired map[int64]int) {
+	rv.NextLabel = nextLabel(k, row.Item.ProgressKeys, row.Entry, row.Item.Fields)
+	rv.Aired = aired[row.Item.ID]
+}
+
 // getHome renders the home page; with no plugin enabled it sends the owner to
 // Settings > Plugins.
 func (s *server) getHome(w http.ResponseWriter, r *http.Request) {
@@ -160,8 +168,7 @@ func (s *server) getHome(w http.ResponseWriter, r *http.Request) {
 	linked := map[string]bool{}
 	for _, he := range entries {
 		rv := s.rowView(he.m, he.row, "/", nil)
-		rv.NextLabel = nextLabel(he.k, he.row.Item.ProgressKeys, he.row.Entry, he.row.Item.Fields)
-		rv.Aired = aired[he.row.Item.ID]
+		applyUpNext(&rv, he.k, he.row, aired)
 		rv.BadgeIcon, rv.BadgeLabel = badge(he.m, he.k)
 		v.Cards = append(v.Cards, rv)
 		if key := he.m.ID + "/" + he.k.Key; !linked[key] {
