@@ -36,6 +36,9 @@ type ScheduledEntry struct {
 	Progress  map[string]float64
 	// ProgressKeys are the item's active progress tracks.
 	ProgressKeys []string
+	// Totals are the totals of the item's bounded tracks (a total field above
+	// 0), by track key.
+	Totals map[string]float64
 }
 
 // StaleSchedule names an active entry whose schedule was never stored or is
@@ -169,7 +172,15 @@ func (l *Library) scheduleQuery(ctx context.Context, extra string, args []any, l
 	if err != nil {
 		return nil, err
 	}
+	totals, err := l.itemTotals(ctx, list)
+	if err != nil {
+		return nil, err
+	}
 	for i := range out {
+		out[i].Totals = totals[out[i].ItemID]
+		if def, err := l.kindDef(out[i].PluginID, out[i].Kind); err == nil {
+			out[i].Totals = scheduledTotals(def, totals[out[i].ItemID])
+		}
 		out[i].Titles = titles[out[i].ItemID]
 		out[i].Progress = progress[out[i].ItemID]
 		if out[i].Progress == nil {
@@ -227,14 +238,33 @@ func Beyond(def plugin.KindDef, progress map[string]float64, season, number int)
 // MarkableTracks reports whether every progress track that marking the release
 // of season watched sets is active: the primary track (a count or pages
 // track), and the group track when the kind has one and the release carries a
-// season. A kind without a primary track has nothing to set.
-func MarkableTracks(def plugin.KindDef, active []string, season int) bool {
+// season. A season above the group track's total (totals by track key, an
+// absent key means unbounded) cannot be stored, so it is not markable either.
+// A kind without a primary track has nothing to set.
+func MarkableTracks(def plugin.KindDef, active []string, totals map[string]float64, season int) bool {
 	ps := def.Progress
 	pd, ok := progressDef(def, ps.PrimaryKey)
 	if ps.PrimaryKey == "" || !ok || !slices.Contains(active, ps.PrimaryKey) || (pd.Type != plugin.Count && pd.Type != plugin.Pages) {
 		return false
 	}
-	return ps.GroupKey == "" || season <= 0 || slices.Contains(active, ps.GroupKey)
+	if ps.GroupKey == "" || season <= 0 {
+		return true
+	}
+	if t, bounded := totals[ps.GroupKey]; bounded && t > 0 && float64(season) > t {
+		return false
+	}
+	return slices.Contains(active, ps.GroupKey)
+}
+
+// trackTotals returns the totals of the item's bounded tracks by track key.
+func trackTotals(def plugin.KindDef, item *Item) map[string]float64 {
+	out := map[string]float64{}
+	for _, d := range def.Progress.Eligible {
+		if total, bounded := progressBound(d, item); bounded {
+			out[d.Key] = total
+		}
+	}
+	return out
 }
 
 // AiredCounts returns, per listed item, how many stored releases have aired
@@ -328,4 +358,42 @@ func (l *Library) StaleSchedules(ctx context.Context, olderThan time.Time) ([]St
 		out = append(out, s)
 	}
 	return out, rows.Err()
+}
+
+// itemTotals reads the numeric fields above 0 of each listed item (the first
+// value of a field wins, like the entry checks), by item id and field key.
+func (l *Library) itemTotals(ctx context.Context, ids []any) (map[int64]map[string]float64, error) {
+	out := map[int64]map[string]float64{}
+	//nolint:gosec // G202: constant SQL and placeholders; values are bound
+	rows, err := l.db.QueryContext(ctx, `SELECT item_id, key, num FROM item_fields
+		WHERE num > 0 AND item_id IN (`+placeholders(len(ids))+`) ORDER BY item_id, seq`, ids...)
+	if err != nil {
+		return nil, fmt.Errorf("item totals: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id int64
+		var k string
+		var n float64
+		if err := rows.Scan(&id, &k, &n); err != nil {
+			return nil, fmt.Errorf("item totals: %w", err)
+		}
+		if out[id] == nil {
+			out[id] = map[string]float64{}
+		}
+		if _, seen := out[id][k]; !seen {
+			out[id][k] = n
+		}
+	}
+	return out, rows.Err()
+}
+
+// scheduledTotals maps an item's field values to the totals of its bounded
+// tracks by track key.
+func scheduledTotals(def plugin.KindDef, fields map[string]float64) map[string]float64 {
+	it := &Item{Fields: map[string]plugin.FieldValue{}}
+	for k, n := range fields {
+		it.Fields[k] = plugin.FieldValue{Num: &n}
+	}
+	return trackTotals(def, it)
 }

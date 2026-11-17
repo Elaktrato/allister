@@ -30,6 +30,8 @@ type calendarView struct {
 	PositionName, PositionValue string
 	// Return is this view's own URL, where Mark watched comes back to
 	Return string
+	// Notice is a message above the grid (a refused Mark watched)
+	Notice string
 }
 
 // setReturn stamps the view's own URL on every release (the button's form).
@@ -206,9 +208,9 @@ func (s *server) collectReleases(ctx context.Context, rows []library.ScheduledEn
 		byDay[key] = append(byDay[key], calendarRelease{
 			Title: title, Label: progressLabel(k), Season: row.Season, Number: row.Number,
 			Href: itemURL(m, row.Source, row.SourceID, row.Kind), At: at, ItemID: row.ItemID,
-			Markable: !row.AirsAt.After(now) && row.RunNumber == 1 &&
+			Markable: s.deps.Registry.IsEnabled(row.PluginID) && !row.AirsAt.After(now) && row.RunNumber == 1 &&
 				library.Beyond(k, row.Progress, row.Season, row.Number) &&
-				library.MarkableTracks(k, row.ProgressKeys, row.Season),
+				library.MarkableTracks(k, row.ProgressKeys, row.Totals, row.Season),
 		})
 	}
 	return byDay

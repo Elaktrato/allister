@@ -540,3 +540,83 @@ func TestMarkWatchedTotalBelowRelease(t *testing.T) {
 		t.Fatal("the second post changed something")
 	}
 }
+
+// TestCalendarMarkWatchedSeasonAboveTotal: a release of a season above the
+// item's season total gets no button, and a forged post answers 422.
+func TestCalendarMarkWatchedSeasonAboveTotal(t *testing.T) {
+	e := newFixtureEnv(t, func(book, tv *plugintest.Plugin) {
+		k := &tv.M.Kinds[0]
+		k.Progress.GroupKey = "season"
+		k.Progress.Eligible[0].TotalField = "seasons"
+		k.Fields = append(k.Fields, plugin.FieldDef{Key: "seasons", Label: "Seasons", Type: plugin.FieldNumber, Min: num(0), Editable: true})
+	})
+	now := time.Date(2026, 11, 11, 12, 0, 0, 0, time.UTC)
+	e.now = &now
+	d := tvShow("1", "Dark")
+	d.Fields["seasons"] = plugin.FieldValue{Num: num(1)}
+	id := e.addFixture(t, "tv", "show", d, library.Entry{Status: library.Active}, library.WithProgressKeys([]string{"season", "episode"}))
+	if err := e.lib.SaveSchedule(context.Background(), id, []library.Airing{
+		{Season: 1, Number: 1, AirsAt: time.Date(2026, 11, 9, 18, 0, 0, 0, time.UTC)},
+		{Season: 2, Number: 1, AirsAt: time.Date(2026, 11, 10, 18, 0, 0, 0, time.UTC)},
+	}, now); err != nil {
+		t.Fatal(err)
+	}
+	b := e.get("/calendar?month=2026-11").Body.String()
+	mustContain(t, b, `name="season" value="1"`)
+	mustNotContain(t, b, `name="season" value="2"`)
+	if rec := e.do("POST", fmt.Sprintf("/list/%d/watched", id), watchForm(2, 1, "/calendar"), false); rec.Code != 422 {
+		t.Fatalf("forged season above total: %d, want 422", rec.Code)
+	}
+}
+
+// TestCalendarMarkWatchedHiddenForDisabledPlugin: the calendar still lists a
+// disabled plugin's releases but offers no button the guard would refuse.
+func TestCalendarMarkWatchedHiddenForDisabledPlugin(t *testing.T) {
+	e, id := watchEnv(t, 0)
+	if !strings.Contains(e.get("/calendar?month=2026-11").Body.String(), fmt.Sprintf(`action="/list/%d/watched"`, id)) {
+		t.Fatal("setup: no button while enabled")
+	}
+	if err := e.reg.SetEnabled(context.Background(), "tv", false); err != nil {
+		t.Fatal(err)
+	}
+	mustNotContain(t, e.get("/calendar?month=2026-11").Body.String(), "/watched")
+}
+
+// TestPostListWatchedHTMXFailureShowsNotice: a refused mark from the calendar
+// grid answers the refreshed grid with a visible message (htmx swaps no error
+// status), not an error page.
+func TestPostListWatchedHTMXFailureShowsNotice(t *testing.T) {
+	e, id := watchEnv(t, 0)
+	if err := e.lib.UpsertEntry(context.Background(), library.Entry{ItemID: id, Status: library.Paused}); err != nil {
+		t.Fatal(err)
+	}
+	post := func(path string, form url.Values) *httptest.ResponseRecorder {
+		r := httptest.NewRequest("POST", path, strings.NewReader(form.Encode()))
+		r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		r.Header.Set("HX-Request", "true")
+		r.Header.Set("HX-Target", "calendar-grid")
+		rec := httptest.NewRecorder()
+		e.h.ServeHTTP(rec, r)
+		return rec
+	}
+	rec := post(fmt.Sprintf("/list/%d/watched", id), watchForm(0, 2, "/calendar?month=2026-11"))
+	if rec.Code != 200 {
+		t.Fatalf("stale mark: %d, want 200 (swappable)", rec.Code)
+	}
+	body := rec.Body.String()
+	mustContain(t, body, `id="calendar-grid"`, `role="alert"`, "Could not mark it watched")
+	mustNotContain(t, body, "<html", "<header")
+	// a plain post still gets the error page
+	if rec := e.do("POST", fmt.Sprintf("/list/%d/watched", id), watchForm(0, 2, "/calendar"), false); rec.Code != 422 {
+		t.Fatalf("plain: %d", rec.Code)
+	}
+	// a successful mark shows no notice
+	e2, id2 := watchEnv(t, 0)
+	r := httptest.NewRequest("POST", fmt.Sprintf("/list/%d/watched", id2), strings.NewReader(watchForm(0, 2, "/calendar?month=2026-11").Encode()))
+	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	r.Header.Set("HX-Request", "true")
+	r.Header.Set("HX-Target", "calendar-grid")
+	rec2 := httptest.NewRecorder()
+	e2.h.ServeHTTP(rec2, r)
+	mustNotContain(t, rec2.Body.String(), `role="alert"`)
+}

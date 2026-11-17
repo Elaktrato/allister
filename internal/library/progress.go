@@ -529,8 +529,12 @@ func (l *Library) MarkReleaseWatched(ctx context.Context, itemID int64, season, 
 	if status != string(Active) {
 		return false, invalid("only an active entry can be marked from the schedule")
 	}
-	if !MarkableTracks(def, active, season) {
-		return false, invalid("the progress tracks of this release are not active for the item")
+	it, _, err := l.txItem(ctx, tx, itemID)
+	if err != nil {
+		return false, err
+	}
+	if !MarkableTracks(def, active, trackTotals(def, it), season) {
+		return false, invalid("the progress tracks of this release are not active for the item or the season is above its total")
 	}
 	progress, err := runProgressTx(ctx, tx, runID)
 	if err != nil {
@@ -538,10 +542,6 @@ func (l *Library) MarkReleaseWatched(ctx context.Context, itemID int64, season, 
 	}
 	if !Beyond(def, progress, season, number) {
 		return false, nil
-	}
-	it, _, err := l.txItem(ctx, tx, itemID)
-	if err != nil {
-		return false, err
 	}
 	key := def.Progress.PrimaryKey
 	pd, _ := progressDef(def, key)

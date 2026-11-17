@@ -7,6 +7,7 @@
 {{/* the month grid; htmx month links swap this region alone */}}
 {{define "calendar_grid"}}
 <div id="calendar-grid">
+  {{if .Notice}}<p role="alert" class="mb-4 rounded border border-amber-700 bg-amber-950 p-3 text-sm text-amber-200">{{.Notice}}</p>{{end}}
   <div class="mb-4 flex flex-wrap items-center gap-3 text-sm">
     <div class="flex items-center gap-1" role="group" aria-label="View">
       <a href="{{.MonthURL}}" hx-get="{{.MonthURL}}" hx-target="#calendar-grid" hx-push-url="true"{{if eq .View "month"}} aria-current="true"{{end}} class="rounded-md border border-slate-700 px-2.5 py-1 hover:bg-slate-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500{{if eq .View "month"}} bg-slate-800 text-slate-200{{else}} text-slate-400{{end}}">Month</a>
