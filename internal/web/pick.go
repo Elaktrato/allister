@@ -24,8 +24,9 @@ import (
 	"github.com/allister/allister/internal/plugin"
 )
 
-// pickCap bounds the entries loaded for one draw.
-const pickCap = 20000
+// defaultPickCap bounds the entries loaded for one draw (server.pickCap, which
+// tests lower).
+const defaultPickCap = 20000
 
 // lengthParams are the URL parameters of the length filter.
 var lengthParams = []string{"len", "len_min", "len_max"}
@@ -298,7 +299,7 @@ func (s *server) buildPick(r *http.Request, m plugin.Manifest, lq listQuery) (*p
 	k, _ := kindDef(m, lq.Kind)
 	q := listLibraryQuery(m, k, lq)
 	q.Sort = library.Sort{Kind: library.SortTitle} // a stable order for the draw
-	rows, err := s.deps.Library.Rows(ctx, q, s.titleLang(ctx, m), pickCap+1, 0)
+	rows, err := s.deps.Library.Rows(ctx, q, s.titleLang(ctx, m), s.pickCap+1, 0)
 	if errors.Is(err, library.ErrInvalid) && lq.Filters.active() {
 		// parseFilters checks every part against the schema: a safety net
 		log.Printf("pick %s: filters refused: %s", m.ID, logSafe(err))
@@ -308,9 +309,9 @@ func (s *server) buildPick(r *http.Request, m plugin.Manifest, lq listQuery) (*p
 	if err != nil {
 		return nil, err
 	}
-	pv := &pickView{Noun: lowerFirst(k.LabelPlural), RollURL: pickURL(m, k, lq), CapLimit: pickCap}
-	if len(rows) > pickCap {
-		rows, pv.Capped = rows[:pickCap], true
+	pv := &pickView{Noun: lowerFirst(k.LabelPlural), RollURL: pickURL(m, k, lq), CapLimit: s.pickCap}
+	if len(rows) > s.pickCap {
+		rows, pv.Capped = rows[:s.pickCap], true
 	}
 	if lq.Length.active() {
 		rows = slices.DeleteFunc(rows, func(row library.Row) bool {

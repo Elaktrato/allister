@@ -188,6 +188,32 @@ func TestPickExcludesUnsetLength(t *testing.T) {
 	}
 }
 
+// TestPickCapNotice: more matches than the cap are cut to the first ones in
+// title order with a notice; at the cap exactly there is none. The cap is a
+// server field so the test does not need 20,000 rows.
+func TestPickCapNotice(t *testing.T) {
+	e := newEnv(t)
+	addPick(t, e, "1", "Alpha", library.Planned, ip(12), ip(24))
+	addPick(t, e, "2", "Bravo", library.Planned, ip(12), ip(24))
+	addPick(t, e, "3", "Charlie", library.Planned, ip(12), ip(24))
+	if e.srv.pickCap != 20000 {
+		t.Fatalf("default cap = %d, want 20000", e.srv.pickCap)
+	}
+	var n int
+	e.srv.pickCap = 2
+	r := pick(t, e, "", 5, &n)
+	if n != 2 || pickedTitle(r.Body) != "Bravo" { // Alpha, Bravo by title; Charlie is cut
+		t.Fatalf("%d candidates, drew %q", n, pickedTitle(r.Body))
+	}
+	mustContain(t, r.Body, "Only the first 2 matching", "were considered")
+	e.srv.pickCap = 3
+	r = pick(t, e, "", 5, &n)
+	if n != 3 || pickedTitle(r.Body) != "Charlie" {
+		t.Fatalf("%d candidates, drew %q", n, pickedTitle(r.Body))
+	}
+	mustNotContain(t, r.Body, "were considered")
+}
+
 func TestPickOneMatchRollsSameEntry(t *testing.T) {
 	e := newEnv(t)
 	addPick(t, e, "1", "Alpha", library.Planned, ip(12), ip(24))

@@ -101,6 +101,8 @@ type server struct {
 	coreGuarded  []string
 	// now is the server's clock (export file names, caches).
 	now func() time.Time
+	// pickCap bounds the entries one pick loads (a seam for tests)
+	pickCap int
 	// restoreMu allows one backup restore at a time; maxBackupBody caps its
 	// upload; spoolHook (tests) sees the spooled temp file.
 	restoreMu     sync.Mutex
@@ -166,7 +168,7 @@ func newServer(deps Deps, now func() time.Time) (*server, http.Handler) {
 		deps.Appearance = appearance.NewService(st, nil)
 	}
 	s := &server{deps: deps, pages: parsePages(), cache: newDetailCache(now, cacheMaxEntries, cacheTTL),
-		recs: newRecCache(now, recCacheMaxEntries, cacheTTL), recTimeout: recTimeout, now: now, rand: rand.IntN, maxBackupBody: maxBackupBody, backupWrite: backup.Write,
+		recs: newRecCache(now, recCacheMaxEntries, cacheTTL), recTimeout: recTimeout, now: now, pickCap: defaultPickCap, rand: rand.IntN, maxBackupBody: maxBackupBody, backupWrite: backup.Write,
 		appearance: deps.Appearance}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
