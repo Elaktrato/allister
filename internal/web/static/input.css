@@ -45,6 +45,83 @@
     color: rgb(var(--al-accent-text));
   }
 
+  /* Checkboxes are round; the checkmark is drawn with two borders and
+     sticks out past the ring at the top right. Sizes are relative to the
+     box (a class such as h-4 w-4 still resizes it), colours are theme
+     tokens. The empty ring is tinted with the background token so it
+     stays visible on a cover. */
+  input[type="checkbox"] {
+    -webkit-appearance: none;
+    appearance: none;
+    position: relative;
+    display: inline-block;
+    flex-shrink: 0;
+    vertical-align: middle;
+    width: 1.25rem;
+    height: 1.25rem;
+    margin: 0;
+    cursor: pointer;
+    border: 2px solid rgb(var(--al-text-muted));
+    border-radius: 9999px;
+    background-color: rgb(var(--al-bg) / 0.65);
+    transition:
+      border-color 0.15s,
+      background-color 0.15s;
+  }
+  input[type="checkbox"]::after {
+    content: "";
+    position: absolute;
+    box-sizing: border-box;
+    left: 30%;
+    top: -52%;
+    width: 42%;
+    height: 124%;
+    border-right: 0.22rem solid rgb(var(--al-accent));
+    border-bottom: 0.22rem solid rgb(var(--al-accent));
+    border-radius: 0 0 0.1rem 0;
+    filter: drop-shadow(0 0 1px rgb(var(--al-bg) / 0.9));
+    transform: rotate(40deg) scale(0);
+    transform-origin: 50% 100%;
+    opacity: 0;
+    transition:
+      transform 0.18s cubic-bezier(0.3, 1.6, 0.5, 1),
+      opacity 0.12s;
+  }
+  input[type="checkbox"]:hover {
+    border-color: rgb(var(--al-accent));
+  }
+  input[type="checkbox"]:checked {
+    border-color: rgb(var(--al-accent));
+    background-color: rgb(var(--al-accent) / 0.22);
+  }
+  input[type="checkbox"]:checked::after {
+    transform: rotate(40deg) scale(1);
+    opacity: 1;
+  }
+  input[type="checkbox"]:focus-visible {
+    outline: 2px solid rgb(var(--al-focus) / 0.5);
+    outline-offset: 2px;
+  }
+  input[type="checkbox"]:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    input[type="checkbox"],
+    input[type="checkbox"]::after {
+      transition: none;
+    }
+  }
+  @media (forced-colors: active) {
+    input[type="checkbox"] {
+      border-color: ButtonText;
+    }
+    input[type="checkbox"]:checked::after {
+      border-color: Highlight;
+      filter: none;
+    }
+  }
+
   /* A spoiler is hidden until clicked (app.js toggles .revealed): the text
      takes the colour of its own background. */
   .spoiler {
