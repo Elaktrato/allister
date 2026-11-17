@@ -139,7 +139,7 @@ func (s *server) getCalendarPage(w http.ResponseWriter, r *http.Request) {
 	// viewing the grid also refreshes stale schedules, like the feed does
 	s.enqueueStaleSchedules(ctx, now)
 	// the answer depends on the partial headers, like the list
-	w.Header().Set("Vary", "HX-Request, HX-Target")
+	w.Header().Set("Vary", "HX-Request, HX-Target, HX-History-Restore-Request")
 	if isPartialRequest(r) && r.Header.Get("HX-Target") == "calendar-grid" {
 		s.renderPartial(w, "calendar", "calendar_grid", v)
 		return
