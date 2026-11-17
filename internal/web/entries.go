@@ -166,6 +166,14 @@ func (s *server) answerChange(w http.ResponseWriter, r *http.Request, ret string
 	if mixed {
 		rv.BadgeIcon, rv.BadgeLabel = badge(t.man, t.kind)
 	}
+	if ret == "/" { // an Up next card on the home page
+		aired, err := s.deps.Library.AiredCounts(r.Context(), []int64{t.row.Item.ID}, s.now())
+		if err != nil {
+			s.internalError(w, r, err)
+			return
+		}
+		applyUpNext(&rv, t.kind, *t.row, aired)
+	}
 	// a row of the plugin's own list keeps its bulk edit checkbox
 	if u, err := url.Parse(ret); err == nil && u.Path == "/"+t.man.ID {
 		rv.SelectID = strconv.FormatInt(t.row.Item.ID, 10)
