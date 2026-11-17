@@ -376,3 +376,39 @@ func TestBeyondEmptyPrimaryKey(t *testing.T) {
 		t.Error("an empty primary key must never be beyond")
 	}
 }
+
+// TestReleaseMarkable: the button predicate is false whenever marking would
+// move nothing, in particular a release number above the total while the
+// primary track already sits at the total (the call clamps to the total).
+func TestReleaseMarkable(t *testing.T) {
+	single := plugin.KindDef{Progress: plugin.ProgressSpec{PrimaryKey: "episode",
+		Eligible: []plugin.ProgressDef{{Key: "episode", Type: plugin.Count, TotalField: "episodes"}}}}
+	grouped := plugin.KindDef{Progress: plugin.ProgressSpec{PrimaryKey: "episode", GroupKey: "season",
+		Eligible: []plugin.ProgressDef{{Key: "season", Type: plugin.Count}, {Key: "episode", Type: plugin.Count, TotalField: "episodes"}}}}
+	keys := []string{"episode"}
+	gkeys := []string{"season", "episode"}
+	total := map[string]float64{"episode": 12}
+	cases := []struct {
+		name     string
+		def      plugin.KindDef
+		keys     []string
+		totals   map[string]float64
+		progress map[string]float64
+		s, n     int
+		want     bool
+	}{
+		{"beyond below total", single, keys, total, map[string]float64{"episode": 3}, 0, 4, true},
+		{"beyond the total, below it now", single, keys, total, map[string]float64{"episode": 10}, 0, 13, true},
+		{"beyond the total, at it now", single, keys, total, map[string]float64{"episode": 12}, 0, 13, false},
+		{"unbounded", single, keys, nil, map[string]float64{"episode": 12}, 0, 13, true},
+		{"not beyond", single, keys, total, map[string]float64{"episode": 4}, 0, 4, false},
+		{"new season restarts the count", grouped, gkeys, total, map[string]float64{"season": 1, "episode": 12}, 2, 1, true},
+		{"same season at the total", grouped, gkeys, total, map[string]float64{"season": 1, "episode": 12}, 1, 13, false},
+		{"track inactive", single, nil, total, map[string]float64{"episode": 1}, 0, 2, false},
+	}
+	for _, c := range cases {
+		if got := ReleaseMarkable(c.def, c.keys, c.totals, c.progress, c.s, c.n); got != c.want {
+			t.Errorf("%s: ReleaseMarkable = %v, want %v", c.name, got, c.want)
+		}
+	}
+}

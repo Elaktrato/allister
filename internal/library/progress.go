@@ -540,37 +540,8 @@ func (l *Library) MarkReleaseWatched(ctx context.Context, itemID int64, season, 
 	if err != nil {
 		return false, err
 	}
-	if !Beyond(def, progress, season, number) {
-		return false, nil
-	}
 	key := def.Progress.PrimaryKey
-	pd, _ := progressDef(def, key)
-	value := float64(number)
-	if total, bounded := progressBound(pd, it); bounded {
-		value = math.Min(value, total)
-	}
-	type move struct {
-		key      string
-		old, new float64
-	}
-	var moves []move
-	gk := def.Progress.GroupKey
-	switch {
-	case gk != "" && float64(season) > math.Max(progress[gk], 1):
-		moves = append(moves, move{gk, progress[gk], float64(season)})
-		// a new group starts its primary count again: the value is the
-		// release's number even when that is below the old primary value
-		moves = append(moves, move{key, progress[key], value})
-	default:
-		if gk != "" && season > 0 && float64(season) > progress[gk] {
-			// an unset group value is the first group: record it
-			moves = append(moves, move{gk, progress[gk], float64(season)})
-		}
-		if value > progress[key] {
-			moves = append(moves, move{key, progress[key], value})
-		}
-	}
-	moves = slices.DeleteFunc(moves, func(m move) bool { return m.new == m.old })
+	moves := releaseMoves(def, trackTotals(def, it), progress, season, number)
 	if len(moves) == 0 {
 		return false, nil
 	}
@@ -625,4 +596,52 @@ func runProgressTx(ctx context.Context, tx *sql.Tx, runID int64) (map[string]flo
 		return nil, fmt.Errorf("run progress: %w", err)
 	}
 	return out, nil
+}
+
+// progressMove is one track change a Mark watched makes.
+type progressMove struct {
+	key      string
+	old, new float64
+}
+
+// releaseMoves returns the track changes marking the release (season, number)
+// watched makes on top of progress: the primary track to number (never above
+// its total, totals by track key) and, for a grouped release, the group track.
+// A release not Beyond progress, or one the clamp to the total leaves where it
+// is, yields none.
+func releaseMoves(def plugin.KindDef, totals, progress map[string]float64, season, number int) []progressMove {
+	if !Beyond(def, progress, season, number) {
+		return nil
+	}
+	key := def.Progress.PrimaryKey
+	value := float64(number)
+	if total, bounded := totals[key]; bounded && total > 0 {
+		value = math.Min(value, total)
+	}
+	var moves []progressMove
+	gk := def.Progress.GroupKey
+	switch {
+	case gk != "" && float64(season) > math.Max(progress[gk], 1):
+		moves = append(moves, progressMove{gk, progress[gk], float64(season)})
+		// a new group starts its primary count again: the value is the
+		// release's number even when that is below the old primary value
+		moves = append(moves, progressMove{key, progress[key], value})
+	default:
+		if gk != "" && season > 0 && float64(season) > progress[gk] {
+			// an unset group value is the first group: record it
+			moves = append(moves, progressMove{gk, progress[gk], float64(season)})
+		}
+		if value > progress[key] {
+			moves = append(moves, progressMove{key, progress[key], value})
+		}
+	}
+	return slices.DeleteFunc(moves, func(m progressMove) bool { return m.new == m.old })
+}
+
+// ReleaseMarkable reports whether Mark watched may be offered for the release
+// (season, number): the tracks it sets are active (MarkableTracks) and marking
+// would change something (releaseMoves). It is the one predicate behind the
+// button; MarkReleaseWatched applies the same moves.
+func ReleaseMarkable(def plugin.KindDef, active []string, totals, progress map[string]float64, season, number int) bool {
+	return MarkableTracks(def, active, totals, season) && len(releaseMoves(def, totals, progress, season, number)) > 0
 }

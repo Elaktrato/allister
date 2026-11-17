@@ -68,9 +68,10 @@ type calendarRelease struct {
 	Season, Number     int
 	At                 time.Time
 	ItemID             int64
-	// Markable: the release has aired, lies beyond the entry's progress, the
-	// entry is active on its first run and every track marking it sets is
-	// active; only then the Mark watched button is offered.
+	// Markable: the release has aired, the entry is active on its first run and
+	// library.ReleaseMarkable agrees (beyond progress, every track it sets is
+	// active, and the clamp to the total still moves something); only then the
+	// Mark watched button is offered.
 	Markable bool
 	Return   string
 }
@@ -209,8 +210,7 @@ func (s *server) collectReleases(ctx context.Context, rows []library.ScheduledEn
 			Title: title, Label: progressLabel(k), Season: row.Season, Number: row.Number,
 			Href: itemURL(m, row.Source, row.SourceID, row.Kind), At: at, ItemID: row.ItemID,
 			Markable: s.deps.Registry.IsEnabled(row.PluginID) && !row.AirsAt.After(now) && row.RunNumber == 1 &&
-				library.Beyond(k, row.Progress, row.Season, row.Number) &&
-				library.MarkableTracks(k, row.ProgressKeys, row.Totals, row.Season),
+				library.ReleaseMarkable(k, row.ProgressKeys, row.Totals, row.Progress, row.Season, row.Number),
 		})
 	}
 	return byDay
