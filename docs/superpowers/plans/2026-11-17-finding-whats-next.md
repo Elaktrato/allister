@@ -150,13 +150,13 @@
 - Produces:
   ```go
   func (l *Library) MarkReleaseWatched(ctx context.Context, itemID int64, season, number int, now time.Time) (changed bool, err error)
-  // POST /calendar/watched  form: item (id), season, number; 303 back to the calendar (the Referer's view) 
+  // POST /list/{id}/watched  form: season, number, return (the calendar URL to go back to, same-site path only); 303 back. A core entry route, so itemPluginGuard covers it
   ```
 - `MarkReleaseWatched`: one transaction; `ErrNoEntry` without an entry; `ErrInvalid` when the (season, number) is not a stored airing of the item, has not aired (`airs_at > now`), the display run is a repeat (number above 1) or the entry is not active; a no-op (`changed=false`) when not `Beyond`; otherwise sets the primary track to `number` (clamped to the total) and, when `GroupKey` is active and `season > 0`, the group track to `season`; resets `ResetOnPrimary` tracks; writes `entry_events` with origin `manual` like `Increment`; never lowers. The button is offered only when every track it sets is active for the item.
 
-- [ ] **Step 1: Failing tests:** library `TestMarkReleaseWatchedSets`, `...Idempotent` (second call `changed=false`, one event total), `...NeverLowers`, `...ClampsToTotal`, `...RejectsUnknownRelease`, `...RejectsFuture`, `...RejectsRepeatRun`, `...SeasonAndUnit` (group track set), `...EventOriginManual`; web `TestCalendarMarkWatchedButton` (shown only aired+beyond+active tracks), `TestPostCalendarWatched` (303; forged item 404/422; disabled plugin 404 via the guard; double post leaves one change).
+- [ ] **Step 1: Failing tests:** library `TestMarkReleaseWatchedSets`, `...Idempotent` (second call `changed=false`, one event total), `...NeverLowers`, `...ClampsToTotal`, `...RejectsUnknownRelease`, `...RejectsFuture`, `...RejectsRepeatRun`, `...SeasonAndUnit` (group track set), `...EventOriginManual`; web `TestCalendarMarkWatchedButton` (shown only aired+beyond+active tracks), `TestPostListWatched` (303; forged release 422; unknown item 404; disabled plugin 404 via the guard; double post leaves one change).
 - [ ] **Step 2: Run** `CGO_ENABLED=0 go test ./internal/library/ ./internal/web/ -run 'MarkRelease|CalendarWatched|MarkWatched' -count=1`; expect FAIL.
-- [ ] **Step 3: Implement**, register `POST /calendar/watched` as a core route behind the item's plugin guard (`itemPluginGuard`, add the pattern to `coreGuarded` the way entry routes are).
+- [ ] **Step 3: Implement**, register `POST /list/{id}/watched` in `entryRoutes` (the guard applies automatically).
 - [ ] **Step 4: Run** both packages in full; expect PASS.
 - [ ] **Step 5: Commit** `feat: mark an aired release watched from the calendar`.
 
