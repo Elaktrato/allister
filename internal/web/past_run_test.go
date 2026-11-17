@@ -41,3 +41,28 @@ func TestRunDialogOnAPastDisplayRunOnlyOffersStartingAgain(t *testing.T) {
 		t.Fatal("the refused answer changed the database")
 	}
 }
+
+// A past display run of an item that is still airing offers neither answer:
+// the question says so instead of asking to correct a run it cannot correct.
+func TestRunDialogPastRunStillAiringHasNothingToAnswer(t *testing.T) {
+	e := newFixtureEnv(t, repeatLabels)
+	id := completedShow(t, e.env, "1", "Airing Past")
+	ctx := context.Background()
+	run2, err := e.lib.StartRun(ctx, id, *day(2026, 1, 2))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := e.lib.UpdateRun(ctx, run2.ID, library.RunUpdate{Status: library.Dropped}); err != nil {
+		t.Fatal(err)
+	}
+	e.airing(t, id, *day(2999, 1, 1))
+	form := url.Values{"status": {"active"}, "rating": {"8"}, "progress.episode": {"10"}, "return": {"/tv"}}
+	rec := e.do("POST", "/list/"+idStr(id)+"/edit", form, true)
+	if rec.Code != 200 {
+		t.Fatal(rec.Code, rec.Body.String())
+	}
+	b := rec.Body.String()
+	mustContain(t, b, "Still airing: it can be started again once it has finished airing, and this earlier run stays finished behind the dropped repeat, so there is nothing to change here.")
+	mustNotContain(t, b, "Correct the current run?", `name="run_choice"`, "No, correct this one", "Watch again instead")
+	mustContain(t, b, "data-dialog-close") // Cancel stays
+}
