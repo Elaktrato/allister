@@ -3,12 +3,14 @@ package web
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/allister/allister/internal/library"
 	"github.com/allister/allister/internal/plugin"
+	"github.com/allister/allister/internal/plugin/plugintest"
 )
 
 // The fixture TV source declares SupportsSchedule; the book source does not.
@@ -184,4 +186,139 @@ func TestCalendarSeasonLabels(t *testing.T) {
 	mustContain(t, b, "UID:"+idStr(id)+"-s2-5@allister\r\n", "SUMMARY:Dark — Season 2\\, Episode 5\r\n")
 	page := e.get("/calendar").Body.String()
 	mustContain(t, page, "S2E5", ">S2E5</span>")
+}
+
+func TestParseCalendarWeek(t *testing.T) {
+	berlin, err := time.LoadLocation("Europe/Berlin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 11, 11, 12, 0, 0, 0, berlin) // a Wednesday
+	cases := []struct {
+		name, raw string
+		now       time.Time
+		want      time.Time
+	}{
+		{"mid-week day gives its Monday", "2026-11-12", now, time.Date(2026, 11, 9, 0, 0, 0, 0, berlin)},
+		{"a Monday is itself", "2026-11-09", now, time.Date(2026, 11, 9, 0, 0, 0, 0, berlin)},
+		{"a Sunday belongs to the week before", "2026-11-15", now, time.Date(2026, 11, 9, 0, 0, 0, 0, berlin)},
+		{"garbage is the current week", "nope", now, time.Date(2026, 11, 9, 0, 0, 0, 0, berlin)},
+		{"empty is the current week", "", now, time.Date(2026, 11, 9, 0, 0, 0, 0, berlin)},
+		{"impossible date is the current week", "2026-02-31", now, time.Date(2026, 11, 9, 0, 0, 0, 0, berlin)},
+		{"DST end week keeps local midnight", "2026-10-28", now, time.Date(2026, 10, 26, 0, 0, 0, 0, berlin)},
+		{"DST start week keeps local midnight", "2026-03-29", now, time.Date(2026, 3, 23, 0, 0, 0, 0, berlin)},
+		{"year boundary goes back a year", "2027-01-01", now, time.Date(2026, 12, 28, 0, 0, 0, 0, berlin)},
+		{"current week across the new year", "", time.Date(2027, 1, 2, 9, 0, 0, 0, berlin), time.Date(2026, 12, 28, 0, 0, 0, 0, berlin)},
+	}
+	for _, c := range cases {
+		got := parseCalendarWeek(c.raw, c.now)
+		if !got.Equal(c.want) || got.Location() != berlin || got.Hour() != 0 {
+			t.Errorf("%s: parseCalendarWeek(%q) = %v, want %v", c.name, c.raw, got, c.want)
+		}
+	}
+}
+
+// scheduleEnv has two schedule-capable plugins (tv and books) and one show
+// and one book airing in the week of Monday 2026-11-09.
+func scheduleEnv(t *testing.T) *fixtureEnv {
+	t.Helper()
+	e := newFixtureEnv(t, func(book, tv *plugintest.Plugin) {
+		book.M.Sources[0].SupportsSchedule = true
+	})
+	now := time.Date(2026, 11, 11, 12, 0, 0, 0, time.UTC)
+	e.now = &now
+	show := e.addFixture(t, "tv", "show", tvShow("1", "Dark"), library.Entry{Status: library.Active})
+	book := e.addFixture(t, "book", "book", bookItem("2", "Earthsea"), library.Entry{Status: library.Active})
+	save := func(id int64, n int, at time.Time) {
+		if err := e.lib.SaveSchedule(context.Background(), id, []library.Airing{{Number: n, AirsAt: at}}, now); err != nil {
+			t.Fatal(err)
+		}
+	}
+	save(show, 3, time.Date(2026, 11, 12, 18, 30, 0, 0, time.UTC))
+	// a second show release on the Sunday and the book on the Monday
+	if err := e.lib.SaveSchedule(context.Background(), show, []library.Airing{
+		{Number: 3, AirsAt: time.Date(2026, 11, 12, 18, 30, 0, 0, time.UTC)},
+		{Number: 4, AirsAt: time.Date(2026, 11, 15, 23, 30, 0, 0, time.UTC)},
+	}, now); err != nil {
+		t.Fatal(err)
+	}
+	save(book, 9, time.Date(2026, 11, 9, 8, 0, 0, 0, time.UTC))
+	return e
+}
+
+func TestCalendarWeekView(t *testing.T) {
+	e := scheduleEnv(t)
+	b := e.get("/calendar?view=week&week=2026-11-12").Body.String()
+	mustContain(t, b, "9 – 15 Nov 2026", ">Mon</th>", ">Sun</th>",
+		`href="/calendar?view=week&amp;week=2026-11-02"`, `href="/calendar?view=week&amp;week=2026-11-16"`,
+		"Dark", "Episode 3", "Episode 4", "Earthsea")
+	if n := strings.Count(b, `class="calendar-day`); n != 7 {
+		t.Fatalf("%d day cells, want 7", n)
+	}
+	// the Monday cell comes first and holds the book
+	if strings.Index(b, "Earthsea") > strings.Index(b, "Dark") {
+		t.Error("Monday's release is not before Thursday's")
+	}
+	// Sunday 23:30 UTC lands on Monday in a zone ahead of UTC
+	if rec := e.do("POST", "/settings/time-zone", url.Values{"time_zone": {"Europe/Berlin"}}, false); rec.Code != 303 {
+		t.Fatalf("%d", rec.Code)
+	}
+	b = e.get("/calendar?view=week&week=2026-11-09").Body.String()
+	mustNotContain(t, b, "Episode 4") // now Monday 16 Nov: next week
+	mustContain(t, e.get("/calendar?view=week&week=2026-11-16").Body.String(), "Episode 4")
+	// view toggle links stay on the same period
+	mustContain(t, b, `href="/calendar?month=2026-11"`, `href="/calendar?view=week&amp;week=2026-11-09"`)
+	// a week across the new year labels both years
+	mustContain(t, e.get("/calendar?view=week&week=2026-12-31").Body.String(), "28 Dec 2026 – 3 Jan 2027")
+	// garbage means the current week; an unknown view means the month
+	mustContain(t, e.get("/calendar?view=week&week=zzz").Body.String(), "9 – 15 Nov 2026")
+	mustContain(t, e.get("/calendar?view=year").Body.String(), "November 2026")
+}
+
+func TestCalendarPluginFilter(t *testing.T) {
+	e := scheduleEnv(t)
+	for _, u := range []string{"/calendar?plugin=tv&month=2026-11", "/calendar?view=week&week=2026-11-09&plugin=tv"} {
+		b := e.get(u).Body.String()
+		mustContain(t, b, "Dark")
+		mustNotContain(t, b, "Earthsea")
+		// navigation keeps the filter
+		mustContain(t, b, "plugin=tv")
+	}
+	b := e.get("/calendar?plugin=book&month=2026-11").Body.String()
+	mustContain(t, b, "Earthsea")
+	mustNotContain(t, b, "Dark")
+	// both without a filter
+	b = e.get("/calendar?view=week&week=2026-11-09").Body.String()
+	mustContain(t, b, "Dark", "Earthsea")
+	mustNotContain(t, b, "plugin=")
+	// the htmx partial keeps both views and the filter
+	for _, u := range []string{"/calendar?plugin=tv", "/calendar?view=week&plugin=tv"} {
+		rec := e.getWith(u, map[string]string{"HX-Request": "true", "HX-Target": "calendar-grid"})
+		body := rec.Body.String()
+		mustContain(t, body, `id="calendar-grid"`, `hx-target="#calendar-grid"`)
+		mustNotContain(t, body, "<html", "<header")
+		if v := rec.Header().Get("Vary"); !strings.Contains(v, "HX-Request") || !strings.Contains(v, "HX-Target") {
+			t.Fatalf("Vary = %q", v)
+		}
+	}
+}
+
+func TestCalendarUnknownPluginIgnored(t *testing.T) {
+	e := scheduleEnv(t)
+	b := e.get("/calendar?plugin=nope&month=2026-11").Body.String()
+	mustContain(t, b, "Dark", "Earthsea")
+	mustNotContain(t, b, "plugin=nope")
+	b = e.get("/calendar?view=week&week=2026-11-09&plugin=%00%3Cx%3E").Body.String()
+	mustContain(t, b, "Dark", "Earthsea")
+	mustNotContain(t, b, "plugin=")
+}
+
+func TestCalendarPluginSelectListsScheduleCapable(t *testing.T) {
+	// only tv declares schedules in the plain fixture
+	e := newFixtureEnv(t)
+	b := e.get("/calendar").Body.String()
+	mustContain(t, b, `<option value="">All plugins</option>`, `<option value="tv"`)
+	mustNotContain(t, b, `<option value="book"`)
+	e = scheduleEnv(t)
+	mustContain(t, e.get("/calendar?plugin=book").Body.String(), `<option value="tv">`, `<option value="book" selected>`)
 }

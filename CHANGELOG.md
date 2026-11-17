@@ -8,6 +8,7 @@ How a release is cut: move the entries under "Unreleased" to a new `## vX.Y.Z - 
 
 ### Added
 
+- **Calendar week view and plugin filter.** The calendar has a Month/Week toggle (the week starts on Monday, in your time zone) and a plugin select that narrows either view to one plugin.
 - **No repeat run while airing.** An item with upcoming releases cannot be started again (button and "<Action> instead?" are hidden with a note; the request answers 422), so airings always belong to the first run. It can be started again once it has finished airing.
 - **Pick one.** A button on each list draws one entry at random from the matching planned entries (or the status you filtered): title, cover, length and genres, with Roll again and Start. Games, movies, TV and anime also filter by length (for example under 90 minutes, or under 13 episodes); entries without that data are left out. The same filters as the list apply.
 - **Update from source shows a comparison.** On a saved item, Update from source asks the source again and lists only what differs (each field, and titles, genres, tags, cover, relations and credits as a whole), with rows you have left empty ticked; it writes only the rows you tick. A blank source value never clears yours.
