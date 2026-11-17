@@ -1038,3 +1038,38 @@ func TestMarkReleaseWatchedSeasonAboveTotal(t *testing.T) {
 		t.Fatal("MarkableTracks ignores the group total")
 	}
 }
+
+// TestMarkReleaseWatchedUnsetSeason: a show advanced with +1 has no season
+// value, which counts as the first season: an aired release of season 1 is
+// compared by number and never lowers the episode.
+func TestMarkReleaseWatchedUnsetSeason(t *testing.T) {
+	l := groupedLib(t)
+	now := time.Date(2026, 11, 10, 12, 0, 0, 0, time.UTC)
+	past := now.Add(-time.Hour)
+	id, err := l.AddToList(bg, "tvg", "show", tvData("us1", nil), Entry{Status: Active, Progress: map[string]float64{"episode": 5}},
+		WithProgressKeys([]string{"season", "episode"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := l.SaveSchedule(bg, id, []Airing{{Season: 1, Number: 3, AirsAt: past}, {Season: 1, Number: 6, AirsAt: past}, {Season: 2, Number: 1, AirsAt: past}}, now); err != nil {
+		t.Fatal(err)
+	}
+	if changed, err := l.MarkReleaseWatched(bg, id, 1, 3, now); err != nil || changed {
+		t.Fatalf("S1E3: changed=%v err=%v", changed, err)
+	}
+	if got := progressOf(t, l, id); got["season"] != 0 || got["episode"] != 5 || len(readEvents(t, l, id)) != 0 {
+		t.Fatalf("S1E3 wrote: %v", got)
+	}
+	if changed, err := l.MarkReleaseWatched(bg, id, 1, 6, now); err != nil || !changed {
+		t.Fatalf("S1E6: changed=%v err=%v", changed, err)
+	}
+	if got := progressOf(t, l, id); got["season"] != 1 || got["episode"] != 6 {
+		t.Fatalf("S1E6: %v", got)
+	}
+	if changed, err := l.MarkReleaseWatched(bg, id, 2, 1, now); err != nil || !changed {
+		t.Fatalf("S2E1: changed=%v err=%v", changed, err)
+	}
+	if got := progressOf(t, l, id); got["season"] != 2 || got["episode"] != 1 {
+		t.Fatalf("S2E1: %v", got)
+	}
+}

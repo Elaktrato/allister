@@ -3,6 +3,7 @@ package library
 import (
 	"context"
 	"fmt"
+	"math"
 	"slices"
 	"strings"
 	"time"
@@ -222,12 +223,14 @@ func (l *Library) displayProgress(ctx context.Context, ids []any) (map[int64]map
 // Beyond reports whether the release (season, number) lies beyond progress.
 // With a group track and a grouped release (season > 0) the pair is compared
 // lexicographically against (group value, primary value); otherwise only the
-// number is compared with the primary value. Missing progress counts as 0.
+// number is compared with the primary value. Missing progress counts as 0,
+// except an unset group value, which counts as the first group (a count
+// advanced with +1 never sets the group track).
 func Beyond(def plugin.KindDef, progress map[string]float64, season, number int) bool {
 	ps := def.Progress
 	n := progress[ps.PrimaryKey]
 	if ps.GroupKey != "" && season > 0 {
-		g := progress[ps.GroupKey]
+		g := math.Max(progress[ps.GroupKey], 1)
 		if float64(season) != g {
 			return float64(season) > g
 		}
