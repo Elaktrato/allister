@@ -731,3 +731,25 @@ func TestMediaMapsDuration(t *testing.T) {
 		t.Fatalf("duration = %v", m.Duration)
 	}
 }
+
+// TestAiringScheduleAsksForTheLatestPage: Media.airingSchedule returns only
+// 25 nodes counted from the oldest air date, which drops the recent and
+// upcoming episodes of a long-running show, so the client reads the Page
+// airingSchedules newest first, 50 at a time.
+func TestAiringScheduleAsksForTheLatestPage(t *testing.T) {
+	var req string
+	body := []byte(`{"data":{"Page":{"airingSchedules":[{"episode":1189,"airingAt":1803824160},{"episode":1188,"airingAt":1803219360}]}}}`)
+	c := serve(t, 200, body, &req)
+	got, err := c.AiringSchedule(context.Background(), "21")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 || got[0].Episode != 1189 || got[1].AirsAt != 1803219360 {
+		t.Fatalf("%+v", got)
+	}
+	for _, want := range []string{"airingSchedules", "TIME_DESC", "perPage: 50", "mediaId"} {
+		if !strings.Contains(req, want) {
+			t.Errorf("request lacks %q: %s", want, req)
+		}
+	}
+}
