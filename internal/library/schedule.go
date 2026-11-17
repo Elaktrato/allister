@@ -325,13 +325,14 @@ func (l *Library) AiredCounts(ctx context.Context, itemIDs []int64, now time.Tim
 	if err := closeRows(rows); err != nil {
 		return nil, fmt.Errorf("aired counts: %w", err)
 	}
-	for id, c := range items {
-		it, err := l.Item(ctx, id)
+	if len(ids) > 0 {
+		// one query for every item's totals, like the calendar's
+		totals, err := l.itemTotals(ctx, ids)
 		if err != nil {
-			return nil, fmt.Errorf("aired counts: %w", err)
+			return nil, err
 		}
-		if it != nil {
-			c.totals = trackTotals(c.def, it)
+		for id, c := range items {
+			c.totals = scheduledTotals(c.def, totals[id])
 		}
 	}
 	if len(ids) == 0 {
