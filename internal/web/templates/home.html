@@ -1,12 +1,12 @@
 {{/* The home page: four sections across the enabled plugins, each hidden when
-      it has nothing to show. In progress reuses the list's cards. */}}
+      it has nothing to show. Up next reuses the list's cards. */}}
 {{define "title"}}Home - Allister{{end}}
 {{define "content"}}
 <h1 class="mb-6 text-3xl font-semibold">Home</h1>
 {{if .Cards}}
 <section aria-labelledby="home-active" class="mb-8">
   <div class="mb-3 flex flex-wrap items-baseline gap-x-4 gap-y-1">
-    <h2 id="home-active" class="text-xl font-semibold">In progress</h2>
+    <h2 id="home-active" class="text-xl font-semibold">Up next</h2>
     <span class="ml-auto flex flex-wrap gap-x-3 text-sm">{{range .ActiveAll}}<a href="{{.Href}}" class="text-indigo-300 hover:underline">All active in {{.Label}}</a>{{end}}</span>
   </div>
   <div data-cards class="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">

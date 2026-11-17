@@ -121,7 +121,7 @@ The universal backup includes these settings and the uploaded fonts. A restore s
 
 | URL | Page |
 |---|---|
-| `/` | The home page across all enabled plugins, four sections each hidden when empty: **In progress** (up to 12 active entries, newest update first, as cards with +1), **Coming up** (up to 10 stored releases of the next 7 days, grouped by day, plus a link to `/calendar`), **Series in progress** (up to 6) and **Recently updated** (10 entries of any status). Redirects to `/settings/plugins` while no plugin is enabled |
+| `/` | The home page across all enabled plugins, four sections each hidden when empty: **Up next** (up to 12 active entries, newest update first, as cards with +1; each card names the next unit, such as the next episode or page, and shows "N aired" when stored schedules know of N released units beyond your progress), **Coming up** (up to 10 stored releases of the next 7 days, grouped by day, plus a link to `/calendar`), **Series in progress** (up to 6) and **Recently updated** (10 entries of any status). Redirects to `/settings/plugins` while no plugin is enabled |
 | `/anime` | Your anime list (with the search and filter parameters above; `view=cards` or `view=table` picks the view, `status=all` explicitly shows every status) |
 | `/anime/search?q=...` | Search AniList |
 | `/anime/anilist/{id}` | Overview of an AniList anime; `/anime/anilist/{id}/edit` edits its details |
