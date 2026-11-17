@@ -228,6 +228,9 @@ func (l *Library) displayProgress(ctx context.Context, ids []any) (map[int64]map
 // advanced with +1 never sets the group track).
 func Beyond(def plugin.KindDef, progress map[string]float64, season, number int) bool {
 	ps := def.Progress
+	if ps.PrimaryKey == "" {
+		return false
+	}
 	n := progress[ps.PrimaryKey]
 	if ps.GroupKey != "" && season > 0 {
 		g := math.Max(progress[ps.GroupKey], 1)
@@ -272,7 +275,9 @@ func trackTotals(def plugin.KindDef, item *Item) map[string]float64 {
 
 // AiredCounts returns, per listed item, how many stored releases have aired
 // (airs_at <= now) beyond the display run's progress. Only active entries on
-// their first run are counted; every other item is absent from the map (no
+// their first run are counted, and only releases the calendar can mark
+// (MarkableTracks: the tracks the release sets are active for the item and the
+// season is within the group total); every other item is absent from the map (no
 // hint), as is an item whose plugin or kind is not installed.
 func (l *Library) AiredCounts(ctx context.Context, itemIDs []int64, now time.Time) (map[int64]int, error) {
 	out := map[int64]int{}
@@ -284,29 +289,50 @@ func (l *Library) AiredCounts(ctx context.Context, itemIDs []int64, now time.Tim
 		list[i] = id
 	}
 	//nolint:gosec // G202: constant SQL and placeholders; values are bound
-	rows, err := l.db.QueryContext(ctx, `SELECT i.id, i.plugin_id, i.kind
+	rows, err := l.db.QueryContext(ctx, `SELECT i.id, i.plugin_id, i.kind, i.progress_keys
 		FROM items i JOIN `+viewEntryState+` e ON e.item_id = i.id
 		WHERE e.status = ? AND e.run_number = 1 AND i.id IN (`+placeholders(len(list))+`)`,
 		append([]any{string(Active)}, list...)...)
 	if err != nil {
 		return nil, fmt.Errorf("aired counts: %w", err)
 	}
-	defs := map[int64]plugin.KindDef{}
+	type counted struct {
+		def    plugin.KindDef
+		keys   []string
+		totals map[string]float64
+	}
+	items := map[int64]*counted{}
 	var ids []any
 	for rows.Next() {
 		var id int64
-		var pluginID, kind string
-		if err := rows.Scan(&id, &pluginID, &kind); err != nil {
+		var pluginID, kind, pk string
+		if err := rows.Scan(&id, &pluginID, &kind, &pk); err != nil {
 			rows.Close()
 			return nil, fmt.Errorf("aired counts: %w", err)
 		}
-		if def, err := l.kindDef(pluginID, kind); err == nil {
-			defs[id] = def
-			ids = append(ids, id)
+		def, err := l.kindDef(pluginID, kind)
+		if err != nil {
+			continue
 		}
+		c := &counted{def: def}
+		if err := decodeKeys(pk, &c.keys); err != nil {
+			rows.Close()
+			return nil, fmt.Errorf("aired counts: %w", err)
+		}
+		items[id] = c
+		ids = append(ids, id)
 	}
 	if err := closeRows(rows); err != nil {
 		return nil, fmt.Errorf("aired counts: %w", err)
+	}
+	for id, c := range items {
+		it, err := l.Item(ctx, id)
+		if err != nil {
+			return nil, fmt.Errorf("aired counts: %w", err)
+		}
+		if it != nil {
+			c.totals = trackTotals(c.def, it)
+		}
 	}
 	if len(ids) == 0 {
 		return out, nil
@@ -332,7 +358,8 @@ func (l *Library) AiredCounts(ctx context.Context, itemIDs []int64, now time.Tim
 		if err := arows.Scan(&id, &season, &number); err != nil {
 			return nil, fmt.Errorf("aired counts: %w", err)
 		}
-		if Beyond(defs[id], progress[id], season, number) {
+		c := items[id]
+		if MarkableTracks(c.def, c.keys, c.totals, season) && Beyond(c.def, progress[id], season, number) {
 			out[id]++
 		}
 	}

@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/allister/allister/internal/plugin"
+	"github.com/allister/allister/internal/plugin/plugintest"
 )
 
 // TestSaveScheduleReplacesAndMarks: the stored schedule is replaced as a
@@ -319,5 +320,59 @@ func TestAiredCountsUnsetSeason(t *testing.T) {
 	got, err := l.AiredCounts(bg, []int64{id}, now)
 	if err != nil || got[id] != 3 {
 		t.Fatalf("aired = %v (%v), want 3", got, err)
+	}
+}
+
+// TestAiredCountsOnlyMarkable: the hint counts only releases whose tracks the
+// calendar can mark (MarkableTracks).
+func TestAiredCountsOnlyMarkable(t *testing.T) {
+	e := newEnv(t)
+	p := plugintest.TVPlugin(plugintest.WithID("tvm"))
+	k := &p.M.Kinds[0]
+	k.Progress.GroupKey = "season"
+	k.Progress.Eligible[0].TotalField = "seasons"
+	k.Fields = append(k.Fields, plugin.FieldDef{Key: "seasons", Label: "Seasons", Type: plugin.FieldNumber, Min: fp(0), Editable: true})
+	if err := e.reg.Register(p); err != nil {
+		t.Fatal(err)
+	}
+	l := e.lib
+	now := time.Date(2026, 11, 10, 12, 0, 0, 0, time.UTC)
+	past := now.Add(-time.Hour)
+	add := func(id string, seasons *float64, prog map[string]float64, keys []string) int64 {
+		d := tvData(id, nil)
+		if seasons != nil {
+			d.Fields["seasons"] = plugin.FieldValue{Num: seasons}
+		}
+		itemID, err := l.AddToList(bg, "tvm", "show", d, Entry{Status: Active, Progress: prog}, WithProgressKeys(keys))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return itemID
+	}
+	airs := []Airing{{Season: 1, Number: 1, AirsAt: past}, {Season: 1, Number: 2, AirsAt: past}, {Season: 2, Number: 1, AirsAt: past}}
+	// episode-only combination: no season track, so nothing is markable
+	solo := add("m1", nil, map[string]float64{"episode": 30}, []string{"episode"})
+	// season 2 is above the seasons total of 1
+	capped := add("m2", fp(1), map[string]float64{"season": 1, "episode": 1}, []string{"season", "episode"})
+	both := add("m3", nil, map[string]float64{"season": 1, "episode": 1}, []string{"season", "episode"})
+	for _, id := range []int64{solo, capped, both} {
+		if err := l.SaveSchedule(bg, id, airs, now); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err := l.AiredCounts(bg, []int64{solo, capped, both}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got[solo] != 0 || got[capped] != 1 || got[both] != 2 {
+		t.Fatalf("aired = %v, want solo 0, capped 1 (S1E2), both 2", got)
+	}
+}
+
+// TestBeyondEmptyPrimaryKey: a kind without a primary key has nothing to be
+// beyond.
+func TestBeyondEmptyPrimaryKey(t *testing.T) {
+	if Beyond(plugin.KindDef{}, map[string]float64{"": 0}, 0, 1) {
+		t.Error("an empty primary key must never be beyond")
 	}
 }
