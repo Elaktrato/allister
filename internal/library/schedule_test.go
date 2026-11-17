@@ -1,6 +1,7 @@
 package library
 
 import (
+	"fmt"
 	"testing"
 	"time"
 
@@ -409,6 +410,57 @@ func TestReleaseMarkable(t *testing.T) {
 	for _, c := range cases {
 		if got := ReleaseMarkable(c.def, c.keys, c.totals, c.progress, c.s, c.n); got != c.want {
 			t.Errorf("%s: ReleaseMarkable = %v, want %v", c.name, got, c.want)
+		}
+	}
+}
+
+// TestAiredCountsSeveralItemsTotals: several listed items with different
+// season totals each get the count their own total allows.
+func TestAiredCountsSeveralItemsTotals(t *testing.T) {
+	e := newEnv(t)
+	p := plugintest.TVPlugin(plugintest.WithID("tvb"))
+	k := &p.M.Kinds[0]
+	k.Progress.GroupKey = "season"
+	k.Progress.Eligible[0].TotalField = "seasons"
+	k.Fields = append(k.Fields, plugin.FieldDef{Key: "seasons", Label: "Seasons", Type: plugin.FieldNumber, Min: fp(0), Editable: true})
+	if err := e.reg.Register(p); err != nil {
+		t.Fatal(err)
+	}
+	l := e.lib
+	now := time.Date(2026, 11, 10, 12, 0, 0, 0, time.UTC)
+	past := now.Add(-time.Hour)
+	airs := []Airing{{Season: 1, Number: 1, AirsAt: past}, {Season: 2, Number: 1, AirsAt: past}, {Season: 3, Number: 1, AirsAt: past}}
+	var ids []int64
+	want := map[int64]int{}
+	for i, c := range []struct {
+		seasons *float64
+		want    int
+	}{{fp(1), 0}, {fp(2), 1}, {fp(3), 2}, {nil, 2}} {
+		d := tvData(fmt.Sprintf("s%d", i), nil)
+		if c.seasons != nil {
+			d.Fields["seasons"] = plugin.FieldValue{Num: c.seasons}
+		}
+		id, err := l.AddToList(bg, "tvb", "show", d, Entry{Status: Active, Progress: map[string]float64{"season": 1, "episode": 1}},
+			WithProgressKeys([]string{"season", "episode"}))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := l.SaveSchedule(bg, id, airs, now); err != nil {
+			t.Fatal(err)
+		}
+		ids = append(ids, id)
+		want[id] = c.want
+	}
+	got, err := l.AiredCounts(bg, ids, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != len(want) {
+		t.Fatalf("%v, want %v", got, want)
+	}
+	for id, w := range want {
+		if got[id] != w {
+			t.Errorf("item %d: %d aired, want %d (all: %v)", id, got[id], w, got)
 		}
 	}
 }
