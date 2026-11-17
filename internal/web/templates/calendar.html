@@ -59,7 +59,17 @@
   <div class="mb-1 text-xs {{if .Today}}inline-flex h-5 items-center justify-center rounded-full bg-indigo-600 px-1.5 font-semibold{{else}}text-slate-400{{end}}">{{if .Label}}{{.Label}}{{else}}{{.Day}}{{end}}</div>
   <div class="flex flex-col gap-1">
     {{range .Releases}}
-    <a href="{{.Href}}" class="truncate rounded bg-slate-800 px-1.5 py-0.5 text-xs text-indigo-300 hover:bg-slate-700" title="{{.Title}} — {{if .Season}}S{{.Season}}E{{.Number}}{{else}}{{.Label}} {{.Number}}{{end}}"><time datetime="{{.At.Format "2006-01-02T15:04:05Z07:00"}}">{{.At.Format "15:04"}}</time>{{if .Season}} <span class="font-mono">S{{.Season}}E{{.Number}}</span>{{end}} {{.Title}}</a>
+    <div class="flex items-center gap-1">
+    <a href="{{.Href}}" class="min-w-0 flex-1 truncate rounded bg-slate-800 px-1.5 py-0.5 text-xs text-indigo-300 hover:bg-slate-700" title="{{.Title}} — {{if .Season}}S{{.Season}}E{{.Number}}{{else}}{{.Label}} {{.Number}}{{end}}"><time datetime="{{.At.Format "2006-01-02T15:04:05Z07:00"}}">{{.At.Format "15:04"}}</time>{{if .Season}} <span class="font-mono">S{{.Season}}E{{.Number}}</span>{{end}} {{.Title}}</a>
+    {{if .Markable}}
+    <form method="post" action="/list/{{.ItemID}}/watched" hx-post="/list/{{.ItemID}}/watched" hx-target="#calendar-grid" hx-swap="outerHTML" class="shrink-0">
+      <input type="hidden" name="season" value="{{.Season}}">
+      <input type="hidden" name="number" value="{{.Number}}">
+      <input type="hidden" name="return" value="{{.Return}}">
+      <button type="submit" title="Mark watched" aria-label="Mark {{.Title}} {{if .Season}}S{{.Season}}E{{.Number}}{{else}}{{.Label}} {{.Number}}{{end}} watched" class="rounded p-0.5 text-slate-400 hover:bg-slate-700 hover:text-slate-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"><span class="icon text-[1rem]" aria-hidden="true">check</span></button>
+    </form>
+    {{end}}
+    </div>
     {{end}}
   </div>
 </td>

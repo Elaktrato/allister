@@ -28,6 +28,21 @@ type calendarView struct {
 	MonthURL, WeekURL          string
 	// Position is the period as hidden form values of the plugin select
 	PositionName, PositionValue string
+	// Return is this view's own URL, where Mark watched comes back to
+	Return string
+}
+
+// setReturn stamps the view's own URL on every release (the button's form).
+func (v *calendarView) setReturn() {
+	days := v.Week
+	for _, w := range v.Weeks {
+		days = append(days, w...)
+	}
+	for _, d := range days {
+		for i := range d.Releases {
+			d.Releases[i].Return = v.Return
+		}
+	}
 }
 
 // calendarPluginOption is one entry of the plugin select.
@@ -50,6 +65,12 @@ type calendarRelease struct {
 	Title, Label, Href string
 	Season, Number     int
 	At                 time.Time
+	ItemID             int64
+	// Markable: the release has aired, lies beyond the entry's progress, the
+	// entry is active on its first run and every track marking it sets is
+	// active; only then the Mark watched button is offered.
+	Markable bool
+	Return   string
 }
 
 // calendarWeekdays are the column labels (Monday first).
@@ -115,16 +136,12 @@ func (s *server) calendarPlugins(selected string) ([]calendarPluginOption, strin
 	return out, picked
 }
 
-// getCalendarPage renders the month or week grid; htmx links get the grid
-// alone.
-func (s *server) getCalendarPage(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
+// buildCalendar assembles the month or week view the query asks for.
+func (s *server) buildCalendar(ctx context.Context, q url.Values) (calendarView, error) {
 	now := s.now().In(s.location(ctx))
-	q := r.URL.Query()
 	rows, err := s.deps.Library.ScheduleEntries(ctx)
 	if err != nil {
-		s.internalError(w, r, err)
-		return
+		return calendarView{}, err
 	}
 	v := calendarView{View: "month", Weekdays: calendarWeekdays}
 	v.Plugins, v.Plugin = s.calendarPlugins(q.Get("plugin"))
@@ -132,9 +149,25 @@ func (s *server) getCalendarPage(w http.ResponseWriter, r *http.Request) {
 		v.View = "week"
 		week := parseCalendarWeek(q.Get("week"), now)
 		s.fillCalendarWeek(ctx, &v, week, now, rows)
+		v.Return = v.WeekURL
 	} else {
 		month := parseCalendarMonth(q.Get("month"), now)
 		s.fillCalendar(ctx, &v, month, now, rows)
+		v.Return = v.MonthURL
+	}
+	v.setReturn()
+	return v, nil
+}
+
+// getCalendarPage renders the month or week grid; htmx links get the grid
+// alone.
+func (s *server) getCalendarPage(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	now := s.now().In(s.location(ctx))
+	v, err := s.buildCalendar(ctx, r.URL.Query())
+	if err != nil {
+		s.internalError(w, r, err)
+		return
 	}
 	// viewing the grid also refreshes stale schedules, like the feed does
 	s.enqueueStaleSchedules(ctx, now)
@@ -150,7 +183,7 @@ func (s *server) getCalendarPage(w http.ResponseWriter, r *http.Request) {
 // collectReleases returns the releases airing in [from, to) (local time of
 // from), keyed by local calendar day "2006-01-02". It keeps only releases of
 // schedule-capable sources and, when plugin is set, of that plugin.
-func (s *server) collectReleases(ctx context.Context, rows []library.ScheduledEntry, from, to time.Time, plugin string) map[string][]calendarRelease {
+func (s *server) collectReleases(ctx context.Context, rows []library.ScheduledEntry, from, to, now time.Time, plugin string) map[string][]calendarRelease {
 	byDay := map[string][]calendarRelease{}
 	for _, row := range rows {
 		at := row.AirsAt.In(from.Location())
@@ -172,7 +205,10 @@ func (s *server) collectReleases(ctx context.Context, rows []library.ScheduledEn
 		key := at.Format("2006-01-02")
 		byDay[key] = append(byDay[key], calendarRelease{
 			Title: title, Label: progressLabel(k), Season: row.Season, Number: row.Number,
-			Href: itemURL(m, row.Source, row.SourceID, row.Kind), At: at,
+			Href: itemURL(m, row.Source, row.SourceID, row.Kind), At: at, ItemID: row.ItemID,
+			Markable: !row.AirsAt.After(now) && row.RunNumber == 1 &&
+				library.Beyond(k, row.Progress, row.Season, row.Number) &&
+				library.MarkableTracks(k, row.ProgressKeys, row.Season),
 		})
 	}
 	return byDay
@@ -186,7 +222,7 @@ func isToday(d, now time.Time) bool {
 // fillCalendarWeek lays out the seven days from Monday week.
 func (s *server) fillCalendarWeek(ctx context.Context, v *calendarView, week, now time.Time, rows []library.ScheduledEntry) {
 	end := week.AddDate(0, 0, 7)
-	byDay := s.collectReleases(ctx, rows, week, end, v.Plugin)
+	byDay := s.collectReleases(ctx, rows, week, end, now, v.Plugin)
 	for i := 0; i < 7; i++ {
 		d := week.AddDate(0, 0, i)
 		v.Week = append(v.Week, calendarDay{Day: d.Day(), Label: d.Format("Jan 2"), InMonth: true,
@@ -219,7 +255,7 @@ func (s *server) fillCalendar(ctx context.Context, v *calendarView, month, now t
 	days := time.Date(month.Year(), month.Month()+1, 0, 12, 0, 0, 0, month.Location()).Day() // not Sub: a DST month is not whole days
 	cells := lead + days
 	weeks := (cells + 6) / 7
-	byDay := s.collectReleases(ctx, rows, month, next, v.Plugin)
+	byDay := s.collectReleases(ctx, rows, month, next, now, v.Plugin)
 	for w := 0; w < weeks; w++ {
 		week := make([]calendarDay, 0, 7)
 		for i := 0; i < 7; i++ {
