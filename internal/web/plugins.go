@@ -33,6 +33,7 @@ func (s *server) entryRoutes(reg routeRegistrar) {
 	reg.Handle("GET /list/{id}/edit", s.getEdit)
 	reg.Handle("POST /list/{id}/edit", s.postEdit)
 	reg.Handle("POST /list/{id}/remove", s.postRemove)
+	reg.Handle("POST /list/{id}/start", s.postStart)
 	reg.Handle("POST /list/{id}/runs", s.postStartRun)
 	reg.Handle("GET /list/{id}/runs/{run}/edit", s.getRunEdit)
 	reg.Handle("POST /list/{id}/runs/{run}/edit", s.postRunEdit)

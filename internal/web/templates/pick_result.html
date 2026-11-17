@@ -1,0 +1,23 @@
+{{/* The randomiser's result panel (#pick-result): the drawn entry with Roll again and, for a planned one, Start; or the empty state naming the filters. */}}
+{{define "pick_result"}}
+{{if .Notice}}<p data-filter-notice role="status" class="mb-4 rounded border border-amber-800 bg-slate-900 p-3 text-sm text-amber-200">Ignored unknown or invalid parameters: {{range $i, $k := .Notice}}{{if $i}}, {{end}}<code>{{$k}}</code>{{end}}{{if .NoticeMore}} and {{.NoticeMore}} more{{end}}.</p>{{end}}
+{{if .Capped}}<p role="status" class="mb-4 rounded border border-amber-800 bg-slate-900 p-3 text-sm text-amber-200">Only the first {{.CapLimit}} matching {{.Noun}} were considered.</p>{{end}}
+{{if .Empty}}
+<p class="mb-5 rounded border border-slate-800 bg-slate-900 p-4 text-slate-300"><strong class="font-medium text-slate-100">Nothing matches.</strong> No {{.Noun}} fit{{if .Filters}} these filters: {{range $i, $f := .Filters}}{{if $i}}; {{end}}{{$f}}{{end}}{{end}}.</p>
+{{else}}{{with .Card}}
+<section aria-label="Your pick" class="mb-5 flex gap-4 rounded-lg border border-slate-800 bg-slate-900 p-4">
+  {{if .Cover}}<img src="{{.Cover}}" alt="" class="h-36 w-24 shrink-0 rounded object-cover">
+  {{else}}<span class="flex h-36 w-24 shrink-0 items-center justify-center rounded bg-slate-800" aria-hidden="true"><span class="icon text-[2rem] text-slate-500" aria-hidden="true">image</span></span>{{end}}
+  <div class="min-w-0">
+    <h2 class="text-xl font-semibold"><a data-pick-title href="{{.Href}}" class="text-slate-100 hover:underline">{{.Title}}</a></h2>
+    <p class="mt-1 text-sm text-slate-400">{{.Status}}{{range .Lengths}} · {{.}}{{end}}</p>
+    {{if .Genres}}<p class="mt-1 text-sm text-slate-300">{{range $i, $g := .Genres}}{{if $i}}, {{end}}{{$g}}{{end}}</p>{{end}}
+    <p class="mt-3 flex flex-wrap items-center gap-2">
+      <a data-roll-again href="{{$.RollURL}}" hx-get="{{$.RollURL}}" hx-target="#pick-result" hx-swap="innerHTML" hx-push-url="false" class="inline-flex items-center gap-1.5 rounded-md border border-slate-700 px-3 py-1.5 text-sm text-slate-200 hover:bg-slate-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"><span class="icon text-[1.125rem]" aria-hidden="true">casino</span><span>Roll again</span></a>
+      <a href="{{.Href}}" class="rounded-md px-3 py-1.5 text-sm text-indigo-300 hover:underline">Open</a>
+      {{if .CanStart}}<form method="post" action="{{.StartURL}}" class="inline"><button type="submit" class="rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400">Start</button></form>{{end}}
+    </p>
+  </div>
+</section>
+{{end}}{{end}}
+{{end}}

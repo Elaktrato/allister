@@ -8,6 +8,7 @@ import (
 	"html/template"
 	"io"
 	"log"
+	"math/rand/v2"
 	"net/http"
 	"os"
 	"strings"
@@ -109,6 +110,9 @@ type server struct {
 	backupWrite func(ctx context.Context, w io.Writer, lib *library.Library, plugins []backup.PluginVersion, coversDir string, app *appearance.Service, timeZone string, now time.Time) error
 	// appearance is Deps.Appearance (or the default one).
 	appearance *appearance.Service
+	// rand returns a uniform number in [0, n) for n > 0 (the randomiser's
+	// draw); tests replace it with a fixed one.
+	rand func(n int) int
 }
 
 // pageNames lists every page template (templates/<name>.html). Add a page by
@@ -122,7 +126,7 @@ var pagePartials = map[string][]string{
 	"settings_plugins_page": {"templates/settings_plugins.html"},
 	"item":                  {"templates/sections.html", "templates/add_dialog.html", "templates/progress_inputs.html", "templates/match_dialog.html", "templates/run_history.html", "templates/timeline.html", "templates/list_picker.html"},
 	"series":                {"templates/series_candidates.html"},
-	"list":                  {"templates/list_row.html", "templates/list_cards.html", "templates/series_rows.html", "templates/filter_bar.html", "templates/entry_dialog.html", "templates/progress_inputs.html", "templates/bulk_bar.html"},
+	"list":                  {"templates/list_row.html", "templates/list_cards.html", "templates/series_rows.html", "templates/filter_bar.html", "templates/entry_dialog.html", "templates/progress_inputs.html", "templates/bulk_bar.html", "templates/pick_result.html"},
 	"manual_form":           {"templates/item_inputs.html", "templates/progress_inputs.html"},
 	"details_form":          {"templates/item_inputs.html"},
 	"stats":                 {"templates/filter_bar.html"},
@@ -162,7 +166,7 @@ func newServer(deps Deps, now func() time.Time) (*server, http.Handler) {
 		deps.Appearance = appearance.NewService(st, nil)
 	}
 	s := &server{deps: deps, pages: parsePages(), cache: newDetailCache(now, cacheMaxEntries, cacheTTL),
-		recs: newRecCache(now, recCacheMaxEntries, cacheTTL), recTimeout: recTimeout, now: now, maxBackupBody: maxBackupBody, backupWrite: backup.Write,
+		recs: newRecCache(now, recCacheMaxEntries, cacheTTL), recTimeout: recTimeout, now: now, rand: rand.IntN, maxBackupBody: maxBackupBody, backupWrite: backup.Write,
 		appearance: deps.Appearance}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {

@@ -19,6 +19,7 @@
 {{template "list_tabs" .}}
 {{if .Duplicates}}<p class="mb-3 text-sm"><a href="{{.DuplicatesURL}}" class="text-indigo-300 hover:underline">Possible duplicates ({{.Duplicates}})</a></p>{{end}}
 {{if .SeriesTab}}{{template "series_search" .Search}}{{else if .AnyEntries}}{{template "filter_bar" .Filters}}{{end}}
+<div id="pick-result" aria-live="polite">{{with .Pick}}{{template "pick_result" .}}{{end}}</div>
 {{/* hx-history="false": htmx never snapshots this page (a snapshot keeps attributes, not typed values), so Back refetches it in full */}}
 <div id="list-rows" hx-history="false">{{template "list_rows" .}}</div>
 {{with .Bulk}}{{template "bulk_bar" .}}{{end}}

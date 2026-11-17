@@ -490,6 +490,8 @@ type filterBar struct {
 	Fields        []filterField
 	Genres, Tags  *termInput
 	UserTags      *termInput // own tags: shown once the library has any (or one is selected)
+	Length        *lengthBar // the randomiser's length controls (nil: the kind declares none)
+	PickAction    string     // the pick button's target
 	Progress      []option   // the progress state select ("" = any)
 	RatingMin     string
 	RatingMax     string
@@ -584,6 +586,7 @@ func buildFilterBar(m plugin.Manifest, k plugin.KindDef, lq listQuery, genres, t
 			b.Progress = append(b.Progress, option{Value: string(st), Label: progressStateLabels[st], Selected: f.Progress == st})
 		}
 	}
+	b.Length, b.PickAction = buildLengthBar(k, lq.Length), b.Action+"/pick"
 	b.Sorts, b.Dirs = sortOptions(k, f)
 	// the card view's direction toggle submits the other direction and shows
 	// the current one as an icon

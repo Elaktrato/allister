@@ -131,6 +131,8 @@ type listView struct {
 	// the link shows when it is above 0).
 	Duplicates    int
 	DuplicatesURL string
+	// Pick is the randomiser's result panel (nil: an empty panel).
+	Pick *pickView
 }
 
 // seriesRowView is one series of the Series tab.
@@ -157,7 +159,10 @@ type listQuery struct {
 	Tab                string // "series" for the Series tab, else ""
 	Page               int
 	Filters            listFilters
-	Rejected           []string
+	// Length is the randomiser's length filter (parsed for every list so the
+	// filter bar keeps it; only the pick applies it).
+	Length   lengthFilter
+	Rejected []string
 }
 
 // listURL builds the list URL of a plugin for a kind (only for plugins with
@@ -227,7 +232,9 @@ func parseListQuery(m plugin.Manifest, q url.Values) listQuery {
 	}
 	kd, _ := kindDef(m, lq.Kind)
 	var rejected []string
-	lq.Filters, rejected = parseFilters(kd, q)
+	lq.Filters, rejected = parseFilters(kd, withoutLengthParams(q))
+	lq.Rejected = append(lq.Rejected, rejected...)
+	lq.Length, rejected = parseLengthFilter(kd, q)
 	lq.Rejected = append(lq.Rejected, rejected...)
 	slices.Sort(lq.Rejected)
 	raw := q.Get("page")
@@ -609,12 +616,21 @@ const listRowsID = "list-rows"
 
 // showList renders the full list page, with the edit dialog open when dialog is set.
 func (s *server) showList(w http.ResponseWriter, r *http.Request, m plugin.Manifest, lq listQuery, dialog *entryDialog, code int) {
+	s.showListWith(w, r, m, lq, dialog, code, nil)
+}
+
+// showListPick renders the full list page with the pick panel filled.
+func (s *server) showListPick(w http.ResponseWriter, r *http.Request, m plugin.Manifest, lq listQuery, pick *pickView) {
+	s.showListWith(w, r, m, lq, nil, http.StatusOK, pick)
+}
+
+func (s *server) showListWith(w http.ResponseWriter, r *http.Request, m plugin.Manifest, lq listQuery, dialog *entryDialog, code int, pick *pickView) {
 	v, err := s.buildList(r, m, lq)
 	if err != nil {
 		s.internalError(w, r, err)
 		return
 	}
-	v.Dialog = dialog
+	v.Dialog, v.Pick = dialog, pick
 	v.BulkNotice = bulkNoticeOf(r, v.PushURL)
 	// the duplicate check is an extra: a failure is logged and hides the link
 	if n, err := s.duplicateCount(r, m.ID); err != nil {
