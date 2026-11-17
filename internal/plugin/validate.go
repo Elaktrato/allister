@@ -523,6 +523,8 @@ func validateProgress(p *problems, path string, ps ProgressSpec, fields map[stri
 		switch {
 		case !ok:
 			p.add(path+".group_key", "%q is not an eligible progress key", ps.GroupKey)
+		case ps.PrimaryKey == "":
+			p.add(path+".group_key", "needs a primary_key (it groups the primary track's units)")
 		case ps.GroupKey == ps.PrimaryKey:
 			p.add(path+".group_key", "must differ from the primary key")
 		case t != Count:
@@ -547,10 +549,12 @@ func validateLength(p *problems, path string, defs []LengthDef, fields map[strin
 		dp := fmt.Sprintf("%s[%d]", path, i)
 		if !keyRe.MatchString(d.Key) {
 			p.add(dp+".key", "%q is not a valid key", d.Key)
-		} else if seen[d.Key] {
-			p.add(dp+".key", "duplicate %q", d.Key)
+		} else {
+			if seen[d.Key] {
+				p.add(dp+".key", "duplicate %q", d.Key)
+			}
+			seen[d.Key] = true
 		}
-		seen[d.Key] = true
 		if d.Label == "" {
 			p.add(dp+".label", "required")
 		}
