@@ -30,6 +30,9 @@ type ScheduledEntry struct {
 	Season           int
 	Number           int
 	AirsAt           time.Time
+	// RunNumber and Progress describe the entry's display run.
+	RunNumber int
+	Progress  map[string]float64
 }
 
 // StaleSchedule names an active entry whose schedule was never stored or is
@@ -100,7 +103,7 @@ func (l *Library) ScheduleBetween(ctx context.Context, from, to time.Time, sourc
 // WHERE terms (constant SQL, bound args), titles included.
 func (l *Library) scheduleQuery(ctx context.Context, extra string, args []any, limit int) ([]ScheduledEntry, error) {
 	//nolint:gosec // G202: constant SQL fragments; values are bound
-	rows, err := l.db.QueryContext(ctx, `SELECT a.item_id, i.plugin_id, i.kind, i.source, i.source_id, a.season, a.number, a.airs_at
+	rows, err := l.db.QueryContext(ctx, `SELECT a.item_id, i.plugin_id, i.kind, i.source, i.source_id, a.season, a.number, a.airs_at, e.run_number
 		FROM airings a
 		JOIN items i ON i.id = a.item_id
 		JOIN `+viewEntryState+` e ON e.item_id = a.item_id
@@ -114,7 +117,7 @@ func (l *Library) scheduleQuery(ctx context.Context, extra string, args []any, l
 	for rows.Next() {
 		var e ScheduledEntry
 		var airs string
-		if err := rows.Scan(&e.ItemID, &e.PluginID, &e.Kind, &e.Source, &e.SourceID, &e.Season, &e.Number, &airs); err != nil {
+		if err := rows.Scan(&e.ItemID, &e.PluginID, &e.Kind, &e.Source, &e.SourceID, &e.Season, &e.Number, &airs, &e.RunNumber); err != nil {
 			rows.Close()
 			return nil, fmt.Errorf("schedule entries: %w", err)
 		}
@@ -155,10 +158,132 @@ func (l *Library) scheduleQuery(ctx context.Context, extra string, args []any, l
 	if err := trows.Err(); err != nil {
 		return nil, fmt.Errorf("schedule entries: %w", err)
 	}
+	progress, err := l.displayProgress(ctx, list)
+	if err != nil {
+		return nil, err
+	}
 	for i := range out {
 		out[i].Titles = titles[out[i].ItemID]
+		out[i].Progress = progress[out[i].ItemID]
+		if out[i].Progress == nil {
+			out[i].Progress = map[string]float64{}
+		}
 	}
 	return out, nil
+}
+
+// displayProgress reads the stored progress values of the display run of
+// each listed item (ids are bound as arguments).
+func (l *Library) displayProgress(ctx context.Context, ids []any) (map[int64]map[string]float64, error) {
+	out := map[int64]map[string]float64{}
+	if len(ids) == 0 {
+		return out, nil
+	}
+	//nolint:gosec // G202: constant SQL and placeholders; values are bound
+	rows, err := l.db.QueryContext(ctx, `SELECT item_id, key, value FROM `+viewDisplayProgress+`
+		WHERE item_id IN (`+placeholders(len(ids))+`)`, ids...)
+	if err != nil {
+		return nil, fmt.Errorf("display progress: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id int64
+		var k string
+		var v float64
+		if err := rows.Scan(&id, &k, &v); err != nil {
+			return nil, fmt.Errorf("display progress: %w", err)
+		}
+		if out[id] == nil {
+			out[id] = map[string]float64{}
+		}
+		out[id][k] = v
+	}
+	return out, rows.Err()
+}
+
+// Beyond reports whether the release (season, number) lies beyond progress.
+// With a group track and a grouped release (season > 0) the pair is compared
+// lexicographically against (group value, primary value); otherwise only the
+// number is compared with the primary value. Missing progress counts as 0.
+func Beyond(def plugin.KindDef, progress map[string]float64, season, number int) bool {
+	ps := def.Progress
+	n := progress[ps.PrimaryKey]
+	if ps.GroupKey != "" && season > 0 {
+		g := progress[ps.GroupKey]
+		if float64(season) != g {
+			return float64(season) > g
+		}
+	}
+	return float64(number) > n
+}
+
+// AiredCounts returns, per listed item, how many stored releases have aired
+// (airs_at <= now) beyond the display run's progress. Only active entries on
+// their first run are counted; every other item is absent from the map (no
+// hint), as is an item whose plugin or kind is not installed.
+func (l *Library) AiredCounts(ctx context.Context, itemIDs []int64, now time.Time) (map[int64]int, error) {
+	out := map[int64]int{}
+	if len(itemIDs) == 0 {
+		return out, nil
+	}
+	list := make([]any, len(itemIDs))
+	for i, id := range itemIDs {
+		list[i] = id
+	}
+	//nolint:gosec // G202: constant SQL and placeholders; values are bound
+	rows, err := l.db.QueryContext(ctx, `SELECT i.id, i.plugin_id, i.kind
+		FROM items i JOIN `+viewEntryState+` e ON e.item_id = i.id
+		WHERE e.status = ? AND e.run_number = 1 AND i.id IN (`+placeholders(len(list))+`)`,
+		append([]any{string(Active)}, list...)...)
+	if err != nil {
+		return nil, fmt.Errorf("aired counts: %w", err)
+	}
+	defs := map[int64]plugin.KindDef{}
+	var ids []any
+	for rows.Next() {
+		var id int64
+		var pluginID, kind string
+		if err := rows.Scan(&id, &pluginID, &kind); err != nil {
+			rows.Close()
+			return nil, fmt.Errorf("aired counts: %w", err)
+		}
+		if def, err := l.kindDef(pluginID, kind); err == nil {
+			defs[id] = def
+			ids = append(ids, id)
+		}
+	}
+	if err := closeRows(rows); err != nil {
+		return nil, fmt.Errorf("aired counts: %w", err)
+	}
+	if len(ids) == 0 {
+		return out, nil
+	}
+	progress, err := l.displayProgress(ctx, ids)
+	if err != nil {
+		return nil, err
+	}
+	for _, id := range ids {
+		out[id.(int64)] = 0
+	}
+	//nolint:gosec // G202: constant SQL and placeholders; values are bound
+	arows, err := l.db.QueryContext(ctx, `SELECT item_id, season, number FROM airings
+		WHERE airs_at <= ? AND item_id IN (`+placeholders(len(ids))+`)`,
+		append([]any{now.UTC().Format(scheduleLayout)}, ids...)...)
+	if err != nil {
+		return nil, fmt.Errorf("aired counts: %w", err)
+	}
+	defer arows.Close()
+	for arows.Next() {
+		var id int64
+		var season, number int
+		if err := arows.Scan(&id, &season, &number); err != nil {
+			return nil, fmt.Errorf("aired counts: %w", err)
+		}
+		if Beyond(defs[id], progress[id], season, number) {
+			out[id]++
+		}
+	}
+	return out, arows.Err()
 }
 
 // StaleSchedules returns the active entries whose schedule was never stored

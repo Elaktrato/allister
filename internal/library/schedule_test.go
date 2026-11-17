@@ -173,3 +173,112 @@ func TestScheduleBetweenWindowSourcesAndLimit(t *testing.T) {
 		}
 	}
 }
+
+// TestBeyond: a release is beyond the progress when it is later on the
+// primary track, or, with a group track and a grouped release, later
+// lexicographically by (group, primary).
+func TestBeyond(t *testing.T) {
+	single := plugin.KindDef{Progress: plugin.ProgressSpec{PrimaryKey: "episode"}}
+	grouped := plugin.KindDef{Progress: plugin.ProgressSpec{PrimaryKey: "episode", GroupKey: "season"}}
+	p := map[string]float64{"season": 1, "episode": 10}
+	cases := []struct {
+		name     string
+		def      plugin.KindDef
+		progress map[string]float64
+		s, n     int
+		want     bool
+	}{
+		{"single beyond", single, map[string]float64{"episode": 3}, 0, 4, true},
+		{"single equal", single, map[string]float64{"episode": 3}, 0, 3, false},
+		{"single behind", single, map[string]float64{"episode": 3}, 0, 2, false},
+		{"single ignores season", single, map[string]float64{"episode": 3, "season": 5}, 1, 2, false},
+		{"same season next", grouped, p, 1, 11, true},
+		{"next season first", grouped, p, 2, 1, true},
+		{"same", grouped, p, 1, 10, false},
+		{"behind", grouped, p, 1, 9, false},
+		{"same season lower number", grouped, p, 1, 9, false},
+		{"release season zero uses number", grouped, p, 0, 11, true},
+		{"release season zero behind", grouped, p, 0, 10, false},
+		{"missing progress is zero", grouped, nil, 1, 1, true},
+		{"missing progress single", single, nil, 0, 1, true},
+		{"nothing at zero", single, nil, 0, 0, false},
+	}
+	for _, c := range cases {
+		if got := Beyond(c.def, c.progress, c.s, c.n); got != c.want {
+			t.Errorf("%s: Beyond = %v, want %v", c.name, got, c.want)
+		}
+	}
+}
+
+// TestAiredCounts: only aired releases beyond the first run's progress of an
+// active entry are counted; other entries are absent (no hint).
+func TestAiredCounts(t *testing.T) {
+	e := newEnv(t)
+	l := e.lib
+	now := time.Date(2026, 11, 10, 12, 0, 0, 0, time.UTC)
+	past := time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC)
+	future := time.Date(2999, 1, 1, 0, 0, 0, 0, time.UTC)
+
+	behind := addShow(t, l, "b1", fp(12), Entry{Status: Active, Progress: map[string]float64{"episode": 2}})
+	if err := l.SaveSchedule(bg, behind, []Airing{
+		{Number: 1, AirsAt: past}, {Number: 2, AirsAt: past}, {Number: 3, AirsAt: past},
+		{Number: 4, AirsAt: past.Add(time.Hour)}, {Number: 5, AirsAt: future}}, now); err != nil {
+		t.Fatal(err)
+	}
+	futureOnly := addShow(t, l, "b2", fp(12), Entry{Status: Active})
+	if err := l.SaveSchedule(bg, futureOnly, []Airing{{Number: 1, AirsAt: future}}, now); err != nil {
+		t.Fatal(err)
+	}
+	done := addShow(t, l, "b3", fp(12), Entry{Status: Completed, Progress: map[string]float64{"episode": 1}})
+	planned := addShow(t, l, "b4", fp(12), Entry{Status: Planned})
+	for _, id := range []int64{done, planned} {
+		if err := l.SaveSchedule(bg, id, []Airing{{Number: 5, AirsAt: past}}, now); err != nil {
+			t.Fatal(err)
+		}
+	}
+	repeat := addShow(t, l, "b5", fp(12), Entry{Status: Completed})
+	if _, err := l.StartRun(bg, repeat, day(2026, 1, 1)); err != nil {
+		t.Fatal(err)
+	}
+	if err := l.SaveSchedule(bg, repeat, []Airing{{Number: 1, AirsAt: past}}, now); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := l.AiredCounts(bg, []int64{behind, futureOnly, done, planned, repeat}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got[behind] != 2 || got[futureOnly] != 0 {
+		t.Fatalf("%v", got)
+	}
+	if _, ok := got[futureOnly]; !ok {
+		t.Fatalf("active run-1 entry without aired releases should be present with 0: %v", got)
+	}
+	for _, id := range []int64{done, planned, repeat} {
+		if _, ok := got[id]; ok {
+			t.Fatalf("entry %d must be absent: %v", id, got)
+		}
+	}
+	if got, err := l.AiredCounts(bg, nil, now); err != nil || len(got) != 0 {
+		t.Fatalf("%v %v", got, err)
+	}
+}
+
+// TestScheduleEntriesCarryProgress: scheduled entries carry the display run's
+// number and progress.
+func TestScheduleEntriesCarryProgress(t *testing.T) {
+	e := newEnv(t)
+	l := e.lib
+	now := time.Date(2026, 11, 10, 12, 0, 0, 0, time.UTC)
+	id := addShow(t, l, "p1", fp(12), Entry{Status: Active, Progress: map[string]float64{"episode": 4}})
+	if err := l.SaveSchedule(bg, id, []Airing{{Number: 5, AirsAt: now.Add(time.Hour)}}, now); err != nil {
+		t.Fatal(err)
+	}
+	got, err := l.ScheduleEntries(bg)
+	if err != nil || len(got) != 1 {
+		t.Fatalf("%v %v", got, err)
+	}
+	if got[0].RunNumber != 1 || got[0].Progress["episode"] != 4 {
+		t.Fatalf("%+v", got[0])
+	}
+}
