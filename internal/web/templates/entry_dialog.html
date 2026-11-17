@@ -55,7 +55,7 @@
           button comes first, so Enter keeps the edit as typed. */}}
     <div class="space-y-1 rounded border border-indigo-500 bg-slate-950 p-3 text-sm" role="alert">
       <p class="font-medium">This entry is {{.Completed}}.</p>
-      {{if .StillAiring}}<p class="text-slate-300">Still airing: it can be started again once it has finished airing. Correct the current run?</p>{{else if .OnlyNew}}<p class="text-slate-300">This earlier run stays finished behind the dropped repeat. Start a new run with these values ({{.Action}})?</p>{{else}}<p class="text-slate-300">Start a new run with these values ({{.Action}}), or correct the current one?</p>{{end}}
+      {{if and .StillAiring .OnlyNew}}<p class="text-slate-300">Still airing: it can be started again once it has finished airing, and this earlier run stays finished behind the dropped repeat, so there is nothing to change here.</p>{{else if .StillAiring}}<p class="text-slate-300">Still airing: it can be started again once it has finished airing. Correct the current run?</p>{{else if .OnlyNew}}<p class="text-slate-300">This earlier run stays finished behind the dropped repeat. Start a new run with these values ({{.Action}})?</p>{{else}}<p class="text-slate-300">Start a new run with these values ({{.Action}}), or correct the current one?</p>{{end}}
     </div>
     <div class="flex flex-wrap justify-end gap-3">
       <a href="{{$.CancelURL}}" data-dialog-close class="rounded px-4 py-2 hover:bg-slate-800">Cancel</a>
