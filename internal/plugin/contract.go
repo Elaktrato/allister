@@ -140,6 +140,9 @@ type ProgressSpec struct {
 	Defaults     []string      `json:"defaults,omitempty"`
 	Combinations [][]string    `json:"combinations,omitempty"`
 	PrimaryKey   string        `json:"primary_key,omitempty"`
+	// GroupKey names an eligible count track that groups the primary track's
+	// units (a release's season maps to it). Optional; empty for none.
+	GroupKey string `json:"group_key,omitempty"`
 }
 
 // SectionType is one of the core's fixed page building blocks.
@@ -277,6 +280,26 @@ type KindDef struct {
 	// Repeat names the kind's wording for starting an entry again. Optional;
 	// the core falls back to neutral labels.
 	Repeat *RepeatDef `json:"repeat,omitempty"`
+	// Length lists the measures of how long an entry is (in minutes or in
+	// units). Optional; a kind without it has no length filter.
+	Length []LengthDef `json:"length,omitempty"`
+}
+
+// LengthDef is one length measure of a kind. Exactly one shape is valid:
+// Field (minutes), UnitsField with PerUnitField (units times minutes per
+// unit), or UnitsField alone (a plain unit count).
+type LengthDef struct {
+	Key          string `json:"key"`
+	Label        string `json:"label"`
+	Field        string `json:"field,omitempty"`          // number field in minutes
+	UnitsField   string `json:"units_field,omitempty"`    // number field counting units
+	PerUnitField string `json:"per_unit_field,omitempty"` // number field, minutes per unit
+}
+
+// InMinutes reports whether the measure yields minutes: a Field, or
+// UnitsField together with PerUnitField.
+func (d LengthDef) InMinutes() bool {
+	return d.Field != "" || (d.UnitsField != "" && d.PerUnitField != "")
 }
 
 // RepeatDef holds a kind's labels for repeat runs: Action is the button that

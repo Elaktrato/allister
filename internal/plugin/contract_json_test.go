@@ -338,3 +338,21 @@ func TestExportEntryRunsTagsListsJSON(t *testing.T) {
 		}
 	}
 }
+
+func TestLengthJSONRoundTrip(t *testing.T) {
+	k := plugintest.TVPlugin().Manifest().Kinds[0]
+	k.Length = []plugin.LengthDef{
+		{Key: "total", Label: "Total", UnitsField: "episodes", PerUnitField: "year"},
+		{Key: "eps", Label: "Episodes", UnitsField: "episodes"},
+		{Key: "t", Label: "T", Field: "year"},
+	}
+	k.Progress.GroupKey = "season"
+	roundTrip(t, "kind length", k)
+	b, err := json.Marshal(plugintest.TVPlugin().Manifest().Kinds[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(b), `"length"`) || strings.Contains(string(b), `"group_key"`) {
+		t.Fatalf("empty length/group_key must be omitted: %s", b)
+	}
+}

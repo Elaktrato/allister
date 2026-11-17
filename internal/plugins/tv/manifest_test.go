@@ -65,3 +65,17 @@ func TestKindStats(t *testing.T) {
 		}
 	}
 }
+
+func TestManifestLength(t *testing.T) {
+	k := New(Options{}).Manifest().Kinds[0]
+	want := []plugin.LengthDef{
+		{Key: "total", Label: "Total time", UnitsField: "episodes", PerUnitField: "runtime"},
+		{Key: "episodes", Label: "Episodes", UnitsField: "episodes"},
+	}
+	if !reflect.DeepEqual(k.Length, want) {
+		t.Fatalf("length = %+v", k.Length)
+	}
+	if k.Progress.GroupKey != "season" {
+		t.Fatalf("group key = %q", k.Progress.GroupKey)
+	}
+}

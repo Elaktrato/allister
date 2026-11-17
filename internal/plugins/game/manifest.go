@@ -38,9 +38,14 @@ func gameKind() plugin.KindDef {
 			{Key: "time_complete", Label: "Completionist", Type: plugin.FieldNumber, Unit: "min", Show: true, Editable: true, Sortable: true},
 			{Key: "summary", Label: "Summary", Type: plugin.FieldText, Editable: true},
 		},
-		Genres:   plugin.TermDef{Enabled: true, Label: "Genres", Editable: true, Filterable: true},
-		Tags:     plugin.TermDef{Enabled: true, Label: "Tags", Editable: true, Filterable: true},
-		Repeat:   &plugin.RepeatDef{Action: "Replay", Marker: "Replaying"},
+		Genres: plugin.TermDef{Enabled: true, Label: "Genres", Editable: true, Filterable: true},
+		Tags:   plugin.TermDef{Enabled: true, Label: "Tags", Editable: true, Filterable: true},
+		Repeat: &plugin.RepeatDef{Action: "Replay", Marker: "Replaying"},
+		Length: []plugin.LengthDef{
+			{Key: "time_main", Label: "Main story", Field: "time_main"},
+			{Key: "time_extra", Label: "Main + extras", Field: "time_extra"},
+			{Key: "time_complete", Label: "Completionist", Field: "time_complete"},
+		},
 		Statuses: gameStatuses,
 		Progress: plugin.ProgressSpec{
 			Eligible:     []plugin.ProgressDef{{Key: "playtime", Type: plugin.Duration, Label: "Playtime"}},
