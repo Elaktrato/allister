@@ -19,6 +19,9 @@ need '.focus-visible\:ring-indigo-500:focus-visible{--tw-ring-opacity:1;--tw-rin
 need '.hover\:bg-slate-800:hover{--tw-bg-opacity:1;background-color:rgb(var(--al-raised)/'
 need '.bg-indigo-600{--al-text-strong:var(--al-accent-text);color:rgb(var(--al-accent-text))}'
 need '.text-white{--tw-text-opacity:1;color:rgb(var(--al-text-strong)/'
+# the round checkbox: a themed ring and a checkmark that sticks out when checked
+need 'input[type=checkbox]{-webkit-appearance:none;-moz-appearance:none;appearance:none;background-color:rgb(var(--al-bg)/.65);border:2px solid rgb(var(--al-text-muted));border-radius:9999px'
+need 'input[type=checkbox]:checked:after{opacity:1;transform:rotate(40deg) scale(1)}'
 # fixed colours: only the preflight defaults (#0000 transparent shadows,
 # the ring offset #fff, the placeholder #9ca3af and the default ring colour,
 # all replaced by token rules in input.css) may remain

@@ -19,6 +19,7 @@ How a release is cut: move the entries under "Unreleased" to a new `## vX.Y.Z - 
 
 ### Changed
 
+- **Round checkboxes.** Every checkbox (bulk selection on cards and rows, filters, settings) is now a round ring in the theme's colours whose checkmark sticks out past the ring when ticked; it follows the accent colour, keeps a visible focus ring, honours reduced motion and forced colours.
 - **Update from source no longer fills empty fields silently**: it always shows the comparison first and changes only what you tick.
 - **Bulk changes do not count on the activity heatmap.** They appear in each run's timeline but, like imports and restores, are not counted as your activity in the statistics heatmap.
 
