@@ -720,3 +720,58 @@ func TestStatsRowsLoadPastRuns(t *testing.T) {
 		t.Fatal("an unknown status must be rejected")
 	}
 }
+
+// completedWithAirings adds a completed show whose stored schedule is the
+// given air times.
+func completedWithAirings(t *testing.T, e *env, sourceID string, at ...time.Time) int64 {
+	t.Helper()
+	id := addShow(t, e.lib, sourceID, fp(12), Entry{Status: Completed, Progress: map[string]float64{"episode": 12}})
+	var airings []Airing
+	for i, a := range at {
+		airings = append(airings, Airing{Number: i + 1, AirsAt: a})
+	}
+	if err := e.lib.SaveSchedule(bg, id, airings, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	return id
+}
+
+func TestStartRunRefusedWhileAiring(t *testing.T) {
+	e := newEnv(t)
+	id := completedWithAirings(t, e, "air1", day(2000, 1, 1), day(2999, 1, 1))
+	_, err := e.lib.StartRun(bg, id, time.Now())
+	if !errors.Is(err, ErrStillAiring) || !errors.Is(err, ErrInvalid) {
+		t.Fatalf("err = %v, want ErrStillAiring wrapping ErrInvalid", err)
+	}
+	if got := err.Error(); got != "invalid: still airing: it has upcoming releases" {
+		t.Fatalf("message %q", got)
+	}
+	if n := len(runsOf(t, e, id)); n != 1 {
+		t.Fatalf("%d runs, want 1", n)
+	}
+}
+
+func TestStartRunAllowedAfterAirings(t *testing.T) {
+	e := newEnv(t)
+	id := completedWithAirings(t, e, "air2", day(2000, 1, 1), day(2000, 2, 1))
+	if _, err := e.lib.StartRun(bg, id, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	none := completedWithAirings(t, e, "air3")
+	if _, err := e.lib.StartRun(bg, none, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestStillAiring(t *testing.T) {
+	e := newEnv(t)
+	future := completedWithAirings(t, e, "f", day(2999, 1, 1))
+	past := completedWithAirings(t, e, "p", day(2000, 1, 1))
+	none := completedWithAirings(t, e, "n")
+	for id, want := range map[int64]bool{future: true, past: false, none: false} {
+		got, err := e.lib.StillAiring(bg, id)
+		if err != nil || got != want {
+			t.Fatalf("item %d: %v %v, want %v", id, got, err, want)
+		}
+	}
+}

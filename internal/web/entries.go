@@ -59,6 +59,7 @@ type entryDialog struct {
 type runQuestion struct {
 	Completed, Action string
 	OnlyNew           bool
+	StillAiring       bool // the item has upcoming releases: no new run, only "correct"
 }
 
 // runChoiceField is the entry dialog's answer to its question: "new" starts
@@ -431,7 +432,12 @@ func (s *server) postEdit(w http.ResponseWriter, r *http.Request) {
 	if msg == "" && movesBack && !startNew && choice != "correct" {
 		// the question; nothing is written
 		d := t.dialog(v, keys, ret, stored)
-		d.Ask = &runQuestion{Completed: statusLabel(t.kind, library.Completed), Action: t.kind.RepeatAction(), OnlyNew: pastRun}
+		airing, err := s.deps.Library.StillAiring(ctx, t.row.Item.ID)
+		if err != nil {
+			s.internalError(w, r, err)
+			return
+		}
+		d.Ask = &runQuestion{Completed: statusLabel(t.kind, library.Completed), Action: t.kind.RepeatAction(), OnlyNew: pastRun, StillAiring: airing}
 		s.editResponse(w, r, t, d, http.StatusOK)
 		return
 	}

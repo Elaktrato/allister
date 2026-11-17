@@ -8,6 +8,7 @@ How a release is cut: move the entries under "Unreleased" to a new `## vX.Y.Z - 
 
 ### Added
 
+- **No repeat run while airing.** An item with upcoming releases cannot be started again (button and "<Action> instead?" are hidden with a note; the request answers 422), so airings always belong to the first run. It can be started again once it has finished airing.
 - **Pick one.** A button on each list draws one entry at random from the matching planned entries (or the status you filtered): title, cover, length and genres, with Roll again and Start. Games, movies, TV and anime also filter by length (for example under 90 minutes, or under 13 episodes); entries without that data are left out. The same filters as the list apply.
 - **Update from source shows a comparison.** On a saved item, Update from source asks the source again and lists only what differs (each field, and titles, genres, tags, cover, relations and credits as a whole), with rows you have left empty ticked; it writes only the rows you tick. A blank source value never clears yours.
 - **Bulk edit in every list.** Tick rows or cards (or the whole page, or every entry the current filter matches) and set their status, add them to a custom list or a series, add or remove own tags, or remove them from your library in one step. A confirmation names the count first and asks again if it changed; afterwards the list says how many changed and how many were skipped. Completed fills an empty finish date and the known totals.
