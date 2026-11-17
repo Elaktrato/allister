@@ -64,6 +64,7 @@ func (s *server) coreRoutes(pluginID string) routeSet {
 		reg.Handle("GET /export/{exporter}", func(w http.ResponseWriter, r *http.Request) { s.getExport(w, r, pluginID) })
 		reg.Handle("POST /{source}/{id}/series", func(w http.ResponseWriter, r *http.Request) { s.postMakeSeries(w, r, pluginID) })
 		reg.Handle("POST /bulk", func(w http.ResponseWriter, r *http.Request) { s.postBulk(w, r, pluginID) })
+		reg.Handle("GET /pick", func(w http.ResponseWriter, r *http.Request) { s.getPick(w, r, pluginID) })
 		reg.Handle("GET /duplicates", func(w http.ResponseWriter, r *http.Request) { s.getDuplicates(w, r, pluginID) })
 		reg.Handle("POST /duplicates/dismiss", func(w http.ResponseWriter, r *http.Request) { s.postDuplicateDismiss(w, r, pluginID) })
 		reg.Handle("GET /merge", func(w http.ResponseWriter, r *http.Request) { s.getMerge(w, r, pluginID) })
