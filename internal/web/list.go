@@ -177,7 +177,16 @@ func listURL(m plugin.Manifest, kind, status, view string, page int) string {
 
 // filteredListURL is listURL keeping the filters f (canonical form).
 func filteredListURL(m plugin.Manifest, kind, status, view string, page int, f listFilters) string {
+	return lengthListURL(m, kind, status, view, page, f, lengthFilter{})
+}
+
+// lengthListURL is filteredListURL keeping the length filter lf as well (only
+// the randomiser reads it, but it survives navigation like the other filters).
+func lengthListURL(m plugin.Manifest, kind, status, view string, page int, f listFilters, lf lengthFilter) string {
 	q := f.values()
+	for k, v := range lf.values() {
+		q[k] = v
+	}
 	if len(m.Kinds) > 1 && kind != "" {
 		q.Set("kind", kind)
 	}
@@ -296,7 +305,7 @@ func coreSort(key string) bool {
 // direction (titles A to Z, the rest highest first); the links keep the
 // filters, kind, status and view and start at page 1 (filteredListURL), in
 // the canonical form parseSort reads.
-func sortHead(m plugin.Manifest, kind, status, view string, f listFilters, key, label string) headView {
+func sortHead(m plugin.Manifest, kind, status, view string, f listFilters, lf lengthFilter, key, label string) headView {
 	cur, dir := f.Sort, f.Dir
 	if cur == "" {
 		cur = string(library.SortUpdated)
@@ -320,7 +329,7 @@ func sortHead(m plugin.Manifest, kind, status, view string, f listFilters, key, 
 	if key == string(library.SortUpdated) && g.Dir == "" { // the default order
 		g.Sort = ""
 	}
-	h.Href = filteredListURL(m, kind, status, view, 1, g)
+	h.Href = lengthListURL(m, kind, status, view, 1, g, lf)
 	return h
 }
 
@@ -493,7 +502,7 @@ func (s *server) buildList(r *http.Request, m plugin.Manifest, lq listQuery) (li
 			return listView{}, err
 		}
 	}
-	ret := filteredListURL(m, k.Key, lq.Status, lq.View, pg.PageNo, f)
+	ret := lengthListURL(m, k.Key, lq.Status, lq.View, pg.PageNo, f, lq.Length)
 	v := listView{Heading: k.LabelPlural, AnyEntries: anyEntries, Total: pg.Total, Filtered: f.narrows(), PushURL: ret, View: lq.View,
 		Filters:   buildFilterBar(m, k, lq, genres, tags, userTags, hasUserTags),
 		SearchURL: "/" + url.PathEscape(m.ID) + "/search", EmptyNoun: lowerFirst(k.LabelPlural), Exports: s.exportLinks(m)}
@@ -506,11 +515,11 @@ func (s *server) buildList(r *http.Request, m plugin.Manifest, lq listQuery) (li
 	// the head sorts only by visible columns; the compact sort control
 	// (sortOptions) keeps every sort key
 	cols := s.visibleColumns(ctx, m, k)
-	v.Head.Title = sortHead(m, k.Key, lq.Status, lq.View, f, string(library.SortTitle), "Title")
+	v.Head.Title = sortHead(m, k.Key, lq.Status, lq.View, f, lq.Length, string(library.SortTitle), "Title")
 	for _, c := range cols {
 		h := headView{Label: c.Label}
 		if key := columnSort(k, c); key != "" {
-			h = sortHead(m, k.Key, lq.Status, lq.View, f, key, c.Label)
+			h = sortHead(m, k.Key, lq.Status, lq.View, f, lq.Length, key, c.Label)
 		}
 		h.Hide = c.Hide
 		v.Head.Columns = append(v.Head.Columns, h)
@@ -532,19 +541,19 @@ func (s *server) buildList(r *http.Request, m plugin.Manifest, lq listQuery) (li
 		v.From, v.To = (pg.PageNo-1)*listPageSize+1, (pg.PageNo-1)*listPageSize+len(pg.Rows)
 	}
 	if pg.PageNo > 1 {
-		v.PrevURL = filteredListURL(m, k.Key, lq.Status, lq.View, pg.PageNo-1, f)
+		v.PrevURL = lengthListURL(m, k.Key, lq.Status, lq.View, pg.PageNo-1, f, lq.Length)
 	}
 	if pg.PageNo < pg.Pages {
-		v.NextURL = filteredListURL(m, k.Key, lq.Status, lq.View, pg.PageNo+1, f)
+		v.NextURL = lengthListURL(m, k.Key, lq.Status, lq.View, pg.PageNo+1, f, lq.Length)
 	}
 	// the view switch keeps the filters, the status and the page
-	v.ViewCardsURL = filteredListURL(m, k.Key, lq.Status, "cards", pg.PageNo, f)
-	v.ViewTableURL = filteredListURL(m, k.Key, lq.Status, "table", pg.PageNo, f)
+	v.ViewCardsURL = lengthListURL(m, k.Key, lq.Status, "cards", pg.PageNo, f, lq.Length)
+	v.ViewTableURL = lengthListURL(m, k.Key, lq.Status, "table", pg.PageNo, f, lq.Length)
 	v.Tabs = append(v.Tabs, tabView{Label: "All", Count: all,
-		Href: filteredListURL(m, k.Key, "all", lq.View, 1, f), Current: lq.Status == "" || lq.Status == "all"})
+		Href: lengthListURL(m, k.Key, "all", lq.View, 1, f, lq.Length), Current: lq.Status == "" || lq.Status == "all"})
 	for _, st := range listTabOrder {
 		v.Tabs = append(v.Tabs, tabView{Label: statusLabel(k, st), Count: counts[st],
-			Href:    filteredListURL(m, k.Key, string(st), lq.View, 1, f),
+			Href:    lengthListURL(m, k.Key, string(st), lq.View, 1, f, lq.Length),
 			Current: string(st) == lq.Status, Status: string(st)})
 	}
 	v.Kinds = kindTabs(m, k, has, lq.View, false)

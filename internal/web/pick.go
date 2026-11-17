@@ -43,6 +43,22 @@ func (f lengthFilter) active() bool {
 	return f.Measure.Key != "" && (f.Min != nil || f.Max != nil)
 }
 
+// values are the filter's URL parameters (none without a measure).
+func (f lengthFilter) values() url.Values {
+	q := url.Values{}
+	if f.Measure.Key == "" {
+		return q
+	}
+	q.Set("len", f.Measure.Key)
+	if f.Min != nil {
+		q.Set("len_min", fmtNum(*f.Min))
+	}
+	if f.Max != nil {
+		q.Set("len_max", fmtNum(*f.Max))
+	}
+	return q
+}
+
 // withoutLengthParams is q without the length parameters (parseFilters would
 // reject them as unknown).
 func withoutLengthParams(q url.Values) url.Values {
@@ -212,14 +228,8 @@ func pickURL(m plugin.Manifest, k plugin.KindDef, lq listQuery) string {
 		q.Set("kind", k.Key)
 	}
 	q.Set("status", statusParam(lq.Status))
-	if lq.Length.Measure.Key != "" {
-		q.Set("len", lq.Length.Measure.Key)
-		if lq.Length.Min != nil {
-			q.Set("len_min", fmtNum(*lq.Length.Min))
-		}
-		if lq.Length.Max != nil {
-			q.Set("len_max", fmtNum(*lq.Length.Max))
-		}
+	for k, v := range lq.Length.values() {
+		q[k] = v
 	}
 	return "/" + url.PathEscape(m.ID) + "/pick?" + q.Encode()
 }

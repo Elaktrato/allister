@@ -450,3 +450,66 @@ func TestPickUnknownOrDisabledPlugin(t *testing.T) {
 		t.Errorf("unknown plugin: status %d", rec.Code)
 	}
 }
+
+// listHrefs returns every /anime?... link of a list page, unescaped.
+func listHrefs(body string) []string {
+	var out []string
+	for _, m := range regexp.MustCompile(`href="(/anime(?:\?[^"]*)?)"`).FindAllStringSubmatch(body, -1) {
+		out = append(out, strings.ReplaceAll(m[1], "&amp;", "&"))
+	}
+	return out
+}
+
+// TestListLinksCarryLengthFilter: the view switch, the sort heads, the status
+// tabs and the pager keep the length parameters like they keep the other
+// filters.
+func TestListLinksCarryLengthFilter(t *testing.T) {
+	e := newEnv(t)
+	for i := range listPageSize + 1 {
+		addPick(t, e, fmt.Sprint(i), fmt.Sprintf("Show %03d", i), library.Planned, ip(12), ip(24))
+	}
+	b := e.get("/anime?status=planned&view=table&q=show&len=total&len_min=30&len_max=900").Body.String()
+	var checked int
+	for _, h := range listHrefs(b) {
+		u, err := url.Parse(h)
+		if err != nil {
+			t.Fatal(err)
+		}
+		q := u.Query()
+		if q.Get("q") == "" {
+			continue // the Clear filters link, which must not carry it
+		}
+		if q.Get("sort") == "" && q.Get("view") == "" && q.Get("status") == "" && q.Get("page") == "" {
+			continue // not a view, sort, status or page link
+		}
+		checked++
+		if q.Get("len") != "total" || q.Get("len_min") != "30" || q.Get("len_max") != "900" {
+			t.Errorf("link %q lost the length filter", h)
+		}
+	}
+	if checked < 8 { // 2 views, sort heads, 8 status tabs, next page
+		t.Fatalf("only %d links checked", checked)
+	}
+	mustContain(t, b, "page=2")
+}
+
+// TestClearFiltersClearsLengthFilter: the Clear filters link is offered for a
+// length filter alone and removes every filter, the length one included.
+func TestClearFiltersClearsLengthFilter(t *testing.T) {
+	e := newEnv(t)
+	addPick(t, e, "1", "Alpha", library.Planned, ip(12), ip(24))
+	for _, q := range []string{"len=total&len_min=30", "q=alpha&len=total&len_min=30&len_max=900"} {
+		b := e.get("/anime?status=planned&" + q).Body.String()
+		m := regexp.MustCompile(`<a [^>]*href="([^"]*)"[^>]*>Clear filters</a>`).FindStringSubmatch(b)
+		if m == nil {
+			t.Fatalf("%s: no Clear filters link", q)
+		}
+		if got := strings.ReplaceAll(m[1], "&amp;", "&"); got != "/anime?status=planned&view=cards" {
+			t.Errorf("%s: Clear filters = %q, want the plain list", q, got)
+		}
+	}
+	mustNotContain(t, e.get("/anime?status=planned").Body.String(), "Clear filters")
+	// the list's own htmx partial updates the slot the same way
+	rec := e.getWith("/anime?status=planned&len=total&len_min=30", map[string]string{"HX-Request": "true", "HX-Target": "list-rows"})
+	mustContain(t, rec.Body.String(), `id="filter-clear"`, "Clear filters")
+}
