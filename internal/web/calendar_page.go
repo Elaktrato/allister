@@ -177,6 +177,11 @@ func (s *server) getCalendarPage(w http.ResponseWriter, r *http.Request) {
 	// the answer depends on the partial headers, like the list
 	w.Header().Set("Vary", "HX-Request, HX-Target, HX-History-Restore-Request")
 	if isPartialRequest(r) && r.Header.Get("HX-Target") == "calendar-grid" {
+		// the select submits plugin= for "All plugins" (and an unknown id is
+		// ignored): push the canonical URL instead of the request's
+		if q := r.URL.Query(); q.Has("plugin") && v.Plugin == "" {
+			w.Header().Set("HX-Push-Url", v.Return)
+		}
 		s.renderPartial(w, "calendar", "calendar_grid", v)
 		return
 	}
