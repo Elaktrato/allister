@@ -4,17 +4,19 @@
 {{template "calendar_grid" .}}
 {{end}}
 
-{{/* the month grid; htmx month links swap this region alone */}}
+{{/* the month or week grid; htmx links and the plugin select replace this
+     region alone (outerHTML: the root id stays unique, and the select keeps
+     its id, so htmx restores its focus after the swap) */}}
 {{define "calendar_grid"}}
 <div id="calendar-grid">
   {{if .Notice}}<p role="alert" class="mb-4 rounded border border-amber-700 bg-amber-950 p-3 text-sm text-amber-200">{{.Notice}}</p>{{end}}
   <div class="mb-4 flex flex-wrap items-center gap-3 text-sm">
     <div class="flex items-center gap-1" role="group" aria-label="View">
-      <a href="{{.MonthURL}}" hx-get="{{.MonthURL}}" hx-target="#calendar-grid" hx-push-url="true"{{if eq .View "month"}} aria-current="true"{{end}} class="rounded-md border border-slate-700 px-2.5 py-1 hover:bg-slate-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500{{if eq .View "month"}} bg-slate-800 text-slate-200{{else}} text-slate-400{{end}}">Month</a>
-      <a href="{{.WeekURL}}" hx-get="{{.WeekURL}}" hx-target="#calendar-grid" hx-push-url="true"{{if eq .View "week"}} aria-current="true"{{end}} class="rounded-md border border-slate-700 px-2.5 py-1 hover:bg-slate-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500{{if eq .View "week"}} bg-slate-800 text-slate-200{{else}} text-slate-400{{end}}">Week</a>
+      <a href="{{.MonthURL}}" hx-get="{{.MonthURL}}" hx-target="#calendar-grid" hx-swap="outerHTML" hx-push-url="true"{{if eq .View "month"}} aria-current="true"{{end}} class="rounded-md border border-slate-700 px-2.5 py-1 hover:bg-slate-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500{{if eq .View "month"}} bg-slate-800 text-slate-200{{else}} text-slate-400{{end}}">Month</a>
+      <a href="{{.WeekURL}}" hx-get="{{.WeekURL}}" hx-target="#calendar-grid" hx-swap="outerHTML" hx-push-url="true"{{if eq .View "week"}} aria-current="true"{{end}} class="rounded-md border border-slate-700 px-2.5 py-1 hover:bg-slate-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500{{if eq .View "week"}} bg-slate-800 text-slate-200{{else}} text-slate-400{{end}}">Week</a>
     </div>
     {{if .Plugins}}
-    <form action="/calendar" method="get" hx-get="/calendar" hx-target="#calendar-grid" hx-push-url="true" hx-trigger="change" class="flex items-center gap-2">
+    <form action="/calendar" method="get" hx-get="/calendar" hx-target="#calendar-grid" hx-swap="outerHTML" hx-push-url="true" hx-trigger="change" class="flex items-center gap-2">
       {{if eq .View "week"}}<input type="hidden" name="view" value="week">{{end}}
       <input type="hidden" name="{{.PositionName}}" value="{{.PositionValue}}">
       <label for="calendar-plugin" class="sr-only">Plugin</label>
@@ -26,10 +28,10 @@
     </form>
     {{end}}
     <div class="ml-auto flex items-center gap-1">
-      <a href="{{.PrevURL}}" hx-get="{{.PrevURL}}" hx-target="#calendar-grid" hx-push-url="true" aria-label="Previous {{.View}}" class="rounded p-1.5 text-slate-400 hover:bg-slate-800 hover:text-slate-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"><span class="icon text-[1.125rem]" aria-hidden="true">chevron_left</span></a>
+      <a href="{{.PrevURL}}" hx-get="{{.PrevURL}}" hx-target="#calendar-grid" hx-swap="outerHTML" hx-push-url="true" aria-label="Previous {{.View}}" class="rounded p-1.5 text-slate-400 hover:bg-slate-800 hover:text-slate-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"><span class="icon text-[1.125rem]" aria-hidden="true">chevron_left</span></a>
       <span class="min-w-40 text-center font-medium">{{.Label}}</span>
-      <a href="{{.NextURL}}" hx-get="{{.NextURL}}" hx-target="#calendar-grid" hx-push-url="true" aria-label="Next {{.View}}" class="rounded p-1.5 text-slate-400 hover:bg-slate-800 hover:text-slate-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"><span class="icon text-[1.125rem]" aria-hidden="true">chevron_right</span></a>
-      <a href="{{.TodayURL}}" hx-get="{{.TodayURL}}" hx-target="#calendar-grid" hx-push-url="true" class="ml-1 rounded-md border border-slate-700 px-2.5 py-1 text-slate-300 hover:bg-slate-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500">Today</a>
+      <a href="{{.NextURL}}" hx-get="{{.NextURL}}" hx-target="#calendar-grid" hx-swap="outerHTML" hx-push-url="true" aria-label="Next {{.View}}" class="rounded p-1.5 text-slate-400 hover:bg-slate-800 hover:text-slate-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"><span class="icon text-[1.125rem]" aria-hidden="true">chevron_right</span></a>
+      <a href="{{.TodayURL}}" hx-get="{{.TodayURL}}" hx-target="#calendar-grid" hx-swap="outerHTML" hx-push-url="true" class="ml-1 rounded-md border border-slate-700 px-2.5 py-1 text-slate-300 hover:bg-slate-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500">Today</a>
     </div>
   </div>
   <div class="overflow-x-auto">

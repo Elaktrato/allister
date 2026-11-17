@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http/httptest"
 	"net/url"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -642,4 +643,50 @@ func TestPostListWatchedHTMXFailureShowsNotice(t *testing.T) {
 	rec2 := httptest.NewRecorder()
 	e2.h.ServeHTTP(rec2, r)
 	mustNotContain(t, rec2.Body.String(), `role="alert"`)
+}
+
+// TestCalendarSwapsReplaceTheGrid: every control that targets the grid
+// replaces it (outerHTML), so the partial's root id is never nested inside the
+// target, and the select can keep focus across the swap.
+func TestCalendarSwapsReplaceTheGrid(t *testing.T) {
+	e := scheduleEnv(t)
+	b := e.get("/calendar").Body.String()
+	targets := strings.Count(b, `hx-target="#calendar-grid"`)
+	if targets < 6 { // two view links, previous, next, today, the select's form
+		t.Fatalf("%d grid targets", targets)
+	}
+	for _, m := range regexp.MustCompile(`<(?:a|form)\b[^>]*hx-target="#calendar-grid"[^>]*>`).FindAllString(b, -1) {
+		if !strings.Contains(m, `hx-swap="outerHTML"`) {
+			t.Errorf("a grid target without outerHTML: %s", m)
+		}
+	}
+	if n := strings.Count(b, `id="calendar-grid"`); n != 1 {
+		t.Errorf("%d elements with the grid id, want 1", n)
+	}
+	mustContain(t, b, `id="calendar-plugin"`)
+}
+
+// TestCalendarNoEmptyPluginInPushedURL: choosing "All plugins" submits
+// plugin= ; the address bar gets the canonical URL without it.
+func TestCalendarNoEmptyPluginInPushedURL(t *testing.T) {
+	e := scheduleEnv(t)
+	hx := map[string]string{"HX-Request": "true", "HX-Target": "calendar-grid"}
+	for u, want := range map[string]string{
+		"/calendar?month=2026-11&plugin=":             "/calendar?month=2026-11",
+		"/calendar?view=week&week=2026-11-09&plugin=": "/calendar?view=week&week=2026-11-09",
+		"/calendar?month=2026-11&plugin=nope":         "/calendar?month=2026-11",
+	} {
+		rec := e.getWith(u, hx)
+		if got := rec.Header().Get("HX-Push-Url"); got != want {
+			t.Errorf("%s: HX-Push-Url = %q, want %q", u, got, want)
+		}
+	}
+	// a chosen plugin or no parameter at all leaves the pushed URL to htmx
+	for _, u := range []string{"/calendar?month=2026-11&plugin=tv", "/calendar?month=2026-11"} {
+		if got := e.getWith(u, hx).Header().Get("HX-Push-Url"); got != "" {
+			t.Errorf("%s: HX-Push-Url = %q, want none", u, got)
+		}
+	}
+	// the form of the select has no empty option value named plugin besides All
+	mustContain(t, e.get("/calendar").Body.String(), `<option value="">All plugins</option>`)
 }
