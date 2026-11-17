@@ -32,7 +32,8 @@ func calendarReturn(raw string) string {
 // postWatched marks the posted release (season, number) of the item watched.
 // htmx gets the refreshed calendar grid, a plain POST a 303 back to the
 // calendar. A release that is not a stored, aired airing of an active entry
-// answers 422; an item without an entry 404; progress already at or beyond
+// answers 422 (for htmx from the grid: the grid again with the message, as
+// htmx swaps no error status); an item without an entry 404; progress already at or beyond
 // the release changes nothing and still answers success.
 func (s *server) postWatched(w http.ResponseWriter, r *http.Request) {
 	ref := entryOf(r)
@@ -47,19 +48,27 @@ func (s *server) postWatched(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx := r.Context()
 	_, err := s.deps.Library.MarkReleaseWatched(ctx, ref.ID, season, number, s.now())
+	ret := calendarReturn(r.PostFormValue("return"))
+	grid := isPartialRequest(r) && r.Header.Get("HX-Target") == "calendar-grid"
+	notice := ""
 	switch {
+	case err == nil:
+	case grid && errors.Is(err, library.ErrNoEntry):
+		notice = "Could not mark it watched: this entry is no longer in your list."
+	case grid && errors.Is(err, library.ErrInvalid):
+		// htmx swaps no error status: show the message above the refreshed grid
+		notice = "Could not mark it watched: " + invalidMessage(err)
 	case errors.Is(err, library.ErrNoEntry):
 		s.entryNotFound(w, r)
 		return
 	case errors.Is(err, library.ErrInvalid):
 		s.errorPage(w, r, http.StatusUnprocessableEntity, "Cannot mark watched", invalidMessage(err), "")
 		return
-	case err != nil:
+	default:
 		s.internalError(w, r, err)
 		return
 	}
-	ret := calendarReturn(r.PostFormValue("return"))
-	if !isPartialRequest(r) || r.Header.Get("HX-Target") != "calendar-grid" {
+	if !grid {
 		http.Redirect(w, r, ret, http.StatusSeeOther)
 		return
 	}
@@ -73,5 +82,6 @@ func (s *server) postWatched(w http.ResponseWriter, r *http.Request) {
 		s.internalError(w, r, err)
 		return
 	}
+	v.Notice = notice
 	s.renderPartial(w, "calendar", "calendar_grid", v)
 }

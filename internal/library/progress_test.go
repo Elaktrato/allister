@@ -991,3 +991,50 @@ func TestMarkReleaseWatchedEventOriginManual(t *testing.T) {
 		t.Fatalf("events = %s", showEvents(evs))
 	}
 }
+
+// TestMarkReleaseWatchedSeasonAboveTotal: a release of a season above the
+// group track's total is refused (the entry would fail validation elsewhere),
+// while a season within it is marked.
+func TestMarkReleaseWatchedSeasonAboveTotal(t *testing.T) {
+	e := newEnv(t)
+	p := plugintest.TVPlugin(plugintest.WithID("tvs"))
+	k := &p.M.Kinds[0]
+	k.Progress.GroupKey = "season"
+	k.Progress.Eligible[0].TotalField = "seasons"
+	k.Fields = append(k.Fields, plugin.FieldDef{Key: "seasons", Label: "Seasons", Type: plugin.FieldNumber, Min: fp(0), Editable: true})
+	if err := e.reg.Register(p); err != nil {
+		t.Fatal(err)
+	}
+	l := e.lib
+	now := time.Date(2026, 11, 10, 12, 0, 0, 0, time.UTC)
+	d := tvData("s1", nil)
+	d.Fields["seasons"] = plugin.FieldValue{Num: fp(1)}
+	id, err := l.AddToList(bg, "tvs", "show", d, Entry{Status: Active, Progress: map[string]float64{"season": 1, "episode": 3}},
+		WithProgressKeys([]string{"season", "episode"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	past := now.Add(-time.Hour)
+	if err := l.SaveSchedule(bg, id, []Airing{{Season: 1, Number: 4, AirsAt: past}, {Season: 2, Number: 1, AirsAt: past}}, now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := l.MarkReleaseWatched(bg, id, 2, 1, now); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("season above total: err = %v, want ErrInvalid", err)
+	}
+	if got := progressOf(t, l, id); got["season"] != 1 || got["episode"] != 3 || len(readEvents(t, l, id)) != 0 {
+		t.Fatalf("a refused release changed the entry: %v", got)
+	}
+	if changed, err := l.MarkReleaseWatched(bg, id, 1, 4, now); err != nil || !changed {
+		t.Fatalf("season within total: changed=%v err=%v", changed, err)
+	}
+	// the stored entry still validates (an unchanged save works)
+	if err := l.UpdateEntry(bg, *mustEntry(t, l, id), nil); err != nil {
+		t.Fatalf("entry no longer saves: %v", err)
+	}
+	// the shared check the calendar uses agrees
+	def := kindOf(t, l, "tvs", "show")
+	keys := []string{"season", "episode"}
+	if MarkableTracks(def, keys, map[string]float64{"season": 1}, 2) || !MarkableTracks(def, keys, map[string]float64{"season": 1}, 1) || !MarkableTracks(def, keys, nil, 2) {
+		t.Fatal("MarkableTracks ignores the group total")
+	}
+}
