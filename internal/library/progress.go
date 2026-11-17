@@ -471,7 +471,7 @@ func (l *Library) StoredProgress(ctx context.Context, itemID int64) (map[string]
 // MarkReleaseWatched records that the viewer has seen the stored airing
 // (season, number) of the item: it sets the kind's primary progress to number
 // (never above the total) and, for a kind with a group track and a release
-// with a season, the group track to season. It never lowers progress: a
+// with a season, the group track to season. It never lowers progress within a group (a new group restarts the primary count, and an unset group value counts as the first group): a
 // release that is not Beyond the display run's progress is a no-op
 // (changed=false, nothing written), as is a second identical call. It is one
 // transaction like Increment: the tracks marked ResetOnPrimary are cleared,
@@ -554,13 +554,21 @@ func (l *Library) MarkReleaseWatched(ctx context.Context, itemID int64, season, 
 		old, new float64
 	}
 	var moves []move
-	if gk := def.Progress.GroupKey; gk != "" && season > 0 && float64(season) > progress[gk] {
+	gk := def.Progress.GroupKey
+	switch {
+	case gk != "" && float64(season) > math.Max(progress[gk], 1):
 		moves = append(moves, move{gk, progress[gk], float64(season)})
 		// a new group starts its primary count again: the value is the
 		// release's number even when that is below the old primary value
 		moves = append(moves, move{key, progress[key], value})
-	} else if value > progress[key] {
-		moves = append(moves, move{key, progress[key], value})
+	default:
+		if gk != "" && season > 0 && float64(season) > progress[gk] {
+			// an unset group value is the first group: record it
+			moves = append(moves, move{gk, progress[gk], float64(season)})
+		}
+		if value > progress[key] {
+			moves = append(moves, move{key, progress[key], value})
+		}
 	}
 	moves = slices.DeleteFunc(moves, func(m move) bool { return m.new == m.old })
 	if len(moves) == 0 {

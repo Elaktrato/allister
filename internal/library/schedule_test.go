@@ -282,3 +282,42 @@ func TestScheduleEntriesCarryProgress(t *testing.T) {
 		t.Fatalf("%+v", got[0])
 	}
 }
+
+// TestBeyondUnsetGroupIsFirstGroup: an unset group value counts as the first
+// group, and a kind without a primary key has nothing to be beyond.
+func TestBeyondUnsetGroupIsFirstGroup(t *testing.T) {
+	grouped := plugin.KindDef{Progress: plugin.ProgressSpec{PrimaryKey: "episode", GroupKey: "season"}}
+	p := map[string]float64{"episode": 5}
+	for _, c := range []struct {
+		s, n int
+		want bool
+	}{{1, 3, false}, {1, 5, false}, {1, 6, true}, {2, 1, true}, {0, 6, true}, {0, 5, false}} {
+		if got := Beyond(grouped, p, c.s, c.n); got != c.want {
+			t.Errorf("S%dE%d: Beyond = %v, want %v", c.s, c.n, got, c.want)
+		}
+	}
+}
+
+// TestAiredCountsUnsetSeason: a show advanced with +1 has no season value;
+// its season-1 releases are compared by number only.
+func TestAiredCountsUnsetSeason(t *testing.T) {
+	l := groupedLib(t)
+	now := time.Date(2026, 11, 10, 12, 0, 0, 0, time.UTC)
+	past := now.Add(-time.Hour)
+	id, err := l.AddToList(bg, "tvg", "show", tvData("u1", nil), Entry{Status: Active, Progress: map[string]float64{"episode": 5}},
+		WithProgressKeys([]string{"season", "episode"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var airs []Airing
+	for n := 1; n <= 8; n++ {
+		airs = append(airs, Airing{Season: 1, Number: n, AirsAt: past})
+	}
+	if err := l.SaveSchedule(bg, id, airs, now); err != nil {
+		t.Fatal(err)
+	}
+	got, err := l.AiredCounts(bg, []int64{id}, now)
+	if err != nil || got[id] != 3 {
+		t.Fatalf("aired = %v (%v), want 3", got, err)
+	}
+}
