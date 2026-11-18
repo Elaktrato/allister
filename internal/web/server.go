@@ -55,6 +55,9 @@ type Deps struct {
 	ScheduleImport func(pluginID, importerID string) (kind string, payload any)
 	// CoversDir is DATA_DIR/covers; when empty /covers/ is not served.
 	CoversDir string
+	// HTTP downloads the cover URLs entered in forms into CoversDir; nil
+	// gets covers.Download's default client.
+	HTTP *http.Client
 	// DataDir is DATA_DIR: a backup restore spools its upload to
 	// DATA_DIR/tmp. When empty the restore form is not offered.
 	DataDir string
@@ -127,7 +130,7 @@ var pagePartials = map[string][]string{
 	"search":                {"templates/search_panel.html", "templates/search_results.html"},
 	"settings_plugins_page": {"templates/settings_plugins.html"},
 	"item":                  {"templates/sections.html", "templates/add_dialog.html", "templates/progress_inputs.html", "templates/match_dialog.html", "templates/run_history.html", "templates/timeline.html", "templates/list_picker.html"},
-	"series":                {"templates/series_candidates.html"},
+	"series":                {"templates/series_candidates.html", "templates/series_edit.html", "templates/item_inputs.html"},
 	"list":                  {"templates/list_row.html", "templates/list_cards.html", "templates/series_rows.html", "templates/filter_bar.html", "templates/entry_dialog.html", "templates/progress_inputs.html", "templates/bulk_bar.html", "templates/pick_result.html"},
 	"manual_form":           {"templates/item_inputs.html", "templates/progress_inputs.html"},
 	"details_form":          {"templates/item_inputs.html"},

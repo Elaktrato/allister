@@ -1,28 +1,45 @@
 {{define "title"}}{{.Title}} - Allister{{end}}
 {{define "content"}}
 <div class="min-w-0 space-y-6">
-  <div>
-    <a href="{{.ListURL}}" class="text-sm text-indigo-300 hover:underline">All series</a>
-    <h1 class="mt-1 text-3xl font-semibold">{{.Title}}</h1>
-    <p class="mt-1 text-slate-300"><span>{{.Done}}/{{.Total}}</span> <span class="text-slate-400">completed</span> · <span>{{.Status}}</span></p>
+  <div class="flex gap-4">
+    {{if .Cover}}<img src="{{.Cover}}" alt="" class="h-48 w-32 shrink-0 rounded object-cover">{{end}}
+    <div class="min-w-0 flex-1">
+      <a href="{{.ListURL}}" class="text-sm text-indigo-300 hover:underline">All series</a>
+      <h1 class="mt-1 text-3xl font-semibold">{{.Title}}</h1>
+      {{if .ParentTitle}}<p class="mt-1 text-sm text-slate-300">Spin-off of <a href="{{.ParentHref}}" class="text-indigo-300 hover:underline">{{.ParentTitle}}</a></p>{{end}}
+      <p class="mt-1 text-slate-300"><span>{{.Done}}/{{.Total}}</span> <span class="text-slate-400">completed</span> · <span>{{.Status}}</span></p>
+      {{with .Info}}
+      <dl class="mt-3 grid grid-cols-[max-content_1fr] gap-x-4 gap-y-1 text-sm">
+        {{range .}}<dt class="text-slate-400">{{.Label}}</dt><dd>{{if .Href}}<a href="{{.Href}}" rel="noopener noreferrer" class="text-indigo-300 hover:underline">{{.Text}}</a>{{else}}{{.Text}}{{end}}</dd>{{end}}
+      </dl>
+      {{end}}
+      {{with .Description}}<p class="mt-3 whitespace-pre-line text-sm text-slate-300">{{.}}</p>{{end}}
+      <p class="mt-3"><a href="{{.EditURL}}" hx-get="{{.EditURL}}" hx-target="#dialog-slot" hx-swap="innerHTML" class="inline-flex items-center gap-1.5 text-indigo-300 hover:underline"><span class="icon text-[1.125rem]" aria-hidden="true">edit</span><span>Edit details</span></a></p>
+    </div>
   </div>
-  <ol class="space-y-2">
-    {{range .Parts}}
-    <li class="flex items-center gap-3 rounded border border-slate-800 bg-slate-900 p-2">
-      {{if .Cover}}<img src="{{.Cover}}" alt="" loading="lazy" class="h-20 w-14 rounded object-cover">
-      {{else}}<span class="block h-20 w-14 rounded bg-slate-800" aria-hidden="true"></span>{{end}}
-      <div class="min-w-0 flex-1">
-        <a href="{{.Href}}" class="font-medium text-indigo-300 hover:underline">{{.Title}}</a>
-        <p class="mt-1 text-sm text-slate-300">{{.Status}}{{range .Progress}} · {{.Label}} {{.Value}}{{end}} · Rating {{.Score}}</p>
-      </div>
-      <div class="flex items-center gap-1">
-        {{if .CanMoveUp}}<form method="post" action="{{.MoveURL}}"><input type="hidden" name="dir" value="up"><button type="submit" aria-label="Move up" title="Move up" class="rounded p-1 hover:bg-slate-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"><span class="icon text-[1.125rem]" aria-hidden="true">arrow_upward</span></button></form>{{end}}
-        {{if .CanMoveDown}}<form method="post" action="{{.MoveURL}}"><input type="hidden" name="dir" value="down"><button type="submit" aria-label="Move down" title="Move down" class="rounded p-1 hover:bg-slate-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"><span class="icon text-[1.125rem]" aria-hidden="true">arrow_downward</span></button></form>{{end}}
-        <form method="post" action="{{.RemoveURL}}"><button type="submit" aria-label="Remove from series" title="Remove from series" class="rounded p-1 text-red-300 hover:bg-slate-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"><span class="icon text-[1.125rem]" aria-hidden="true">link_off</span></button></form>
-      </div>
-    </li>
-    {{end}}
-  </ol>
+  {{if .Parts}}<ol class="space-y-2">
+    {{range .Parts}}{{template "series_part_item" .}}{{end}}
+  </ol>{{else if not .SpinOffParts}}<p class="rounded border border-slate-800 bg-slate-900 p-4 text-sm text-slate-300">No parts yet. Add one below.</p>{{end}}
+  {{if or .SpinOffParts .SpinOffSeries}}
+  <section class="space-y-2" aria-labelledby="series-spinoffs">
+    <h2 id="series-spinoffs" class="text-lg font-semibold">Spin-offs</h2>
+    {{if .SpinOffParts}}<ol class="space-y-2">
+      {{range .SpinOffParts}}{{template "series_part_item" .}}{{end}}
+    </ol>{{end}}
+    {{if .SpinOffSeries}}<ul class="space-y-2">
+      {{range .SpinOffSeries}}
+      <li class="flex items-center gap-3 rounded border border-slate-800 bg-slate-900 p-2">
+        {{if .Cover}}<img src="{{.Cover}}" alt="" loading="lazy" class="h-20 w-14 rounded object-cover">
+        {{else}}<span class="block h-20 w-14 rounded bg-slate-800" aria-hidden="true"></span>{{end}}
+        <div class="min-w-0 flex-1">
+          <a href="{{.Href}}" class="font-medium text-indigo-300 hover:underline">{{.Title}}</a>
+          <p class="mt-1 text-sm text-slate-300">{{.Done}}/{{.Total}} completed · {{.Status}}</p>
+        </div>
+      </li>
+      {{end}}
+    </ul>{{end}}
+  </section>
+  {{end}}
 
   <section class="space-y-2">
     <h2 class="text-lg font-semibold">Add a part</h2>
@@ -51,4 +68,22 @@
     </form>
   </section>
 </div>
+<div id="dialog-slot" data-swap-statuses="{{dialogStatuses}}">{{with .Dialog}}{{template "series_dialog" .}}{{end}}</div>
+{{end}}
+
+{{define "series_part_item"}}
+    <li class="flex items-center gap-3 rounded border border-slate-800 bg-slate-900 p-2">
+      {{if .Cover}}<img src="{{.Cover}}" alt="" loading="lazy" class="h-20 w-14 rounded object-cover">
+      {{else}}<span class="block h-20 w-14 rounded bg-slate-800" aria-hidden="true"></span>{{end}}
+      <div class="min-w-0 flex-1">
+        <a href="{{.Href}}" class="font-medium text-indigo-300 hover:underline">{{.Title}}</a>
+        <p class="mt-1 text-sm text-slate-300">{{if .SpinOff}}Spin-off{{else}}Part{{end}} {{.Pos}} · {{.Status}}{{range .Progress}} · {{.Label}} {{.Value}}{{end}} · Rating {{.Score}}</p>
+      </div>
+      <div class="flex items-center gap-1">
+        {{if .CanMoveUp}}<form method="post" action="{{.MoveURL}}"><input type="hidden" name="dir" value="up"><button type="submit" aria-label="Move up" title="Move up" class="rounded p-1 hover:bg-slate-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"><span class="icon text-[1.125rem]" aria-hidden="true">arrow_upward</span></button></form>{{end}}
+        {{if .CanMoveDown}}<form method="post" action="{{.MoveURL}}"><input type="hidden" name="dir" value="down"><button type="submit" aria-label="Move down" title="Move down" class="rounded p-1 hover:bg-slate-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"><span class="icon text-[1.125rem]" aria-hidden="true">arrow_downward</span></button></form>{{end}}
+        <form method="post" action="{{.SpinOffURL}}"><input type="hidden" name="spin_off" value="{{.SpinOffNext}}"><button type="submit" class="rounded px-2 py-1 text-sm text-indigo-300 hover:bg-slate-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500">{{if .SpinOff}}Mark as main part{{else}}Mark as spin-off{{end}}</button></form>
+        <form method="post" action="{{.RemoveURL}}"><button type="submit" aria-label="Remove from series" title="Remove from series" class="rounded p-1 text-red-300 hover:bg-slate-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"><span class="icon text-[1.125rem]" aria-hidden="true">link_off</span></button></form>
+      </div>
+    </li>
 {{end}}

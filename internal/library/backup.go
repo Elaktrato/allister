@@ -1326,32 +1326,61 @@ func restorePerson(ctx context.Context, tx *sql.Tx, pluginID, source string, p p
 	return id, nil
 }
 
-// BackupSeries is one series of a backup: its parts in position order,
-// identified like items everywhere in the backup (no numeric ids).
+// BackupSeries is one series of a backup: its own values and its parts
+// (main parts first, then spin-off parts, each block in position order),
+// identified like items everywhere in the backup (no numeric ids). Cover,
+// CoverURL and CoverMissing work like BackupItem's; StartedOn and EndedOn are
+// calendar days (YYYY-MM-DD); Linked is the identity of the linked entry and
+// Parent the uid of the parent series. A reader that does not know the value
+// members ignores them.
 type BackupSeries struct {
-	UID       string          `json:"uid"`
-	PluginID  string          `json:"plugin_id"`
-	Kind      string          `json:"kind"`
-	Title     string          `json:"title"`
-	CreatedAt time.Time       `json:"created_at"`
-	UpdatedAt time.Time       `json:"updated_at"`
-	Parts     []BackupPartRef `json:"parts"`
+	UID          string                       `json:"uid"`
+	PluginID     string                       `json:"plugin_id"`
+	Kind         string                       `json:"kind"`
+	Title        string                       `json:"title"`
+	CreatedAt    time.Time                    `json:"created_at"`
+	UpdatedAt    time.Time                    `json:"updated_at"`
+	Cover        string                       `json:"cover,omitempty"`
+	CoverURL     string                       `json:"cover_url,omitempty"`
+	CoverMissing bool                         `json:"cover_missing,omitempty"`
+	Description  string                       `json:"description,omitempty"`
+	StartedOn    string                       `json:"started_on,omitempty"`
+	EndedOn      string                       `json:"ended_on,omitempty"`
+	Finished     bool                         `json:"finished,omitempty"`
+	PartsTotal   int                          `json:"parts_total,omitempty"`
+	Fields       map[string]plugin.FieldValue `json:"fields,omitempty"`
+	Linked       *BackupItemRef               `json:"linked,omitempty"`
+	Parent       string                       `json:"parent,omitempty"`
+	Parts        []BackupPartRef              `json:"parts"`
 }
 
-// BackupPartRef identifies a series part by its item's source identity.
-type BackupPartRef struct {
+// BackupItemRef identifies an item by its source identity.
+type BackupItemRef struct {
 	PluginID string `json:"plugin_id"`
 	Kind     string `json:"kind"`
 	Source   string `json:"source"`
 	SourceID string `json:"source_id"`
 }
 
-// BackupSeries calls fn for every series (ordered by id) with its parts in
-// position order, streamed from one query.
+// BackupPartRef identifies a series part by its item's source identity and
+// says whether it is a spin-off part.
+type BackupPartRef struct {
+	PluginID string `json:"plugin_id"`
+	Kind     string `json:"kind"`
+	Source   string `json:"source"`
+	SourceID string `json:"source_id"`
+	SpinOff  bool   `json:"spin_off,omitempty"`
+}
+
+// BackupSeries calls fn for every series (ordered by id) with its values and
+// its parts (main block first, then spin-offs, each in position order),
+// streamed from one query; the fields of each series are read before fn.
 func (l *Library) BackupSeries(ctx context.Context, fn func(BackupSeries) error) error {
-	rows, err := l.db.QueryContext(ctx, `SELECT `+seriesCols+`, i.plugin_id, i.kind, i.source, i.source_id
-		FROM series s JOIN series_parts p ON p.series_id = s.id JOIN items i ON i.id = p.item_id
-		ORDER BY s.id, p.position`)
+	rows, err := l.db.QueryContext(ctx, `SELECT `+seriesCols+`, li.plugin_id, li.kind, li.source, li.source_id, ps.uid,
+		i.plugin_id, i.kind, i.source, i.source_id, p.spin_off
+		FROM series s LEFT JOIN series_parts p ON p.series_id = s.id LEFT JOIN items i ON i.id = p.item_id
+		LEFT JOIN items li ON li.id = s.linked_item_id LEFT JOIN series ps ON ps.id = s.parent_id
+		ORDER BY s.id, p.spin_off, p.position`)
 	if err != nil {
 		return fmt.Errorf("backup series: %w", err)
 	}
@@ -1362,13 +1391,22 @@ func (l *Library) BackupSeries(ctx context.Context, fn func(BackupSeries) error)
 		if cur == nil {
 			return nil
 		}
+		s := &Series{ID: curID}
+		if err := attachSeriesFields(ctx, l.db, s); err != nil {
+			return fmt.Errorf("backup series: %w", err)
+		}
+		cur.Fields = s.Fields
 		err := fn(*cur)
 		cur = nil
 		return err
 	}
 	for rows.Next() {
-		var ref BackupPartRef
-		s, err := scanSeries(rows, &ref.PluginID, &ref.Kind, &ref.Source, &ref.SourceID)
+		// the part columns are NULL for a series without parts
+		var lPlugin, lKind, lSource, lID, parent sql.NullString
+		var pPlugin, pKind, pSource, pID sql.NullString
+		var pSpin sql.NullBool
+		s, err := scanSeries(rows, &lPlugin, &lKind, &lSource, &lID, &parent,
+			&pPlugin, &pKind, &pSource, &pID, &pSpin)
 		if err != nil {
 			return fmt.Errorf("backup series: %w", err)
 		}
@@ -1377,15 +1415,39 @@ func (l *Library) BackupSeries(ctx context.Context, fn func(BackupSeries) error)
 				return err
 			}
 			curID = s.ID
-			cur = &BackupSeries{UID: s.UID, PluginID: s.PluginID, Kind: s.Kind, Title: s.Title,
-				CreatedAt: s.CreatedAt, UpdatedAt: s.UpdatedAt, Parts: []BackupPartRef{}}
+			cur = backupSeriesOf(s, parent.String)
+			if lPlugin.Valid {
+				cur.Linked = &BackupItemRef{PluginID: lPlugin.String, Kind: lKind.String, Source: lSource.String, SourceID: lID.String}
+			}
 		}
-		cur.Parts = append(cur.Parts, ref)
+		if pPlugin.Valid {
+			cur.Parts = append(cur.Parts, BackupPartRef{PluginID: pPlugin.String, Kind: pKind.String, Source: pSource.String,
+				SourceID: pID.String, SpinOff: pSpin.Bool})
+		}
 	}
 	if err := rows.Err(); err != nil {
 		return fmt.Errorf("backup series: %w", err)
 	}
 	return flush()
+}
+
+// backupSeriesOf is the backup record of s without its parts, link and fields.
+func backupSeriesOf(s *Series, parentUID string) *BackupSeries {
+	bs := &BackupSeries{UID: s.UID, PluginID: s.PluginID, Kind: s.Kind, Title: s.Title,
+		CreatedAt: s.CreatedAt, UpdatedAt: s.UpdatedAt, Description: s.Description,
+		Finished: s.Finished, PartsTotal: s.PartsTotal, Parent: parentUID, Parts: []BackupPartRef{}}
+	if isRemote(s.CoverPath) {
+		bs.CoverURL = s.CoverPath
+	} else {
+		bs.Cover = s.CoverPath
+	}
+	if s.StartedOn != nil {
+		bs.StartedOn = s.StartedOn.Format(dateLayout)
+	}
+	if s.EndedOn != nil {
+		bs.EndedOn = s.EndedOn.Format(dateLayout)
+	}
+	return bs
 }
 
 // Why a part of a restored series was left out (LeftOutPart.Reason).
@@ -1404,23 +1466,51 @@ type LeftOutPart struct {
 	Title  string
 }
 
+// SeriesRestore reports one restored backup series. LeftOut lists the parts
+// left out (also when the series was not created); Notes the values restored
+// differently from the backup (only for a created series); Parent the
+// parent uid that RestoreSeriesParent must resolve once every series of the
+// backup is restored ("" for none).
+//
+// Empty marks a series created without parts and without own values: it is
+// only worth keeping when a spin-off series of the backup names it as its
+// parent, so the caller passes it to DeleteSeriesIfEmpty once every parent
+// is set.
+type SeriesRestore struct {
+	Created bool
+	LeftOut []LeftOutPart
+	Notes   []string
+	Parent  string
+	Empty   bool
+}
+
 // RestoreSeries merges one series of a backup in a single transaction. A
-// series whose uid exists is skipped (created false, nothing left out). The
-// parts are resolved by identity; a part whose item is missing, has no entry,
-// is of another plugin or kind than the series, is listed twice, or already
-// belongs to a series is left out (named in leftOut with the reason). A
-// series with no resolvable part is not created. The uid, title and stamps of
-// the backup are kept; an invalid title or kind is ErrInvalid.
-func (l *Library) RestoreSeries(ctx context.Context, bs BackupSeries) (created bool, leftOut []LeftOutPart, err error) {
+// series whose uid exists is skipped (not created, nothing left out). The
+// parts are resolved by identity and keep their block (main or spin-off) in
+// backup order; a part whose item is missing, has no entry, is of another
+// plugin or kind than the series, is listed twice, or already belongs to a
+// series is left out (named in LeftOut with the reason). A series none of
+// whose archived parts resolves is not created unless it holds own values;
+// one archived without parts (kept for its data or its spin-offs) is. The
+// uid, title and stamps of the backup are kept; an invalid title, uid or
+// kind is ErrInvalid.
+//
+// The values are checked one by one with the rules of UpdateSeriesDetails
+// against the installed kind; a value that fails, a linked entry that is
+// missing or refused, and a cover that cannot be restored (opts.ResolveCover
+// as for RestoreItem) are left empty with a note, the rest is restored. The
+// parent is not set here (see SeriesRestore.Parent).
+func (l *Library) RestoreSeries(ctx context.Context, bs BackupSeries, opts RestoreOptions) (SeriesRestore, error) {
+	var res SeriesRestore
 	title, err := cleanSeriesTitle(bs.Title)
 	if err != nil {
-		return false, nil, err
+		return res, err
 	}
 	if bs.UID == "" || len(bs.UID) > 100 || bs.PluginID == "" || bs.Kind == "" {
-		return false, nil, invalid("series without a uid, plugin or kind")
+		return res, invalid("series without a uid, plugin or kind")
 	}
 	if err := cleanText("series uid", bs.UID, singleLine); err != nil {
-		return false, nil, err
+		return res, err
 	}
 	now := time.Now().UTC()
 	if bs.CreatedAt.IsZero() {
@@ -1429,23 +1519,55 @@ func (l *Library) RestoreSeries(ctx context.Context, bs BackupSeries) (created b
 	if bs.UpdatedAt.IsZero() {
 		bs.UpdatedAt = bs.CreatedAt
 	}
-	tx, err := l.db.BeginTx(ctx, nil)
-	if err != nil {
-		return false, nil, err
+	kind, kindErr := l.kindDef(bs.PluginID, bs.Kind)
+	d, fieldRows, notes := restoreSeriesValues(kind, kindErr, title, bs)
+	parent, parentNote := restoreParentUID(bs.Parent)
+	if parentNote != "" {
+		notes = append(notes, parentNote)
 	}
-	defer tx.Rollback()
+	// an existing uid is skipped before anything is stored
 	var n int
-	if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM series WHERE uid = ?`, bs.UID).Scan(&n); err != nil {
-		return false, nil, err
+	if err := l.db.QueryRowContext(ctx, `SELECT count(*) FROM series WHERE uid = ?`, bs.UID).Scan(&n); err != nil {
+		return res, err
 	}
 	if n > 0 {
-		return false, nil, nil
+		return res, nil
 	}
-	var itemIDs []int64
+	stored := ""
+	committed := false
+	defer func() {
+		if stored != "" && !committed {
+			l.releaseCover(ctx, opts, stored)
+		}
+	}()
+	// the cover is stored before the write transaction, like RestoreItem
+	if kindErr == nil && bs.Cover != "" {
+		var note string
+		if stored, note, err = restoreSeriesCover(ctx, opts, bs.Cover); err != nil {
+			return res, err
+		}
+		if stored != "" {
+			d.CoverPath = stored
+		} else if note != "" {
+			notes = append(notes, note)
+		}
+	}
+	tx, err := l.db.BeginTx(ctx, nil)
+	if err != nil {
+		return res, err
+	}
+	defer tx.Rollback()
+	if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM series WHERE uid = ?`, bs.UID).Scan(&n); err != nil {
+		return res, err
+	}
+	if n > 0 {
+		return res, nil
+	}
+	var parts []SeriesPart
 	taken := map[int64]bool{}
 	for _, ref := range bs.Parts {
 		if ref.PluginID != bs.PluginID || ref.Kind != bs.Kind {
-			leftOut = append(leftOut, LeftOutPart{Ref: ref, Reason: LeftOutOtherKind})
+			res.LeftOut = append(res.LeftOut, LeftOutPart{Ref: ref, Reason: LeftOutOtherKind})
 			continue
 		}
 		var id int64
@@ -1458,41 +1580,265 @@ func (l *Library) RestoreSeries(ctx context.Context, bs BackupSeries) (created b
 			ref.PluginID, ref.Kind, ref.Source, ref.SourceID).Scan(&id, &inSeries, &itemTitle)
 		switch {
 		case errors.Is(err, sql.ErrNoRows):
-			leftOut = append(leftOut, LeftOutPart{Ref: ref, Reason: LeftOutMissing})
+			res.LeftOut = append(res.LeftOut, LeftOutPart{Ref: ref, Reason: LeftOutMissing})
 			continue
 		case err != nil:
-			return false, nil, err
+			return res, err
 		case taken[id]:
-			leftOut = append(leftOut, LeftOutPart{Ref: ref, Reason: LeftOutDuplicate, Title: itemTitle.String})
+			res.LeftOut = append(res.LeftOut, LeftOutPart{Ref: ref, Reason: LeftOutDuplicate, Title: itemTitle.String})
 			continue
 		case inSeries:
-			leftOut = append(leftOut, LeftOutPart{Ref: ref, Reason: LeftOutInSeries, Title: itemTitle.String})
+			res.LeftOut = append(res.LeftOut, LeftOutPart{Ref: ref, Reason: LeftOutInSeries, Title: itemTitle.String})
 			continue
 		}
 		taken[id] = true
-		itemIDs = append(itemIDs, id)
+		parts = append(parts, SeriesPart{ItemID: id, SpinOff: ref.SpinOff})
 	}
-	if len(itemIDs) == 0 {
-		return false, leftOut, nil
+	if kindErr == nil && bs.Linked != nil {
+		id, note, err := restoreSeriesLink(ctx, tx, bs.PluginID, kind, *bs.Linked)
+		if err != nil {
+			return res, err
+		}
+		d.LinkedItemID = id
+		if note != "" {
+			notes = append(notes, note)
+		}
 	}
-	res, err := tx.ExecContext(ctx, `INSERT INTO series(uid, plugin_id, kind, title, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`,
+	// a series whose parts all failed is kept only for its own data (R6); one
+	// archived without parts was kept for its data or its spin-offs (Empty)
+	if len(parts) == 0 && len(bs.Parts) > 0 && !d.holdsOwn() {
+		return res, nil
+	}
+	res.Empty = len(parts) == 0 && !d.holdsOwn()
+	ins, err := tx.ExecContext(ctx, `INSERT INTO series(uid, plugin_id, kind, title, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`,
 		bs.UID, bs.PluginID, bs.Kind, title, bs.CreatedAt.UTC().Format(time.RFC3339), bs.UpdatedAt.UTC().Format(time.RFC3339))
 	if err != nil {
-		return false, nil, err
+		return res, err
 	}
-	sid, err := res.LastInsertId()
+	sid, err := ins.LastInsertId()
 	if err != nil {
-		return false, nil, err
+		return res, err
 	}
-	for i, id := range itemIDs {
-		if _, err := tx.ExecContext(ctx, `INSERT INTO series_parts(series_id, item_id, position) VALUES (?, ?, ?)`, sid, id, i+1); err != nil {
-			return false, nil, mapPartInsertErr(err)
+	if err := writeSeriesValues(ctx, tx, sid, d, fieldRows); err != nil {
+		return res, err
+	}
+	pos := map[bool]int{}
+	for _, p := range parts {
+		pos[p.SpinOff]++
+		if _, err := tx.ExecContext(ctx, `INSERT INTO series_parts(series_id, item_id, position, spin_off) VALUES (?, ?, ?, ?)`,
+			sid, p.ItemID, pos[p.SpinOff], p.SpinOff); err != nil {
+			return res, mapPartInsertErr(err)
 		}
 	}
 	if err := tx.Commit(); err != nil {
-		return false, nil, err
+		return res, err
 	}
-	return true, leftOut, nil
+	committed = true
+	res.Created, res.Notes, res.Parent = true, notes, parent
+	return res, nil
+}
+
+// restoreSeriesValues returns the values of bs that pass
+// prepareSeriesDetails one by one (with the field rows to store) and a note
+// for every value left out. Without an installed kind only the title and
+// the finished marker are restored.
+func restoreSeriesValues(kind plugin.KindDef, kindErr error, title string, bs BackupSeries) (SeriesDetails, []fieldRow, []string) {
+	d := SeriesDetails{Title: title, Finished: bs.Finished}
+	var notes []string
+	if kindErr != nil {
+		if bs.Cover != "" || bs.CoverURL != "" || bs.Description != "" || bs.StartedOn != "" || bs.EndedOn != "" ||
+			bs.PartsTotal != 0 || len(bs.Fields) > 0 || bs.Linked != nil {
+			notes = append(notes, "the series data is not restored: "+noteReason(kindErr))
+		}
+		return d, nil, notes
+	}
+	try := func(what string, set func(*SeriesDetails)) {
+		t := d
+		set(&t)
+		if _, err := prepareSeriesDetails(kind, &t); err != nil {
+			notes = append(notes, what+" is not restored: "+noteReason(err))
+			return
+		}
+		d = t
+	}
+	if bs.Description != "" {
+		try("the description", func(t *SeriesDetails) { t.Description = bs.Description })
+	}
+	for _, v := range []struct {
+		name, value string
+		set         func(*SeriesDetails, *time.Time)
+	}{
+		{"started_on", bs.StartedOn, func(t *SeriesDetails, v *time.Time) { t.StartedOn = v }},
+		{"ended_on", bs.EndedOn, func(t *SeriesDetails, v *time.Time) { t.EndedOn = v }},
+	} {
+		if v.value == "" {
+			continue
+		}
+		day, err := time.Parse(dateLayout, v.value)
+		if err != nil {
+			notes = append(notes, fmt.Sprintf("%s is not restored: %q is not a calendar day (YYYY-MM-DD)", v.name, v.value))
+			continue
+		}
+		try(v.name, func(t *SeriesDetails) { v.set(t, &day) })
+	}
+	if bs.PartsTotal != 0 {
+		try("parts_total", func(t *SeriesDetails) { t.PartsTotal = bs.PartsTotal })
+	}
+	if bs.Cover == "" && bs.CoverURL != "" {
+		try("the cover", func(t *SeriesDetails) { t.CoverPath = bs.CoverURL })
+	}
+	keys := make([]string, 0, len(bs.Fields))
+	for k := range bs.Fields {
+		keys = append(keys, k)
+	}
+	slices.Sort(keys)
+	accepted := map[string]plugin.FieldValue{}
+	for _, k := range keys {
+		t := d
+		t.Fields = map[string]plugin.FieldValue{k: bs.Fields[k]}
+		if _, err := prepareSeriesDetails(kind, &t); err != nil {
+			notes = append(notes, fmt.Sprintf("the field %q is not restored: %s", k, noteReason(err)))
+			continue
+		}
+		accepted[k] = bs.Fields[k]
+	}
+	if len(accepted) > 0 {
+		d.Fields = accepted
+	}
+	rows, err := prepareSeriesDetails(kind, &d)
+	if err != nil { // the accepted fields together fail
+		notes = append(notes, "the fields are not restored: "+noteReason(err))
+		d.Fields = nil
+		if rows, err = prepareSeriesDetails(kind, &d); err != nil {
+			return SeriesDetails{Title: title, Finished: bs.Finished}, nil, append(notes, "the series data is not restored: "+noteReason(err))
+		}
+	}
+	return d, rows, notes
+}
+
+// noteReason is err as the reason of a restore note: without the "invalid: "
+// prefix of ErrInvalid, like the web's messages.
+func noteReason(err error) string {
+	return strings.TrimPrefix(err.Error(), ErrInvalid.Error()+": ")
+}
+
+// restoreParentUID returns the parent uid to resolve later, or a note when
+// it cannot be a uid.
+func restoreParentUID(uid string) (string, string) {
+	if uid == "" {
+		return "", ""
+	}
+	if len(uid) > 100 || cleanText("parent", uid, singleLine) != nil {
+		return "", "the parent series is not restored: its uid is not valid"
+	}
+	return uid, ""
+}
+
+// restoreSeriesLink resolves the linked entry by identity and checks it like
+// UpdateSeriesDetails; a missing or refused entry is 0 with a note.
+func restoreSeriesLink(ctx context.Context, tx *sql.Tx, pluginID string, kind plugin.KindDef, ref BackupItemRef) (int64, string, error) {
+	what := "the linked entry " + ref.Source + ":" + ref.SourceID
+	var id int64
+	err := tx.QueryRowContext(ctx, `SELECT id FROM items WHERE plugin_id = ? AND kind = ? AND source = ? AND source_id = ?`,
+		ref.PluginID, ref.Kind, ref.Source, ref.SourceID).Scan(&id)
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+		return 0, what + " is not in the library: restored without the link", nil
+	case err != nil:
+		return 0, "", err
+	}
+	if err := checkSeriesLink(ctx, tx, pluginID, kind, id, true); err != nil {
+		if errors.Is(err, ErrInvalid) {
+			return 0, what + " is not restored: " + noteReason(err), nil
+		}
+		return 0, "", err
+	}
+	return id, "", nil
+}
+
+// restoreSeriesCover stores the backup's local cover name through
+// opts.ResolveCover like RestoreItem; "" with a note when it cannot be
+// restored.
+func restoreSeriesCover(ctx context.Context, opts RestoreOptions, name string) (string, string, error) {
+	if !ValidFileName(name) {
+		return "", "the cover is not restored: it is not a plain file name", nil
+	}
+	if opts.ResolveCover == nil {
+		return "", "the cover file is not part of the backup: restored without a cover", nil
+	}
+	stored, note, err := opts.ResolveCover(ctx, name)
+	if err != nil {
+		return "", "", err
+	}
+	if stored == "" || checkImageRef("cover", stored) != nil {
+		if note == "" {
+			note = "the cover is not restored"
+		}
+		return "", note, nil
+	}
+	return stored, "", nil
+}
+
+// DeleteSeriesIfEmpty deletes the series uid of the plugin when it has no
+// parts, holds nothing of its own and has no spin-off series, the rule of
+// renumberSeries, and reports whether it did.
+func (l *Library) DeleteSeriesIfEmpty(ctx context.Context, pluginID, uid string) (bool, error) {
+	var id int64
+	switch err := l.db.QueryRowContext(ctx, `SELECT id FROM series WHERE plugin_id = ? AND uid = ?
+		AND NOT EXISTS (SELECT 1 FROM series_parts p WHERE p.series_id = series.id)`, pluginID, uid).Scan(&id); {
+	case errors.Is(err, sql.ErrNoRows):
+		return false, nil
+	case err != nil:
+		return false, fmt.Errorf("delete empty series: %w", err)
+	}
+	res, err := l.db.ExecContext(ctx, deleteEmptySeriesSQL+` AND NOT EXISTS (SELECT 1 FROM series_parts p WHERE p.series_id = ?1)`, id)
+	if err != nil {
+		return false, fmt.Errorf("delete empty series: %w", err)
+	}
+	n, err := res.RowsAffected()
+	return n > 0, err
+}
+
+// RestoreSeriesParent sets the parent of the restored series uid (of the
+// plugin) to the series parentUID, checked like UpdateSeriesDetails. It runs
+// once every series of a backup is restored. A parent that is missing or
+// refused leaves the series without a parent and returns a note; a series
+// that does not exist or already has a parent is left alone ("", nil).
+func (l *Library) RestoreSeriesParent(ctx context.Context, pluginID, uid, parentUID string) (string, error) {
+	tx, err := l.db.BeginTx(ctx, nil)
+	if err != nil {
+		return "", err
+	}
+	defer tx.Rollback()
+	var id int64
+	var has sql.NullInt64
+	switch err := tx.QueryRowContext(ctx, `SELECT id, parent_id FROM series WHERE plugin_id = ? AND uid = ?`, pluginID, uid).Scan(&id, &has); {
+	case errors.Is(err, sql.ErrNoRows):
+		return "", nil
+	case err != nil:
+		return "", err
+	}
+	if has.Valid {
+		return "", nil
+	}
+	what := "the parent series " + parentUID
+	var pid int64
+	switch err := tx.QueryRowContext(ctx, `SELECT id FROM series WHERE uid = ?`, parentUID).Scan(&pid); {
+	case errors.Is(err, sql.ErrNoRows):
+		return what + " is not in the library: restored without a parent", nil
+	case err != nil:
+		return "", err
+	}
+	if err := checkSeriesParent(ctx, tx, id, pluginID, pid); err != nil {
+		if errors.Is(err, ErrInvalid) {
+			return what + " is not restored: " + noteReason(err), nil
+		}
+		return "", err
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE series SET parent_id = ? WHERE id = ?`, pid, id); err != nil {
+		return "", err
+	}
+	return "", tx.Commit()
 }
 
 // BackupList is one custom list of a backup: its name, order mode, creation

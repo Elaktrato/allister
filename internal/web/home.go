@@ -55,6 +55,7 @@ type homeRelease struct {
 
 type homeSeries struct {
 	Title, Href, Cover, Progress string
+	ParentTitle, ParentHref      string
 	BadgeIcon, BadgeLabel        string
 	BarPct                       int // -1: no parts
 }
@@ -303,6 +304,10 @@ func (s *server) homeSeries(ctx context.Context, ms []plugin.Manifest) ([]homeSe
 	if err != nil {
 		return nil, err
 	}
+	parents, err := s.seriesParents(ctx, rows)
+	if err != nil {
+		return nil, err
+	}
 	var out []homeSeries
 	for _, row := range rows {
 		m, ok := byID[row.Series.PluginID]
@@ -315,9 +320,12 @@ func (s *server) homeSeries(ctx context.Context, ms []plugin.Manifest) ([]homeSe
 		}
 		icon, label := badge(m, k)
 		hs := homeSeries{Title: row.Series.Title, Href: seriesURL(m.ID, row.Series.UID), Cover: covers.Src(row.Cover),
-			Progress: strconv.Itoa(row.Completed) + "/" + strconv.Itoa(row.Parts), BadgeIcon: icon, BadgeLabel: label, BarPct: -1}
-		if row.Parts > 0 {
-			hs.BarPct = row.Completed * 100 / row.Parts
+			Progress: strconv.Itoa(row.Completed) + "/" + strconv.Itoa(row.PartsTotal), BadgeIcon: icon, BadgeLabel: label, BarPct: -1}
+		if row.PartsTotal > 0 {
+			hs.BarPct = min(row.Completed*100/row.PartsTotal, 100)
+		}
+		if p, ok := parents[row.ParentID]; ok {
+			hs.ParentTitle, hs.ParentHref = p.Title, seriesURL(p.PluginID, p.UID)
 		}
 		out = append(out, hs)
 	}

@@ -168,3 +168,62 @@ func TestSeriesViewsEscapeTitles(t *testing.T) {
 		}
 	}
 }
+
+// completedBookSeries is a series of two completed books.
+func (fe *fixtureEnv) completedBookSeries(t *testing.T, title string) *library.Series {
+	t.Helper()
+	var ids []int64
+	for _, n := range []string{"1", "2"} {
+		ids = append(ids, fe.addFixture(t, "book", "book", bookItem(n+title, title+" "+n), library.Entry{Status: library.Completed}))
+	}
+	ser, err := fe.lib.CreateSeries(bg, ids[0], title)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := fe.lib.AddPart(bg, ser.ID, ids[1], ""); err != nil {
+		t.Fatal(err)
+	}
+	return &ser
+}
+
+func TestSeriesTabShowsSeriesData(t *testing.T) {
+	fe := newFixtureEnv(t, withSeriesData)
+	ser, _ := fe.bookSeries(t, "Saga")
+	err := fe.lib.UpdateSeriesDetails(bg, ser.ID, bookKind(t, fe), library.SeriesDetails{Title: "Saga", PartsTotal: 12, CoverPath: "https://img.example/c.jpg"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, u := range []string{"/book?tab=series", "/book?tab=series&view=table"} {
+		mustContain(t, fe.get(u).Body.String(), "1/12", `src="https://img.example/c.jpg"`)
+	}
+	mustContain(t, fe.get("/book?tab=series&view=cards").Body.String(), "1/12", `src="https://img.example/c.jpg"`)
+	mustContain(t, fe.get("/").Body.String(), "1/12", `src="https://img.example/c.jpg"`)
+}
+
+func TestSeriesTabSpinOffLine(t *testing.T) {
+	fe := newFixtureEnv(t, withSeriesData)
+	parent, _ := fe.bookSeries(t, "Saga")
+	kid, _ := fe.bookSeries(t, "Side")
+	if err := fe.lib.UpdateSeriesDetails(bg, kid.ID, bookKind(t, fe), library.SeriesDetails{Title: "Side", ParentID: parent.ID}); err != nil {
+		t.Fatal(err)
+	}
+	for _, u := range []string{"/book?tab=series&view=table", "/book?tab=series&view=cards"} {
+		body := fe.get(u).Body.String()
+		mustContain(t, body, "Spin-off of", seriesURL("book", parent.UID))
+		if n := strings.Count(body, "Spin-off of"); n != 1 {
+			t.Errorf("%s: %d spin-off lines, want 1", u, n)
+		}
+	}
+}
+
+// "5 of 12 all read" is not completed: it stays under Active.
+func TestSeriesTabExpectedPartsStatus(t *testing.T) {
+	fe := newFixtureEnv(t, withSeriesData)
+	ser := fe.completedBookSeries(t, "Epic")
+	if err := fe.lib.UpdateSeriesDetails(bg, ser.ID, bookKind(t, fe), library.SeriesDetails{Title: "Epic", PartsTotal: 12}); err != nil {
+		t.Fatal(err)
+	}
+	mustContain(t, fe.get("/book?tab=series&status=active").Body.String(), "Epic", "2/12")
+	mustNotContain(t, fe.get("/book?tab=series&status=completed").Body.String(), "Epic")
+	mustContain(t, fe.get("/").Body.String(), "Epic")
+}

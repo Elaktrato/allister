@@ -27,6 +27,7 @@ func movieKind() plugin.KindDef {
 		Key:         KindMovie,
 		Label:       "Movie",
 		LabelPlural: "Movies",
+		SeriesHint:  &plugin.SeriesHintDef{ReleaseField: "released_on"},
 		Fields: []plugin.FieldDef{
 			{Key: "year", Label: "Year", Type: plugin.FieldNumber, Min: num(1900), Max: num(2100), Show: true, Editable: true, Filterable: true, Sortable: true},
 			{Key: "runtime", Label: "Runtime", Type: plugin.FieldNumber, Min: num(1), Max: num(10000), Unit: "min", Show: true, Editable: true},

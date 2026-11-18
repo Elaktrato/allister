@@ -15,11 +15,15 @@ import (
 	"fmt"
 	"io"
 	"mime"
+	"net"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -54,17 +58,32 @@ func Src(path string) string {
 	return "/covers/" + url.PathEscape(path)
 }
 
+// downloadURL is the only URL shape Download accepts: an http(s) scheme
+// (any case), a host with no userinfo (an "@" before the host can disguise
+// it) and no whitespace, then an optional path, query or fragment on one
+// line. It is the explicit request-forgery guard static analysis (CodeQL)
+// recognises; what keeps a download off loopback and the local network is
+// the default client's dialer check (refusePrivate), which it does not
+// replace.
+var downloadURL = regexp.MustCompile(`(?i)^https?://[^/?#@\s]+(?:[/?#].*)?$`)
+
 // Download fetches an image over http(s) into dir and returns its file name
 // (sha256 of the content plus an extension from Content-Type). A nil hc means
-// a client with a 20s timeout. Content over MaxImageBytes is ErrTooLarge. No
-// partial file is left on error.
+// the default client: a 20s timeout, and connections (redirects included) only
+// to public addresses, so a typed URL cannot reach loopback or the local
+// network (ErrNotPublic). Content over MaxImageBytes is ErrTooLarge. No
+// partial file is left on error. A URL outside the downloadURL shape (userinfo,
+// whitespace, a line break) is refused before any request is made.
 func Download(ctx context.Context, hc *http.Client, dir, rawURL string) (string, error) {
+	if !downloadURL.MatchString(rawURL) {
+		return "", fmt.Errorf("download cover: unsupported url %q", rawURL)
+	}
 	u, err := url.Parse(rawURL)
 	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
 		return "", fmt.Errorf("download cover: unsupported url %q", rawURL)
 	}
 	if hc == nil {
-		hc = &http.Client{Timeout: 20 * time.Second}
+		hc = defaultClient()
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
 	if err != nil {
@@ -221,4 +240,60 @@ func writeHashed(dir string, r io.Reader, limit int64, pick func(head []byte) (s
 		return "", err
 	}
 	return name, nil
+}
+
+// ErrNotPublic is returned by Download's default client for an address that
+// is not a public unicast address (loopback, private, link-local, ...).
+var ErrNotPublic = errors.New("address is not public")
+
+// cgnat is the shared address space of carrier-grade NAT (RFC 6598), which
+// netip does not count as private.
+var cgnat = netip.MustParsePrefix("100.64.0.0/10")
+
+// publicIP reports whether ip is a public unicast address. An IPv4-mapped
+// IPv6 address is judged as the IPv4 address it carries.
+func publicIP(ip netip.Addr) bool {
+	ip = ip.Unmap()
+	return ip.IsGlobalUnicast() && !ip.IsPrivate() && !cgnat.Contains(ip) &&
+		ip != netip.AddrFrom4([4]byte{255, 255, 255, 255})
+}
+
+// refusePrivate is a net.Dialer Control hook: it runs for every address the
+// dialer connects to, after name resolution (so a name that resolves to a
+// private address, or rebinds to one, is refused too) and for every redirect.
+func refusePrivate(_, address string, _ syscall.RawConn) error {
+	ap, err := netip.ParseAddrPort(address)
+	if err != nil {
+		return fmt.Errorf("%w: %s", ErrNotPublic, address)
+	}
+	if !publicIP(ap.Addr()) {
+		return fmt.Errorf("%w: %s", ErrNotPublic, ap.Addr())
+	}
+	return nil
+}
+
+// maxRedirects bounds the redirects Download's default client follows.
+const maxRedirects = 5
+
+// defaultClient is Download's client when none is given: a 20s timeout, no
+// proxy (a proxy would hide the target address from the check), connections
+// only to public addresses and redirects only to http(s).
+func defaultClient() *http.Client {
+	dialer := &net.Dialer{Timeout: 10 * time.Second, Control: refusePrivate}
+	tr := http.DefaultTransport.(*http.Transport).Clone()
+	tr.Proxy = nil
+	tr.DialContext = dialer.DialContext
+	return &http.Client{
+		Timeout:   20 * time.Second,
+		Transport: tr,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if len(via) >= maxRedirects {
+				return fmt.Errorf("stopped after %d redirects", maxRedirects)
+			}
+			if req.URL.Scheme != "http" && req.URL.Scheme != "https" {
+				return fmt.Errorf("redirect to unsupported scheme %q", req.URL.Scheme)
+			}
+			return nil
+		},
+	}
 }

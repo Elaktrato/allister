@@ -1,0 +1,227 @@
+package library
+
+import (
+	"context"
+	"fmt"
+	"math"
+	"strings"
+	"time"
+
+	"github.com/allister/allister/internal/plugin"
+)
+
+// ResolvedSeries is a series with each value resolved: the series' own value,
+// else the linked entry's mapped value, else the derived value, else
+// nothing. MainParts and Completed count the main parts only; PartsTotal is
+// the shown total: the expected number of parts or the number of counted
+// parts, whichever is larger; Status is derived from the main
+// parts and the set expected number.
+type ResolvedSeries struct {
+	Series                             Series
+	Cover, Description                 string
+	StartedOn, EndedOn                 *time.Time
+	Finished                           bool
+	PartsTotal                         int
+	ExpectedParts                      int // the set expected number (own or linked), 0 when only derived
+	Fields                             map[string]plugin.FieldValue
+	MainParts, SpinOffParts, Completed int
+	Status                             Status
+}
+
+// ResolveSeries resolves s (of kind) from its own data, the linked item and
+// its entry (nil when not linked), the main parts' rows and the spin-off
+// parts' rows, each in order. It reads no database. The linked item
+// counts only when kind declares a SeriesLink of the item's kind; it fills
+// the description, dates and expected parts through the link's fields, each
+// series field from its same-named field, and "finished" when the owner's
+// marker is not set but it has an end date. Derived values come from the
+// counted parts: the start is the earliest date of the kind's release field,
+// the end the latest one when the series is finished. The status, Completed,
+// the derived expected parts (their number) and the cover fallback count the
+// main parts, or the spin-off parts when there is no main part (the derived
+// dates too). The cover is
+// the own cover, else the linked cover, else the first counted part's
+// cover. linkedEntry is accepted for callers that load it;
+// the resolution reads the linked item's fields only.
+func ResolveSeries(s Series, kind plugin.KindDef, linked *Item, linkedEntry *Entry, main, spinOffs []Row) ResolvedSeries {
+	r := ResolvedSeries{Series: s, MainParts: len(main), SpinOffParts: len(spinOffs), Fields: map[string]plugin.FieldValue{}}
+	// counted are the parts behind the status, the progress and the cover
+	// fallback: the main parts, or the spin-off parts when there is no main part.
+	counted := main
+	if len(main) == 0 {
+		counted = spinOffs
+	}
+	link := kind.SeriesLink
+	if link == nil || linked == nil || linked.Kind != link.Kind {
+		link, linked = nil, nil
+	}
+	linkedValue := func(key string) plugin.FieldValue {
+		if link == nil || key == "" {
+			return plugin.FieldValue{}
+		}
+		return linked.Fields[key]
+	}
+
+	r.Cover = s.CoverPath
+	if r.Cover == "" && linked != nil {
+		r.Cover = linked.CoverPath
+	}
+	if r.Cover == "" && len(counted) > 0 {
+		r.Cover = counted[0].Item.CoverPath
+	}
+
+	r.Description = s.Description
+	if r.Description == "" && link != nil {
+		if v := linkedValue(link.DescriptionField).Text; strings.TrimSpace(v) != "" {
+			r.Description = v
+		}
+	}
+
+	var linkedEnd *time.Time
+	if link != nil {
+		linkedEnd = linkedValue(link.EndField).Date
+	}
+	r.Finished = s.Finished || linkedEnd != nil
+
+	first, last := releaseRange(kind, counted)
+	r.StartedOn = s.StartedOn
+	if r.StartedOn == nil && link != nil {
+		r.StartedOn = linkedValue(link.StartField).Date
+	}
+	if r.StartedOn == nil {
+		r.StartedOn = first
+	}
+	r.EndedOn = s.EndedOn
+	if r.EndedOn == nil {
+		r.EndedOn = linkedEnd
+	}
+	if r.EndedOn == nil && r.Finished {
+		r.EndedOn = last
+	}
+
+	expected := expectedParts(s, kind, linked)
+	r.ExpectedParts = expected
+	// the shown total never falls below the counted parts ("12/10")
+	r.PartsTotal = max(expected, len(counted))
+
+	for k, v := range s.Fields {
+		r.Fields[k] = v
+	}
+	if link != nil {
+		for _, f := range kind.SeriesFields {
+			if _, own := r.Fields[f.Key]; own {
+				continue
+			}
+			if v, ok := linked.Fields[f.Key]; ok && fieldValueSet(f.Type, v) {
+				r.Fields[f.Key] = v
+			}
+		}
+	}
+
+	statuses := make([]Status, len(counted))
+	for i, row := range counted {
+		statuses[i] = row.Entry.Status
+		if row.Entry.Status == Completed {
+			r.Completed++
+		}
+	}
+	r.Status = DeriveSeriesStatus(statuses, expected)
+	return r
+}
+
+// expectedParts is the set expected number of parts of s (0 = not set): its
+// own, else the linked item's parts field rounded down (negative is not
+// set, capped like the own value). The SQL of ActiveSeries mirrors it.
+func expectedParts(s Series, kind plugin.KindDef, linked *Item) int {
+	if s.PartsTotal > 0 {
+		return s.PartsTotal
+	}
+	link := kind.SeriesLink
+	if link == nil || link.PartsField == "" || linked == nil || linked.Kind != link.Kind {
+		return 0
+	}
+	n := linked.Fields[link.PartsField].Num
+	if n == nil || math.IsNaN(*n) || *n < 1 {
+		return 0
+	}
+	return int(min(math.Floor(*n), maxSeriesPartsTotal))
+}
+
+// releaseRange is the earliest and latest date of the kind's release field
+// over the rows (nil without a release field or dates).
+func releaseRange(kind plugin.KindDef, rows []Row) (first, last *time.Time) {
+	if kind.SeriesHint == nil || kind.SeriesHint.ReleaseField == "" {
+		return nil, nil
+	}
+	for _, row := range rows {
+		d := row.Item.Fields[kind.SeriesHint.ReleaseField].Date
+		if d == nil {
+			continue
+		}
+		if first == nil || d.Before(*first) {
+			first = d
+		}
+		if last == nil || d.After(*last) {
+			last = d
+		}
+	}
+	return first, last
+}
+
+// fieldValueSet reports whether v holds a value of type t.
+func fieldValueSet(t plugin.FieldType, v plugin.FieldValue) bool {
+	switch t {
+	case plugin.FieldNumber:
+		return v.Num != nil
+	case plugin.FieldDate:
+		return v.Date != nil
+	case plugin.FieldList:
+		return len(v.List) > 0
+	}
+	return strings.TrimSpace(v.Text) != ""
+}
+
+// LoadResolvedSeries loads what s needs for ResolveSeries (its main parts'
+// and spin-off parts' rows with titles for lang, the linked item and its
+// entry) and resolves it.
+func (l *Library) LoadResolvedSeries(ctx context.Context, s *Series, lang string) (ResolvedSeries, error) {
+	kind, err := l.kindDef(s.PluginID, s.Kind)
+	if err != nil {
+		return ResolvedSeries{}, err
+	}
+	order, err := l.SeriesPartsOrder(ctx, s.ID)
+	if err != nil {
+		return ResolvedSeries{}, err
+	}
+	rows, err := l.SeriesParts(ctx, s.ID, lang)
+	if err != nil {
+		return ResolvedSeries{}, err
+	}
+	spinOff := map[int64]bool{}
+	for _, p := range order {
+		if p.SpinOff {
+			spinOff[p.ItemID] = true
+		}
+	}
+	var main, spinOffs []Row
+	for _, row := range rows {
+		if spinOff[row.Item.ID] {
+			spinOffs = append(spinOffs, row)
+		} else {
+			main = append(main, row)
+		}
+	}
+	var linked *Item
+	var linkedEntry *Entry
+	if s.LinkedItemID != 0 {
+		if linked, err = l.Item(ctx, s.LinkedItemID); err != nil {
+			return ResolvedSeries{}, fmt.Errorf("series linked entry: %w", err)
+		}
+		if linked != nil {
+			if linkedEntry, err = l.Entry(ctx, s.LinkedItemID); err != nil {
+				return ResolvedSeries{}, fmt.Errorf("series linked entry: %w", err)
+			}
+		}
+	}
+	return ResolveSeries(*s, kind, linked, linkedEntry, main, spinOffs), nil
+}

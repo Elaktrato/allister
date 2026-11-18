@@ -34,6 +34,7 @@ func manifest() plugin.Manifest {
 			Key:         KindAnime,
 			Label:       "Anime",
 			LabelPlural: "Anime",
+			SeriesHint:  &plugin.SeriesHintDef{ReleaseField: "started_on"},
 			Fields: []plugin.FieldDef{
 				{Key: "type", Label: "Type", Type: plugin.FieldEnum, EnumValues: append([]string(nil), typeValues...), Show: true, Editable: true, Filterable: true, Required: true},
 				{Key: "episodes", Label: "Episodes", Type: plugin.FieldNumber, Unit: "eps", Min: num(1), Max: num(10000), Show: true, Editable: true},

@@ -1,0 +1,81 @@
+{{define "series_dialog"}}
+<div data-dialog class="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-black/70 p-4" role="dialog" aria-modal="true" aria-labelledby="series-dialog-title">
+  <form method="post" action="{{.Action}}" hx-post="{{.Action}}" hx-encoding="multipart/form-data" enctype="multipart/form-data" hx-target="#dialog-slot" hx-swap="innerHTML"
+    class="my-auto w-full max-w-xl space-y-4 rounded border border-slate-700 bg-slate-900 p-5">
+    <h2 id="series-dialog-title" class="text-xl font-semibold">{{.Heading}}</h2>
+    {{if .Error}}
+    <div class="rounded border border-amber-700 bg-amber-950 p-3 text-amber-200" role="alert"><p>{{.Error}}</p></div>
+    {{end}}
+    <label class="block text-sm">Title
+      <input type="text" name="title" value="{{.Title}}" maxlength="300" required class="mt-1 w-full rounded border border-slate-700 bg-slate-950 px-3 py-2">
+    </label>
+    <label class="block text-sm">Description
+      <textarea name="description" rows="5" maxlength="20000" class="mt-1 w-full rounded border border-slate-700 bg-slate-950 px-3 py-2">
+{{.Description}}</textarea>
+    </label>
+    <p class="text-xs text-slate-400">Leave a value empty to use the linked entry's value or the one derived from the parts.</p>
+    <div class="grid grid-cols-2 gap-3">
+      <label class="block text-sm">Started
+        <input type="date" name="started_on" value="{{.StartedOn}}" class="mt-1 w-full rounded border border-slate-700 bg-slate-950 px-3 py-2">
+      </label>
+      <label class="block text-sm">Ended
+        <input type="date" name="ended_on" value="{{.EndedOn}}" class="mt-1 w-full rounded border border-slate-700 bg-slate-950 px-3 py-2">
+      </label>
+    </div>
+    <div class="grid grid-cols-2 gap-3">
+      <label class="block text-sm">Expected parts
+        <input type="number" name="parts_total" value="{{.PartsTotal}}" min="1" step="1" class="mt-1 w-full rounded border border-slate-700 bg-slate-950 px-3 py-2">
+      </label>
+      <label class="flex items-end gap-2 pb-2 text-sm"><input type="checkbox" name="finished" value="1"{{if .Finished}} checked{{end}}> Finished</label>
+    </div>
+    {{template "item_inputs" .}}
+    <label class="block text-sm">Cover URL
+      <input type="url" name="cover_url" value="{{.CoverURL}}" placeholder="https://" class="mt-1 w-full rounded border border-slate-700 bg-slate-950 px-3 py-2">
+    </label>
+    {{if .ShowLink}}
+    <fieldset class="space-y-2 text-sm">
+      <legend class="font-medium">Linked entry</legend>
+      <label class="flex items-center gap-2"><input type="radio" name="linked" value="0"{{if not .LinkedID}} checked{{end}}> None</label>
+      <input type="search" data-search-only name="q" placeholder="Search your {{.LinkLabel}} entries" autocomplete="off" aria-label="Search your entries to link"
+        hx-get="{{.LinkURL}}" hx-trigger="input changed delay:300ms, search" hx-target="#series-link-results" hx-swap="innerHTML"
+        class="w-full rounded border border-slate-700 bg-slate-950 px-3 py-2">
+      <div id="series-link-results">{{template "series_pick" .LinkPick}}</div>
+    </fieldset>
+    {{end}}
+    <fieldset class="space-y-2 text-sm">
+      <legend class="font-medium">Spin-off of</legend>
+      {{if .ParentLocked}}<p class="text-slate-400">{{.ParentLocked}}</p>{{else}}
+      <label class="flex items-center gap-2"><input type="radio" name="parent" value="0"{{if not .ParentID}} checked{{end}}> None</label>
+      <input type="search" data-search-only name="q" placeholder="Search your series" autocomplete="off" aria-label="Search your series"
+        hx-get="{{.ParentURL}}" hx-trigger="input changed delay:300ms, search" hx-target="#series-parent-results" hx-swap="innerHTML"
+        class="w-full rounded border border-slate-700 bg-slate-950 px-3 py-2">
+      <div id="series-parent-results">{{template "series_pick" .ParentPick}}</div>
+      {{end}}
+    </fieldset>
+    <div class="flex justify-end gap-3">
+      <a href="{{.CancelURL}}" data-dialog-close class="rounded px-4 py-2 hover:bg-slate-800">Cancel</a>
+      <button type="submit" class="rounded bg-indigo-600 px-4 py-2 font-medium hover:bg-indigo-500">{{.Submit}}</button>
+    </div>
+  </form>
+</div>
+{{end}}
+
+{{/* the result list of a picker: radio inputs named .Name */}}
+{{define "series_pick"}}
+{{if or .Items .Current}}
+<ul class="space-y-1">
+  {{with .Current}}<li><label class="flex items-center gap-3 rounded border border-slate-800 bg-slate-950 p-2">
+    <input type="radio" name="{{$.Name}}" value="{{.ID}}" checked>
+    <span class="min-w-0 flex-1 break-words">{{.Title}} (current{{if .Unlisted}} — not in your list{{end}})</span>
+  </label></li>{{end}}
+  {{range .Items}}
+  <li><label class="flex items-center gap-3 rounded border border-slate-800 bg-slate-950 p-2">
+    <input type="radio" name="{{$.Name}}" value="{{.ID}}">
+    {{if .Cover}}<img src="{{.Cover}}" alt="" loading="lazy" class="h-12 w-8 rounded object-cover">
+    {{else}}<span class="block h-12 w-8 rounded bg-slate-800" aria-hidden="true"></span>{{end}}
+    <span class="min-w-0 flex-1 break-words">{{.Title}}</span>
+  </label></li>
+  {{end}}
+</ul>
+{{else}}<p class="text-slate-400">{{if .Note}}{{.Note}}{{else}}No matching entries.{{end}}</p>{{end}}
+{{end}}

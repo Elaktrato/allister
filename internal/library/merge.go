@@ -40,7 +40,8 @@ const notesDivider = "\n\n---\n\n"
 //   - Own tags and custom lists: union. A list keeps the survivor's place
 //     when both are members, else the other's.
 //   - Series: the survivor keeps its own; when only the other is a part, the
-//     survivor takes its place.
+//     survivor takes its place (same series, block and position). A series
+//     linked to the other item is linked to the survivor.
 //   - External ids of the types the survivor lacks are added.
 //   - The other item's dismissed duplicate pairs ("Not a duplicate") move
 //     to the survivor; a pair of the two items themselves is dropped.
@@ -87,6 +88,11 @@ func (l *Library) MergeItems(ctx context.Context, keepID, otherID int64, keys []
 			FROM dismissed_duplicates WHERE item_a = ?2 OR item_b = ?2)
 		WHERE partner <> ?1`, keepID, otherID); err != nil {
 		return fmt.Errorf("merge items: dismissed duplicates: %w", err)
+	}
+	// a series linked to the other item is linked to the survivor (the
+	// deletion would clear the link)
+	if _, err := tx.ExecContext(ctx, `UPDATE series SET linked_item_id = ?, updated_at = `+nowSQL+` WHERE linked_item_id = ?`, keepID, otherID); err != nil {
+		return fmt.Errorf("merge items: linked series: %w", err)
 	}
 	lists, err := mergeIDsTx(ctx, tx, `SELECT list_id FROM list_items WHERE item_id = ?`, otherID)
 	if err != nil {

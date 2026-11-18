@@ -61,7 +61,7 @@
     {{if .Cover}}<img src="{{.Cover}}" alt="" loading="lazy" class="h-20 w-14 rounded object-cover">
     {{else}}<span class="block h-20 w-14 rounded bg-slate-800" aria-hidden="true"></span>{{end}}
   </td>
-  <td class="min-w-40 py-2 pr-3"><a href="{{.Href}}" class="font-medium text-indigo-300 hover:underline">{{.Title}}</a></td>
+  <td class="min-w-40 py-2 pr-3"><a href="{{.Href}}" class="font-medium text-indigo-300 hover:underline">{{.Title}}</a>{{if .ParentTitle}}<div class="mt-1 text-xs text-slate-400">Spin-off of <a href="{{.ParentHref}}" class="text-indigo-300 hover:underline">{{.ParentTitle}}</a></div>{{end}}</td>
   <td class="py-2 pr-3 whitespace-nowrap">{{.Progress}}</td>
   <td class="py-2 pr-3 whitespace-nowrap">{{.Status}}</td>
   <td class="py-2 pr-3 whitespace-nowrap text-slate-400">{{with .Updated}}<time datetime="{{.}}">{{.}}</time>{{end}}</td>
@@ -80,6 +80,7 @@
   <span class="absolute right-0 top-0 h-0 w-0 border-l-[1.5rem] border-t-[1.5rem] border-l-transparent{{template "status_corner" .StatusKey}}" title="{{.Status}}"><span class="sr-only">{{.Status}}</span></span>
   <div class="absolute inset-x-0 bottom-0 bg-slate-950/90 p-2.5">
     <a href="{{.Href}}" class="line-clamp-2 text-sm font-medium leading-snug text-white hover:underline">{{.Title}}</a>
+    {{if .ParentTitle}}<p class="mt-0.5 text-xs text-slate-300">Spin-off of <a href="{{.ParentHref}}" class="underline">{{.ParentTitle}}</a></p>{{end}}
     <p class="mt-1 text-xs text-slate-300">{{.Progress}}</p>
   </div>
 </div>
@@ -97,7 +98,7 @@
   </td>
   <td class="min-w-40 py-2 pr-3">
     <a href="{{.Href}}" class="font-medium text-indigo-300 hover:underline">{{.Title}}</a>
-    <div class="mt-1 text-xs text-slate-400">Part {{.SeriesPos}}</div>
+    <div class="mt-1 text-xs text-slate-400">{{if .SeriesSpinOff}}Spin-off{{else}}Part{{end}} {{.SeriesPos}}</div>
   </td>
   <td class="py-2 pr-3 whitespace-nowrap">
     <span class="inline-flex flex-wrap items-center gap-2">
