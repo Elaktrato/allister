@@ -146,6 +146,7 @@ func bookKind() plugin.KindDef {
 		},
 		Genres:   plugin.TermDef{Enabled: true, Label: "Genres", Editable: true, Filterable: true},
 		Tags:     plugin.TermDef{Enabled: true, Label: "Tags", Editable: true, Filterable: true},
+		Repeat:   &plugin.RepeatDef{Action: "Reread", Marker: "Rereading"},
 		Statuses: bookStatuses,
 		Progress: plugin.ProgressSpec{
 			Eligible: []plugin.ProgressDef{
@@ -202,6 +203,7 @@ func seriesKind() plugin.KindDef {
 		},
 		Genres:   plugin.TermDef{Enabled: true, Label: "Genres", Editable: true, Filterable: true},
 		Tags:     plugin.TermDef{Enabled: true, Label: "Tags", Editable: true, Filterable: true},
+		Repeat:   &plugin.RepeatDef{Action: "Reread", Marker: "Rereading"},
 		Statuses: seriesStatuses,
 		Progress: plugin.ProgressSpec{
 			Eligible: []plugin.ProgressDef{

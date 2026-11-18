@@ -19,7 +19,7 @@ func TestExportJSONViaRoute(t *testing.T) {
 	e := newEnv(t)
 	d := anime.ItemData(e.fp.anime)
 	_, err := e.lib.AddToList(context.Background(), "anime", "anime", d, library.Entry{Status: library.Active, Rating: ip(9),
-		Progress: map[string]float64{"episode": 5}, Comment: "c <b>"})
+		Progress: map[string]float64{"episode": 5}, Notes: "c <b>"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -42,18 +42,22 @@ func TestExportJSONViaRoute(t *testing.T) {
 			Status      string             `json:"status"`
 			Rating      *int               `json:"rating"`
 			Progress    map[string]float64 `json:"progress"`
-			Comment     string             `json:"comment"`
+			Notes       string             `json:"notes"`
+			Runs        []struct {
+				Number int    `json:"number"`
+				Status string `json:"status"`
+			} `json:"runs"`
 		} `json:"entries"`
 	}
 	if err := json.Unmarshal(rec.Body.Bytes(), &doc); err != nil {
 		t.Fatalf("not JSON: %v\n%s", err, rec.Body.String())
 	}
-	if doc.Format != "allister.anime.export" || doc.Version != 1 || len(doc.Entries) != 1 {
+	if doc.Format != "allister.anime.export" || doc.Version != 2 || len(doc.Entries) != 1 {
 		t.Fatalf("doc: %+v", doc)
 	}
 	en := doc.Entries[0]
 	if en.Kind != "anime" || en.Status != "active" || en.Rating == nil || *en.Rating != 9 || en.Progress["episode"] != 5 ||
-		en.Comment != "c <b>" || len(en.Titles) != len(d.Titles) || en.Titles[0] != d.Titles[0] {
+		en.Notes != "c <b>" || len(en.Runs) != 1 || en.Runs[0].Number != 1 || en.Runs[0].Status != "active" || len(en.Titles) != len(d.Titles) || en.Titles[0] != d.Titles[0] {
 		t.Fatalf("entry: %+v", en)
 	}
 }

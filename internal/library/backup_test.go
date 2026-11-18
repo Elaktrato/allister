@@ -45,13 +45,13 @@ func richShow(t *testing.T, e *env, id string) int64 {
 	d.Relations = []plugin.Relation{{Kind: "sequel", Item: plugin.ItemSummary{Source: "tvdata", ID: "s2", Kind: "show",
 		Titles: []plugin.Title{{Lang: "en", Text: "Season 2"}}, CoverURL: "https://img.example/s2.jpg", URL: "https://tv.example/show/s2"}}}
 	d.CoverURL = "abc123.jpg"
-	itemID, err := e.lib.AddToList(bg, "tv", "show", d, Entry{Status: Active, Rating: ip(8), Comment: "line one\nline two",
+	itemID, err := e.lib.AddToList(bg, "tv", "show", d, Entry{Status: Active, Rating: ip(8), Notes: "line one\nline two",
 		StartedOn: tp(day(2024, 3, 5)), Progress: map[string]float64{"episode": 3}}, WithProgressKeys([]string{"episode", "position"}))
 	if err != nil {
 		t.Fatal(err)
 	}
 	// position 90 stays stored after switching to season+episode (inactive)
-	if err := e.lib.UpsertEntry(bg, Entry{ItemID: itemID, Status: Active, Rating: ip(8), Comment: "line one\nline two",
+	if err := e.lib.UpsertEntry(bg, Entry{ItemID: itemID, Status: Active, Rating: ip(8), Notes: "line one\nline two",
 		StartedOn: tp(day(2024, 3, 5)), Progress: map[string]float64{"episode": 3, "position": 90}}); err != nil {
 		t.Fatal(err)
 	}
@@ -73,9 +73,7 @@ func richShow(t *testing.T, e *env, id string) int64 {
 	if _, err := e.db.Exec(`UPDATE items SET created_at = '2023-01-02T03:04:05Z', updated_at = '2023-02-03T04:05:06Z' WHERE id = ?`, itemID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := e.db.Exec(`UPDATE entries SET updated_at = '2024-04-05T06:07:08Z' WHERE item_id = ?`, itemID); err != nil {
-		t.Fatal(err)
-	}
+	setEntryUpdated(t, e.db, "2024-04-05T06:07:08Z", itemID)
 	return itemID
 }
 
@@ -112,13 +110,15 @@ func TestBackupItemsCarriesEveryPart(t *testing.T) {
 	if bi.Credits[1].Person.ImageURL != "" {
 		t.Fatalf("local person photo leaked: %+v", bi.Credits[1].Person)
 	}
-	if bi.Entry == nil || bi.Entry.Status != Active || bi.Entry.Rating == nil || *bi.Entry.Rating != 8 ||
-		bi.Entry.StartedOn == nil || *bi.Entry.StartedOn != "2024-03-05" || bi.Entry.FinishedOn != nil ||
-		bi.Entry.UpdatedAt != "2024-04-05T06:07:08Z" {
+	if bi.Entry == nil || bi.Entry.Notes != "line one\nline two" || bi.Entry.UpdatedAt != "2024-04-05T06:07:08Z" || len(bi.Entry.Runs) != 1 {
 		t.Fatalf("entry = %+v", bi.Entry)
 	}
-	if !reflect.DeepEqual(bi.Entry.Progress, map[string]float64{"episode": 3, "position": 90}) {
-		t.Fatalf("progress (all keys) = %v", bi.Entry.Progress)
+	if r := bi.Entry.Runs[0]; r.Number != 1 || r.Status != Active || r.Rating == nil || *r.Rating != 8 ||
+		r.StartedOn == nil || *r.StartedOn != "2024-03-05" || r.FinishedOn != nil || r.UpdatedAt != "2024-04-05T06:07:08Z" {
+		t.Fatalf("run = %+v", r)
+	}
+	if !reflect.DeepEqual(bi.Entry.Runs[0].Progress, map[string]float64{"episode": 3, "position": 90}) {
+		t.Fatalf("progress (all keys) = %v", bi.Entry.Runs[0].Progress)
 	}
 	if len(bi.Relations) != 1 || bi.Relations[0].Item.URL != "https://tv.example/show/s2" {
 		t.Fatalf("relations = %+v", bi.Relations)
@@ -309,13 +309,13 @@ func TestRestoreItemReportsInvalidRowsWithoutWriting(t *testing.T) {
 		{"local person photo", "http(s) URL", func(b *BackupItem) { b.Credits[0].Person.ImageURL = "x.jpg" }},
 		{"long detail", "longer than", func(b *BackupItem) { b.Credits[0].Detail = strings.Repeat("d", 101) }},
 		{"progress keys not allowed", "not an allowed combination", func(b *BackupItem) { b.ProgressKeys = []string{"position"} }},
-		{"progress key not eligible", "not a progress", func(b *BackupItem) { b.Entry.Progress["chapter"] = 1 }},
-		{"progress above total", "above the total", func(b *BackupItem) { b.Entry.Progress["episode"] = 99 }},
-		{"inactive progress negative", "negative", func(b *BackupItem) { b.Entry.Progress["position"] = -1 }},
-		{"bad status", "status", func(b *BackupItem) { b.Entry.Status = "watching" }},
-		{"rating 11", "rating", func(b *BackupItem) { b.Entry.Rating = ip(11) }},
-		{"bad date", "date", func(b *BackupItem) { s := "2024-02-30"; b.Entry.StartedOn = &s }},
-		{"finish before start", "before the start", func(b *BackupItem) { s := "2020-01-01"; b.Entry.FinishedOn = &s }},
+		{"progress key not eligible", "not a progress", func(b *BackupItem) { b.Entry.Runs[0].Progress["chapter"] = 1 }},
+		{"progress above total", "above the total", func(b *BackupItem) { b.Entry.Runs[0].Progress["episode"] = 99 }},
+		{"inactive progress negative", "negative", func(b *BackupItem) { b.Entry.Runs[0].Progress["position"] = -1 }},
+		{"bad status", "status", func(b *BackupItem) { b.Entry.Runs[0].Status = "watching" }},
+		{"rating 11", "rating", func(b *BackupItem) { b.Entry.Runs[0].Rating = ip(11) }},
+		{"bad date", "date", func(b *BackupItem) { s := "2024-02-30"; b.Entry.Runs[0].StartedOn = &s }},
+		{"finish before start", "before the start", func(b *BackupItem) { s := "2020-01-01"; b.Entry.Runs[0].FinishedOn = &s }},
 		{"bad stamp", "time", func(b *BackupItem) { b.CreatedAt = "yesterday" }},
 		{"bad entry stamp", "time", func(b *BackupItem) { b.Entry.UpdatedAt = "soon" }},
 		{"cover path", "file name", func(b *BackupItem) { b.Cover = "../etc/passwd" }},
@@ -327,7 +327,7 @@ func TestRestoreItemReportsInvalidRowsWithoutWriting(t *testing.T) {
 				b.Titles = append(b.Titles, plugin.Title{Lang: "en", Text: fmt.Sprint("t", i)})
 			}
 		}},
-		{"comment NUL", "NUL", func(b *BackupItem) { b.Entry.Comment = "a\x00b" }},
+		{"notes NUL", "NUL", func(b *BackupItem) { b.Entry.Notes = "a\x00b" }},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -585,8 +585,20 @@ func readStampedEvents(t *testing.T, l *Library, itemID int64) []BackupEvent {
 	return out
 }
 
+// insertRunEventAt is insertEventAt on the item's display run.
+func insertRunEventAt(t *testing.T, l *Library, itemID int64, occurredAt time.Time, eventType, key string,
+	oldNum, newNum *float64, oldText, newText string, origin EventOrigin) {
+	t.Helper()
+	insertEventAt(t, l, itemID, occurredAt, eventType, key, oldNum, newNum, oldText, newText, origin)
+	if _, err := l.db.ExecContext(bg, `UPDATE entry_events SET run_id = (SELECT display_run_id FROM entries WHERE item_id = ?1)
+		WHERE id = (SELECT MAX(id) FROM entry_events WHERE item_id = ?1)`, itemID); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // insertEventsBulk appends n progress events in one transaction, one per
-// second from 2026-01-01T00:00:00Z, with new_num counting up from 1.
+// second from 2026-01-01T00:00:00Z, with new_num counting up from 1, on the
+// entry's display run.
 func insertEventsBulk(t *testing.T, l *Library, itemID int64, n int) {
 	t.Helper()
 	tx, err := l.db.Begin()
@@ -597,8 +609,8 @@ func insertEventsBulk(t *testing.T, l *Library, itemID int64, n int) {
 	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	for i := 0; i < n; i++ {
 		stamp := base.Add(time.Duration(i) * time.Second).Format("2006-01-02T15:04:05Z")
-		if _, err := tx.Exec(`INSERT INTO entry_events(item_id, occurred_at, event_type, progress_key, old_num, new_num, origin)
-			VALUES (?,?,?,?,?,?,?)`, itemID, stamp, "progress", "pages", float64(i), float64(i+1), "manual"); err != nil {
+		if _, err := tx.Exec(`INSERT INTO entry_events(item_id, run_id, occurred_at, event_type, progress_key, old_num, new_num, origin)
+			VALUES (?,(SELECT display_run_id FROM entries WHERE item_id = ?),?,?,?,?,?,?)`, itemID, itemID, stamp, "progress", "pages", float64(i), float64(i+1), "manual"); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -610,14 +622,14 @@ func insertEventsBulk(t *testing.T, l *Library, itemID int64, n int) {
 func TestBackupIncludesEvents(t *testing.T) {
 	e := newEnv(t)
 	id := addBook(t, e.lib, "bke-1", fp(100), Entry{Status: Active, Progress: map[string]float64{"pages": 3}})
-	insertEventAt(t, e.lib, id, at(2026, 5, 1, 8, 0, 0), eventProgress, "pages", fp(1), fp(3), "", "", OriginManual)
-	insertEventAt(t, e.lib, id, at(2026, 5, 1, 9, 0, 0), eventStatus, "", nil, nil, "planned", "active", OriginImport)
-	insertEventAt(t, e.lib, id, at(2026, 5, 2, 10, 0, 0), eventRating, "", nil, fp(0), "", "", OriginManual)
+	insertRunEventAt(t, e.lib, id, at(2026, 5, 1, 8, 0, 0), eventProgress, "pages", fp(1), fp(3), "", "", OriginManual)
+	insertRunEventAt(t, e.lib, id, at(2026, 5, 1, 9, 0, 0), eventStatus, "", nil, nil, "planned", "active", OriginImport)
+	insertRunEventAt(t, e.lib, id, at(2026, 5, 2, 10, 0, 0), eventRating, "", nil, fp(0), "", "", OriginManual)
 	items := collect(t, e.lib, 200)
 	if len(items) != 1 || items[0].Entry == nil {
 		t.Fatalf("items = %+v", items)
 	}
-	en := items[0].Entry
+	en := items[0].Entry.Runs[0]
 	if en.EventsTruncated {
 		t.Fatal("three events reported as truncated")
 	}
@@ -661,7 +673,7 @@ func TestBackupKeepsNewestEvents(t *testing.T) {
 	if len(items) != 1 || items[0].Entry == nil {
 		t.Fatalf("items = %+v", items)
 	}
-	en := items[0].Entry
+	en := items[0].Entry.Runs[0]
 	if len(en.Events) != 5000 || !en.EventsTruncated {
 		t.Fatalf("events = %d, truncated = %v", len(en.Events), en.EventsTruncated)
 	}
@@ -683,11 +695,11 @@ func TestBackupKeepsNewestEvents(t *testing.T) {
 func TestRestoreCreatesEvents(t *testing.T) {
 	a := newEnv(t)
 	id := addBook(t, a.lib, "bke-4", fp(100), Entry{Status: Active, Progress: map[string]float64{"pages": 3}})
-	insertEventAt(t, a.lib, id, at(2026, 5, 1, 8, 0, 0), eventProgress, "pages", fp(1), fp(3), "", "", OriginManual)
-	insertEventAt(t, a.lib, id, at(2026, 5, 1, 9, 0, 0), eventStatus, "", nil, nil, "planned", "active", OriginImport)
-	insertEventAt(t, a.lib, id, at(2026, 5, 2, 10, 0, 0), eventRating, "", nil, fp(0), "", "", OriginManual)
+	insertRunEventAt(t, a.lib, id, at(2026, 5, 1, 8, 0, 0), eventProgress, "pages", fp(1), fp(3), "", "", OriginManual)
+	insertRunEventAt(t, a.lib, id, at(2026, 5, 1, 9, 0, 0), eventStatus, "", nil, nil, "planned", "active", OriginImport)
+	insertRunEventAt(t, a.lib, id, at(2026, 5, 2, 10, 0, 0), eventRating, "", nil, fp(0), "", "", OriginManual)
 	before := collect(t, a.lib, 200)
-	if len(before) != 1 || before[0].Entry == nil || len(before[0].Entry.Events) != 3 {
+	if len(before) != 1 || before[0].Entry == nil || len(before[0].Entry.Runs[0].Events) != 3 {
 		t.Fatalf("backup = %+v", before)
 	}
 	// the archive carries JSON: the events survive the round trip
@@ -706,7 +718,7 @@ func TestRestoreCreatesEvents(t *testing.T) {
 		t.Fatalf("result = %+v", res[0])
 	}
 	// restored oldest first, so the id order stays chronological
-	want := slices.Clone(before[0].Entry.Events)
+	want := slices.Clone(before[0].Entry.Runs[0].Events)
 	slices.Reverse(want)
 	if got := readStampedEvents(t, b.lib, res[0].ItemID); !reflect.DeepEqual(got, want) {
 		t.Fatalf("events = %+v, want %+v", got, want)
@@ -726,7 +738,7 @@ func TestRestoreNotesTruncatedEvents(t *testing.T) {
 	id := addBook(t, a.lib, "bke-6", fp(100), Entry{Status: Active, Progress: map[string]float64{"pages": 0}})
 	insertEventsBulk(t, a.lib, id, 5001)
 	items := collect(t, a.lib, 200)
-	if len(items) != 1 || items[0].Entry == nil || len(items[0].Entry.Events) != 5000 || !items[0].Entry.EventsTruncated {
+	if len(items) != 1 || items[0].Entry == nil || len(items[0].Entry.Runs[0].Events) != 5000 || !items[0].Entry.Runs[0].EventsTruncated {
 		t.Fatalf("backup = %+v", items)
 	}
 
@@ -747,25 +759,25 @@ func TestRestoreNotesTruncatedEvents(t *testing.T) {
 func TestRestoreRejectsBadEvent(t *testing.T) {
 	good := BackupItem{PluginID: "book", Kind: "book", Source: "books", SourceID: "bke-bad",
 		Titles: []plugin.Title{{Lang: "en", Text: "Bad"}}, CoverURL: "https://img.example/bke-bad.jpg",
-		Entry: &BackupEntry{Status: Active, Progress: map[string]float64{"pages": 3},
+		Entry: &BackupEntry{Runs: []BackupRun{{Number: 1, Status: Active, Progress: map[string]float64{"pages": 3},
 			Events: []BackupEvent{{OccurredAt: "2026-05-01T08:00:00Z", Type: "progress", ProgressKey: "pages",
-				OldNum: fp(1), NewNum: fp(3), Origin: "manual"}}}}
+				OldNum: fp(1), NewNum: fp(3), Origin: "manual"}}}}}}
 	inf := math.Inf(1)
 	cases := []struct {
 		name, want string
-		mod        func(*BackupEvent, *BackupEntry)
+		mod        func(*BackupEvent, *BackupRun)
 	}{
-		{"unknown type", "type", func(ev *BackupEvent, _ *BackupEntry) { ev.Type = "bogus" }},
-		{"status with progress key", "progress key", func(ev *BackupEvent, _ *BackupEntry) { ev.Type = "status" }},
-		{"progress without key", "progress key", func(ev *BackupEvent, _ *BackupEntry) { ev.ProgressKey = "" }},
-		{"progress key not eligible", "not a progress", func(ev *BackupEvent, _ *BackupEntry) { ev.ProgressKey = "chapter" }},
-		{"unknown origin", "origin", func(ev *BackupEvent, _ *BackupEntry) { ev.Origin = "bogus" }},
-		{"missing origin", "origin", func(ev *BackupEvent, _ *BackupEntry) { ev.Origin = "" }},
-		{"bad stamp", "time", func(ev *BackupEvent, _ *BackupEntry) { ev.OccurredAt = "yesterday" }},
-		{"missing stamp", "occurred_at", func(ev *BackupEvent, _ *BackupEntry) { ev.OccurredAt = "" }},
-		{"NaN number", "finite", func(ev *BackupEvent, _ *BackupEntry) { ev.NewNum = fp(math.NaN()) }},
-		{"infinite number", "finite", func(ev *BackupEvent, _ *BackupEntry) { ev.OldNum = &inf }},
-		{"too many events", "events", func(_ *BackupEvent, en *BackupEntry) {
+		{"unknown type", "type", func(ev *BackupEvent, _ *BackupRun) { ev.Type = "bogus" }},
+		{"status with progress key", "progress key", func(ev *BackupEvent, _ *BackupRun) { ev.Type = "status" }},
+		{"progress without key", "progress key", func(ev *BackupEvent, _ *BackupRun) { ev.ProgressKey = "" }},
+		{"progress key not eligible", "not a progress", func(ev *BackupEvent, _ *BackupRun) { ev.ProgressKey = "chapter" }},
+		{"unknown origin", "origin", func(ev *BackupEvent, _ *BackupRun) { ev.Origin = "bogus" }},
+		{"missing origin", "origin", func(ev *BackupEvent, _ *BackupRun) { ev.Origin = "" }},
+		{"bad stamp", "time", func(ev *BackupEvent, _ *BackupRun) { ev.OccurredAt = "yesterday" }},
+		{"missing stamp", "occurred_at", func(ev *BackupEvent, _ *BackupRun) { ev.OccurredAt = "" }},
+		{"NaN number", "finite", func(ev *BackupEvent, _ *BackupRun) { ev.NewNum = fp(math.NaN()) }},
+		{"infinite number", "finite", func(ev *BackupEvent, _ *BackupRun) { ev.OldNum = &inf }},
+		{"too many events", "events", func(_ *BackupEvent, en *BackupRun) {
 			for i := 0; i < 5000; i++ {
 				en.Events = append(en.Events, en.Events[0])
 			}
@@ -779,7 +791,7 @@ func TestRestoreRejectsBadEvent(t *testing.T) {
 			if err := json.Unmarshal(raw, &bi); err != nil {
 				t.Fatal(err)
 			}
-			tc.mod(&bi.Entry.Events[0], bi.Entry)
+			tc.mod(&bi.Entry.Runs[0].Events[0], &bi.Entry.Runs[0])
 			res, err := e.lib.RestoreItem(bg, bi, keepCovers)
 			if err != nil {
 				t.Fatal(err)
@@ -797,7 +809,7 @@ func TestRestoreRejectsBadEvent(t *testing.T) {
 func TestRestoreSkipsExistingItemEvents(t *testing.T) {
 	a := newEnv(t)
 	id := addBook(t, a.lib, "bke-5", fp(100), Entry{Status: Active, Progress: map[string]float64{"pages": 3}})
-	insertEventAt(t, a.lib, id, at(2026, 5, 1, 8, 0, 0), eventProgress, "pages", fp(1), fp(3), "", "", OriginManual)
+	insertRunEventAt(t, a.lib, id, at(2026, 5, 1, 8, 0, 0), eventProgress, "pages", fp(1), fp(3), "", "", OriginManual)
 	items := collect(t, a.lib, 200)
 
 	b := newEnv(t)

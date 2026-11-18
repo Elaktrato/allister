@@ -266,7 +266,7 @@ func TestManualSavesAllFields(t *testing.T) {
 		t.Fatalf("terms %+v %+v", it.Genres, it.Tags)
 	}
 	if en.Status != library.Active || en.Rating == nil || *en.Rating != 0 || en.Progress["episode"] != 5 ||
-		fmtDay(en.StartedOn) != "2024-01-02" || fmtDay(en.FinishedOn) != "2024-02-03" || en.Comment != "fun" {
+		fmtDay(en.StartedOn) != "2024-01-02" || fmtDay(en.FinishedOn) != "2024-02-03" || en.Notes != "fun" {
 		t.Fatalf("entry %+v", en)
 	}
 	b := e.get("/anime/manual/" + id).Body.String()

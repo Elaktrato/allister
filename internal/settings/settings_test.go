@@ -1,7 +1,10 @@
 package settings
 
 import (
+	"bytes"
 	"context"
+	"log"
+	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -409,5 +412,44 @@ func TestValidTimeZoneIsStrict(t *testing.T) {
 		if !ValidTimeZone(ok) {
 			t.Errorf("%q should be valid", ok)
 		}
+	}
+}
+
+// TestTimeZoneSyntax pins the name check that runs before the zone database
+// is asked: the length cap and every edge of the allowed characters.
+func TestTimeZoneSyntax(t *testing.T) {
+	ok := []string{"UTC", "a/b", "z/z", "A/A", "Z/Z", "0/9", "a_b/c+d-e", "x/" + strings.Repeat("y", 62)}
+	for _, name := range ok {
+		if !timeZoneSyntax(name) {
+			t.Errorf("%q should pass the syntax check", name)
+		}
+	}
+	bad := []string{"", "x/" + strings.Repeat("y", 63), "Berlin", "/a/b", "a/../b", "a/b..c",
+		"`/a", "{/a", "@/a", "[/a", ":/a", "a/b c", "a/b*", "a/b.c", "a/\u00e9"}
+	for _, name := range bad {
+		if timeZoneSyntax(name) {
+			t.Errorf("%q should fail the syntax check", name)
+		}
+	}
+}
+
+// TestTimeZoneNameLogsAnUnreadableSetting: a read error is logged once and the
+// default is used; a normal read logs nothing.
+func TestTimeZoneNameLogsAnUnreadableSetting(t *testing.T) {
+	var buf bytes.Buffer
+	log.SetOutput(&buf)
+	t.Cleanup(func() { log.SetOutput(os.Stderr) })
+	t.Setenv("TZ", "")
+	s, exec := newStore(t)
+	ctx := context.Background()
+	if got := s.TimeZoneName(ctx); got != "UTC" || buf.Len() != 0 {
+		t.Fatalf("normal read: %q, log %q", got, buf.String())
+	}
+	exec(`DROP TABLE settings`)
+	if got := s.TimeZoneName(ctx); got != "UTC" {
+		t.Errorf("unreadable: %q", got)
+	}
+	if !strings.Contains(buf.String(), "using the default zone") {
+		t.Errorf("no log line: %q", buf.String())
 	}
 }

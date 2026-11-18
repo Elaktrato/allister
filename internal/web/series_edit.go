@@ -26,8 +26,8 @@ type pickItem struct {
 	Unlisted         bool
 }
 
-// pickView is the result list of a picker: radio inputs called Name.
-type pickView struct {
+// seriesPickView is the result list of a picker: radio inputs called Name.
+type seriesPickView struct {
 	Name  string
 	Items []pickItem
 	Note  string
@@ -47,7 +47,7 @@ type seriesDialog struct {
 	LinkLabel            string
 	LinkedID             int64
 	LinkURL, ParentURL   string
-	LinkPick, ParentPick pickView
+	LinkPick, ParentPick seriesPickView
 	ParentID             int64
 	ParentLocked         string
 }
@@ -133,8 +133,8 @@ const noteHasSpinOffs = "This series has spin-offs, so it cannot be a spin-off i
 
 // linkPick lists the entries of the link kind of this plugin that match text,
 // with the entry current pinned first.
-func (s *server) linkPick(r *http.Request, m plugin.Manifest, k plugin.KindDef, ser *library.Series, text string, current int64) (pickView, error) {
-	v := pickView{Name: "linked"}
+func (s *server) linkPick(r *http.Request, m plugin.Manifest, k plugin.KindDef, ser *library.Series, text string, current int64) (seriesPickView, error) {
+	v := seriesPickView{Name: "linked"}
 	if k.SeriesLink == nil {
 		return v, nil
 	}
@@ -167,8 +167,8 @@ func (s *server) linkPick(r *http.Request, m plugin.Manifest, k plugin.KindDef, 
 // parentPick lists the series of the plugin that can be the parent of ser:
 // not itself, no spin-off itself; none when ser has spin-offs. The series
 // current is pinned first.
-func (s *server) parentPick(r *http.Request, m plugin.Manifest, ser *library.Series, text string, current int64) (pickView, error) {
-	v := pickView{Name: "parent"}
+func (s *server) parentPick(r *http.Request, m plugin.Manifest, ser *library.Series, text string, current int64) (seriesPickView, error) {
+	v := seriesPickView{Name: "parent"}
 	ctx := r.Context()
 	kids, err := s.deps.Library.SpinOffsOf(ctx, ser.ID)
 	if err != nil {

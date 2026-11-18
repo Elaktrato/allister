@@ -11,13 +11,15 @@ import (
 	"slices"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/allister/allister/internal/plugin"
 )
 
-// Backup records (format_version 1 of the universal backup). The JSON names
-// are part of the backup format: change them only together with the format
-// version. sync_state is deliberately not stored: a restore decides it.
+// Backup records (format_version 3 of the universal backup; BackupEntryV1 is
+// the entry of format 1). The JSON names are part of the backup format:
+// change them only together with the format version. sync_state is
+// deliberately not stored: a restore decides it.
 
 // BackupItem is one item of a backup with all its parts and, when the item is
 // in the list, its entry.
@@ -26,7 +28,9 @@ import (
 // covers/<name>); CoverURL holds a remote cover URL that was never
 // downloaded. At most one of them is set. CoverMissing is set by the archive
 // writer when the item referenced a local cover that could not be included
-// (file missing or name not acceptable); Cover is then "".
+// (file missing or name not acceptable); Cover is then "". CoverSource is
+// the remote URL a local cover was downloaded from (restored only with the
+// cover file).
 type BackupItem struct {
 	PluginID     string                       `json:"plugin_id"`
 	Kind         string                       `json:"kind"`
@@ -43,6 +47,7 @@ type BackupItem struct {
 	Cover        string                       `json:"cover,omitempty"`
 	CoverURL     string                       `json:"cover_url,omitempty"`
 	CoverMissing bool                         `json:"cover_missing,omitempty"`
+	CoverSource  string                       `json:"cover_source,omitempty"`
 	ProgressKeys []string                     `json:"progress_keys"`
 	CreatedAt    string                       `json:"created_at,omitempty"` // RFC 3339 UTC
 	UpdatedAt    string                       `json:"updated_at,omitempty"` // RFC 3339 UTC
@@ -68,12 +73,55 @@ type BackupPerson struct {
 	ImageURL string `json:"image_url,omitempty"`
 }
 
-// BackupEntry is the list entry of a backed-up item. Rating is null when
-// unrated; the dates are YYYY-MM-DD or null; Progress holds EVERY stored
-// value, also those of keys that are not active. Events holds the newest part
-// of the entry's change log, newest first; EventsTruncated says older events
-// stayed behind (see maxBackupEvents).
+// BackupEntry is the list entry of a backed-up item (format 2): its notes,
+// every run in number order (1..n), its own tags (names ordered by key) and
+// its stamps. The display run is not stored: a restore recomputes it.
+// OrphanEvents are the changes whose run was deleted (they still feed the
+// activity history); events of the runs are in the runs. Together the entry
+// carries the newest maxBackupEvents changes; the run (or the orphans) whose
+// older changes stayed behind is marked EventsTruncated.
 type BackupEntry struct {
+	Notes                 string        `json:"notes"`
+	Runs                  []BackupRun   `json:"runs"`
+	UserTags              []string      `json:"user_tags,omitempty"`
+	OrphanEvents          []BackupEvent `json:"orphan_events,omitempty"`
+	OrphanEventsTruncated bool          `json:"orphan_events_truncated,omitempty"`
+	AddedAt               string        `json:"added_at,omitempty"`   // RFC 3339 UTC
+	UpdatedAt             string        `json:"updated_at,omitempty"` // RFC 3339 UTC
+}
+
+// BackupRun is one run of a backed-up entry. Rating is null when unrated;
+// the dates are YYYY-MM-DD or null; Progress holds EVERY stored value of the
+// run, also those of keys that are not active. Events holds the run's
+// changes, newest first.
+type BackupRun struct {
+	Number          int                `json:"number"`
+	Status          Status             `json:"status"`
+	Rating          *int               `json:"rating"`
+	Review          string             `json:"review"`
+	StartedOn       *string            `json:"started_on"`
+	FinishedOn      *string            `json:"finished_on"`
+	Progress        map[string]float64 `json:"progress"`
+	UnitNotes       []BackupUnitNote   `json:"unit_notes,omitempty"`
+	Events          []BackupEvent      `json:"events,omitempty"`
+	EventsTruncated bool               `json:"events_truncated,omitempty"`
+	CreatedAt       string             `json:"created_at,omitempty"` // RFC 3339 UTC
+	UpdatedAt       string             `json:"updated_at,omitempty"` // RFC 3339 UTC
+}
+
+// BackupUnitNote is the note on one unit of a run's progress track.
+type BackupUnitNote struct {
+	ProgressKey string `json:"progress_key"`
+	Unit        int    `json:"unit"`
+	Body        string `json:"body"`
+	CreatedAt   string `json:"created_at,omitempty"` // RFC 3339 UTC
+	UpdatedAt   string `json:"updated_at,omitempty"` // RFC 3339 UTC
+}
+
+// BackupEntryV1 is the list entry of a format-1 backup: one state with a
+// comment, all stored progress values and the change log (newest first).
+// Upgrade turns it into the format-2 entry a restore writes.
+type BackupEntryV1 struct {
 	Status          Status             `json:"status"`
 	Rating          *int               `json:"rating"`
 	Comment         string             `json:"comment"`
@@ -83,6 +131,15 @@ type BackupEntry struct {
 	UpdatedAt       string             `json:"updated_at,omitempty"` // RFC 3339 UTC
 	Events          []BackupEvent      `json:"events,omitempty"`
 	EventsTruncated bool               `json:"events_truncated,omitempty"`
+}
+
+// Upgrade returns the format-2 entry of a format-1 entry: its state, progress
+// and change log become run 1, the comment the entry's notes, and its stamp
+// the entry's and the run's stamps (as a format-1 restore wrote them).
+func (e BackupEntryV1) Upgrade() BackupEntry {
+	return BackupEntry{Notes: e.Comment, AddedAt: e.UpdatedAt, UpdatedAt: e.UpdatedAt, Runs: []BackupRun{{
+		Number: 1, Status: e.Status, Rating: e.Rating, StartedOn: e.StartedOn, FinishedOn: e.FinishedOn, Progress: e.Progress,
+		Events: e.Events, EventsTruncated: e.EventsTruncated, CreatedAt: e.UpdatedAt, UpdatedAt: e.UpdatedAt}}}
 }
 
 // BackupEvent is one change of an entry's log, as stored: OccurredAt is an RFC
@@ -163,7 +220,7 @@ func (l *Library) BackupItems(ctx context.Context, batch int, fn func(BackupItem
 
 // backupBatch reads up to n items with id > after and all their parts.
 func (l *Library) backupBatch(ctx context.Context, after int64, n int) ([]BackupItem, []int64, error) {
-	rows, err := l.db.QueryContext(ctx, `SELECT id, plugin_id, kind, source, source_id, cover_path, external_url, progress_keys, created_at, updated_at
+	rows, err := l.db.QueryContext(ctx, `SELECT id, plugin_id, kind, source, source_id, cover_path, cover_source, external_url, progress_keys, created_at, updated_at
 		FROM items WHERE id > ? ORDER BY id LIMIT ?`, after, n)
 	if err != nil {
 		return nil, nil, fmt.Errorf("backup items: %w", err)
@@ -174,7 +231,7 @@ func (l *Library) backupBatch(ctx context.Context, after int64, n int) ([]Backup
 		var id int64
 		var bi BackupItem
 		var cover, pk string
-		if err := rows.Scan(&id, &bi.PluginID, &bi.Kind, &bi.Source, &bi.SourceID, &cover, &bi.ExternalURL, &pk, &bi.CreatedAt, &bi.UpdatedAt); err != nil {
+		if err := rows.Scan(&id, &bi.PluginID, &bi.Kind, &bi.Source, &bi.SourceID, &cover, &bi.CoverSource, &bi.ExternalURL, &pk, &bi.CreatedAt, &bi.UpdatedAt); err != nil {
 			rows.Close()
 			return nil, nil, fmt.Errorf("backup items: %w", err)
 		}
@@ -186,7 +243,7 @@ func (l *Library) backupBatch(ctx context.Context, after int64, n int) ([]Backup
 			bi.ProgressKeys = []string{}
 		}
 		if isRemote(cover) {
-			bi.CoverURL = cover
+			bi.CoverURL, bi.CoverSource = cover, ""
 		} else {
 			bi.Cover = cover
 		}
@@ -377,42 +434,110 @@ func (l *Library) backupParts(ctx context.Context, ids []int64, items []BackupIt
 		return err
 	}
 
-	var status, updated string
-	var rating sql.NullInt64
-	var comment string
-	var started, finished sql.NullString
-	if err := l.eachRow(ctx, `SELECT item_id, status, rating, comment, started_on, finished_on, updated_at FROM `+tableEntries+` WHERE item_id IN (?)`, ids,
-		func(r *sql.Rows) (int64, error) {
-			return id, r.Scan(&id, &status, &rating, &comment, &started, &finished, &updated)
-		},
+	return l.backupEntries(ctx, ids, items)
+}
+
+// backupEntries fills the entries of a batch: the entry rows, their runs with
+// every stored progress value and unit note, their own tags and the change
+// log. Rows of an item without an entry (its entry was removed) have no
+// place in a backup.
+func (l *Library) backupEntries(ctx context.Context, ids []int64, items []BackupItem) error {
+	var id int64
+	var notes, added, updated string
+	if err := l.eachRow(ctx, `SELECT item_id, notes, added_at, updated_at FROM `+tableEntries+` WHERE item_id IN (?)`, ids,
+		func(r *sql.Rows) (int64, error) { return id, r.Scan(&id, &notes, &added, &updated) },
 		func(i int) error {
-			e := &BackupEntry{Status: Status(status), Comment: comment, UpdatedAt: updated, Progress: map[string]float64{}}
-			if rating.Valid {
-				r := int(rating.Int64)
-				e.Rating = &r
-			}
-			if started.Valid && started.String != "" {
-				s := started.String
-				e.StartedOn = &s
-			}
-			if finished.Valid && finished.String != "" {
-				s := finished.String
-				e.FinishedOn = &s
-			}
-			items[i].Entry = e
+			items[i].Entry = &BackupEntry{Notes: notes, AddedAt: added, UpdatedAt: updated, Runs: []BackupRun{}}
 			return nil
 		}); err != nil {
 		return err
 	}
 
+	// where each run sits: its item's index in the batch and its index in
+	// the entry's runs
+	type place struct{ item, run int }
+	runs := map[int64]place{}
+	var runID int64
+	var br BackupRun
+	var status string
+	var rating sql.NullInt64
+	var started, finished sql.NullString
+	if err := l.eachRow(ctx, `SELECT item_id, id, number, status, rating, review, started_on, finished_on, created_at, updated_at
+		FROM `+tableRuns+` WHERE item_id IN (?) ORDER BY item_id, number`, ids,
+		func(r *sql.Rows) (int64, error) {
+			br = BackupRun{}
+			return id, r.Scan(&id, &runID, &br.Number, &status, &rating, &br.Review, &started, &finished, &br.CreatedAt, &br.UpdatedAt)
+		},
+		func(i int) error {
+			e := items[i].Entry
+			if e == nil {
+				return nil
+			}
+			br.Status, br.Progress = Status(status), map[string]float64{}
+			if rating.Valid {
+				v := int(rating.Int64)
+				br.Rating = &v
+			}
+			if started.Valid && started.String != "" {
+				v := started.String
+				br.StartedOn = &v
+			}
+			if finished.Valid && finished.String != "" {
+				v := finished.String
+				br.FinishedOn = &v
+			}
+			runs[runID] = place{i, len(e.Runs)}
+			e.Runs = append(e.Runs, br)
+			return nil
+		}); err != nil {
+		return err
+	}
+	run := func(runID int64) *BackupRun {
+		p, ok := runs[runID]
+		if !ok {
+			return nil
+		}
+		return &items[p.item].Entry.Runs[p.run]
+	}
+
+	// every stored value of every run, active or not
 	var pkey string
 	var pval float64
-	if err := l.eachRow(ctx, `SELECT item_id, key, value FROM `+tableEntryProgress+` WHERE item_id IN (?)`, ids,
-		func(r *sql.Rows) (int64, error) { return id, r.Scan(&id, &pkey, &pval) },
+	if err := l.eachRow(ctx, `SELECT r.item_id, p.run_id, p.key, p.value FROM `+tableRunProgress+` p
+		JOIN `+tableRuns+` r ON r.id = p.run_id WHERE r.item_id IN (?)`, ids,
+		func(r *sql.Rows) (int64, error) { return id, r.Scan(&id, &runID, &pkey, &pval) },
+		func(int) error {
+			if r := run(runID); r != nil {
+				r.Progress[pkey] = pval
+			}
+			return nil
+		}); err != nil {
+		return err
+	}
+
+	var un BackupUnitNote
+	if err := l.eachRow(ctx, `SELECT r.item_id, n.run_id, n.progress_key, n.unit, n.body, n.created_at, n.updated_at FROM `+tableUnitNotes+` n
+		JOIN `+tableRuns+` r ON r.id = n.run_id WHERE r.item_id IN (?) ORDER BY r.item_id, r.number, n.progress_key, n.unit`, ids,
+		func(r *sql.Rows) (int64, error) {
+			un = BackupUnitNote{}
+			return id, r.Scan(&id, &runID, &un.ProgressKey, &un.Unit, &un.Body, &un.CreatedAt, &un.UpdatedAt)
+		},
+		func(int) error {
+			if r := run(runID); r != nil {
+				r.UnitNotes = append(r.UnitNotes, un)
+			}
+			return nil
+		}); err != nil {
+		return err
+	}
+
+	var tag string
+	if err := l.eachRow(ctx, `SELECT x.item_id, u.name FROM entry_user_tags x JOIN user_tags u ON u.id = x.tag_id
+		WHERE x.item_id IN (?) ORDER BY x.item_id, u.name_key`, ids,
+		func(r *sql.Rows) (int64, error) { return id, r.Scan(&id, &tag) },
 		func(i int) error {
-			// values without an entry are not part of a backup
-			if items[i].Entry != nil {
-				items[i].Entry.Progress[pkey] = pval
+			if e := items[i].Entry; e != nil {
+				e.UserTags = append(e.UserTags, tag)
 			}
 			return nil
 		}); err != nil {
@@ -420,25 +545,36 @@ func (l *Library) backupParts(ctx context.Context, ids []int64, items []BackupIt
 	}
 
 	// The change log is read newest first; an entry keeps maxBackupEvents of
-	// them and records that older ones stayed behind. Rows of an item without
-	// an entry (its entry was removed) have no place in a backup.
+	// them, each in its run (or among the orphans when its run was deleted),
+	// and marks where older ones stayed behind.
+	kept := make([]int, len(items))
+	var evRun sql.NullInt64
 	var occurred, evType, evKey, evOrigin string
 	var oldNum, newNum sql.NullFloat64
 	var oldText, newText string
-	return l.eachRow(ctx, `SELECT item_id, occurred_at, event_type, progress_key, old_num, new_num, old_text, new_text, origin
+	return l.eachRow(ctx, `SELECT item_id, run_id, occurred_at, event_type, progress_key, old_num, new_num, old_text, new_text, origin
 		FROM `+tableEntryEvents+` WHERE item_id IN (?) ORDER BY item_id, id DESC`, ids,
 		func(r *sql.Rows) (int64, error) {
-			return id, r.Scan(&id, &occurred, &evType, &evKey, &oldNum, &newNum, &oldText, &newText, &evOrigin)
+			return id, r.Scan(&id, &evRun, &occurred, &evType, &evKey, &oldNum, &newNum, &oldText, &newText, &evOrigin)
 		},
 		func(i int) error {
 			e := items[i].Entry
 			if e == nil {
 				return nil
 			}
-			if len(e.Events) >= maxBackupEvents {
-				e.EventsTruncated = true
+			var r *BackupRun
+			if evRun.Valid {
+				r = run(evRun.Int64)
+			}
+			if kept[i] >= maxBackupEvents {
+				if r != nil {
+					r.EventsTruncated = true
+				} else {
+					e.OrphanEventsTruncated = true
+				}
 				return nil
 			}
+			kept[i]++
 			ev := BackupEvent{OccurredAt: occurred, Type: evType, ProgressKey: evKey, OldText: oldText, NewText: newText, Origin: evOrigin}
 			if oldNum.Valid {
 				v := oldNum.Float64
@@ -448,7 +584,11 @@ func (l *Library) backupParts(ctx context.Context, ids []int64, items []BackupIt
 				v := newNum.Float64
 				ev.NewNum = &v
 			}
-			e.Events = append(e.Events, ev)
+			if r != nil {
+				r.Events = append(r.Events, ev)
+			} else {
+				e.OrphanEvents = append(e.OrphanEvents, ev)
+			}
 			return nil
 		})
 }
@@ -499,18 +639,43 @@ type restorePlan struct {
 	p                    *prepared
 	data                 plugin.ItemData
 	credits              []plugin.Credit
-	entry                *Entry
-	entryStamp           string
-	events               []BackupEvent
+	entry                *entryPlan
 	createdAt, updatedAt string
+	coverSource          string // kept when the cover file was stored
 }
+
+// entryPlan is a validated backup entry: its runs in number order, the
+// change log oldest first (each event with the index of its run, -1 for an
+// orphan) and the own tags. The stamps are in the stored form ("" is now).
+type entryPlan struct {
+	notes              string
+	addedAt, updatedAt string
+	runs               []runPlan
+	events             []planEvent
+	tags               []tagName
+	truncated          bool // the backup kept only the newest events
+}
+
+type runPlan struct {
+	run                  BackupRun
+	createdAt, updatedAt string
+	notes                []BackupUnitNote
+}
+
+type planEvent struct {
+	run int
+	ev  BackupEvent
+}
+
+type tagName struct{ name, key string }
 
 // RestoreItem MERGES one backup item into the library: it never overwrites
 // or deletes anything. The item is validated with the same rules as SaveItem
 // (titles, fields, terms, external ids, relations, cover), SaveCredits and
-// entries (status, rating, comment, dates, progress of every stored key:
-// active keys like ValidateEntry, inactive ones must be eligible and in
-// range), plus caps on titles and external ids and RFC 3339 time stamps.
+// entries (notes; per run status, rating, review, dates, progress of every
+// stored key, see restoreRun; run numbers 1..n; unit notes as SetUnitNote
+// but not bounded by the total; own tags as SetEntryTags),
+// plus caps on titles, external ids and events and RFC 3339 time stamps.
 // Manual items additionally need their required fields (as ValidateItem),
 // and every credited person needs a name.
 //
@@ -519,8 +684,10 @@ type restorePlan struct {
 // an item whose (plugin, kind, source, source id) exists is RestoreSkipped
 // and left untouched (no entry is added either); otherwise the item with all
 // its parts, its credits (existing people are linked unchanged, missing
-// ones created), its entry with all progress values and its time stamps is
-// written in ONE transaction and the result is RestoreCreated. Its sync
+// ones created), its entry with every run (numbers, progress values, unit
+// notes, change log), its own tags (an existing tag keeps its spelling) and
+// its time stamps is written in ONE transaction, the display run recomputed,
+// and the result is RestoreCreated. Its sync
 // state is "done" for manual items without a remote cover and "pending"
 // otherwise (SyncPending), so the normal sync refetches credits' photos,
 // downloads remote covers and fills gaps. When the item is not written
@@ -558,7 +725,8 @@ func (l *Library) RestoreItem(ctx context.Context, bi BackupItem, opts RestoreOp
 			}
 		}
 		if stored != "" && checkImageRef("cover", stored) == nil {
-			plan.data.CoverURL = stored
+			// the origin of a downloaded cover, kept only with that file
+			plan.data.CoverURL, plan.coverSource = stored, bi.CoverSource
 		} else {
 			stored = ""
 			if note != "" {
@@ -588,7 +756,7 @@ func (l *Library) RestoreItem(ctx context.Context, bi BackupItem, opts RestoreOp
 	res.Outcome, res.ItemID, res.SyncPending = RestoreCreated, id, syncState == "pending"
 	// the writer keeps only the newest part of the log; say so rather than
 	// silently restoring a gap
-	if bi.Entry != nil && bi.Entry.EventsTruncated {
+	if plan.entry != nil && plan.entry.truncated {
 		res.Notes = append(res.Notes, "the change log of this entry was truncated in the backup (newest 5,000 events restored); older events are not in the archive")
 	}
 	return res, nil
@@ -634,6 +802,9 @@ func (l *Library) planRestore(bi BackupItem) (*restorePlan, error) {
 		if !isRemote(bi.CoverURL) {
 			return nil, invalid("cover url must be an http(s) URL")
 		}
+	}
+	if err := checkHTTPURL("cover source", bi.CoverSource); err != nil {
+		return nil, err
 	}
 	d := plugin.ItemData{
 		ItemSummary: plugin.ItemSummary{Source: bi.Source, ID: bi.SourceID, Kind: bi.Kind, Titles: bi.Titles, Fields: bi.Fields, CoverURL: bi.CoverURL},
@@ -683,15 +854,7 @@ func (l *Library) planRestore(bi BackupItem) (*restorePlan, error) {
 		return nil, err
 	}
 	if bi.Entry != nil {
-		e, err := l.restoreEntry(p, d, *bi.Entry)
-		if err != nil {
-			return nil, err
-		}
-		plan.entry = e
-		if plan.entryStamp, err = restoreStamp("entry updated_at", bi.Entry.UpdatedAt); err != nil {
-			return nil, err
-		}
-		if plan.events, err = restoreEvents(p, bi.Entry.Events); err != nil {
+		if plan.entry, err = l.restoreEntry(p, d, *bi.Entry); err != nil {
 			return nil, err
 		}
 	}
@@ -742,52 +905,205 @@ func restoreDay(path string, s *string) (*time.Time, error) {
 	return &t, nil
 }
 
-// restoreEntry validates a backup entry against the prepared item: the
-// active keys' values like ValidateEntry, the other stored values must be
-// eligible progress of the kind and within their bounds.
-func (l *Library) restoreEntry(p *prepared, d plugin.ItemData, be BackupEntry) (*Entry, error) {
-	started, err := restoreDay("started_on", be.StartedOn)
-	if err != nil {
-		return nil, err
-	}
-	finished, err := restoreDay("finished_on", be.FinishedOn)
-	if err != nil {
-		return nil, err
-	}
+// restoreEntry validates a backup entry against the prepared item and plans
+// its write.
+func (l *Library) restoreEntry(p *prepared, d plugin.ItemData, be BackupEntry) (*entryPlan, error) {
 	item := &Item{ProgressKeys: p.progress, Fields: d.Fields}
+	if err := l.ValidateEntry(p.def, item, Entry{Status: Planned, Notes: be.Notes}); err != nil {
+		return nil, err
+	}
+	plan := &entryPlan{notes: be.Notes}
+	var err error
+	if plan.addedAt, err = restoreStamp("entry added_at", be.AddedAt); err != nil {
+		return nil, err
+	}
+	if plan.updatedAt, err = restoreStamp("entry updated_at", be.UpdatedAt); err != nil {
+		return nil, err
+	}
+	if len(be.Runs) == 0 {
+		return nil, invalid("an entry needs at least one run")
+	}
+	runs := slices.Clone(be.Runs)
+	slices.SortStableFunc(runs, func(a, b BackupRun) int { return a.Number - b.Number })
+	for i, r := range runs {
+		if r.Number != i+1 {
+			return nil, invalid("run numbers must be 1 to %d without gaps or repeats", len(runs))
+		}
+	}
+	total := len(be.OrphanEvents)
+	for _, r := range runs {
+		total += len(r.Events)
+	}
+	if total > maxBackupEvents {
+		return nil, invalid("entry has more than %d events", maxBackupEvents)
+	}
+	plan.truncated = be.OrphanEventsTruncated
+	orphans, err := restoreEvents(p, be.OrphanEvents)
+	if err != nil {
+		return nil, err
+	}
+	// the log oldest first: orphans (their runs were deleted, so they are
+	// older as a rule), then the runs in order, then by time (stable)
+	for i := len(orphans) - 1; i >= 0; i-- {
+		plan.events = append(plan.events, planEvent{run: -1, ev: orphans[i]})
+	}
+	display := displayRunIndex(runs)
+	for i, r := range runs {
+		rp, err := l.restoreRun(p, item, r, i == display)
+		if err != nil {
+			return nil, err
+		}
+		plan.runs = append(plan.runs, rp)
+		plan.truncated = plan.truncated || r.EventsTruncated
+		evs, err := restoreEvents(p, r.Events)
+		if err != nil {
+			return nil, err
+		}
+		for j := len(evs) - 1; j >= 0; j-- {
+			plan.events = append(plan.events, planEvent{run: i, ev: evs[j]})
+		}
+	}
+	slices.SortStableFunc(plan.events, func(a, b planEvent) int { return strings.Compare(a.ev.OccurredAt, b.ev.OccurredAt) })
+	for _, raw := range be.UserTags {
+		name, key, err := userTagName(raw)
+		if err != nil {
+			return nil, err
+		}
+		if slices.ContainsFunc(plan.tags, func(t tagName) bool { return t.key == key }) {
+			continue
+		}
+		if len(plan.tags) == maxEntryTags {
+			return nil, invalid("more than %d tags", maxEntryTags)
+		}
+		plan.tags = append(plan.tags, tagName{name, key})
+	}
+	return plan, nil
+}
+
+// displayRunIndex applies refreshDisplayRun's rule to runs (in number
+// order): the latest run, except that a dropped repeat gives way to the
+// latest completed run.
+func displayRunIndex(runs []BackupRun) int {
+	last := len(runs) - 1
+	if runs[last].Number > 1 && runs[last].Status == Dropped {
+		for i := last - 1; i >= 0; i-- {
+			if runs[i].Status == Completed {
+				return i
+			}
+		}
+	}
+	return last
+}
+
+// restoreRun validates one run: its state like ValidateEntry, and its stored
+// progress values, which must be eligible progress of the kind. The display
+// run's values are checked against the item's totals (the active keys like
+// ValidateEntry); the other runs are stored as written, so their values are
+// bounded only by the largest value the library takes (a total can be
+// lowered after a run was finished). The status of a past run is not
+// checked either: the app can store any. Unit notes are checked like
+// SetUnitNote except for the total (see checkUnitNote), then the stamps.
+func (l *Library) restoreRun(p *prepared, item *Item, r BackupRun, display bool) (runPlan, error) {
+	at := fmt.Sprintf("run %d ", r.Number)
+	started, err := restoreDay(at+"started_on", r.StartedOn)
+	if err != nil {
+		return runPlan{}, err
+	}
+	finished, err := restoreDay(at+"finished_on", r.FinishedOn)
+	if err != nil {
+		return runPlan{}, err
+	}
 	active := map[string]float64{}
-	keys := make([]string, 0, len(be.Progress))
-	for k := range be.Progress {
+	keys := make([]string, 0, len(r.Progress))
+	for k := range r.Progress {
 		keys = append(keys, k)
 	}
 	slices.Sort(keys)
 	for _, k := range keys {
-		if slices.Contains(p.progress, k) {
-			active[k] = be.Progress[k]
+		if display && slices.Contains(p.progress, k) {
+			active[k] = r.Progress[k]
 			continue
 		}
 		def, ok := progressDef(p.def, k)
 		if !ok {
-			return nil, invalid("progress %q is not a progress of kind %q", truncateRunes(k, 40), p.def.Key)
+			return runPlan{}, invalid("progress %q is not a progress of kind %q", truncateRunes(k, 40), p.def.Key)
 		}
 		total, bounded := progressBound(def, item)
-		if err := checkProgressValue(def, be.Progress[k], total, bounded); err != nil {
-			return nil, err
+		if !display {
+			total, bounded = 0, false
+		}
+		if err := checkProgressValue(def, r.Progress[k], total, bounded); err != nil {
+			return runPlan{}, err
 		}
 	}
-	e := Entry{Status: be.Status, Rating: be.Rating, Comment: be.Comment, StartedOn: started, FinishedOn: finished, Progress: active}
-	if err := l.ValidateEntry(p.def, item, e); err != nil {
-		return nil, err
+	if err := l.ValidateEntry(p.def, item, Entry{Status: r.Status, Rating: r.Rating, Review: r.Review,
+		StartedOn: started, FinishedOn: finished, Progress: active}); err != nil {
+		return runPlan{}, err
 	}
-	e.Progress = be.Progress
-	return &e, nil
+	rp := runPlan{run: r}
+	if rp.run.Progress == nil {
+		rp.run.Progress = map[string]float64{}
+	}
+	if rp.createdAt, err = restoreStamp(at+"created_at", r.CreatedAt); err != nil {
+		return runPlan{}, err
+	}
+	if rp.updatedAt, err = restoreStamp(at+"updated_at", r.UpdatedAt); err != nil {
+		return runPlan{}, err
+	}
+	seen := map[string]bool{}
+	for _, n := range r.UnitNotes {
+		if err := checkUnitNote(p.def, n); err != nil {
+			return runPlan{}, err
+		}
+		id := fmt.Sprintf("%s %d", n.ProgressKey, n.Unit)
+		if seen[id] {
+			return runPlan{}, invalid("the unit note on %s %d appears twice", truncateRunes(n.ProgressKey, 40), n.Unit)
+		}
+		seen[id] = true
+		if n.CreatedAt, err = restoreStamp("unit note created_at", n.CreatedAt); err != nil {
+			return runPlan{}, err
+		}
+		if n.UpdatedAt, err = restoreStamp("unit note updated_at", n.UpdatedAt); err != nil {
+			return runPlan{}, err
+		}
+		rp.notes = append(rp.notes, n)
+	}
+	return rp, nil
+}
+
+// checkUnitNote applies SetUnitNote's rules to a backed-up unit note, except
+// the item's total: a note is stored as written even when the total was
+// lowered after it (a conversion clamps progress, never notes), so the unit
+// is bounded only by the largest value the library takes. A blank note
+// (SetUnitNote deletes it) is refused.
+func checkUnitNote(kind plugin.KindDef, n BackupUnitNote) error {
+	def, ok := progressDef(kind, n.ProgressKey)
+	if !ok {
+		return invalid("unit note progress %q is not a progress of kind %q", truncateRunes(n.ProgressKey, 40), kind.Key)
+	}
+	if def.Type != plugin.Count && def.Type != plugin.Pages {
+		return invalid("notes can only be added to count or pages progress, not %q", n.ProgressKey)
+	}
+	if n.Unit < 1 {
+		return invalid("the unit must be at least 1")
+	}
+	if float64(n.Unit) > maxProgressValue {
+		return invalid("the unit %d is too large", n.Unit)
+	}
+	if strings.TrimSpace(n.Body) == "" {
+		return invalid("a unit note is empty")
+	}
+	if utf8.RuneCountInString(n.Body) > MaxUnitNoteRunes {
+		return invalid("the note is longer than %d characters", MaxUnitNoteRunes)
+	}
+	return cleanText("note", n.Body, multiLine)
 }
 
 // restoreEvents validates a backed-up change log against the prepared item:
 // at most maxBackupEvents, a known type, origin and progress key (only a
 // progress event carries one), an RFC 3339 time and finite numbers. It
 // returns the events with their time stamps in the stored form. The order is
-// kept as backed up (newest first), writeRestore reverses it.
+// kept as backed up (newest first), restoreEntry reverses it.
 func restoreEvents(p *prepared, events []BackupEvent) ([]BackupEvent, error) {
 	if len(events) > maxBackupEvents {
 		return nil, invalid("entry has more than %d events", maxBackupEvents)
@@ -810,7 +1126,7 @@ func restoreEvents(p *prepared, events []BackupEvent) ([]BackupEvent, error) {
 			return nil, invalid("event type %q must be one of progress, status, rating", truncateRunes(ev.Type, 40))
 		}
 		if !validOrigin(EventOrigin(ev.Origin)) {
-			return nil, invalid("event origin %q must be one of manual, import, restore", truncateRunes(ev.Origin, 40))
+			return nil, invalid("event origin %q must be one of manual, import, restore, bulk", truncateRunes(ev.Origin, 40))
 		}
 		stamp, err := restoreStamp("event occurred_at", ev.OccurredAt)
 		if err != nil {
@@ -851,24 +1167,17 @@ func (l *Library) writeRestore(ctx context.Context, bi BackupItem, plan *restore
 			return 0, fmt.Errorf("restore item: %w", err)
 		}
 	}
+	if plan.coverSource != "" {
+		if _, err := tx.ExecContext(ctx, `UPDATE items SET cover_source = ? WHERE id = ?`, plan.coverSource, id); err != nil {
+			return 0, fmt.Errorf("restore item: %w", err)
+		}
+	}
 	if err := restoreCredits(ctx, tx, id, bi.PluginID, plan.p.source, plan.credits); err != nil {
 		return 0, err
 	}
 	if plan.entry != nil {
-		if _, err := writeEntryMode(ctx, tx, id, *plan.entry, true); err != nil {
+		if err := writeRestoredEntry(ctx, tx, id, plan.entry); err != nil {
 			return 0, err
-		}
-		if plan.entryStamp != "" {
-			if _, err := tx.ExecContext(ctx, `UPDATE `+tableEntries+` SET updated_at = ? WHERE item_id = ?`, plan.entryStamp, id); err != nil {
-				return 0, fmt.Errorf("restore item: %w", err)
-			}
-		}
-		// the backup holds the log newest first: insert oldest first so the
-		// restored ids stay in chronological order
-		for i := len(plan.events) - 1; i >= 0; i-- {
-			if err := restoreEvent(ctx, tx, id, plan.events[i]); err != nil {
-				return 0, err
-			}
 		}
 	}
 	if err := tx.Commit(); err != nil {
@@ -877,9 +1186,89 @@ func (l *Library) writeRestore(ctx context.Context, bi BackupItem, plan *restore
 	return id, nil
 }
 
-// restoreEvent appends one backed-up event with its stored time stamp and
-// origin, so the restored log keeps the history of the backup.
-func restoreEvent(ctx context.Context, tx *sql.Tx, itemID int64, ev BackupEvent) error {
+// orNow is the SQL value of a stored stamp: NULL for "" (the column then
+// takes now through COALESCE).
+func orNow(stamp string) any {
+	if stamp == "" {
+		return nil
+	}
+	return stamp
+}
+
+// writeRestoredEntry writes a planned entry of item itemID: the entry row,
+// its runs with their numbers, progress values and unit notes, the change
+// log oldest first, the own tags, then the display run.
+func writeRestoredEntry(ctx context.Context, tx *sql.Tx, itemID int64, e *entryPlan) error {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO `+tableEntries+`(item_id, notes, added_at, updated_at)
+		VALUES (?, ?, COALESCE(?, `+nowSQL+`), COALESCE(?, `+nowSQL+`))`, itemID, e.notes, orNow(e.addedAt), orNow(e.updatedAt)); err != nil {
+		return fmt.Errorf("restore entry: %w", err)
+	}
+	runIDs := make([]int64, len(e.runs))
+	for i, rp := range e.runs {
+		r := rp.run
+		var rating, started, finished any
+		if r.Rating != nil {
+			rating = *r.Rating
+		}
+		if r.StartedOn != nil {
+			started = *r.StartedOn
+		}
+		if r.FinishedOn != nil {
+			finished = *r.FinishedOn
+		}
+		res, err := tx.ExecContext(ctx, `INSERT INTO `+tableRuns+`(item_id, number, status, rating, review, started_on, finished_on, created_at, updated_at)
+			VALUES (?,?,?,?,?,?,?,COALESCE(?, `+nowSQL+`),COALESCE(?, `+nowSQL+`))`,
+			itemID, r.Number, string(r.Status), rating, r.Review, started, finished, orNow(rp.createdAt), orNow(rp.updatedAt))
+		if err != nil {
+			return fmt.Errorf("restore run: %w", err)
+		}
+		if runIDs[i], err = res.LastInsertId(); err != nil {
+			return fmt.Errorf("restore run: %w", err)
+		}
+		keys := make([]string, 0, len(r.Progress))
+		for k := range r.Progress {
+			keys = append(keys, k)
+		}
+		slices.Sort(keys)
+		for _, k := range keys {
+			if _, err := tx.ExecContext(ctx, `INSERT INTO `+tableRunProgress+`(run_id, key, value) VALUES (?,?,?)`, runIDs[i], k, r.Progress[k]); err != nil {
+				return fmt.Errorf("restore run progress: %w", err)
+			}
+		}
+		for _, n := range rp.notes {
+			if _, err := tx.ExecContext(ctx, `INSERT INTO `+tableUnitNotes+`(run_id, progress_key, unit, body, created_at, updated_at)
+				VALUES (?,?,?,?,COALESCE(?, `+nowSQL+`),COALESCE(?, `+nowSQL+`))`,
+				runIDs[i], n.ProgressKey, n.Unit, n.Body, orNow(n.CreatedAt), orNow(n.UpdatedAt)); err != nil {
+				return fmt.Errorf("restore unit note: %w", err)
+			}
+		}
+	}
+	for _, pe := range e.events {
+		var runID any
+		if pe.run >= 0 {
+			runID = runIDs[pe.run]
+		}
+		if err := restoreEvent(ctx, tx, itemID, runID, pe.ev); err != nil {
+			return err
+		}
+	}
+	for _, t := range e.tags {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO user_tags(name, name_key, created_at) VALUES (?, ?, `+nowSQL+`)
+			ON CONFLICT(name_key) DO NOTHING`, t.name, t.key); err != nil {
+			return fmt.Errorf("restore tags: %w", err)
+		}
+		if _, err := tx.ExecContext(ctx, `INSERT INTO entry_user_tags(item_id, tag_id)
+			SELECT ?, id FROM user_tags WHERE name_key = ?`, itemID, t.key); err != nil {
+			return fmt.Errorf("restore tags: %w", err)
+		}
+	}
+	return refreshDisplayRun(ctx, tx, itemID)
+}
+
+// restoreEvent appends one backed-up event of run runID (nil: its run was
+// deleted) with its stored time stamp and origin, so the restored log keeps
+// the history of the backup.
+func restoreEvent(ctx context.Context, tx *sql.Tx, itemID int64, runID any, ev BackupEvent) error {
 	var oldV, newV any
 	if ev.OldNum != nil {
 		oldV = *ev.OldNum
@@ -887,9 +1276,9 @@ func restoreEvent(ctx context.Context, tx *sql.Tx, itemID int64, ev BackupEvent)
 	if ev.NewNum != nil {
 		newV = *ev.NewNum
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO `+tableEntryEvents+`(item_id, occurred_at, event_type, progress_key, old_num, new_num, old_text, new_text, origin)
-		VALUES (?,?,?,?,?,?,?,?,?)`,
-		itemID, ev.OccurredAt, ev.Type, ev.ProgressKey, oldV, newV, ev.OldText, ev.NewText, ev.Origin); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO `+tableEntryEvents+`(item_id, run_id, occurred_at, event_type, progress_key, old_num, new_num, old_text, new_text, origin)
+		VALUES (?,?,?,?,?,?,?,?,?,?)`,
+		itemID, runID, ev.OccurredAt, ev.Type, ev.ProgressKey, oldV, newV, ev.OldText, ev.NewText, ev.Origin); err != nil {
 		return fmt.Errorf("restore event: %w", err)
 	}
 	return nil
@@ -1450,4 +1839,329 @@ func (l *Library) RestoreSeriesParent(ctx context.Context, pluginID, uid, parent
 		return "", err
 	}
 	return "", tx.Commit()
+}
+
+// BackupList is one custom list of a backup: its name, order mode, creation
+// stamp and entries in position order, identified like items everywhere in
+// the backup (no numeric ids).
+type BackupList struct {
+	Name        string           `json:"name"`
+	ManualOrder bool             `json:"manual_order"`
+	CreatedAt   string           `json:"created_at,omitempty"` // RFC 3339 UTC
+	Items       []BackupListItem `json:"items"`
+}
+
+// BackupListItem is one place of a backed-up list.
+type BackupListItem struct {
+	BackupPartRef
+	Position int    `json:"position"`
+	AddedAt  string `json:"added_at,omitempty"` // RFC 3339 UTC
+}
+
+// BackupLists calls fn for every custom list (ordered by name key) with its
+// entries in position order, streamed from one query.
+func (l *Library) BackupLists(ctx context.Context, fn func(BackupList) error) error {
+	rows, err := l.db.QueryContext(ctx, `SELECT c.id, c.name, c.manual_order, c.created_at,
+		i.plugin_id, i.kind, i.source, i.source_id, li.position, li.added_at
+		FROM lists c LEFT JOIN list_items li ON li.list_id = c.id LEFT JOIN items i ON i.id = li.item_id
+		ORDER BY c.name_key, c.id, li.position`)
+	if err != nil {
+		return fmt.Errorf("backup lists: %w", err)
+	}
+	defer rows.Close()
+	var cur *BackupList
+	var curID int64
+	for rows.Next() {
+		var id int64
+		var bl BackupList
+		var pluginID, kind, source, sourceID, added sql.NullString
+		var pos sql.NullInt64
+		if err := rows.Scan(&id, &bl.Name, &bl.ManualOrder, &bl.CreatedAt, &pluginID, &kind, &source, &sourceID, &pos, &added); err != nil {
+			return fmt.Errorf("backup lists: %w", err)
+		}
+		if cur == nil || id != curID {
+			if cur != nil {
+				if err := fn(*cur); err != nil {
+					return err
+				}
+			}
+			curID, bl.Items = id, []BackupListItem{}
+			cur = &bl
+		}
+		if pluginID.Valid {
+			cur.Items = append(cur.Items, BackupListItem{BackupPartRef: BackupPartRef{PluginID: pluginID.String, Kind: kind.String,
+				Source: source.String, SourceID: sourceID.String}, Position: int(pos.Int64), AddedAt: added.String})
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("backup lists: %w", err)
+	}
+	if cur != nil {
+		return fn(*cur)
+	}
+	return nil
+}
+
+// RestoreList merges one list of a backup in a single transaction. A list
+// whose name exists (ignoring case) keeps its name, order mode and places;
+// the backup's entries it lacks are added at its end. A missing list is
+// created with the backup's name, order mode and creation stamp. Entries are
+// taken in the backup's position order and resolved by identity; an entry
+// whose item is missing or has no entry is left out (counted in leftOut),
+// one listed twice or in the list already is passed over. added counts the
+// places written. An invalid name or stamp is ErrInvalid (nothing written).
+func (l *Library) RestoreList(ctx context.Context, bl BackupList) (added int, leftOut int, err error) {
+	name, key, err := listName(bl.Name)
+	if err != nil {
+		return 0, 0, err
+	}
+	created, err := restoreStamp("list created_at", bl.CreatedAt)
+	if err != nil {
+		return 0, 0, err
+	}
+	places := slices.Clone(bl.Items)
+	slices.SortStableFunc(places, func(a, b BackupListItem) int { return a.Position - b.Position })
+	stamps := make([]string, len(places))
+	for i, p := range places {
+		if stamps[i], err = restoreStamp("list entry added_at", p.AddedAt); err != nil {
+			return 0, 0, err
+		}
+	}
+	tx, err := l.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, 0, fmt.Errorf("restore list: %w", err)
+	}
+	defer tx.Rollback()
+	var listID int64
+	switch err := tx.QueryRowContext(ctx, `SELECT id FROM lists WHERE name_key = ?`, key).Scan(&listID); {
+	case errors.Is(err, sql.ErrNoRows):
+		res, err := tx.ExecContext(ctx, `INSERT INTO lists(name, name_key, manual_order, created_at, updated_at)
+			VALUES (?1, ?2, ?3, COALESCE(?4, `+nowSQL+`), COALESCE(?4, `+nowSQL+`))`, name, key, bl.ManualOrder, orNow(created))
+		if err != nil {
+			return 0, 0, fmt.Errorf("restore list: %w", err)
+		}
+		if listID, err = res.LastInsertId(); err != nil {
+			return 0, 0, fmt.Errorf("restore list: %w", err)
+		}
+	case err != nil:
+		return 0, 0, fmt.Errorf("restore list: %w", err)
+	}
+	for i, p := range places {
+		var itemID int64
+		var in bool
+		err := tx.QueryRowContext(ctx, `SELECT i.id, EXISTS (SELECT 1 FROM list_items x WHERE x.list_id = ? AND x.item_id = i.id)
+			FROM items i JOIN `+tableEntries+` e ON e.item_id = i.id
+			WHERE i.plugin_id = ? AND i.kind = ? AND i.source = ? AND i.source_id = ?`,
+			listID, p.PluginID, p.Kind, p.Source, p.SourceID).Scan(&itemID, &in)
+		switch {
+		case errors.Is(err, sql.ErrNoRows):
+			leftOut++
+			continue
+		case err != nil:
+			return 0, 0, fmt.Errorf("restore list: %w", err)
+		case in:
+			continue
+		}
+		if _, err := tx.ExecContext(ctx, `INSERT INTO list_items(list_id, item_id, position, added_at)
+			SELECT ?1, ?2, COALESCE((SELECT MAX(position) FROM list_items WHERE list_id = ?1), 0) + 1, COALESCE(?3, `+nowSQL+`)`,
+			listID, itemID, orNow(stamps[i])); err != nil {
+			return 0, 0, fmt.Errorf("restore list: %w", err)
+		}
+		added++
+	}
+	if added > 0 {
+		if err := touchList(ctx, tx, listID, ""); err != nil {
+			return 0, 0, err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, 0, fmt.Errorf("restore list: %w", err)
+	}
+	return added, leftOut, nil
+}
+
+// BackupAlias is a merged-away identity of a backup: the identity of the item
+// that kept it (Item) and the identity it stands for (Alias).
+type BackupAlias struct {
+	Item  BackupPartRef `json:"item"`
+	Alias BackupPartRef `json:"alias"`
+}
+
+// BackupDismissedPair is a pair of items the duplicate finder must not offer
+// again, both by identity.
+type BackupDismissedPair struct {
+	A           BackupPartRef `json:"a"`
+	B           BackupPartRef `json:"b"`
+	DismissedAt string        `json:"dismissed_at"` // RFC 3339 UTC
+}
+
+// What RestoreAlias and RestoreDismissedPair did with a row.
+type RestoreMerge int
+
+// The outcomes of RestoreAlias and RestoreDismissedPair.
+const (
+	MergeAdded   RestoreMerge = iota // written
+	MergeSkipped                     // present already
+	MergeLeftOut                     // its items are not in the library
+)
+
+// BackupAliases calls fn for every alias (ordered by its identity) with the
+// identity of the item it belongs to.
+func (l *Library) BackupAliases(ctx context.Context, fn func(BackupAlias) error) error {
+	rows, err := l.db.QueryContext(ctx, `SELECT i.plugin_id, i.kind, i.source, i.source_id, a.plugin_id, a.kind, a.source, a.source_id
+		FROM item_aliases a JOIN items i ON i.id = a.item_id ORDER BY a.plugin_id, a.kind, a.source, a.source_id`)
+	if err != nil {
+		return fmt.Errorf("backup aliases: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var ba BackupAlias
+		if err := rows.Scan(&ba.Item.PluginID, &ba.Item.Kind, &ba.Item.Source, &ba.Item.SourceID,
+			&ba.Alias.PluginID, &ba.Alias.Kind, &ba.Alias.Source, &ba.Alias.SourceID); err != nil {
+			return fmt.Errorf("backup aliases: %w", err)
+		}
+		if err := fn(ba); err != nil {
+			return err
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("backup aliases: %w", err)
+	}
+	return nil
+}
+
+// BackupDismissedPairs calls fn for every dismissed duplicate pair (ordered
+// by item ids) with both identities.
+func (l *Library) BackupDismissedPairs(ctx context.Context, fn func(BackupDismissedPair) error) error {
+	rows, err := l.db.QueryContext(ctx, `SELECT x.plugin_id, x.kind, x.source, x.source_id, y.plugin_id, y.kind, y.source, y.source_id, d.dismissed_at
+		FROM dismissed_duplicates d JOIN items x ON x.id = d.item_a JOIN items y ON y.id = d.item_b ORDER BY d.item_a, d.item_b`)
+	if err != nil {
+		return fmt.Errorf("backup dismissed duplicates: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var bp BackupDismissedPair
+		if err := rows.Scan(&bp.A.PluginID, &bp.A.Kind, &bp.A.Source, &bp.A.SourceID,
+			&bp.B.PluginID, &bp.B.Kind, &bp.B.Source, &bp.B.SourceID, &bp.DismissedAt); err != nil {
+			return fmt.Errorf("backup dismissed duplicates: %w", err)
+		}
+		if err := fn(bp); err != nil {
+			return err
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("backup dismissed duplicates: %w", err)
+	}
+	return nil
+}
+
+// checkRef validates an identity that is written to the database: every
+// part set, single-line text.
+func checkRef(path string, r BackupPartRef) error {
+	for _, v := range []struct{ name, s string }{{"plugin", r.PluginID}, {"kind", r.Kind}, {"source", r.Source}, {"source id", r.SourceID}} {
+		if v.s == "" {
+			return invalid("%s has no %s", path, v.name)
+		}
+		if err := cleanText(path+" "+v.name, v.s, singleLine); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// RestoreAlias merges one alias of a backup. Its survivor is resolved by
+// identity (an item, or the item that identity is an alias of); a missing
+// survivor leaves it out. An alias identity that is an item or an alias
+// already is skipped. The alias must be of the survivor's plugin and kind,
+// and a manual identity is never an alias (ErrInvalid otherwise).
+func (l *Library) RestoreAlias(ctx context.Context, ba BackupAlias) (RestoreMerge, error) {
+	if err := checkRef("alias", ba.Alias); err != nil {
+		return 0, err
+	}
+	if err := checkRef("alias item", ba.Item); err != nil {
+		return 0, err
+	}
+	if ba.Alias.PluginID != ba.Item.PluginID || ba.Alias.Kind != ba.Item.Kind {
+		return 0, invalid("an alias must be of its item's plugin and kind")
+	}
+	if ba.Alias.Source == manualSource {
+		return 0, invalid("a manual identity is not an alias")
+	}
+	tx, err := l.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, fmt.Errorf("restore alias: %w", err)
+	}
+	defer tx.Rollback()
+	a := ba.Alias
+	taken, err := identityOwner(ctx, tx, a.PluginID, a.Kind, a.Source, a.SourceID)
+	if err != nil {
+		return 0, fmt.Errorf("restore alias: %w", err)
+	}
+	if taken != 0 {
+		return MergeSkipped, nil
+	}
+	owner, err := identityOwner(ctx, tx, ba.Item.PluginID, ba.Item.Kind, ba.Item.Source, ba.Item.SourceID)
+	if err != nil {
+		return 0, fmt.Errorf("restore alias: %w", err)
+	}
+	if owner == 0 {
+		return MergeLeftOut, nil
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO item_aliases(item_id, plugin_id, kind, source, source_id) VALUES (?,?,?,?,?)`,
+		owner, a.PluginID, a.Kind, a.Source, a.SourceID); err != nil {
+		return 0, fmt.Errorf("restore alias: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, fmt.Errorf("restore alias: %w", err)
+	}
+	return MergeAdded, nil
+}
+
+// RestoreDismissedPair merges one dismissed duplicate pair of a backup. Both
+// items are resolved by identity (an item, or the item that identity is an
+// alias of); a pair with a missing item, or whose identities resolve to one
+// item, is left out, and one present already is skipped. An invalid identity
+// or stamp is ErrInvalid.
+func (l *Library) RestoreDismissedPair(ctx context.Context, bp BackupDismissedPair) (RestoreMerge, error) {
+	if err := checkRef("dismissed pair", bp.A); err != nil {
+		return 0, err
+	}
+	if err := checkRef("dismissed pair", bp.B); err != nil {
+		return 0, err
+	}
+	stamp, err := restoreStamp("dismissed_at", bp.DismissedAt)
+	if err != nil {
+		return 0, err
+	}
+	tx, err := l.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, fmt.Errorf("restore dismissed pair: %w", err)
+	}
+	defer tx.Rollback()
+	var ids [2]int64
+	for i, r := range []BackupPartRef{bp.A, bp.B} {
+		if ids[i], err = identityOwner(ctx, tx, r.PluginID, r.Kind, r.Source, r.SourceID); err != nil {
+			return 0, fmt.Errorf("restore dismissed pair: %w", err)
+		}
+	}
+	a, b := min(ids[0], ids[1]), max(ids[0], ids[1])
+	if a == 0 || a == b {
+		return MergeLeftOut, nil
+	}
+	res, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO dismissed_duplicates(item_a, item_b, dismissed_at)
+		VALUES (?1, ?2, COALESCE(?3, `+nowSQL+`))`, a, b, orNow(stamp))
+	if err != nil {
+		return 0, fmt.Errorf("restore dismissed pair: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("restore dismissed pair: %w", err)
+	}
+	if n == 0 {
+		return MergeSkipped, nil
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, fmt.Errorf("restore dismissed pair: %w", err)
+	}
+	return MergeAdded, nil
 }

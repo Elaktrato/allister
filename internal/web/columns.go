@@ -4,7 +4,8 @@ package web
 // always there; every other column is offered by the kind: its declared
 // Columns (plugin data, see plugin.ColumnDef) or, without them, the table
 // derived from its schema. Which offered columns are shown, and in which
-// order, starts with the kind's defaults (see visibleColumns).
+// order, starts with the kind's defaults (see visibleColumns). Every kind
+// also offers the owner's own tags (userTagsColumn), hidden by default.
 
 import (
 	"context"
@@ -31,10 +32,25 @@ var coreColumnLabels = map[string]string{
 	plugin.ColumnStatus: "Status", plugin.ColumnUpdated: "Updated",
 }
 
+// userTagsColumn is the key of the own-tags column (a core column of the
+// web layer, not of the plugin contract: no kind declares it).
+const userTagsColumn = "user_tags"
+
 // kindColumns are the columns kind k offers, in order: its declared Columns,
 // else the derived table (the type field from sm, the sortable fields from
-// md, progress, score, status, and updated from lg), all shown by default.
+// md, progress, score, status, and updated from lg), all shown by default;
+// then the own tags, from md, not shown by default (left out when a field of
+// the kind has the same key).
 func kindColumns(k plugin.KindDef) []listColumn {
+	out := pluginColumns(k)
+	if !slices.ContainsFunc(out, func(c listColumn) bool { return c.Key == userTagsColumn }) {
+		out = append(out, listColumn{Key: userTagsColumn, Label: "Own tags", Hide: "md", Core: userTagsColumn})
+	}
+	return out
+}
+
+// pluginColumns are the columns of the kind's plugin data (see kindColumns).
+func pluginColumns(k plugin.KindDef) []listColumn {
 	if len(k.Columns) == 0 {
 		return derivedColumns(k)
 	}

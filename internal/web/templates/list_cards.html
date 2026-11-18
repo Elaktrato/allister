@@ -12,12 +12,15 @@
 <div data-card class="relative aspect-[2/3] overflow-hidden rounded-lg bg-slate-800">
   {{if .Cover}}<img src="{{.Cover}}" alt="" loading="lazy" class="absolute inset-0 h-full w-full object-cover">
   {{else}}<span class="absolute inset-0 flex items-center justify-center bg-slate-800" aria-hidden="true"><span class="icon text-[2rem] text-slate-500" aria-hidden="true">image</span></span>{{end}}
+  {{with .SelectID}}<label class="absolute top-0 left-0 p-2"><input type="checkbox" name="ids" value="{{.}}" form="bulk-form" data-bulk-row class="h-4 w-4 accent-indigo-500"><span class="sr-only">Select {{$.Title}}</span></label>{{end}}
   {{with .BadgeLabel}}<span class="absolute left-0 top-0 flex max-w-[70%] items-center gap-1 rounded-br-lg bg-slate-950/90 px-1.5 py-0.5 text-xs text-slate-300" title="{{.}}"><span class="icon text-[0.875rem]" aria-hidden="true">{{$.BadgeIcon}}</span><span class="truncate">{{.}}</span></span>{{end}}
   {{/* the status corner: a colored triangle, the label as its accessible name */}}
   <span class="absolute right-0 top-0 h-0 w-0 border-l-[1.5rem] border-t-[1.5rem] border-l-transparent{{template "status_corner" .StatusKey}}" title="{{.Status}}"><span class="sr-only">{{.Status}}</span></span>
   <div class="absolute inset-x-0 bottom-0 bg-slate-950/90 p-2.5">
     <a href="{{.Href}}" class="line-clamp-2 text-sm font-medium leading-snug text-white hover:underline">{{.Title}}</a>
+    {{if or .NextLabel (ge .Aired 1)}}<div class="mt-1 flex flex-wrap items-center gap-x-2 text-xs">{{with .NextLabel}}<span data-next class="font-medium text-slate-100">{{.}}</span>{{end}}{{if ge .Aired 1}}<span class="rounded bg-slate-800 px-1.5 text-indigo-300">{{.Aired}} aired</span>{{end}}</div>{{end}}
     {{if .Series}}<a href="{{.SeriesHref}}" title="{{if .SeriesSpinOff}}Spin-off {{.SeriesPos}}{{else}}Part {{.SeriesPos}}{{end}} of {{.Series}}" class="mt-1 inline-block max-w-full truncate rounded bg-slate-800 px-1.5 text-xs text-indigo-300 hover:underline">{{if .SeriesSpinOff}}Spin-off · {{.Series}}{{else}}{{.SeriesPos}} · {{.Series}}{{end}}</a>{{end}}
+    {{if or .RepeatMarker (ge .Repeats 2)}}<div class="mt-1 flex flex-wrap gap-1 text-xs">{{with .RepeatMarker}}<span class="rounded bg-slate-800 px-1.5 text-indigo-300">{{.}}</span>{{end}}{{if ge .Repeats 2}}<span title="{{.RepeatsTitle}}" class="rounded bg-slate-800 px-1.5 text-slate-300">x{{.Repeats}}</span>{{end}}</div>{{end}}
     <div class="mt-1 flex items-center justify-between gap-2 text-xs text-slate-300">
       <span class="min-w-0">{{range .Progress}}<span>{{if $.ShowLabels}}<span class="text-slate-400">{{.Label}}</span> {{else}}<span class="sr-only">{{.Label}}</span> {{end}}{{.Value}}</span> {{end}}</span>
       <span class="flex shrink-0 items-center gap-1">
@@ -29,6 +32,7 @@
           <button type="submit" class="rounded bg-slate-800/80 px-2 py-0.5 text-sm hover:bg-slate-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500" aria-label="{{.IncrementLabel}}">+1</button>
         </form>
         {{end}}
+        {{with .NoteURL}}<a href="{{.}}" hx-get="{{.}}" hx-target="#dialog-slot" hx-swap="innerHTML" class="rounded bg-slate-800/80 px-1.5 py-0.5 text-indigo-300 hover:bg-slate-700 hover:underline">{{$.NoteLabel}}</a>{{end}}
       </span>
     </div>
   </div>

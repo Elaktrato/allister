@@ -125,7 +125,7 @@ func TestBackupDownloadStreamsZipWithHeaders(t *testing.T) {
 		t.Fatalf("headers = %v", h)
 	}
 	head, items, names := backupJSON(t, rec.Body.Bytes())
-	if head["format"] != "allister.backup" || head["format_version"] != float64(1) {
+	if head["format"] != "allister.backup" || head["format_version"] != float64(3) {
 		t.Fatalf("head = %v", head)
 	}
 	plugins, _ := head["plugins"].([]any)
@@ -251,7 +251,7 @@ func TestBackupRestoreRefusals(t *testing.T) {
 	}{
 		{"not a zip", []byte("<html>hello</html>"), "not an Allister backup"},
 		{"no backup.json", zipWith("x.txt", "x"), "not an Allister backup"},
-		{"newer format", zipWith("backup.json", `{"format":"allister.backup","format_version":2,"items":[]}`), "format version 2"},
+		{"newer format", zipWith("backup.json", `{"format":"allister.backup","format_version":4,"items":[]}`), "format version 4"},
 		{"other format", zipWith("backup.json", `{"format":"x","format_version":1,"items":[]}`), "not an Allister backup"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -376,7 +376,7 @@ func TestBackupRoundTripsRealAnimePlugin(t *testing.T) {
 	a := newEnv(t)
 	d := anime.ItemData(a.fp.anime)
 	id, err := a.lib.AddToList(context.Background(), "anime", "anime", d, library.Entry{Status: library.Active, Rating: ip(9),
-		Progress: map[string]float64{"episode": 5}, Comment: "c <b>"})
+		Progress: map[string]float64{"episode": 5}, Notes: "c <b>"})
 	if err != nil {
 		t.Fatal(err)
 	}

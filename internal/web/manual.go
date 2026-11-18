@@ -79,17 +79,20 @@ func (s *server) newManualForm(r *http.Request, m plugin.Manifest, k plugin.Kind
 		f.TitleLang = pref
 	}
 	f.Heading, f.Submit = "Add "+lowerFirst(k.Label)+" manually", "Add"
-	uid := seriesParam(r)
-	f.Action, f.CancelURL = withSeriesParam(manualPath(m, k.Key), uid), "/"+url.PathEscape(m.ID)
-	if uid != "" {
-		f.CancelURL = seriesURL(m.ID, uid)
+	carry := carriedAdd(r)
+	f.Action, f.CancelURL = carry.on(manualPath(m, k.Key)), "/"+url.PathEscape(m.ID)
+	switch {
+	case carry.series != "":
+		f.CancelURL = seriesURL(m.ID, carry.series)
+	case carry.list > 0:
+		f.CancelURL = customListURL(carry.list)
 	}
 	if f.Status == "" {
 		f.Status = string(library.Planned)
 	}
 	if len(m.Kinds) > 1 {
 		for _, x := range m.Kinds {
-			f.Kinds = append(f.Kinds, choice{Value: withSeriesParam(manualPath(m, x.Key), uid), Label: x.Label, Selected: x.Key == k.Key})
+			f.Kinds = append(f.Kinds, choice{Value: carry.on(manualPath(m, x.Key)), Label: x.Label, Selected: x.Key == k.Key})
 		}
 	}
 	return f
@@ -128,8 +131,12 @@ func (s *server) postManualNew(w http.ResponseWriter, r *http.Request, pluginID 
 	}
 	defer cleanupForm(r)
 	ctx := r.Context()
-	// the target series is checked before anything is saved
+	// the target series and list are checked before anything is saved
 	ser, ok := s.targetSeries(w, r, m.ID, k)
+	if !ok {
+		return
+	}
+	lst, ok := s.targetList(w, r)
 	if !ok {
 		return
 	}
@@ -218,9 +225,15 @@ func (s *server) postManualNew(w http.ResponseWriter, r *http.Request, pluginID 
 		return
 	}
 	overview := itemURL(m, manualSource, id, k.Key)
-	if ser != nil {
-		s.attachAfterAdd(w, r, m, ser, item, overview)
+	if lst != nil && !s.joinAfterAdd(w, r, lst, item, overview) {
 		return
 	}
-	http.Redirect(w, r, overview, http.StatusSeeOther)
+	switch {
+	case ser != nil:
+		s.attachAfterAdd(w, r, m, ser, item, overview)
+	case lst != nil:
+		http.Redirect(w, r, customListURL(lst.ID), http.StatusSeeOther)
+	default:
+		http.Redirect(w, r, overview, http.StatusSeeOther)
+	}
 }

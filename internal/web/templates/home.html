@@ -1,12 +1,12 @@
 {{/* The home page: four sections across the enabled plugins, each hidden when
-      it has nothing to show. In progress reuses the list's cards. */}}
+      it has nothing to show. Up next reuses the list's cards. */}}
 {{define "title"}}Home - Allister{{end}}
 {{define "content"}}
 <h1 class="mb-6 text-3xl font-semibold">Home</h1>
 {{if .Cards}}
 <section aria-labelledby="home-active" class="mb-8">
   <div class="mb-3 flex flex-wrap items-baseline gap-x-4 gap-y-1">
-    <h2 id="home-active" class="text-xl font-semibold">In progress</h2>
+    <h2 id="home-active" class="text-xl font-semibold">Up next</h2>
     <span class="ml-auto flex flex-wrap gap-x-3 text-sm">{{range .ActiveAll}}<a href="{{.Href}}" class="text-indigo-300 hover:underline">All active in {{.Label}}</a>{{end}}</span>
   </div>
   <div data-cards class="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
@@ -49,7 +49,7 @@
   <h2 id="home-recent" class="mb-3 text-xl font-semibold">Recently updated</h2>
   <ul class="divide-y divide-slate-800 rounded border border-slate-800 bg-slate-900">
     {{range .Recent}}
-    <li class="flex items-center gap-3 px-3 py-2 text-sm"><span class="icon text-[1rem] text-slate-400" aria-hidden="true" title="{{.BadgeLabel}}">{{.BadgeIcon}}</span><a href="{{.Href}}" class="min-w-0 flex-1 truncate font-medium text-slate-100 hover:underline">{{.Title}}</a><span class="shrink-0 {{template "status_tone" .StatusKey}}">{{.Status}}</span><time datetime="{{.Updated}}" class="hidden shrink-0 text-slate-400 sm:inline">{{.Updated}}</time></li>
+    <li class="flex items-center gap-3 px-3 py-2 text-sm"><span class="icon text-[1rem] text-slate-400" aria-hidden="true" title="{{.BadgeLabel}}">{{.BadgeIcon}}</span><a href="{{.Href}}" class="min-w-0 flex-1 truncate font-medium text-slate-100 hover:underline">{{.Title}}</a>{{with .RepeatMarker}}<span class="shrink-0 rounded bg-slate-800 px-1.5 text-xs text-indigo-300">{{.}}</span>{{end}}<span class="shrink-0 {{template "status_tone" .StatusKey}}">{{.Status}}</span><time datetime="{{.Updated}}" class="hidden shrink-0 text-slate-400 sm:inline">{{.Updated}}</time></li>
     {{end}}
   </ul>
 </section>

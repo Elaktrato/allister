@@ -1,0 +1,64 @@
+{{define "title"}}{{.Title}} - Allister{{end}}
+{{define "content"}}
+<h1 class="mb-6 text-2xl font-semibold">{{.Title}}</h1>
+{{with .Merge}}
+<div class="mb-4 max-w-4xl space-y-2 text-sm">
+  {{if .Error}}<p role="alert" class="rounded border border-amber-700 bg-amber-950 p-3 text-amber-200">{{.Error}}</p>{{end}}
+  <p class="rounded border border-slate-700 bg-slate-900 px-3 py-2 text-amber-300">{{.Warning}}</p>
+  <p class="text-slate-300">{{.Moves}}</p>
+  <a href="{{.SwapURL}}" class="text-indigo-300 hover:underline">Swap: keep the other item instead</a>
+</div>
+{{end}}
+{{if and .Empty (not .Merge)}}
+<p class="mb-4 text-slate-300">This item is up to date with {{.Source}}.</p>
+<a href="{{.Return}}" class="text-indigo-300 hover:underline">Back to the item</a>
+{{else}}
+<form method="post" action="{{.Action}}" class="max-w-4xl space-y-4">
+  {{with .Merge}}<input type="hidden" name="keep" value="{{.KeepID}}"><input type="hidden" name="other" value="{{.OtherID}}">{{end}}
+  {{if .Empty}}<p class="text-sm text-slate-400">Nothing differs in the details of the two items.</p>
+  {{else}}<p class="text-sm text-slate-400">Tick what to take from {{.Source}}; everything else stays as it is.</p>{{end}}
+  <ul class="space-y-3">
+    {{range .Rows}}
+    <li class="rounded border border-slate-800 bg-slate-900 p-3">
+      <label class="flex items-center gap-2 font-medium">
+        <input type="checkbox" name="key" value="{{.Key}}"{{if .Checked}} checked{{end}} class="accent-indigo-500">
+        {{.Label}}
+      </label>
+      <div class="mt-2 grid gap-3 text-sm sm:grid-cols-2">
+        <div class="min-w-0">
+          <p class="text-xs uppercase tracking-wide text-slate-500">Current</p>
+          {{if .Cover}}{{template "change_cover" .StoredCover}}{{else}}{{template "change_value" .Stored}}{{end}}
+        </div>
+        <div class="min-w-0">
+          <p class="text-xs uppercase tracking-wide text-slate-500">From {{$.Source}}</p>
+          {{if .Cover}}{{template "change_cover" .IncomingCover}}{{else}}{{template "change_value" .Incoming}}{{end}}
+        </div>
+      </div>
+      {{with .Added}}<p class="mt-2 break-words text-xs text-emerald-400">Added: {{range $i, $a := .}}{{if $i}}, {{end}}{{$a}}{{end}}</p>{{end}}
+      {{with .Removed}}<p class="mt-1 break-words text-xs text-red-300">Removed: {{range $i, $a := .}}{{if $i}}, {{end}}{{$a}}{{end}}</p>{{end}}
+    </li>
+    {{end}}
+  </ul>
+  <div class="flex flex-wrap items-center gap-3">
+    <button type="submit" class="rounded bg-indigo-600 px-4 py-2 font-medium hover:bg-indigo-500">{{if .Merge}}Merge{{else}}Apply selected{{end}}</button>
+    <a href="{{.Return}}" class="text-indigo-300 hover:underline">Cancel</a>
+  </div>
+</form>
+{{end}}
+{{end}}
+
+{{define "change_value"}}
+{{- if not .}}<p class="text-slate-500">(none)</p>
+{{- else}}{{with fold .}}<p class="whitespace-pre-line break-words text-slate-300">{{.}}</p>
+<details class="mt-1">
+  <summary class="cursor-pointer text-indigo-300">Show all</summary>
+  <p class="mt-1 whitespace-pre-line break-words text-slate-300">{{$}}</p>
+</details>
+{{- else}}<p class="whitespace-pre-line break-words text-slate-300">{{.}}</p>{{end}}
+{{- end}}
+{{- end}}
+
+{{define "change_cover"}}
+{{- if .}}<img src="{{.}}" alt="" loading="lazy" class="mt-1 h-28 w-20 rounded object-cover">
+{{- else}}<p class="text-slate-500">(none)</p>{{end}}
+{{- end}}

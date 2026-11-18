@@ -18,7 +18,7 @@ func manualBook(t *testing.T, e *env) int64 {
 	d.ExternalIDs = map[string]string{"isbn": "111", "foo": "keep"}
 	d.Genres = []string{"Old"}
 	d.Relations = []plugin.Relation{{Kind: "other", Item: plugin.ItemSummary{Source: "books", ID: "r0"}}}
-	id, err := e.lib.AddToList(bg, "book", "book", d, Entry{Status: Completed, Rating: ip(0), Comment: "c", Progress: map[string]float64{"pages": 250}}, WithSyncState("done"))
+	id, err := e.lib.AddToList(bg, "book", "book", d, Entry{Status: Completed, Rating: ip(0), Notes: "c", Progress: map[string]float64{"pages": 250}}, WithSyncState("done"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -39,7 +39,7 @@ const oldStamp = "2001-02-03T04:05:06Z"
 func entryStamp(t *testing.T, e *env, id int64) string {
 	t.Helper()
 	var s string
-	if err := e.db.QueryRow(`SELECT updated_at FROM entries WHERE item_id = ?`, id).Scan(&s); err != nil {
+	if err := e.db.QueryRow(`SELECT updated_at FROM entry_state WHERE item_id = ?`, id).Scan(&s); err != nil {
 		t.Fatal(err)
 	}
 	return s
@@ -49,9 +49,7 @@ func TestConvertToSourceReplacesItemInPlace(t *testing.T) {
 	e := newEnv(t)
 	id := manualBook(t, e)
 	before := mustEntry(t, e.lib, id)
-	if _, err := e.db.Exec(`UPDATE entries SET updated_at = ? WHERE item_id = ?`, oldStamp, id); err != nil {
-		t.Fatal(err)
-	}
+	setEntryUpdated(t, e.db, oldStamp, id)
 	d := sourced("b700", fp(400))
 	d.ExternalIDs = map[string]string{"isbn": "222"}
 	if err := e.lib.ConvertToSource(bg, id, d); err != nil {
@@ -110,14 +108,12 @@ func TestConvertToSourceClampsProgressOnlyWhenExceeded(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			e := newEnv(t)
 			id := manualBook(t, e)
-			if _, err := e.db.Exec(`UPDATE entries SET updated_at = ? WHERE item_id = ?`, oldStamp, id); err != nil {
-				t.Fatal(err)
-			}
+			setEntryUpdated(t, e.db, oldStamp, id)
 			if err := e.lib.ConvertToSource(bg, id, sourced("b1", c.pages)); err != nil {
 				t.Fatal(err)
 			}
 			en := mustEntry(t, e.lib, id)
-			if en.Progress["pages"] != c.want || en.Status != Completed || en.Comment != "c" || en.Rating == nil || *en.Rating != 0 {
+			if en.Progress["pages"] != c.want || en.Status != Completed || en.Notes != "c" || en.Rating == nil || *en.Rating != 0 {
 				t.Fatalf("entry %+v", en)
 			}
 			if touched := entryStamp(t, e, id) != oldStamp; touched != c.clamped {
@@ -211,7 +207,7 @@ func TestConvertToSourceRollsBackClampOnLateFailure(t *testing.T) {
 	if after := mustEntry(t, e.lib, id); !reflect.DeepEqual(after, beforeEntry) {
 		t.Fatalf("entry not rolled back: %+v -> %+v", beforeEntry, after)
 	}
-	if n := count(t, e.db, `SELECT count(*) FROM entry_progress WHERE item_id = ? AND value = 250`, id); n != 1 {
+	if n := count(t, e.db, `SELECT count(*) FROM display_progress WHERE item_id = ? AND value = 250`, id); n != 1 {
 		t.Fatal("clamp not rolled back")
 	}
 }

@@ -556,8 +556,11 @@ func TestFormBodyTooLarge(t *testing.T) {
 	id := e.addEntry(t, anilist.AniList, "1", nil, library.Active, 0)
 	big := okForm()
 	big.Set("comment", strings.Repeat("a", 70<<10))
-	for _, path := range []string{"/list/" + idStr(id) + "/edit", "/anime/anilist/1535/add", "/list/" + idStr(id) + "/remove"} {
-		if rec := e.do("POST", path, big, false); rec.Code != 413 {
+	huge := okForm() // the forms with long texts have a larger cap
+	huge.Set("comment", strings.Repeat("a", maxTextFormBytes))
+	for path, form := range map[string]url.Values{"/list/" + idStr(id) + "/edit": huge, "/anime/anilist/1535/add": huge,
+		"/list/" + idStr(id) + "/remove": big} {
+		if rec := e.do("POST", path, form, false); rec.Code != 413 {
 			t.Errorf("%s: %d", path, rec.Code)
 		}
 	}
@@ -915,7 +918,7 @@ func TestListHostileTitleEscaped(t *testing.T) {
 	e := newFixtureEnv(t)
 	d := tvShow("1", `<script>alert(1)</script>`)
 	d.Fields["type"] = plugin.FieldValue{Text: "series"}
-	e.addFixture(t, "tv", "show", d, library.Entry{Status: library.Active, Comment: "<b>x</b>"})
+	e.addFixture(t, "tv", "show", d, library.Entry{Status: library.Active, Notes: "<b>x</b>"})
 	b := e.get("/tv?view=table").Body.String()
 	mustContain(t, b, "&lt;script&gt;alert(1)&lt;/script&gt;")
 	mustNotContain(t, b, "<script>alert(1)")

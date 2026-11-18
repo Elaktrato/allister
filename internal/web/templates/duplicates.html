@@ -1,0 +1,43 @@
+{{define "title"}}{{.Heading}} - Allister{{end}}
+{{define "content"}}
+<div class="mb-5 flex flex-wrap items-center gap-x-4 gap-y-3">
+  <h1 class="text-3xl font-semibold">{{.Heading}}</h1>
+  <a href="{{.ListURL}}" class="ml-auto text-indigo-300 hover:underline">Back to the list</a>
+</div>
+{{if .Rows}}
+<p class="mb-4 max-w-3xl text-sm text-slate-400">Items that share an id or a title. Merge the two into one, or mark the pair as not a duplicate to hide it.</p>
+<ul class="space-y-3">
+  {{range .Rows}}
+  <li class="rounded border border-slate-800 bg-slate-900 p-3">
+    <p class="mb-2 text-xs uppercase tracking-wide text-slate-500">{{.Reason}}</p>
+    <div class="grid gap-3 sm:grid-cols-2">
+      {{template "duplicate_side" .A}}
+      {{template "duplicate_side" .B}}
+    </div>
+    <div class="mt-3 flex flex-wrap items-center gap-3">
+      <a href="{{.MergeURL}}" class="rounded bg-indigo-600 px-3 py-1.5 text-sm font-medium hover:bg-indigo-500">Compare &amp; merge</a>
+      <form method="post" action="{{$.ListURL}}/duplicates/dismiss">
+        <input type="hidden" name="a" value="{{.AID}}">
+        <input type="hidden" name="b" value="{{.BID}}">
+        <button type="submit" class="rounded px-3 py-1.5 text-sm text-slate-300 hover:bg-slate-800">Not a duplicate</button>
+      </form>
+    </div>
+  </li>
+  {{end}}
+</ul>
+{{else}}
+<p class="text-slate-300">No possible duplicates.</p>
+{{end}}
+{{end}}
+
+{{define "duplicate_side"}}
+<div class="flex min-w-0 gap-3">
+  {{if .Cover}}<img src="{{.Cover}}" alt="" loading="lazy" class="h-20 w-14 rounded object-cover">
+  {{else}}<div class="h-20 w-14 rounded bg-slate-800" aria-hidden="true"></div>{{end}}
+  <div class="min-w-0">
+    <a href="{{.Href}}" class="break-words font-medium text-indigo-300 hover:underline">{{.Title}}</a>
+    <p class="text-sm text-slate-400">{{.Source}}</p>
+    <p class="text-sm text-slate-300">{{.Status}}</p>
+  </div>
+</div>
+{{end}}

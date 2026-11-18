@@ -35,7 +35,12 @@ const progressShorthand = "progress"
 // into the dialog on errors. Progress is keyed by progress key.
 type entryValues struct {
 	Status, Rating, StartedOn, FinishedOn, Comment string
-	Progress                                       map[string]string
+	// Review is the display run's review (the edit dialog only; the add
+	// and manual forms do not post it, a new run starts without one).
+	Review   string
+	Progress map[string]string
+	// UserTags are the entry's own tag names (the edit dialog only).
+	UserTags []string
 	// orphan is a non-empty shorthand value of a kind without a primary key.
 	orphan string
 }
@@ -69,17 +74,15 @@ type progressContext struct {
 	Fields map[string]plugin.FieldValue
 }
 
-// readEntryValues reads the raw form values. The comment is trimmed and
-// capped at library.MaxCommentRunes. A repeated parameter counts with its
+// readEntryValues reads the raw form values. The comment (the entry's
+// notes) and the review are trimmed, with line breaks as LF (lfBreaks); their length is the library's check
+// (library.MaxNotesRunes, library.MaxReviewRunes). A repeated parameter counts with its
 // FIRST value (PostFormValue). When both progress.<primary> and the
 // progressShorthand are sent, the explicit progress.<primary> wins.
 func readEntryValues(kind plugin.KindDef, r *http.Request) entryValues {
 	get := func(k string) string { return strings.TrimSpace(r.PostFormValue(k)) }
 	v := entryValues{Status: get("status"), Rating: get("rating"), StartedOn: get("started_on"),
-		FinishedOn: get("finished_on"), Comment: get("comment"), Progress: map[string]string{}}
-	if rs := []rune(v.Comment); len(rs) > library.MaxCommentRunes {
-		v.Comment = strings.TrimSpace(string(rs[:library.MaxCommentRunes]))
-	}
+		FinishedOn: get("finished_on"), Comment: lfBreaks(get("comment")), Review: lfBreaks(get("review")), Progress: map[string]string{}}
 	for name := range r.PostForm {
 		if key, ok := strings.CutPrefix(name, progressField); ok {
 			v.Progress[key] = get(name)
@@ -159,11 +162,11 @@ func parseProgress(def plugin.ProgressDef, raw string) (float64, string) {
 // is known. Field names: status (a core status class), rating (blank or
 // 0..10), progress.<key> per active progress key (plus the
 // progressShorthand), started_on and finished_on (YYYY-MM-DD calendar days,
-// stored as the UTC midnight of the typed day) and comment. msg is a
+// stored as the UTC midnight of the typed day), comment and review. msg is a
 // user-facing message, non-empty on error.
 func (s *server) parseEntryForm(kind plugin.KindDef, keys []string, r *http.Request) (entryValues, library.Entry, string) {
 	v := readEntryValues(kind, r)
-	e := library.Entry{Status: library.Status(v.Status), Comment: v.Comment, Progress: map[string]float64{}}
+	e := library.Entry{Status: library.Status(v.Status), Notes: v.Comment, Review: v.Review, Progress: map[string]float64{}}
 	if !slices.Contains(library.Statuses(), e.Status) {
 		return v, e, "Please choose a status."
 	}
@@ -494,7 +497,7 @@ func (s *server) getAdd(w http.ResponseWriter, r *http.Request, pluginID string)
 	if !ok {
 		return
 	}
-	uid := seriesParam(r)
+	carry := carriedAdd(r)
 	v := entryValues{Status: string(library.Planned)}
 	if !isPartialRequest(r) {
 		s.showItem(w, r, ref, itemExtras{Dialog: &entryForm{entryValues: v}, UseCache: true}, http.StatusOK)
@@ -513,7 +516,7 @@ func (s *server) getAdd(w http.ResponseWriter, r *http.Request, pluginID string)
 		return
 	}
 	f := t.form(v)
-	f.Action = withSeriesParam(f.Action, uid)
+	f.Action = carry.on(f.Action)
 	if t.entry != nil {
 		f.Error, f.ExistingURL = alreadyInList(t.kind), itemURL(m, t.ref.Source, t.ref.ID, t.kind.Key)
 		s.renderPartialStatus(w, http.StatusConflict, "item", "add_dialog", f)
@@ -528,7 +531,7 @@ func (s *server) getAdd(w http.ResponseWriter, r *http.Request, pluginID string)
 // totals, then save.
 func (s *server) postAdd(w http.ResponseWriter, r *http.Request, pluginID string) {
 	m, ref, ok := s.addRef(w, r, pluginID)
-	if !ok || !parseForm(w, r) {
+	if !ok || !parseTextForm(w, r) {
 		return
 	}
 	ctx := r.Context()
@@ -537,14 +540,18 @@ func (s *server) postAdd(w http.ResponseWriter, r *http.Request, pluginID string
 		s.addFailure(w, r, m, ref, readEntryValues(kindFor(m, ref), r), err)
 		return
 	}
-	// the target series is checked before anything is saved
+	// the target series and list are checked before anything is saved
 	ser, ok := s.addSeries(w, r, t)
 	if !ok {
 		return
 	}
+	lst, ok := s.targetList(w, r)
+	if !ok {
+		return
+	}
 	if t.entry != nil {
-		if ser != nil {
-			s.attachToSeries(w, r, t, ser)
+		if ser != nil || lst != nil {
+			s.joinExisting(w, r, t, ser, lst)
 			return
 		}
 		s.addConflict(w, r, t, readEntryValues(t.kind, r))
@@ -561,8 +568,8 @@ func (s *server) postAdd(w http.ResponseWriter, r *http.Request, pluginID string
 			return
 		}
 		if t.entry != nil {
-			if ser != nil {
-				s.attachToSeries(w, r, t, ser)
+			if ser != nil || lst != nil {
+				s.joinExisting(w, r, t, ser, lst)
 				return
 			}
 			s.addConflict(w, r, t, v)
@@ -581,7 +588,7 @@ func (s *server) postAdd(w http.ResponseWriter, r *http.Request, pluginID string
 		switch {
 		case err == nil:
 			s.enqueueSync(ctx, m.ID, id)
-			s.addFinished(w, r, t, id, ser)
+			s.addFinished(w, r, t, id, ser, lst)
 			return
 		case errors.Is(err, library.ErrInvalid):
 			f := t.form(v)
@@ -600,18 +607,18 @@ func (s *server) postAdd(w http.ResponseWriter, r *http.Request, pluginID string
 			return
 		}
 	}
-	s.attachEntry(w, r, t, v, entry, ser)
+	s.attachEntry(w, r, t, v, entry, ser, lst)
 }
 
 // attachEntry gives an already saved item its list entry (no re-save, no
 // job) with library.CreateEntry, which inserts only when the item has no
 // entry yet: an entry that appeared meanwhile is the same 409 as before.
-func (s *server) attachEntry(w http.ResponseWriter, r *http.Request, t *addTarget, v entryValues, entry library.Entry, ser *library.Series) {
+func (s *server) attachEntry(w http.ResponseWriter, r *http.Request, t *addTarget, v entryValues, entry library.Entry, ser *library.Series, lst *library.List) {
 	entry.ItemID = t.saved.ID
 	err := s.deps.Library.CreateEntry(r.Context(), entry)
 	switch {
 	case err == nil:
-		s.addFinished(w, r, t, t.saved.ID, ser)
+		s.addFinished(w, r, t, t.saved.ID, ser, lst)
 	case errors.Is(err, library.ErrEntryExists):
 		s.addConflict(w, r, t, v)
 	case errors.Is(err, library.ErrInvalid):
@@ -648,8 +655,8 @@ func (s *server) enqueueSync(ctx context.Context, pluginID string, itemID int64)
 	}
 }
 
-// redirectAfterAdd redirects to target (the plugin's list or the series): htmx would swap a 303 target into
-// the dialog, so it gets HX-Redirect with 204.
+// redirectAfterAdd redirects to target (the plugin's list, the series or the custom list; also after a bulk change): htmx
+// would swap a 303 target into the dialog, so it gets HX-Redirect with 204.
 func (s *server) redirectAfterAdd(w http.ResponseWriter, r *http.Request, target string) {
 	if isPartialRequest(r) {
 		w.Header().Set("HX-Redirect", target)

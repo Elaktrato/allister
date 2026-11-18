@@ -97,7 +97,9 @@ const (
 // only (SQLite lower()); other scripts match by exact case.
 //
 // Genres and Tags match case-insensitively on the term key; "any" (default)
-// needs one selected term, GenresAll/TagsAll every selected term.
+// needs one selected term, GenresAll/TagsAll every selected term. UserTags
+// (the owner's own tags, offered by every kind) match the same way on the
+// tag's name key, UserTagsAll needing every selected tag.
 //
 // The rating conditions RatingMin/RatingMax (an inclusive range), Unrated
 // (rating NULL) and RatingZero (rating explicitly 0) are alternatives: an
@@ -110,6 +112,8 @@ type Query struct {
 	Filters            []Filter
 	Genres, Tags       []string
 	GenresAll, TagsAll bool
+	UserTags           []string
+	UserTagsAll        bool
 	RatingMin          *int
 	RatingMax          *int
 	Unrated            bool
@@ -155,6 +159,11 @@ type Row struct {
 	Entry Entry
 	Title string
 	Flags RowFlags
+	// UserTags are the entry's own tags (ordered by name key), nil for none.
+	UserTags []string
+	// PastRuns are the entry's runs other than the display run, newest
+	// first. Only StatsRows fills them; every other loader leaves it nil.
+	PastRuns []Run
 }
 
 // Page is one page of rows. PageNo is the page actually returned (requests
@@ -232,7 +241,7 @@ type compiled struct {
 	unmatched      clause
 }
 
-const fromSQL = ` FROM items JOIN ` + tableEntries + ` e ON e.item_id = items.id`
+const fromSQL = ` FROM items JOIN ` + viewEntryState + ` e ON e.item_id = items.id`
 
 // where renders the conditions, skipping the named clauses.
 func (c *compiled) where(skip ...string) (string, []any) {
@@ -323,6 +332,13 @@ func (l *Library) compile(q Query) (*compiled, error) {
 			c.clauses = append(c.clauses, cl)
 		}
 	}
+	cl, ok, err := compileUserTags(q.UserTags, q.UserTagsAll)
+	if err != nil {
+		return nil, err
+	}
+	if ok {
+		c.clauses = append(c.clauses, cl)
+	}
 	if err := c.compileRating(q); err != nil {
 		return nil, err
 	}
@@ -393,12 +409,12 @@ func unmatchedClause(man plugin.Manifest) clause {
 	return clause{sql: `(items.source = 'manual' AND EXISTS (SELECT 1 FROM external_ids x WHERE x.item_id = items.id AND x.type IN (` + placeholders(len(types)) + `)))`, args: args}
 }
 
-func compileTerms(name, kind string, vals []string, all bool, td plugin.TermDef) (clause, bool, error) {
-	var keys []string
+// filterKeys are the distinct term keys of a term filter's values (blanks
+// skipped); nul reports a value with a NUL, which no stored name has.
+func filterKeys(name, kind string, vals []string) (keys []string, nul bool, err error) {
 	seen := map[string]bool{}
-	nul := false
 	for _, v := range vals {
-		k := strings.ToLower(strings.TrimSpace(truncateRunes(v, maxFilterRunes)))
+		k := termKey(strings.TrimSpace(truncateRunes(v, maxFilterRunes)))
 		switch {
 		case k == "":
 		case strings.ContainsRune(k, 0):
@@ -407,18 +423,23 @@ func compileTerms(name, kind string, vals []string, all bool, td plugin.TermDef)
 			seen[k] = true
 			keys = append(keys, k)
 			if len(keys) > maxFilterValues { // fail fast, before looking at the rest
-				return clause{}, false, filterErr(name, "more than %d %s values", maxFilterValues, kind)
+				return nil, false, filterErr(name, "more than %d %s values", maxFilterValues, kind)
 			}
 		}
+	}
+	return keys, nul, nil
+}
+
+func compileTerms(name, kind string, vals []string, all bool, td plugin.TermDef) (clause, bool, error) {
+	keys, nul, err := filterKeys(name, kind, vals)
+	if err != nil {
+		return clause{}, false, err
 	}
 	if len(keys) == 0 && !nul {
 		return clause{}, false, nil
 	}
 	if !td.Enabled || !td.Filterable {
 		return clause{}, false, filterErr(name, "the kind does not offer a %s filter", kind)
-	}
-	if len(keys) > maxFilterValues {
-		return clause{}, false, filterErr(name, "more than %d %s values", maxFilterValues, kind)
 	}
 	if len(keys) == 0 || (nul && all) {
 		return clause{name, `0`, nil}, true, nil
@@ -657,7 +678,7 @@ func (c *compiled) compileProgress(st ProgressState) error {
 
 const (
 	activeSQL = `EXISTS (SELECT 1 FROM json_each(items.progress_keys) j WHERE j.value = ?)`
-	valueSQL  = `COALESCE((SELECT p.value FROM ` + tableEntryProgress + ` p WHERE p.item_id = items.id AND p.key = ?), 0)`
+	valueSQL  = `COALESCE((SELECT p.value FROM ` + viewDisplayProgress + ` p WHERE p.item_id = items.id AND p.key = ?), 0)`
 )
 
 // totalSQL returns the SQL of a track's total and of "is bounded" and the
@@ -709,7 +730,7 @@ func (c *compiled) orderBy(s Sort, lang string) (string, []any, error) {
 		if key == "" {
 			return "", nil, filterErr("progress", "the kind has no primary progress to sort by")
 		}
-		expr = `CASE WHEN ` + activeSQL + ` THEN (SELECT p.value FROM ` + tableEntryProgress + ` p WHERE p.item_id = items.id AND p.key = ?) END`
+		expr = `CASE WHEN ` + activeSQL + ` THEN (SELECT p.value FROM ` + viewDisplayProgress + ` p WHERE p.item_id = items.id AND p.key = ?) END`
 		args, nullsLast = []any{key, key}, true
 	case SortField:
 		var fd *plugin.FieldDef
@@ -804,15 +825,36 @@ var ErrTooManyRows = errors.New("too many rows to aggregate")
 const maxStatsRows = 20000
 
 // StatsRows returns every entry matching q in item-id order, for the
-// statistics aggregation. It fails with ErrTooManyRows above maxStatsRows.
+// statistics aggregation, with each row's PastRuns (every run except the
+// display run) loaded for all rows at once. A status filter matches an entry
+// when ANY of its runs has that status, because the statistics narrow each
+// run by its own status; the caller narrows the display runs. It fails with
+// ErrTooManyRows above maxStatsRows.
 func (l *Library) StatsRows(ctx context.Context, q Query, lang string) ([]Row, error) {
-	return l.statsRows(ctx, q, lang, maxStatsRows)
+	rows, err := l.statsRows(ctx, q, lang, maxStatsRows)
+	if err != nil {
+		return nil, err
+	}
+	if err := l.loadPastRuns(ctx, rows); err != nil {
+		return nil, err
+	}
+	return rows, nil
 }
 
 func (l *Library) statsRows(ctx context.Context, q Query, lang string, limit int) ([]Row, error) {
+	status := q.Status
+	q.Status = nil
+	if status != nil && !validStatus(*status) {
+		return nil, invalid("status %q must be one of planned, active, paused, completed, dropped", *status)
+	}
 	c, err := l.compile(q)
 	if err != nil {
 		return nil, err
+	}
+	if status != nil {
+		c.clauses = append(c.clauses, clause{"status",
+			`e.status = ? OR EXISTS (SELECT 1 FROM ` + tableRuns + ` sr WHERE sr.item_id = items.id AND sr.status = ?)`,
+			[]any{string(*status), string(*status)}})
 	}
 	whereSQL, whereArgs := c.where()
 	var total int
@@ -852,7 +894,7 @@ func (l *Library) loadRows(ctx context.Context, unmatched clause, whereSQL strin
 	args = append(args, limit, offset)
 	//nolint:gosec // G202: the query builder joins constant SQL and placeholders; values are bound
 	rows, err := l.db.QueryContext(ctx, `SELECT items.id, items.plugin_id, items.kind, items.source, items.source_id, items.cover_path,
-		items.external_url, items.sync_state, items.progress_keys, e.status, e.rating, e.comment, e.started_on, e.finished_on, e.updated_at,
+		items.external_url, items.sync_state, items.progress_keys, `+stateCols+`,
 		(`+unmatched.sql+`), (items.sync_state <> 'done')`+fromSQL+whereSQL+order+` LIMIT ? OFFSET ?`, args...)
 	if err != nil {
 		return nil, fmt.Errorf("list: %w", err)
@@ -861,12 +903,12 @@ func (l *Library) loadRows(ctx context.Context, unmatched clause, whereSQL strin
 	var ids []any
 	for rows.Next() {
 		var r Row
-		var pk, status, updated string
-		var rating sql.NullInt64
-		var started, finished sql.NullString
-		if err := rows.Scan(&r.Item.ID, &r.Item.PluginID, &r.Item.Kind, &r.Item.Source, &r.Item.SourceID, &r.Item.CoverPath,
-			&r.Item.ExternalURL, &r.Item.SyncState, &pk, &status, &rating, &r.Entry.Comment, &started, &finished, &updated,
-			&r.Flags.Unmatched, &r.Flags.PartialSync); err != nil {
+		var pk string
+		var st stateScan
+		dest := []any{&r.Item.ID, &r.Item.PluginID, &r.Item.Kind, &r.Item.Source, &r.Item.SourceID, &r.Item.CoverPath,
+			&r.Item.ExternalURL, &r.Item.SyncState, &pk}
+		dest = append(append(dest, st.dest(&r.Entry)...), &r.Flags.Unmatched, &r.Flags.PartialSync)
+		if err := rows.Scan(dest...); err != nil {
 			rows.Close()
 			return nil, fmt.Errorf("list: %w", err)
 		}
@@ -876,7 +918,7 @@ func (l *Library) loadRows(ctx context.Context, unmatched clause, whereSQL strin
 		}
 		r.Entry.ItemID = r.Item.ID
 		r.Entry.Progress = map[string]float64{}
-		if err := r.Entry.fill(status, rating, started, finished, updated); err != nil {
+		if err := st.fill(&r.Entry); err != nil {
 			rows.Close()
 			return nil, err
 		}
@@ -1001,7 +1043,19 @@ func (l *Library) loadRowParts(ctx context.Context, ids []any, byID map[int64]*R
 	}); err != nil {
 		return err
 	}
-	return query("progress", `SELECT item_id, key, value FROM `+tableEntryProgress+in, func(r *sql.Rows) error {
+	if err := query("own tags", `SELECT x.item_id, u.name FROM entry_user_tags x JOIN user_tags u ON u.id = x.tag_id
+		WHERE x.item_id IN (`+placeholders(len(ids))+`) ORDER BY x.item_id, u.name_key`, func(r *sql.Rows) error {
+		var id int64
+		var name string
+		if err := r.Scan(&id, &name); err != nil {
+			return err
+		}
+		byID[id].UserTags = append(byID[id].UserTags, name)
+		return nil
+	}); err != nil {
+		return err
+	}
+	return query("progress", `SELECT item_id, key, value FROM `+viewDisplayProgress+in, func(r *sql.Rows) error {
 		var id int64
 		var k string
 		var v float64

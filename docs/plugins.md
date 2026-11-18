@@ -61,7 +61,7 @@ type Exporter interface {
 | `Kinds` | One or more media kinds (below). At least one is required. |
 | `Sources`, `Importers`, `Exporters` | Optional declarations (below). |
 
-**Reserved ids.** Plugin ids `list`, `people`, `settings`, `covers`, `static`, `healthz`, `api` and `version` belong to the core's first URL segment. Source ids `manual`, `export`, `search` and `series` would be hidden by the core's own routes under `/{plugin}/` and are refused too. Kind, source, importer and exporter ids use the slug rule above. Field and progress keys use `^[a-z][a-z0-9_]{0,31}$`.
+**Reserved ids.** Plugin ids `list`, `people`, `settings`, `covers`, `static`, `healthz`, `api`, `version` and `lists` belong to the core's first URL segment. Source ids `manual`, `export`, `search` and `series` would be hidden by the core's own routes under `/{plugin}/` and are refused too. Kind, source, importer and exporter ids use the slug rule above. Field and progress keys use `^[a-z][a-z0-9_]{0,31}$`.
 
 ### Kinds
 
@@ -74,6 +74,8 @@ A `KindDef` describes one media kind:
 - `Fields`: the item schema (below).
 - `Genres`, `Tags`: `TermDef{Enabled, Label, Editable, Filterable}`. When enabled, items carry genres (names) and tags (a name, an optional rank from 0 to 100 and a spoiler flag) as dedicated, indexed rows. `Label` is required when enabled. `Editable` puts a text area in Edit details and the manual form (one term per line; tags as `Name:80!`, where `:80` is the rank and a trailing `!` marks a spoiler). `Filterable` adds a multi-select with counts from the user's own library and an any/all switch to the list. The core trims terms, removes case-insensitive duplicates and allows at most 60 characters per term, 50 genres and 100 tags per item.
 - `Statuses`: labels for the five fixed core status classes `planned`, `active`, `paused`, `completed` and `dropped` ("Plan to watch", "Watching", ...). All five labels are required. A plugin cannot add a status.
+- `Repeat`: optional `RepeatDef{Action, Marker}`, the kind's wording for repeat runs: `Action` labels the button that starts the entry again ("Rewatch", "Reread", "Replay"), `Marker` the badge on an active repeat run ("Rewatching"). Both are required when `Repeat` is set, single line, at most 40 characters. Without it the core says "Start again" and "Again". JSON `repeat`, omitted when unset. Every shipped plugin declares it.
+- `Length`: optional list of `LengthDef{Key, Label, Field, UnitsField, PerUnitField}`, the measures of how long an entry is. `Key` is a slug, unique within the kind, and `Label` is required. Valid shapes: `Field` alone (a number field in minutes); `UnitsField` with `PerUnitField` (units times minutes per unit); `UnitsField` alone (a plain unit count, not minutes). Every named field must be a **number** field of the kind. `InMinutes()` is true for the first two shapes. JSON `length`, omitted when empty; adding it needs no contract version bump. (v0.5.0 accepted a `group_key` without a `primary_key`; it is refused from the next release on, which no bundled manifest relied on.)
 - `Progress`: see [Progress](#progress).
 - `Sections`: see [Sections](#sections).
 - `Stats`: optional, how the kind's time and units count on the Statistics page (see [Statistics](#statistics)). JSON `stats`, omitted when unset.
@@ -140,16 +142,18 @@ Progress types are a **closed core enum**: `count`, `pages`, `percent` and `dura
 
 ```go
 type ProgressDef struct {
-	Key        string       // unique within the kind
-	Type       ProgressType
-	Label      string       // "Episode", "Page", "Position"
-	TotalField string       // optional: a number field holding the total
+	Key         string       // unique within the kind
+	Type        ProgressType
+	Label       string       // "Episode", "Page", "Position"
+	LabelPlural string       // optional plural: "Episodes"
+	TotalField  string       // optional: a number field holding the total
 }
 type ProgressSpec struct {
 	Eligible     []ProgressDef
 	Defaults     []string   // the active keys of a new item
 	Combinations [][]string // every allowed set of active keys
 	PrimaryKey   string     // the "+1" track; "" hides +1
+	GroupKey     string     // optional: a count track grouping the primary track's units
 }
 ```
 
@@ -159,7 +163,10 @@ Rules enforced by `Validate`:
 - `TotalField` must name a **number** field of the kind, and is not allowed on `percent`.
 - When anything is eligible, `Defaults` and at least one combination are required. Every key in them must be eligible and listed once, no combination may be empty, and `Defaults` must equal one of the combinations (as a set).
 - `PrimaryKey`, when set, must be an eligible `count` or `pages` track.
+- `GroupKey`, when set, needs a `PrimaryKey` and must be an eligible `count` track other than it. It marks the track that groups the primary track's units (a TV release's season maps to it). Optional, JSON `group_key`, omitted when empty; adding it needs no contract version bump.
 - `ResetOnPrimary` is for a track that belongs to the release the +1 advances: the TV position is cleared when the episode increments. It is not set on the primary track.
+
+`LabelPlural` is optional data (JSON `label_plural`, not validated): the run timeline uses it for ranges ("Episodes 5-7"); without it the core adds an "s" to `Label`.
 
 Behaviour: an item starts with the default combination. The **entry dialog** (Edit on a list row or on the overview, route `/list/{id}/edit`) offers the allowed combinations when there is more than one, for example a book switching from pages to percent. Values of tracks that become inactive are kept and come back when the user switches again. Edit details does not change the combination. A bounded track cannot exceed its total. "Finished" means every active bounded track is at its total (percent at 100), "not started" means every active track is 0, and anything else is "in progress". The list's progress filter (`progress=not_started|in_progress|finished`) uses these rules. Setting the status to completed does not change progress. "+1" raises the primary track by one, capped at its total. It is hidden when there is no primary key or the primary track is not active.
 
@@ -343,7 +350,7 @@ The core then does the rest, as a resumable job on the import page:
 type ExporterInfo struct{ ID, Name, Extension, MIME string } // all required
 ```
 
-`Export` receives every list entry of the plugin (titles, external ids, status, rating, active progress, dates, comment) and writes the file. The core serves it at `/{plugin}/export/{exporter}` as `<plugin>-<exporter>-<date><extension>`, linked from the list page and the plugin's row in Settings > Plugins. The whole list is built in memory, which is fine for a few thousand entries.
+`Export` receives every list entry of the plugin (`ExportEntry`: titles, external ids, the shown run's status, rating, every stored progress value and dates, the entry's notes, its `Runs` (`ExportRun`: number, status, rating, review, progress, dates), own tags (`UserTags`), the names of its custom lists (`Lists`) and its series) and writes the file. The core serves it at `/{plugin}/export/{exporter}` as `<plugin>-<exporter>-<date><extension>`, linked from the list page and the plugin's row in Settings > Plugins. The whole list is built in memory, which is fine for a few thousand entries. **Contract change:** `ExportEntry`'s `comment` is now `notes`, and it gained `runs`, `user_tags` and `lists`; its top-level status, rating, progress and dates are those of the run the list shows. `ContractVersion` was not bumped, so an exporter written against the old shape must be updated by hand.
 
 An export is the plugin's own interchange format. The **universal backup** (Settings > Backup) is separate and owned by the core. It covers every item of every installed plugin, including disabled ones, so a plugin needs no code for backups.
 

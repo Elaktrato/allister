@@ -453,9 +453,7 @@ func TestQuerySortsAndPagination(t *testing.T) {
 	for i := 0; i < 101; i++ {
 		ids = append(ids, bookT(t, l, fmt.Sprint(i), fmt.Sprintf("Book %03d", i), nil, Entry{}))
 	}
-	if _, err := e.db.Exec(`UPDATE entries SET updated_at = '2024-01-01T00:00:00Z'`); err != nil {
-		t.Fatal(err)
-	}
+	setEntryUpdated(t, e.db, "2024-01-01T00:00:00Z")
 	pg := mustList(t, l, bookQ)
 	if pg.Total != 101 || pg.Pages != 2 || pg.PageNo != 1 || len(pg.Rows) != 100 {
 		t.Fatalf("page = total %d pages %d no %d rows %d", pg.Total, pg.Pages, pg.PageNo, len(pg.Rows))
@@ -492,9 +490,7 @@ func TestQuerySortsAndPagination(t *testing.T) {
 	}
 	// updated: newest first by default, Desc=false oldest first when explicit
 	for i, id := range ids[:3] {
-		if _, err := e.db.Exec(`UPDATE entries SET updated_at = ? WHERE item_id = ?`, fmt.Sprintf("2025-01-0%dT00:00:00Z", i+1), id); err != nil {
-			t.Fatal(err)
-		}
+		setEntryUpdated(t, e.db, fmt.Sprintf("2025-01-0%dT00:00:00Z", i+1), id)
 	}
 	q = bookQ
 	q.PageSize = 3

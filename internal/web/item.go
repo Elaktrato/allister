@@ -56,12 +56,20 @@ func (s *server) coreRoutes(pluginID string) routeSet {
 		reg.Handle("POST /manual/new", func(w http.ResponseWriter, r *http.Request) { s.postManualNew(w, r, pluginID) })
 		reg.Handle("GET /{source}/{id}/edit", func(w http.ResponseWriter, r *http.Request) { s.getDetails(w, r, pluginID) })
 		reg.Handle("POST /{source}/{id}/edit", func(w http.ResponseWriter, r *http.Request) { s.postDetails(w, r, pluginID) })
+		reg.Handle("GET /{source}/{id}/refresh", func(w http.ResponseWriter, r *http.Request) { s.getRefresh(w, r, pluginID) })
 		reg.Handle("POST /{source}/{id}/refresh", func(w http.ResponseWriter, r *http.Request) { s.postRefresh(w, r, pluginID) })
 		reg.Handle("GET /{source}/{id}/match", func(w http.ResponseWriter, r *http.Request) { s.getMatch(w, r, pluginID) })
 		reg.Handle("GET /{source}/{id}/match/search", func(w http.ResponseWriter, r *http.Request) { s.getMatchSearch(w, r, pluginID) })
 		reg.Handle("POST /{source}/{id}/match", func(w http.ResponseWriter, r *http.Request) { s.postMatch(w, r, pluginID) })
 		reg.Handle("GET /export/{exporter}", func(w http.ResponseWriter, r *http.Request) { s.getExport(w, r, pluginID) })
 		reg.Handle("POST /{source}/{id}/series", func(w http.ResponseWriter, r *http.Request) { s.postMakeSeries(w, r, pluginID) })
+		reg.Handle("POST /bulk", func(w http.ResponseWriter, r *http.Request) { s.postBulk(w, r, pluginID) })
+		reg.Handle("GET /pick", func(w http.ResponseWriter, r *http.Request) { s.getPick(w, r, pluginID) })
+		reg.Handle("GET /duplicates", func(w http.ResponseWriter, r *http.Request) { s.getDuplicates(w, r, pluginID) })
+		reg.Handle("POST /duplicates/dismiss", func(w http.ResponseWriter, r *http.Request) { s.postDuplicateDismiss(w, r, pluginID) })
+		reg.Handle("GET /merge", func(w http.ResponseWriter, r *http.Request) { s.getMerge(w, r, pluginID) })
+		reg.Handle("POST /merge", func(w http.ResponseWriter, r *http.Request) { s.postMerge(w, r, pluginID) })
+		reg.Handle("GET /merge/pick", func(w http.ResponseWriter, r *http.Request) { s.getMergePick(w, r, pluginID) })
 		s.seriesRoutes(reg, pluginID)
 	}
 }
@@ -173,58 +181,6 @@ func updatedCount(r *http.Request) *int {
 	return &n
 }
 
-// postRefresh is "Update from source": it asks the item's source for its
-// details once and fills in only the fields the item does not have yet
-// (library.FillMissingFields), so local edits, imported data and earlier
-// refreshes survive. Manual items, unsaved items and sources the plugin does
-// not declare or provide have no action (404). Source failures use the same
-// mapping as the overview. Success redirects to the overview with ?updated=N.
-func (s *server) postRefresh(w http.ResponseWriter, r *http.Request, pluginID string) {
-	m, ref, ok := s.addRef(w, r, pluginID)
-	if !ok {
-		return
-	}
-	it, k, err := s.findSaved(r.Context(), m, ref)
-	switch {
-	case errors.Is(err, errAmbiguousKind):
-		s.itemFail(w, r, m, ref.Source, err, "")
-		return
-	case err != nil:
-		s.internalError(w, r, err)
-		return
-	}
-	if it == nil || it.Source == manualSource || !hasSource(m, it.Source) {
-		s.errorPage(w, r, http.StatusNotFound, "Not found", "There is no such item.", "")
-		return
-	}
-	src := s.source(m.ID, it.Source)
-	if src == nil {
-		s.errorPage(w, r, http.StatusNotFound, "Not found", "There is no such item.", "")
-		return
-	}
-	overview := itemURL(m, it.Source, it.SourceID, k.Key)
-	d, err := src.Details(r.Context(), k.Key, it.SourceID)
-	if err != nil {
-		s.itemFail(w, r, m, it.Source, err, overview)
-		return
-	}
-	added, err := s.deps.Library.FillMissingFields(r.Context(), it.ID, d.Fields)
-	if err != nil {
-		switch {
-		case errors.Is(err, library.ErrNoEntry):
-			s.itemFail(w, r, m, it.Source, errNoSuchItem, "")
-		case errors.Is(err, library.ErrInvalid):
-			// a source answer the library cannot store is the same bad gateway
-			// as an unusable answer
-			s.itemFail(w, r, m, it.Source, fmt.Errorf("%w: %w", plugin.ErrBadResponse, err), overview)
-		default:
-			s.internalError(w, r, err)
-		}
-		return
-	}
-	http.Redirect(w, r, updatedURL(overview, len(added)), http.StatusSeeOther)
-}
-
 // itemExtras are the dialogs an overview can be rendered with (no
 // JavaScript fallback of the add and match dialogs). Dialog carries the add
 // form's values and messages; the rest of the form is built from the loaded
@@ -232,10 +188,13 @@ func (s *server) postRefresh(w http.ResponseWriter, r *http.Request, pluginID st
 // unsaved item. Updated is the ?updated=N count of a finished refresh (nil
 // when the page was not reached that way).
 type itemExtras struct {
-	Dialog   *entryForm
-	Match    *matchView
-	UseCache bool
-	Updated  *int
+	Dialog    *entryForm
+	Match     *matchView
+	RunDialog *runDialog
+	// NoteDialog is the unit note form (notes.go)
+	NoteDialog *noteDialog
+	UseCache   bool
+	Updated    *int
 	// CanonicalRedirect sends an unsaved item opened by an alias to its
 	// canonical URL (the plain overview GET only).
 	CanonicalRedirect bool
@@ -253,6 +212,11 @@ func (s *server) showItem(w http.ResponseWriter, r *http.Request, ref itemRef, x
 		http.Redirect(w, r, itemURL(m, ref.Source, li.canonicalID, ref.Kind), http.StatusFound)
 		return
 	}
+	if it := li.saved; x.CanonicalRedirect && it != nil && (it.Source != ref.Source || it.SourceID != ref.ID) {
+		// an alias of a merged item: the survivor's own URL
+		http.Redirect(w, r, itemURL(m, it.Source, it.SourceID, it.Kind), http.StatusFound)
+		return
+	}
 	v, err := s.itemView(r.Context(), li)
 	if err != nil {
 		s.internalError(w, r, err)
@@ -261,8 +225,16 @@ func (s *server) showItem(w http.ResponseWriter, r *http.Request, ref itemRef, x
 	if x.Updated != nil && li.saved != nil {
 		v.UpdateNotice = updateNotice(*x.Updated, sourceName(m, li.data.Source))
 	}
-	if li.saved != nil && r.URL.Query().Get("notice") == noticeSeriesAttach {
-		v.UpdateNotice = "The entry was added to your list, but could not be put into the series."
+	if li.saved != nil {
+		switch r.URL.Query().Get("notice") {
+		case noticeSeriesAttach:
+			v.UpdateNotice = "The entry was added to your list, but could not be put into the series."
+		case noticeListAttach:
+			v.UpdateNotice = "The entry was added to your list, but could not be put into the custom list."
+		}
+		if n := mergedNotice(r); n != "" {
+			v.UpdateNotice = n
+		}
 	}
 	if x.Dialog != nil {
 		pc := progressContext{Keys: li.kind.Progress.Defaults, Fields: li.data.Fields}
@@ -276,39 +248,67 @@ func (s *server) showItem(w http.ResponseWriter, r *http.Request, ref itemRef, x
 		}
 		v.Dialog = &f
 	}
-	v.Match = x.Match
-	if err := s.carrySeries(r, li, &v); err != nil {
+	v.Match, v.RunDialog, v.NoteDialog = x.Match, x.RunDialog, x.NoteDialog
+	if err := s.carryAdd(r, li, &v); err != nil {
 		s.internalError(w, r, err)
 		return
+	}
+	if li.saved != nil && li.entry != nil {
+		d := li.data
+		if v.ListPicker, err = s.listPicker(r, li.saved.ID, itemURL(li.man, d.Source, d.ID, d.Kind)); err != nil {
+			s.internalError(w, r, err)
+			return
+		}
 	}
 	s.renderStatus(w, r, status, "item", v)
 }
 
-// carrySeries keeps a ?series= parameter (a search into a series) on the add
-// links of the overview, and offers an entry that is already listed and in no
-// series to join it. An unknown series, or one of another kind, is ignored.
-func (s *server) carrySeries(r *http.Request, li *loadedItem, v *itemView) error {
-	uid := seriesParam(r)
-	if uid == "" {
-		return nil
+// carryAdd keeps a ?series= and a ?list= parameter (a search into a series
+// or a custom list) on the add links of the overview, and offers an entry
+// that is already listed to join them (the series only when it is in none).
+// An unknown series, or one of another kind, and an unknown list are
+// ignored.
+func (s *server) carryAdd(r *http.Request, li *loadedItem, v *itemView) error {
+	ctx := r.Context()
+	var carry addCarry
+	var ser *library.Series
+	if uid := seriesParam(r); uid != "" {
+		got, err := s.deps.Library.SeriesByUID(ctx, li.man.ID, uid)
+		switch {
+		case errors.Is(err, library.ErrNoSeries):
+		case err != nil:
+			return err
+		case got.Kind == li.kind.Key:
+			ser, carry.series = got, uid
+		}
 	}
-	ser, err := s.deps.Library.SeriesByUID(r.Context(), li.man.ID, uid)
-	if errors.Is(err, library.ErrNoSeries) || (err == nil && ser.Kind != li.kind.Key) {
-		return nil
-	}
-	if err != nil {
-		return err
+	var lst library.List
+	if id := listParam(r); id > 0 {
+		got, err := s.deps.Library.CustomList(ctx, id)
+		switch {
+		case errors.Is(err, library.ErrNoList):
+		case err != nil:
+			return err
+		default:
+			lst, carry.list = got, id
+		}
 	}
 	if v.AddURL != "" {
-		v.AddURL = withSeriesParam(v.AddURL, uid)
+		v.AddURL = carry.on(v.AddURL)
 	}
 	if v.Dialog != nil {
-		v.Dialog.Action = withSeriesParam(v.Dialog.Action, uid)
+		v.Dialog.Action = carry.on(v.Dialog.Action)
 	}
-	if li.saved != nil && li.entry != nil && v.Series == nil {
-		d := li.data
-		v.AddToSeriesURL = withSeriesParam(itemAction(li.man, d.Source, d.ID, d.Kind, "add", nil), uid)
-		v.SeriesTitle = ser.Title
+	if li.saved == nil || li.entry == nil {
+		return nil
+	}
+	d := li.data
+	add := itemAction(li.man, d.Source, d.ID, d.Kind, "add", nil)
+	if ser != nil && v.Series == nil {
+		v.AddToSeriesURL, v.SeriesTitle = addCarry{series: carry.series}.on(add), ser.Title
+	}
+	if carry.list > 0 {
+		v.AddToListURL, v.ListName = addCarry{list: carry.list}.on(add), lst.Name
 	}
 	return nil
 }

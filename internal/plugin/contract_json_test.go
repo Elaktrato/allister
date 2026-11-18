@@ -46,7 +46,7 @@ func TestManifestJSONRoundTrip(t *testing.T) {
 			Tags:     plugin.TermDef{Enabled: true, Label: "Tags", Editable: true, Filterable: true},
 			Statuses: plugin.StatusLabels{Planned: "P", Active: "A", Paused: "Pa", Completed: "C", Dropped: "D"},
 			Progress: plugin.ProgressSpec{
-				Eligible:     []plugin.ProgressDef{{Key: "x", Type: plugin.Count, Label: "X", TotalField: "n"}, {Key: "y", Type: plugin.Percent, Label: "Y", ResetOnPrimary: true}, {Key: "d", Type: plugin.Duration, Label: "D"}},
+				Eligible:     []plugin.ProgressDef{{Key: "x", Type: plugin.Count, Label: "X", LabelPlural: "Xes", TotalField: "n"}, {Key: "y", Type: plugin.Percent, Label: "Y", ResetOnPrimary: true}, {Key: "d", Type: plugin.Duration, Label: "D"}},
 				Defaults:     []string{"x"},
 				Combinations: [][]string{{"x"}, {"y"}},
 				PrimaryKey:   "x",
@@ -58,6 +58,7 @@ func TestManifestJSONRoundTrip(t *testing.T) {
 			SeriesHint:     &plugin.SeriesHintDef{TitleField: "e", PositionField: "n", ReleaseField: "d"},
 			SeriesFields:   []plugin.FieldDef{{Key: "sf", Label: "SF", Type: plugin.FieldNumber, Min: fptr(1), Editable: true}},
 			SeriesLink:     &plugin.SeriesLinkDef{Kind: "k", DescriptionField: "e", StartField: "d", EndField: "d", PartsField: "n"},
+			Repeat:         &plugin.RepeatDef{Action: "Redo", Marker: "Redoing"},
 			Stats: &plugin.StatsDef{
 				Time:  &plugin.StatsTimeDef{Label: "Time", DurationKey: "d", CompletedField: "n", UnitsKey: "x", PerUnitField: "n"},
 				Units: &plugin.StatsUnitsDef{Key: "x", LabelPlural: "Units"},
@@ -112,7 +113,10 @@ func TestRuntimeDataJSONRoundTrip(t *testing.T) {
 	roundTrip(t, "parseresult", plugin.ParseResult{Entries: []plugin.ParsedEntry{entry}, Skipped: []plugin.SkippedRow{{Line: 1, Reason: "r"}}, Ignored: 2})
 	roundTrip(t, "exportentry", plugin.ExportEntry{
 		Kind: "k", Titles: []plugin.Title{{Lang: "en", Text: "T"}}, ExternalIDs: map[string]string{"a": "b"},
-		Status: plugin.Dropped, Rating: iptr(7), Progress: map[string]float64{"p": 1}, StartedOn: &day, FinishedOn: &day, Comment: "c",
+		Status: plugin.Dropped, Rating: iptr(7), Progress: map[string]float64{"p": 1}, StartedOn: &day, FinishedOn: &day, Notes: "c",
+		Runs: []plugin.ExportRun{{Number: 1, Status: plugin.Completed, Rating: iptr(6), Review: "r", Progress: map[string]float64{"p": 3}, StartedOn: &day, FinishedOn: &day},
+			{Number: 2, Status: plugin.Dropped}},
+		UserTags: []string{"comfort"}, Lists: []string{"Favourites"}, Series: "S", SeriesPosition: 2,
 	})
 }
 
@@ -352,4 +356,50 @@ func TestSourceKeyOptionalJSON(t *testing.T) {
 		t.Errorf("unset must be omitted: %s", off)
 	}
 	roundTrip(t, "key optional", plugin.SourceInfo{ID: "s", KeyLabel: "API key", KeyOptional: true})
+}
+
+func TestProgressDefPluralLabel(t *testing.T) {
+	if got := (plugin.ProgressDef{Label: "Page"}).PluralLabel(); got != "Pages" {
+		t.Fatalf("default plural = %q", got)
+	}
+	if got := (plugin.ProgressDef{Label: "Match", LabelPlural: "Matches"}).PluralLabel(); got != "Matches" {
+		t.Fatalf("declared plural = %q", got)
+	}
+}
+
+func TestExportEntryRunsTagsListsJSON(t *testing.T) {
+	b, err := json.Marshal(plugin.ExportEntry{Kind: "k", Notes: "n", Runs: []plugin.ExportRun{{Number: 1, Status: plugin.Active}},
+		UserTags: []string{"t"}, Lists: []string{"L"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{`"notes":"n"`, `"runs":[{"number":1,"status":"active"}]`, `"user_tags":["t"]`, `"lists":["L"]`} {
+		if !strings.Contains(string(b), want) {
+			t.Fatalf("json lacks %s: %s", want, b)
+		}
+	}
+	b, _ = json.Marshal(plugin.ExportEntry{Kind: "k"})
+	for _, not := range []string{"notes", "runs", "user_tags", "lists", "comment"} {
+		if strings.Contains(string(b), not) {
+			t.Fatalf("empty entry has %s: %s", not, b)
+		}
+	}
+}
+
+func TestLengthJSONRoundTrip(t *testing.T) {
+	k := plugintest.TVPlugin().Manifest().Kinds[0]
+	k.Length = []plugin.LengthDef{
+		{Key: "total", Label: "Total", UnitsField: "episodes", PerUnitField: "year"},
+		{Key: "eps", Label: "Episodes", UnitsField: "episodes"},
+		{Key: "t", Label: "T", Field: "year"},
+	}
+	k.Progress.GroupKey = "season"
+	roundTrip(t, "kind length", k)
+	b, err := json.Marshal(plugintest.TVPlugin().Manifest().Kinds[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(b), `"length"`) || strings.Contains(string(b), `"group_key"`) {
+		t.Fatalf("empty length/group_key must be omitted: %s", b)
+	}
 }

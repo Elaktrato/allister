@@ -86,7 +86,22 @@ type entryView struct {
 	// EditHXURL loads the edit dialog into the overview and returns to it.
 	EditHXURL string
 	Progress  []progressView
+	// StartURL and StartLabel: the "start again" form (a completed
+	// display run only); Return is its return path, the overview.
+	StartURL, StartLabel, Return string
+	// StillAiring: a completed entry with upcoming releases, shown with a
+	// note instead of the start again form.
+	StillAiring bool
+	// the repeat marker and count of the list (see repeatBadges)
+	RepeatMarker string
+	Repeats      int
+	RepeatsTitle string
+	// UserTags are the entry's own tags, each linking to the list filtered by it.
+	UserTags []tagLink
 }
+
+// tagLink is an own tag linking to its filtered list.
+type tagLink struct{ Name, Href string }
 
 // partLink is a link to a neighbouring part of a series.
 type partLink struct{ Title, Href string }
@@ -111,17 +126,23 @@ type itemView struct {
 	MakeSeries     *makeSeriesView
 	AddToSeriesURL string
 	SeriesTitle    string
-	PartialSync    bool
-	Entry          *entryView
+	// AddToListURL (with ListName) when the overview was reached from a
+	// search into a custom list; ListPicker is the "Lists" form of a listed
+	// entry.
+	AddToListURL string
+	ListName     string
+	ListPicker   *listPickerView
+	PartialSync  bool
+	Entry        *entryView
 	// AddURL opens the add dialog (items not in the list).
 	AddURL string
 	// MatchURL, MatchLabel and UnmatchedHint: a manual item that can be
 	// matched to the plugin's source.
 	MatchURL, MatchLabel, UnmatchedHint string
 	// DetailsURL opens "Edit details" (every saved item); it returns to
-	// the overview.
-	DetailsURL string
-	// UpdateURL, UpdateLabel: the "Update from source" form of a saved item
+	// the overview. MergeURL is the "Merge with…" search of a saved item.
+	DetailsURL, MergeURL string
+	// UpdateURL, UpdateLabel: the "Update from source" link of a saved item
 	// whose source is declared, implemented and not manual.
 	UpdateURL, UpdateLabel string
 	// UpdateNotice reports a finished refresh (?updated=N).
@@ -129,6 +150,11 @@ type itemView struct {
 	Sections     []sectionView
 	Dialog       *entryForm
 	Match        *matchView
+	// Runs is the run history of a listed item, newest first; RunDialog an
+	// open run form, NoteDialog an open unit note form (no JavaScript).
+	Runs       []runView
+	RunDialog  *runDialog
+	NoteDialog *noteDialog
 }
 
 // itemView builds the overview of li. A failing credential read (the "Match
@@ -145,6 +171,7 @@ func (s *server) itemView(ctx context.Context, li *loadedItem) (itemView, error)
 		v.Cover = covers.Src(it.CoverPath)
 		v.PartialSync = it.SyncState != "done"
 		v.DetailsURL = itemAction(m, d.Source, d.ID, d.Kind, "edit", url.Values{"return": {overview}})
+		v.MergeURL = "/" + url.PathEscape(m.ID) + "/merge/pick?" + url.Values{"keep": {strconv.FormatInt(it.ID, 10)}}.Encode()
 		if it.Source != manualSource && hasSource(m, it.Source) && s.source(m.ID, it.Source) != nil {
 			v.UpdateURL, v.UpdateLabel = itemAction(m, d.Source, d.ID, d.Kind, "refresh", nil), "Update from source"
 		}
@@ -159,6 +186,26 @@ func (s *server) itemView(ctx context.Context, li *loadedItem) (itemView, error)
 		if li.entry != nil {
 			v.Entry = entrySummary(k, it, li.entry)
 			v.Entry.EditHXURL = v.Entry.EditURL + "?" + url.Values{"return": {overview}}.Encode()
+			tags, err := s.deps.Library.EntryTags(ctx, []int64{it.ID})
+			if err != nil {
+				return itemView{}, err
+			}
+			for _, name := range tags[it.ID] {
+				v.Entry.UserTags = append(v.Entry.UserTags, tagLink{Name: name,
+					Href: filteredListURL(m, it.Kind, "all", "", 1, listFilters{UserTags: []string{name}})})
+			}
+			if li.entry.Status == library.Completed {
+				if v.Entry.StillAiring, err = s.deps.Library.StillAiring(ctx, it.ID); err != nil {
+					return itemView{}, err
+				}
+			}
+			if li.entry.Status == library.Completed && !v.Entry.StillAiring {
+				v.Entry.StartURL = "/list/" + strconv.FormatInt(it.ID, 10) + "/runs"
+				v.Entry.StartLabel, v.Entry.Return = k.RepeatAction(), overview
+			}
+			if v.Runs, err = s.runHistory(ctx, k, it, li.entry, overview); err != nil {
+				return itemView{}, err
+			}
 			if err := s.seriesBlock(ctx, &v, li, lang); err != nil {
 				return itemView{}, err
 			}
@@ -252,11 +299,12 @@ func statusLabel(k plugin.KindDef, st library.Status) string {
 }
 
 func entrySummary(k plugin.KindDef, it *library.Item, e *library.Entry) *entryView {
-	v := &entryView{Status: statusLabel(k, e.Status), Rating: "–", Comment: e.Comment,
+	v := &entryView{Status: statusLabel(k, e.Status), Rating: "–", Comment: e.Notes,
 		EditURL: "/list/" + strconv.FormatInt(it.ID, 10) + "/edit"}
 	if e.Rating != nil {
 		v.Rating = strconv.Itoa(*e.Rating)
 	}
+	v.RepeatMarker, v.Repeats, v.RepeatsTitle = repeatBadges(k, *e)
 	for _, key := range it.ProgressKeys {
 		for _, def := range k.Progress.Eligible {
 			if def.Key == key {
@@ -316,15 +364,15 @@ func sourceName(m plugin.Manifest, id string) string {
 }
 
 // updateNotice is the message of a finished "Update from source": the number
-// of added fields, or that nothing was missing.
+// of parts written, or that nothing was.
 func updateNotice(n int, source string) string {
 	switch n {
 	case 0:
-		return "Nothing new; every source field is already filled."
+		return "Nothing was updated."
 	case 1:
-		return "1 field added from " + source + "."
+		return "Updated 1 value from " + source + "."
 	}
-	return strconv.Itoa(n) + " fields added from " + source + "."
+	return "Updated " + strconv.Itoa(n) + " values from " + source + "."
 }
 
 // sourceLink is the "View on ..." link of the item's external page (https

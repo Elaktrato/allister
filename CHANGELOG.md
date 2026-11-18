@@ -6,9 +6,61 @@ How a release is cut: move the entries under "Unreleased" to a new `## vX.Y.Z - 
 
 ## Unreleased
 
+### Added
+
+- **Series with their own data and spin-offs.** A series has its own cover (upload or https URL, downloaded into the cover store), description, start and end day, a finished marker, the expected number of parts and plugin-declared fields (books: Volumes, Chapters, Author), plus an optional linked entry and a parent series for spin-off series (one level). Parts can be marked spin-off: they are numbered separately and not counted towards the series' progress. With expected parts set, 5 of 12 stays in progress. Removing the last part keeps a series that holds its own data. Backups carry all of it (format 3; series covers are archived) (migration 00021).
+
 ### Fixed
 
 - Cover downloads refuse a URL with userinfo (`user@host`), whitespace or a line break before making any request.
+- **Plugin authors: `group_key` now needs a `primary_key`.** A manifest that sets `group_key` without a primary progress track is refused at load (it had no defined meaning). No bundled plugin is affected.
+- **Calendar plugin select keeps keyboard focus** after you change it, and the grid no longer nests a second copy of itself in the page.
+- **No empty `plugin=` in the calendar address** after choosing "All plugins".
+- **Mark watched is no longer offered when it cannot change anything**, for example when your progress is already at the total and a stored release is numbered above it.
+- **Clearer entry dialog for a still airing item** whose shown run is an earlier one: it says there is nothing to answer instead of asking to correct the current run with no button for it.
+- **Pick filter links:** Clear filters also clears the length filter, and the view, sort, status and page links of a list keep it.
+
+## v0.5.0 - 2026-11-17
+
+### Added
+
+- **Up next on the home page.** The home page's active cards (formerly In progress) name the next unit to watch, read or play (for example the next episode or page) and show "N aired" when stored schedules know of releases beyond your progress. The plugin lists' cards are unchanged.
+- **Mark watched on the calendar.** Releases that have aired and lie beyond your progress get a check button in the month and week view that sets your progress to that release (season and episode where the item has both). It never lowers progress within a season (a new season restarts the unit count, and a season you never set counts as the first), a double click changes nothing, and it counts as activity in the statistics.
+- **Calendar week view and plugin filter.** The calendar has a Month/Week toggle (the week starts on Monday, in your time zone) and a plugin select that narrows either view to one plugin.
+- **No repeat run while airing.** An item with upcoming releases cannot be started again (button and "<Action> instead?" are hidden with a note; the request answers 422), so airings always belong to the first run. It can be started again once it has finished airing.
+- **Pick one.** A button on each list draws one entry at random from the matching planned entries (or the status you filtered): title, cover, length and genres, with Roll again and Start. Games, movies, TV and anime also filter by length (for example under 90 minutes, or under 13 episodes); entries without that data are left out. The same filters as the list apply.
+- **Update from source shows a comparison.** On a saved item, Update from source asks the source again and lists only what differs (each field, and titles, genres, tags, cover, relations and credits as a whole), with rows you have left empty ticked; it writes only the rows you tick. A blank source value never clears yours.
+- **Bulk edit in every list.** Tick rows or cards (or the whole page, or every entry the current filter matches) and set their status, add them to a custom list or a series, add or remove own tags, or remove them from your library in one step. A confirmation names the count first and asks again if it changed; afterwards the list says how many changed and how many were skipped. Completed fills an empty finish date and the known totals.
+- **Duplicates and merge.** Each plugin's list links to its possible duplicates (items sharing an id such as an ISBN, or the same title and year) when there are any; hide a pair with "Not a duplicate". "Compare & merge" there, or "Merge with…" on an item page, shows both items side by side: tick which details to take from the other item, then merge. Runs, notes, own tags, custom lists and the series place move to the item you keep, the other is removed, and adding or importing it again finds the kept item. Backups keep the merged identities and the hidden pairs. Backups are now format 3: older Allister versions refuse them, older backups (formats 1 and 2) still restore.
+
+### Changed
+
+- **Round checkboxes.** Every checkbox (bulk selection on cards and rows, filters, settings) is now a round ring in the theme's colours whose checkmark sticks out past the ring when ticked; it follows the accent colour, keeps a visible focus ring, honours reduced motion and forced colours.
+- **Update from source no longer fills empty fields silently**: it always shows the comparison first and changes only what you tick.
+- **Bulk changes do not count on the activity heatmap.** They appear in each run's timeline but, like imports and restores, are not counted as your activity in the statistics heatmap.
+
+## v0.4.0 - 2026-11-16
+
+### Added
+
+- **Home page.** `/` shows every enabled plugin at once: In progress (cards with +1), Coming up (the next 7 days of releases), Series in progress and Recently updated; each section hides when empty.
+- **Time zone setting** (Settings > General). The home page's Coming up and the calendar page group their days and show their times in your zone; empty uses `TZ`, else UTC. The calendar feed stays UTC.
+- **Runs and Start again.** Every entry keeps each viewing, reading or playthrough as a run with its own status, rating, review, progress and dates. "Start again" (Rewatch, Reread, Replay, in each plugin's own words) begins a new run, and moving a completed entry back in the Edit dialog first asks whether to start a new run (Rewatch, ...) or correct the current one. A repeat shows a marker while active and "x2" once finished twice; a repeat you drop leaves the entry showing its last completed run. Earlier runs can only be completed or dropped, and edited or deleted from the run history. Statistics count every run.
+- **Run timeline.** Each run in an entry's history has a collapsed, read-only timeline of its logged changes (progress steps and jumps, status and rating changes) with times in your time zone; imported and restored changes are marked. Plugins can declare an optional plural track label (`label_plural`).
+- **Notes, reviews and unit notes.** The Edit dialog holds the entry's notes and the review of the current run (10,000 characters each; past runs' reviews are edited in the run history). Add a short note to a single unit (an episode, a page, ...) from a run's timeline or from the "Note on ..." link after a +1; notes show in the timeline at their unit. Notes and reviews take simple formatting: bold, italic, lists, https links and spoilers that stay hidden until clicked.
+- **Own tags.** Label entries of any plugin with your own tags ("comfort", "with-partner") in the Edit dialog, with suggestions from your existing tags. Filter every list by them (any or all, `ut` / `ut_all=1`), show them as a table column, see them on the item page, and rename, merge or delete them under Settings > Tags. Names ignore case, also beyond ASCII.
+- **Custom lists.** Collect entries of any plugin in your own named lists ("Kingdom Hearts" across games, manga and novels; "100% completed"), each with its own page of cards, a progress line ("6 of 14 done"), sorting by title, date added or status, or a manual order you arrange. Add entries from an item page (tick the lists), by searching your library on the list page, or straight from a plugin's search (the new entry lands as planned). The sidebar lists them under the plugins. Deleting a list keeps its entries; removing an entry takes it out of every list.
+
+### Changed
+
+- An entry's comment is now called notes. Notes longer than 10,000 characters are refused with a message instead of being cut silently. Existing entries become run 1 of their history (migration 00019).
+- **Backups are format 2.** A backup now carries every run of an entry (with its progress, review, unit notes and change log), the entry's notes, your own tags and your custom lists. Older backups (format 1) still restore: each entry becomes its first run. Older Allister versions cannot read format 2 backups. Restoring a backup merges custom lists by name and adds nothing when repeated.
+- **JSON export version 2.** The per-plugin JSON export's `comment` is now `notes`, and each entry gains `runs`, `user_tags` and `lists`; the top-level status, rating, progress and dates stay those of the run the list shows.
+
+### Fixed
+
+- A Google Books 403 with a key but no known reason is reported instead of retried.
+- The import time estimate counts rows resolved by title as two requests.
 
 ## v0.3.0 - 2026-11-15
 

@@ -35,13 +35,39 @@
         <input type="date" name="finished_on" value="{{.FinishedOn}}" class="mt-1 w-full rounded border border-slate-700 bg-slate-950 px-3 py-2">
       </label>
     </div>
-    <label class="block text-sm">Comment
-      <textarea name="comment" rows="3" maxlength="2000" class="mt-1 w-full rounded border border-slate-700 bg-slate-950 px-3 py-2">{{.Comment}}</textarea>
+    <label class="block text-sm">Notes
+      <textarea name="comment" rows="3" maxlength="10000" class="mt-1 w-full rounded border border-slate-700 bg-slate-950 px-3 py-2">{{.Comment}}</textarea>
     </label>
+    <label class="block text-sm">Review
+      <textarea name="review" rows="3" maxlength="10000" class="mt-1 w-full rounded border border-slate-700 bg-slate-950 px-3 py-2">{{.Review}}</textarea>
+      <span class="mt-1 block text-xs text-slate-400">Formatting: **bold**, *italic*, - lists, [links](https://…), ||spoilers||.</span>
+    </label>
+    <fieldset class="text-sm">
+      <legend>Own tags</legend>
+      <div class="mt-1 flex flex-wrap gap-2">
+        {{range .TagInputs}}<input type="text" name="user_tag" value="{{.}}" list="user-tag-names" autocomplete="off" aria-label="Own tag"{{if not .}} placeholder="Add a tag"{{end}} class="w-36 rounded border border-slate-700 bg-slate-950 px-3 py-2">{{end}}
+      </div>
+      <datalist id="user-tag-names">{{range .TagNames}}<option value="{{.}}"></option>{{end}}</datalist>
+      <span class="mt-1 block text-xs text-slate-400">Your own labels, shared by every list. Clear a field to remove its tag.</span>
+    </fieldset>
+    {{with .Ask}}
+    {{/* the confirm state: moving a completed run back. The plain "correct"
+          button comes first, so Enter keeps the edit as typed. */}}
+    <div class="space-y-1 rounded border border-indigo-500 bg-slate-950 p-3 text-sm" role="alert">
+      <p class="font-medium">This entry is {{.Completed}}.</p>
+      {{if and .StillAiring .OnlyNew}}<p class="text-slate-300">Still airing: it can be started again once it has finished airing, and this earlier run stays finished behind the dropped repeat, so there is nothing to change here.</p>{{else if .StillAiring}}<p class="text-slate-300">Still airing: it can be started again once it has finished airing. Correct the current run?</p>{{else if .OnlyNew}}<p class="text-slate-300">This earlier run stays finished behind the dropped repeat. Start a new run with these values ({{.Action}})?</p>{{else}}<p class="text-slate-300">Start a new run with these values ({{.Action}}), or correct the current one?</p>{{end}}
+    </div>
+    <div class="flex flex-wrap justify-end gap-3">
+      <a href="{{$.CancelURL}}" data-dialog-close class="rounded px-4 py-2 hover:bg-slate-800">Cancel</a>
+      {{if not .OnlyNew}}<button type="submit" name="run_choice" value="correct" class="rounded border border-slate-700 px-4 py-2 hover:bg-slate-800">No, correct this one</button>{{end}}
+      {{if not .StillAiring}}<button type="submit" name="run_choice" value="new" class="rounded bg-indigo-600 px-4 py-2 font-medium hover:bg-indigo-500">{{.Action}} instead</button>{{end}}
+    </div>
+    {{else}}
     <div class="flex justify-end gap-3">
       <a href="{{.CancelURL}}" data-dialog-close class="rounded px-4 py-2 hover:bg-slate-800">Cancel</a>
       <button type="submit" class="rounded bg-indigo-600 px-4 py-2 font-medium hover:bg-indigo-500">{{.Submit}}</button>
     </div>
+    {{end}}
   </form>
 </div>
 {{end}}

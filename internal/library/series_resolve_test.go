@@ -305,7 +305,7 @@ func TestResolveSpinOffsExcluded(t *testing.T) {
 		t.Fatalf("active: %+v", got)
 	}
 	// with a main part planned it is active, with the main counts and cover
-	if _, err := e.db.Exec(`UPDATE entries SET status = 'planned' WHERE item_id = ?`, b); err != nil {
+	if _, err := e.db.Exec(`UPDATE entry_runs SET status = 'planned' WHERE id = (SELECT display_run_id FROM entries WHERE item_id = ?)`, b); err != nil {
 		t.Fatal(err)
 	}
 	got, err := e.lib.ActiveSeries(bg, []string{"saga"}, 10)

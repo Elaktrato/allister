@@ -28,7 +28,7 @@ scripts/go.sh fmt ./...
 
 ## Conventions
 
-- Migrations (`internal/db/migrations`, goose, embedded) must be strictly increasing. **00008 is intentionally unused** (a guard test asserts it); the next number is 00019. Never edit an applied migration's SQL.
+- Migrations (`internal/db/migrations`, goose, embedded) must be strictly increasing. **00008 is intentionally unused** (a guard test asserts it); the next number is 00022. Never edit an applied migration's SQL.
 - Text hygiene: user input is rejected when invalid (control characters etc.); plugins sanitise source input with `plugin.SingleLine/MultiLine/HTTPSURL`.
 - Errors from sources: `plugin.ErrNotFound`, `ErrRateLimited`, `ErrUnavailable` (retryable), `ErrBadResponse` (answered with unusable data: web shows a 502 page, the import records the row failed without retry), `ErrNotConfigured` (missing or refused source credential: actionable 503, never retried; keyless imports fall back to manual rows), `jobs.ErrRetryLater`, `ErrPaused` (an unbounded hold, not counted), `ErrPermanent` for jobs.
 - htmx: `hx-history="false"` on `#list-rows` (restore returns the full page), `Vary: HX-Request, HX-Target, HX-History-Restore-Request` on the list, out-of-band swaps update only option lists and links, never focused inputs. No inline scripts: page handlers live in `internal/web/static/app.js` (a strict CSP must stay possible).
@@ -44,7 +44,7 @@ scripts/go.sh fmt ./...
 - golangci-lint (`.golangci.yml`) must stay at 0 issues: fix findings; for a real false positive use a narrow `//nolint:<linter> // <reason>`, never a broad exclusion without a reason.
 - Workflows: actions pinned by full commit SHA with `# vX.Y.Z` and a row in `PINS.md`; least-privilege `permissions:`; `timeout-minutes` on every job; `persist-credentials: false` on checkouts (all enforced by `internal/guard`). Lint them with `scripts/ci.sh actionlint`. Tool images live in `scripts/ci.sh` (pinned by digest, refreshed by `scripts/update-pins.sh`); govulncheck and gremlins in `tools/go.mod`.
 - Mutation testing (gremlins) runs on `main`/`dev` pushes only; per-package thresholds in `scripts/ci.sh` (`MUTATION_PACKAGES`) are a ratchet: raise, never lower.
-- Branches: `main` (releases) and `dev` (integration; not created yet). Releases: semantic version tags `vX.Y.Z` / `vX.Y.Z-rc.N` on `main`. Cut one with `scripts/release-check.sh vX.Y.Z` (dry run, never pushes), then the owner runs `git tag -a vX.Y.Z -m "Allister vX.Y.Z"` and `git push origin vX.Y.Z`. Never create or push tags yourself. Update `CHANGELOG.md` (Unreleased) with user-visible changes.
+- Branches: work happens on a feature branch and lands on `main` through a pull request (rebase merge); releases are tagged on `main`. A `dev` branch from the early days still exists on GitHub but is stale and unused: do not target it (see the end of `docs/ci.md`). Releases: semantic version tags `vX.Y.Z` / `vX.Y.Z-rc.N` on `main`. Cut one with `scripts/release-check.sh vX.Y.Z` (dry run, never pushes), then the owner runs `git tag -a vX.Y.Z -m "Allister vX.Y.Z"` and `git push origin vX.Y.Z`. Never create or push tags yourself. Update `CHANGELOG.md` (Unreleased) with user-visible changes.
 - The version is linked in via `-ldflags -X` (`internal/version`, Docker build args `VERSION`/`COMMIT`/`DATE`); `/healthz` must keep answering exactly `ok`.
 
 ## Working agreement with the owner

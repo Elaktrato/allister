@@ -112,3 +112,33 @@ func wantInvalid(t *testing.T, err error, substr string) {
 }
 
 func day(y int, m time.Month, d int) time.Time { return time.Date(y, m, d, 0, 0, 0, 0, time.UTC) }
+
+// setEntryUpdated sets the stored change time of the given entries (of
+// every entry when none is given). An entry presents the newer of its own
+// and its display run's time, so both are set.
+func setEntryUpdated(t *testing.T, d *sql.DB, stamp string, ids ...int64) {
+	t.Helper()
+	if len(ids) == 0 {
+		for _, q := range []string{`UPDATE entries SET updated_at = ?`, `UPDATE entry_runs SET updated_at = ?`} {
+			if _, err := d.Exec(q, stamp); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return
+	}
+	for _, id := range ids {
+		for _, q := range []string{`UPDATE entries SET updated_at = ? WHERE item_id = ?`, `UPDATE entry_runs SET updated_at = ? WHERE item_id = ?`} {
+			if _, err := d.Exec(q, stamp, id); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+}
+
+// setDisplayStatus sets the status of an entry's display run.
+func setDisplayStatus(t *testing.T, d *sql.DB, itemID int64, st Status) {
+	t.Helper()
+	if _, err := d.Exec(`UPDATE entry_runs SET status = ? WHERE id = (SELECT display_run_id FROM entries WHERE item_id = ?)`, string(st), itemID); err != nil {
+		t.Fatal(err)
+	}
+}

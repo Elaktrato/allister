@@ -1,0 +1,103 @@
+{{/* A custom list: its entries as the list's cards (each with its own
+      plugin's status labels, +1 and badge), the sort tabs, adding (a
+      search of the whole library, or a plugin's search), rename, the order
+      mode and delete. */}}
+{{define "title"}}{{.Name}} - Allister{{end}}
+{{define "content"}}
+<div class="min-w-0 space-y-6">
+  <div>
+    <a href="/lists" class="text-sm text-indigo-300 hover:underline">All lists</a>
+    <h1 class="mt-1 break-words text-3xl font-semibold">{{.Name}}</h1>
+    <p class="mt-1 text-slate-300">{{.Progress}}</p>
+  </div>
+  {{if .Error}}<div class="max-w-2xl rounded border border-amber-700 bg-amber-950 p-3 text-amber-200" role="alert"><p>{{.Error}}</p></div>{{end}}
+  <nav aria-label="Sort" class="flex flex-wrap gap-2">
+    {{range .Sorts}}<a href="{{.Href}}"{{if .Active}} aria-current="true"{{end}} class="rounded px-3 py-1 text-sm {{if .Active}}bg-slate-700 font-medium{{else}}bg-slate-900 hover:bg-slate-800{{end}}">{{.Label}}</a>
+    {{end}}
+  </nav>
+  {{if .Cards}}
+  <div data-cards class="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
+    {{range .Cards}}
+    <div class="space-y-1">
+      {{template "list_card" .}}
+      <div class="flex items-center justify-end gap-1">
+        {{if .CanMoveUp}}<form method="post" action="{{.MoveURL}}"><input type="hidden" name="dir" value="up"><button type="submit" aria-label="Move up" title="Move up" class="rounded p-1 hover:bg-slate-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"><span class="icon text-[1.125rem]" aria-hidden="true">arrow_upward</span></button></form>{{end}}
+        {{if .CanMoveDown}}<form method="post" action="{{.MoveURL}}"><input type="hidden" name="dir" value="down"><button type="submit" aria-label="Move down" title="Move down" class="rounded p-1 hover:bg-slate-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"><span class="icon text-[1.125rem]" aria-hidden="true">arrow_downward</span></button></form>{{end}}
+        <form method="post" action="{{.RemoveURL}}"><button type="submit" aria-label="Remove {{.Title}} from this list" title="Remove from this list" class="rounded p-1 text-red-300 hover:bg-slate-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"><span class="icon text-[1.125rem]" aria-hidden="true">playlist_remove</span></button></form>
+      </div>
+    </div>
+    {{end}}
+  </div>
+  {{else}}
+  <p class="rounded border border-slate-800 bg-slate-900 p-4 text-slate-300">This list is empty. Add entries below.</p>
+  {{end}}
+
+  <section class="space-y-2">
+    <h2 class="text-lg font-semibold">Add entries</h2>
+    <form method="get" action="{{.SearchURL}}" class="flex gap-2">
+      <label for="list-q" class="sr-only">Search your library</label>
+      <input id="list-q" type="search" name="q" value="{{.Query}}" maxlength="200" placeholder="Search your library" autocomplete="off"
+        hx-get="{{.SearchURL}}" hx-trigger="input changed delay:300ms, search" hx-target="#list-search-results" hx-swap="innerHTML"
+        class="min-w-0 flex-1 rounded border border-slate-700 bg-slate-900 px-3 py-2 text-sm">
+      <button type="submit" class="rounded border border-slate-700 px-4 py-2 text-sm hover:bg-slate-800">Search</button>
+    </form>
+    <div id="list-search-results">{{template "list_search_results" .}}</div>
+    {{if .Searches}}
+    <ul class="flex flex-wrap gap-x-4 gap-y-1 pt-1 text-sm">
+      {{range .Searches}}<li><a href="{{.Href}}" class="inline-flex items-center gap-1.5 text-indigo-300 hover:underline"><span class="icon text-[1.125rem]" aria-hidden="true">search</span><span>{{.Label}}</span></a></li>
+      {{end}}
+    </ul>
+    {{end}}
+  </section>
+
+  <section class="space-y-2">
+    <h2 class="text-lg font-semibold">Order</h2>
+    <form method="post" action="{{.BaseURL}}" class="flex flex-wrap items-center gap-3 text-sm">
+      {{if .Manual}}
+      <span class="text-slate-300">Manual order: move entries up and down.</span>
+      <input type="hidden" name="order" value="sorted">
+      <button type="submit" class="rounded border border-slate-700 px-3 py-1.5 hover:bg-slate-800">Sort instead</button>
+      {{else}}
+      <span class="text-slate-300">Sorted by title, date added or status.</span>
+      <input type="hidden" name="order" value="manual">
+      <button type="submit" class="rounded border border-slate-700 px-3 py-1.5 hover:bg-slate-800">Use manual order</button>
+      {{end}}
+    </form>
+  </section>
+
+  <section class="space-y-2">
+    <h2 class="text-lg font-semibold">Rename</h2>
+    <form method="post" action="{{.BaseURL}}" class="flex gap-2">
+      <label for="list-name" class="sr-only">Name of the list</label>
+      <input id="list-name" type="text" name="name" value="{{.NameValue}}" maxlength="80" required autocomplete="off" class="min-w-0 flex-1 rounded border border-slate-700 bg-slate-900 px-3 py-2 text-sm">
+      <button type="submit" class="rounded bg-indigo-600 px-4 py-2 font-medium hover:bg-indigo-500">Rename</button>
+    </form>
+  </section>
+
+  <section class="space-y-2">
+    <h2 class="text-lg font-semibold">Delete list</h2>
+    <form method="post" action="{{.DeleteURL}}" class="flex flex-wrap items-center gap-3 text-sm">
+      <span class="text-slate-300">The entries stay in your library.</span>
+      <button type="submit" class="rounded border border-slate-700 px-4 py-2 text-red-300 hover:bg-slate-800">Delete list</button>
+    </form>
+  </section>
+</div>
+<div id="dialog-slot" data-swap-statuses="{{dialogStatuses}}"></div>
+{{end}}
+
+{{/* the library search's results: an add button, or "In this list" */}}
+{{define "list_search_results"}}
+{{if .Results}}
+<ul class="space-y-1">
+  {{range .Results}}
+  <li class="flex items-center gap-3 rounded border border-slate-800 bg-slate-900 p-2">
+    {{if .Cover}}<img src="{{.Cover}}" alt="" loading="lazy" class="h-12 w-8 rounded object-cover">
+    {{else}}<span class="block h-12 w-8 rounded bg-slate-800" aria-hidden="true"></span>{{end}}
+    <span class="min-w-0 flex-1 break-words">{{.Title}} <span class="text-sm text-slate-400">{{.Label}}</span></span>
+    {{if .InList}}<span class="text-sm text-slate-400">In this list</span>
+    {{else}}<form method="post" action="{{$.AddURL}}"><input type="hidden" name="item" value="{{.ID}}"><button type="submit" class="rounded bg-indigo-600 px-3 py-1 text-sm font-medium hover:bg-indigo-500">Add</button></form>{{end}}
+  </li>
+  {{end}}
+</ul>
+{{else if .Searched}}<p class="text-sm text-slate-400">No matching entries in your library.</p>{{end}}
+{{end}}

@@ -34,12 +34,12 @@ func (e *env) itemOf(t *testing.T, id int64) *library.Item {
 	return it
 }
 
-// storedProgress reads a progress value straight from the table (active or
-// retained); ok is false when there is none.
+// storedProgress reads a progress value of the display run straight from the
+// database (active or retained); ok is false when there is none.
 func (e *env) storedProgress(t *testing.T, id int64, key string) (float64, bool) {
 	t.Helper()
 	var v float64
-	err := e.d.QueryRow(`SELECT value FROM entry_progress WHERE item_id = ? AND key = ?`, id, key).Scan(&v)
+	err := e.d.QueryRow(`SELECT value FROM display_progress WHERE item_id = ? AND key = ?`, id, key).Scan(&v)
 	if err != nil {
 		return 0, false
 	}
@@ -114,7 +114,13 @@ func TestRowHelperSharedByPageAndIncrement(t *testing.T) {
 	id := e.addFixture(t, "tv", "show", tvWithEpisodes("1", "Shared", 10), library.Entry{Status: library.Active, Progress: map[string]float64{"episode": 2}})
 	inc := strings.TrimSpace(e.do("POST", "/list/"+idStr(id)+"/increment", url.Values{"return": {"/tv?view=table"}}, true).Body.String())
 	page := rowOf(t, e.get("/tv?view=table").Body.String(), "Shared")
-	if inc != page {
+	// the +1 answer only adds the link to a note on the unit just logged
+	link := noteURLOf(id, e.runsOf(t, id)[0], "episode", 3) + "?return=%2Ftv%3Fview%3Dtable"
+	note := "<a href=\"" + link + "\" hx-get=\"" + link + "\" hx-target=\"#dialog-slot\" hx-swap=\"innerHTML\" class=\"text-xs text-indigo-300 hover:underline\">Note on Episode 3</a>"
+	if !strings.Contains(inc, note) {
+		t.Fatalf("no note link in the increment row:\n%s", inc)
+	}
+	if inc = strings.Replace(inc, note, "", 1); inc != page {
 		t.Fatalf("increment row differs from the page row:\n%s\n---\n%s", inc, page)
 	}
 }
@@ -124,7 +130,7 @@ func TestEditFixtureDialogPrefill(t *testing.T) {
 	paged := bookItem("1", "Paged")
 	paged.Fields["pages"] = plugin.FieldValue{Num: num(300)}
 	id := e.addFixture(t, "book", "book", paged, library.Entry{Status: library.Active, Progress: map[string]float64{"pages": 12},
-		StartedOn: day(2024, 1, 2), Comment: "c"})
+		StartedOn: day(2024, 1, 2), Notes: "c"})
 	rec := e.do("GET", "/list/"+idStr(id)+"/edit", nil, true)
 	if rec.Code != 200 {
 		t.Fatal(rec.Code)
@@ -329,7 +335,7 @@ func TestRemoveFixtureCascades(t *testing.T) {
 		t.Fatal("item remains")
 	}
 	var n int
-	for _, tb := range []string{"entries", "entry_progress", "item_titles", "credits"} {
+	for _, tb := range []string{"entries", "entry_runs", "item_titles", "credits"} {
 		if err := e.d.QueryRow(`SELECT COUNT(*) FROM `+tb+` WHERE item_id = ?`, id).Scan(&n); err != nil || n != 0 {
 			t.Fatalf("%s: %d %v", tb, n, err)
 		}

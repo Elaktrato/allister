@@ -16,7 +16,7 @@ func TestExportEntriesHoldEveryStoredValue(t *testing.T) {
 	// 1: a full entry whose pages value became inactive (percent is active now)
 	d1 := bookWith("e1", fp(300))
 	d1.ExternalIDs = map[string]string{"isbn": "978-1", "olid": "OL1"}
-	id1, err := l.AddToList(bg, "book", "book", d1, Entry{Status: Completed, Rating: ip(8), Comment: "line one\nline two",
+	id1, err := l.AddToList(bg, "book", "book", d1, Entry{Status: Completed, Rating: ip(8), Notes: "line one\nline two",
 		StartedOn: tp(day(2024, 3, 1)), FinishedOn: tp(day(2024, 3, 9)), Progress: map[string]float64{"pages": 120}})
 	if err != nil {
 		t.Fatal(err)
@@ -24,7 +24,7 @@ func TestExportEntriesHoldEveryStoredValue(t *testing.T) {
 	if err := l.SetActiveProgress(bg, id1, []string{"percent"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := l.UpsertEntry(bg, Entry{ItemID: id1, Status: Completed, Rating: ip(8), Comment: "line one\nline two",
+	if err := l.UpsertEntry(bg, Entry{ItemID: id1, Status: Completed, Rating: ip(8), Notes: "line one\nline two",
 		StartedOn: tp(day(2024, 3, 1)), FinishedOn: tp(day(2024, 3, 9)), Progress: map[string]float64{"percent": 40}}); err != nil {
 		t.Fatal(err)
 	}
@@ -44,8 +44,10 @@ func TestExportEntriesHoldEveryStoredValue(t *testing.T) {
 	want := []plugin.ExportEntry{
 		{Kind: "book", Titles: bookData("e1").Titles, ExternalIDs: map[string]string{"isbn": "978-1", "olid": "OL1"},
 			Status: plugin.Completed, Rating: ip(8), Progress: map[string]float64{"pages": 120, "percent": 40},
-			StartedOn: tp(day(2024, 3, 1)), FinishedOn: tp(day(2024, 3, 9)), Comment: "line one\nline two"},
-		{Kind: "book", Titles: bookData("e2").Titles, Status: plugin.Planned},
+			StartedOn: tp(day(2024, 3, 1)), FinishedOn: tp(day(2024, 3, 9)), Notes: "line one\nline two",
+			Runs: []plugin.ExportRun{{Number: 1, Status: plugin.Completed, Rating: ip(8), Progress: map[string]float64{"pages": 120, "percent": 40},
+				StartedOn: tp(day(2024, 3, 1)), FinishedOn: tp(day(2024, 3, 9))}}},
+		{Kind: "book", Titles: bookData("e2").Titles, Status: plugin.Planned, Runs: []plugin.ExportRun{{Number: 1, Status: plugin.Planned}}},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("export =\n%+v\nwant\n%+v", got, want)
@@ -132,5 +134,54 @@ func TestExportCarriesSeries(t *testing.T) {
 	}
 	if got[2].Series != "" || got[2].SeriesPosition != 0 {
 		t.Fatalf("standalone = %+v", got[2])
+	}
+}
+
+func TestExportCarriesRunsTagsAndLists(t *testing.T) {
+	e := newEnv(t)
+	id := addBook(t, e.lib, "r", fp(100), Entry{Status: Completed, Rating: ip(7), Notes: "entry notes", Review: "first",
+		FinishedOn: tp(day(2024, 1, 2)), Progress: map[string]float64{"pages": 100}})
+	run2, err := e.lib.StartRun(bg, id, day(2025, 5, 1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := e.lib.UpsertEntry(bg, Entry{ItemID: id, Status: Active, Rating: ip(9), Notes: "entry notes", StartedOn: tp(day(2025, 5, 1)),
+		Progress: map[string]float64{"pages": 30}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.lib.SetEntryTags(bg, id, []string{"zeta", "Alpha"}); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"Shelf", "Favourites"} {
+		l, err := e.lib.CreateList(bg, name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := e.lib.AddToCustomList(bg, l.ID, id); err != nil {
+			t.Fatal(err)
+		}
+	}
+	addBook(t, e.lib, "plain", nil, Entry{Status: Planned})
+	got, err := e.lib.ExportEntries(bg, "book", "")
+	if err != nil || len(got) != 2 {
+		t.Fatalf("export = %+v, %v", got, err)
+	}
+	x := got[0]
+	// the top level is the display run (the active second run)
+	if x.Status != plugin.Active || *x.Rating != 9 || x.Progress["pages"] != 30 || x.Notes != "entry notes" || x.FinishedOn != nil {
+		t.Fatalf("top level = %+v", x)
+	}
+	want := []plugin.ExportRun{
+		{Number: 1, Status: plugin.Completed, Rating: ip(7), Review: "first", Progress: map[string]float64{"pages": 100}, FinishedOn: tp(day(2024, 1, 2))},
+		{Number: 2, Status: plugin.Active, Rating: ip(9), Progress: map[string]float64{"pages": 30}, StartedOn: tp(day(2025, 5, 1))},
+	}
+	if !reflect.DeepEqual(x.Runs, want) || run2.Number != 2 {
+		t.Fatalf("runs = %+v\nwant %+v", x.Runs, want)
+	}
+	if !reflect.DeepEqual(x.UserTags, []string{"Alpha", "zeta"}) || !reflect.DeepEqual(x.Lists, []string{"Favourites", "Shelf"}) {
+		t.Fatalf("tags %v, lists %v", x.UserTags, x.Lists)
+	}
+	if got[1].UserTags != nil || got[1].Lists != nil || len(got[1].Runs) != 1 {
+		t.Fatalf("plain = %+v", got[1])
 	}
 }

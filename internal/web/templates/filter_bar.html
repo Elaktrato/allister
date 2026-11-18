@@ -52,6 +52,7 @@ GET form without JavaScript; with htmx it refreshes the rows region live. */}}
       <div class="{{if .Fields}}mt-4 {{end}}flex flex-wrap items-start gap-4">
         {{with .Genres}}{{template "filter_terms" .}}{{end}}
         {{with .Tags}}{{template "filter_terms" .}}{{end}}
+        {{with .UserTags}}{{template "filter_terms" .}}{{end}}
         {{with .Progress}}<label class="flex flex-col gap-1"><span class="text-slate-400">Progress</span>
           <select name="progress" class="rounded-md border border-slate-700 bg-slate-950 px-2 py-1.5 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500">
             {{range .}}<option value="{{.Value}}"{{if .Selected}} selected{{end}}>{{.Label}}</option>{{end}}
@@ -71,6 +72,15 @@ GET form without JavaScript; with htmx it refreshes the rows region live. */}}
              keeps its options in sync); in the card view there is no head,
              so the control rendered above sorts */}}
         {{if ne .View "cards"}}{{template "sort_control" .}}{{end}}
+        {{with .Length}}<fieldset class="flex flex-col gap-1"><legend class="mb-1 text-slate-400">Length</legend>
+          <select name="len" aria-label="Length measure" class="rounded-md border border-slate-700 bg-slate-950 px-2 py-1.5 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500">{{template "filter_options" .Measures}}</select>
+          <span class="flex items-center gap-1">
+            <input type="number" name="len_min" value="{{.Min}}" min="0" step="any" aria-label="Length from" class="w-20 rounded-md border border-slate-700 bg-slate-950 px-2 py-1.5 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500">
+            <span aria-hidden="true">–</span>
+            <input type="number" name="len_max" value="{{.Max}}" min="0" step="any" aria-label="Length to" class="w-20 rounded-md border border-slate-700 bg-slate-950 px-2 py-1.5 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500">
+          </span>
+          <span class="max-w-48 text-xs text-slate-500">Used by Pick one only. Entries without the data are left out.</span>
+        </fieldset>{{end}}
         <fieldset class="flex flex-col gap-1"><legend class="mb-1 text-slate-400">Show only</legend>
           {{if .ShowUnmatched}}<label class="flex items-center gap-2"><input type="checkbox" name="unmatched" value="1"{{if .Unmatched}} checked{{end}}> Unmatched</label>{{end}}
           <label class="flex items-center gap-2"><input type="checkbox" name="partial" value="1"{{if .Partial}} checked{{end}}> Partially synced</label>
@@ -82,6 +92,10 @@ GET form without JavaScript; with htmx it refreshes the rows region live. */}}
       </div>
     </div>
   </details>
+  {{/* Pick one: a plain submit to the pick page (without JavaScript), with htmx it fills the result panel with the form's current values */}}
+  <div class="mt-3">
+    <button type="submit" formaction="{{.PickAction}}" hx-get="{{.PickAction}}" hx-include="#list-filter" hx-target="#pick-result" hx-swap="innerHTML" hx-push-url="false" hx-sync="this:replace" class="inline-flex items-center gap-1.5 rounded-md border border-slate-700 px-3 py-1.5 font-medium text-slate-200 hover:bg-slate-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"><span class="icon text-[1.125rem]" aria-hidden="true">casino</span><span>Pick one</span></button>
+  </div>
 </form>
 {{end}}
 
@@ -120,9 +134,13 @@ GET form without JavaScript; with htmx it refreshes the rows region live. */}}
   <select id="filter-{{.Name}}-select" name="{{.Name}}" multiple size="6" aria-label="{{.Label}}" class="min-w-40 rounded-md border border-slate-700 bg-slate-950 px-2 py-1.5 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500">
     {{template "filter_term_options" .}}
   </select>
+  {{if .AllName}}
+  <label class="flex items-center gap-2"><input type="checkbox" name="{{.AllName}}" value="1"{{if .All}} checked{{end}}> All of these</label>
+  {{else}}
   <select name="{{.ModeName}}" aria-label="{{.Label}}: match" class="rounded-md border border-slate-700 bg-slate-950 px-2 py-1.5 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500">
     <option value="any"{{if not .All}} selected{{end}}>Any of these</option>
     <option value="all"{{if .All}} selected{{end}}>All of these</option>
   </select>
+  {{end}}
 </fieldset>
 {{end}}

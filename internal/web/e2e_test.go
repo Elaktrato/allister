@@ -248,7 +248,7 @@ func TestMatchFlowEndToEnd(t *testing.T) {
 	if sv.Source != "anilist" || !reflect.DeepEqual(en, enBefore) {
 		t.Fatalf("%+v\n%+v\n%+v", sv, en, enBefore)
 	}
-	if en.Rating == nil || *en.Rating != 0 || en.Progress["episode"] != 3 || en.Comment != "c" || en.StartedOn == nil {
+	if en.Rating == nil || *en.Rating != 0 || en.Progress["episode"] != 3 || en.Notes != "c" || en.StartedOn == nil {
 		t.Fatalf("list data: %+v", en)
 	}
 

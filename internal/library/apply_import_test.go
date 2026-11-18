@@ -11,9 +11,9 @@ import (
 func TestApplyImport(t *testing.T) {
 	e := newEnv(t)
 	l := e.lib
-	id := addShow(t, l, "a1", fp(12), Entry{Status: Planned, Rating: ip(4), Comment: "mine",
+	id := addShow(t, l, "a1", fp(12), Entry{Status: Planned, Rating: ip(4), Notes: "mine",
 		Progress: map[string]float64{"episode": 1}}, WithProgressKeys([]string{"season", "episode"}))
-	if err := l.UpsertEntry(bg, Entry{ItemID: id, Status: Planned, Rating: ip(4), Comment: "mine",
+	if err := l.UpsertEntry(bg, Entry{ItemID: id, Status: Planned, Rating: ip(4), Notes: "mine",
 		Progress: map[string]float64{"episode": 1, "season": 2}}); err != nil {
 		t.Fatal(err)
 	}
@@ -31,7 +31,7 @@ func TestApplyImport(t *testing.T) {
 	}
 	got := mustEntry(t, l, id)
 	if got.Status != Active || got.Rating == nil || *got.Rating != 9 || got.Progress["episode"] != 7 ||
-		got.Progress["season"] != 3 || got.Comment != "mine" {
+		got.Progress["season"] != 3 || got.Notes != "mine" {
 		t.Fatalf("%+v", got)
 	}
 	if got.UpdatedAt.Before(cur.UpdatedAt) {

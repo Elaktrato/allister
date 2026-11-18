@@ -62,7 +62,7 @@ type listEntry struct {
 }
 
 func (e listEntry) entry() library.Entry {
-	return library.Entry{ItemID: e.ItemID, Status: e.Status, Rating: e.Rating, Comment: e.Comment,
+	return library.Entry{ItemID: e.ItemID, Status: e.Status, Rating: e.Rating, Notes: e.Comment,
 		StartedOn: e.StartedOn, FinishedOn: e.FinishedOn, Progress: map[string]float64{"episode": float64(e.Progress)}}
 }
 
@@ -89,7 +89,7 @@ func getEntry(ctx context.Context, lib *library.Library, itemID int64) (*listEnt
 		return nil, err
 	}
 	return &listEntry{ItemID: en.ItemID, Status: en.Status, Rating: en.Rating, Progress: int(en.Progress["episode"]),
-		StartedOn: en.StartedOn, FinishedOn: en.FinishedOn, Comment: en.Comment}, nil
+		StartedOn: en.StartedOn, FinishedOn: en.FinishedOn, Comment: en.Notes}, nil
 }
 
 // findBySource returns the anime item saved from (source, id), or nil.

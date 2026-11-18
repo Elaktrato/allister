@@ -1,5 +1,6 @@
 {{define "list_row"}}
 <tr data-row class="border-b border-slate-800 align-middle">
+  {{with .SelectID}}<td class="w-8 py-2 pr-3"><input type="checkbox" name="ids" value="{{.}}" form="bulk-form" data-bulk-row aria-label="Select {{$.Title}}" class="h-4 w-4 accent-indigo-500"></td>{{end}}
   <td class="w-14 py-2 pr-3">
     {{if .Cover}}<img src="{{.Cover}}" alt="" loading="lazy" class="h-20 w-14 rounded object-cover">
     {{else}}<span class="block h-20 w-14 rounded bg-slate-800" aria-hidden="true"></span>{{end}}
@@ -10,6 +11,7 @@
       {{if .Series}}<a href="{{.SeriesHref}}" title="{{if .SeriesSpinOff}}Spin-off {{.SeriesPos}}{{else}}Part {{.SeriesPos}}{{end}} of {{.Series}}" class="rounded bg-slate-800 px-2 py-0.5 text-indigo-300 hover:underline">{{if .SeriesSpinOff}}Spin-off · {{.Series}}{{else}}{{.SeriesPos}} · {{.Series}}{{end}}</a>{{end}}
       {{if .PartialSync}}<span title="Some details are still being downloaded in the background" class="rounded bg-slate-800 px-2 py-0.5 text-amber-300">partially synced</span>{{end}}
       {{if .Unmatched}}<span title="{{.UnmatchedHint}}" class="rounded bg-slate-800 px-2 py-0.5 text-sky-300">unmatched</span>{{end}}
+      {{template "repeat_badges" .}}
     </div>
   </td>
   {{range .Cells}}
@@ -23,6 +25,7 @@
         <button type="submit" class="rounded bg-slate-800 px-2 py-0.5 text-sm hover:bg-slate-700" aria-label="{{$.IncrementLabel}}">+1</button>
       </form>
       {{end}}
+      {{with $.NoteURL}}<a href="{{.}}" hx-get="{{.}}" hx-target="#dialog-slot" hx-swap="innerHTML" class="text-xs text-indigo-300 hover:underline">{{$.NoteLabel}}</a>{{end}}
     </span>
   </td>
   {{- else if eq .Core "rating"}}
@@ -44,3 +47,6 @@
   </td>
 </tr>
 {{end}}
+
+{{/* the repeat marker of an active repeat run and the repeat count "x<n>" */}}
+{{define "repeat_badges"}}{{with .RepeatMarker}}<span class="rounded bg-slate-800 px-2 py-0.5 text-indigo-300">{{.}}</span>{{end}}{{if ge .Repeats 2}}<span title="{{.RepeatsTitle}}" class="rounded bg-slate-800 px-2 py-0.5 text-slate-300">x{{.Repeats}}</span>{{end}}{{end}}

@@ -8,6 +8,7 @@ import (
 	"html/template"
 	"io"
 	"log"
+	"math/rand/v2"
 	"net/http"
 	"os"
 	"strings"
@@ -41,6 +42,11 @@ type Deps struct {
 	// sync job. cmd/allister wires the generic sync job (jobs.SyncJobFor)
 	// for every installed plugin.
 	SyncJobs map[string]func(itemID int64) (kind string, payload any)
+	// CoverJobs maps a plugin id to its cover-only sync job (jobs.CoverJobFor),
+	// like SyncJobs: taking a source's remote cover on "Update from source"
+	// enqueues it so the cover is downloaded. A plugin without an entry gets
+	// no job (the remote cover stays until a later sync).
+	CoverJobs map[string]func(itemID int64) (kind string, payload any)
 	// ScheduleJobs maps a plugin id to its schedule refresh job, like
 	// SyncJobs: the calendar feed enqueues refreshes without knowing the kind.
 	ScheduleJobs map[string]func(itemID int64) (kind string, payload any)
@@ -98,6 +104,8 @@ type server struct {
 	coreGuarded  []string
 	// now is the server's clock (export file names, caches).
 	now func() time.Time
+	// pickCap bounds the entries one pick loads (a seam for tests)
+	pickCap int
 	// restoreMu allows one backup restore at a time; maxBackupBody caps its
 	// upload; spoolHook (tests) sees the spooled temp file.
 	restoreMu     sync.Mutex
@@ -107,24 +115,29 @@ type server struct {
 	backupWrite func(ctx context.Context, w io.Writer, lib *library.Library, plugins []backup.PluginVersion, coversDir string, app *appearance.Service, timeZone string, now time.Time) error
 	// appearance is Deps.Appearance (or the default one).
 	appearance *appearance.Service
+	// rand returns a uniform number in [0, n) for n > 0 (the randomiser's
+	// draw); tests replace it with a fixed one.
+	rand func(n int) int
 }
 
 // pageNames lists every page template (templates/<name>.html). Add a page by
 // dropping its file in templates/ and listing it here.
-var pageNames = []string{"calendar", "stats", "settings", "settings_appearance", "settings_plugins_page", "settings_plugin", "search", "item", "list", "series", "person", "manual_form", "details_form", "import", "error", "recommendations", "backup", "home"}
+var pageNames = []string{"calendar", "stats", "settings", "settings_appearance", "settings_plugins_page", "settings_plugin", "search", "item", "list", "series", "person", "manual_form", "details_form", "import", "error", "recommendations", "backup", "home", "settings_tags", "lists", "list_page", "changes", "bulk_confirm", "duplicates", "merge_pick"}
 
 // pagePartials lists extra template files a page needs (also rendered alone
 // for htmx requests).
 var pagePartials = map[string][]string{
 	"search":                {"templates/search_panel.html", "templates/search_results.html"},
 	"settings_plugins_page": {"templates/settings_plugins.html"},
-	"item":                  {"templates/sections.html", "templates/add_dialog.html", "templates/progress_inputs.html", "templates/match_dialog.html"},
+	"item":                  {"templates/sections.html", "templates/add_dialog.html", "templates/progress_inputs.html", "templates/match_dialog.html", "templates/run_history.html", "templates/timeline.html", "templates/list_picker.html"},
 	"series":                {"templates/series_candidates.html", "templates/series_edit.html", "templates/item_inputs.html"},
-	"list":                  {"templates/list_row.html", "templates/list_cards.html", "templates/series_rows.html", "templates/filter_bar.html", "templates/entry_dialog.html", "templates/progress_inputs.html"},
+	"list":                  {"templates/list_row.html", "templates/list_cards.html", "templates/series_rows.html", "templates/filter_bar.html", "templates/entry_dialog.html", "templates/progress_inputs.html", "templates/bulk_bar.html", "templates/pick_result.html"},
 	"manual_form":           {"templates/item_inputs.html", "templates/progress_inputs.html"},
 	"details_form":          {"templates/item_inputs.html"},
 	"stats":                 {"templates/filter_bar.html"},
 	"home":                  {"templates/list_cards.html"},
+	"list_page":             {"templates/list_cards.html"},
+	"bulk_confirm":          {"templates/bulk_bar.html"},
 }
 
 // parsePages builds one template set per page, each cloned from base.html plus
@@ -158,7 +171,7 @@ func newServer(deps Deps, now func() time.Time) (*server, http.Handler) {
 		deps.Appearance = appearance.NewService(st, nil)
 	}
 	s := &server{deps: deps, pages: parsePages(), cache: newDetailCache(now, cacheMaxEntries, cacheTTL),
-		recs: newRecCache(now, recCacheMaxEntries, cacheTTL), recTimeout: recTimeout, now: now, maxBackupBody: maxBackupBody, backupWrite: backup.Write,
+		recs: newRecCache(now, recCacheMaxEntries, cacheTTL), recTimeout: recTimeout, now: now, pickCap: defaultPickCap, rand: rand.IntN, maxBackupBody: maxBackupBody, backupWrite: backup.Write,
 		appearance: deps.Appearance}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
@@ -187,9 +200,13 @@ func newServer(deps Deps, now func() time.Time) (*server, http.Handler) {
 	mux.HandleFunc("POST /settings/plugins/{id}/home", s.postHomeSettings)
 	mux.HandleFunc("POST /settings/plugins/{id}/import/{importer}", s.postPluginImport)
 	mux.HandleFunc("POST /settings/plugins/{id}/columns", s.postColumns)
+	mux.HandleFunc("GET /settings/tags", s.getTags)
+	mux.HandleFunc("POST /settings/tags/{id}", s.postRenameTag)
+	mux.HandleFunc("POST /settings/tags/{id}/delete", s.postDeleteTag)
 	mux.HandleFunc("GET /settings/backup", s.getBackup)
 	mux.HandleFunc("GET /settings/backup/download", s.getBackupDownload)
 	mux.HandleFunc("POST /settings/backup/restore", s.postBackupRestore)
+	s.mountLists(mux)
 	s.mountPlugins(mux)
 	s.mountAppearance(mux)
 	return s, refuseCrossOrigin(mux)

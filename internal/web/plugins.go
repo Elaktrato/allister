@@ -30,9 +30,19 @@ type routeSet func(reg routeRegistrar)
 // plugin of the item {id} decides whether they answer.
 func (s *server) entryRoutes(reg routeRegistrar) {
 	reg.Handle("POST /list/{id}/increment", s.postIncrement)
+	reg.Handle("POST /list/{id}/watched", s.postWatched)
 	reg.Handle("GET /list/{id}/edit", s.getEdit)
 	reg.Handle("POST /list/{id}/edit", s.postEdit)
 	reg.Handle("POST /list/{id}/remove", s.postRemove)
+	reg.Handle("POST /list/{id}/start", s.postStart)
+	reg.Handle("POST /list/{id}/runs", s.postStartRun)
+	reg.Handle("GET /list/{id}/runs/{run}/edit", s.getRunEdit)
+	reg.Handle("POST /list/{id}/runs/{run}/edit", s.postRunEdit)
+	reg.Handle("POST /list/{id}/runs/{run}/delete", s.postRunDelete)
+	reg.Handle("GET /list/{id}/runs/{run}/timeline", s.getTimeline)
+	reg.Handle("GET /list/{id}/runs/{run}/notes/{key}/{unit}", s.getUnitNote)
+	reg.Handle("POST /list/{id}/runs/{run}/notes/{key}/{unit}", s.postUnitNote)
+	reg.Handle("POST /list/{id}/lists", s.postItemLists)
 }
 
 // muxRegistrar mounts relative patterns on a mux behind a guard.
@@ -180,13 +190,18 @@ type navItem struct {
 	Href   string
 	Icon   string // the manifest's icon name ("" = the template's default)
 	Active bool
+	Sub    bool // indented under the row before it (a custom list)
 }
 
-// navView is the sidebar: one row per enabled plugin, Statistics, Calendar
-// and Settings at the bottom.
+// navView is the sidebar: one row per enabled plugin, the Lists group (the
+// overview, each custom list and "New list"), Statistics, Calendar and
+// Settings at the bottom.
 type navView struct {
 	Home     navItem // the home page; Label "" while no plugin is enabled
 	Items    []navItem
+	Lists    navItem
+	MyLists  []navItem
+	NewList  navItem
 	Stats    navItem
 	Calendar navItem
 	Settings navItem
@@ -226,6 +241,16 @@ func (s *server) navItems(r *http.Request) navView {
 	}
 	if len(v.Items) > 0 {
 		v.Home = navItem{Label: "Home", Href: "/", Icon: "home", Active: r.URL.Path == "/"}
+	}
+	v.Lists = navItem{Label: "Lists", Href: "/lists", Icon: "list_alt", Active: r.URL.Path == "/lists"}
+	v.NewList = navItem{Label: "New list", Href: "/lists#new-list", Icon: "playlist_add", Sub: true}
+	lists, err := s.deps.Library.Lists(r.Context())
+	if err != nil { // the sidebar is drawn without the lists
+		log.Printf("nav lists: %s", logSafe(err))
+	}
+	for _, ls := range lists {
+		href := customListURL(ls.ID)
+		v.MyLists = append(v.MyLists, navItem{Label: ls.Name, Href: href, Icon: "list", Active: underPrefix(r.URL.Path, href), Sub: true})
 	}
 	v.Stats = navItem{Label: "Statistics", Href: "/stats", Icon: "bar_chart", Active: underPrefix(r.URL.Path, "/stats")}
 	v.Calendar = navItem{Label: "Calendar", Href: "/calendar", Active: underPrefix(r.URL.Path, "/calendar")}

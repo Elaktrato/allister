@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/allister/allister/internal/plugin"
+	"github.com/allister/allister/internal/plugin/plugintest"
 )
 
 func progressOf(t *testing.T, l *Library, id int64) map[string]float64 {
@@ -93,7 +94,7 @@ func TestIncrementCapsAtTotalAndNoPrimary(t *testing.T) {
 	if err := l.Increment(bg, id); err != nil {
 		t.Fatal(err)
 	}
-	if n := count(t, e.db, `SELECT count(*) FROM entry_progress WHERE item_id = ?`, id); n != 0 {
+	if n := count(t, e.db, `SELECT count(*) FROM display_progress WHERE item_id = ?`, id); n != 0 {
 		t.Fatalf("rows = %d", n)
 	}
 	// kind without a primary key: no-op
@@ -104,14 +105,12 @@ func TestIncrementCapsAtTotalAndNoPrimary(t *testing.T) {
 	if err := l.Increment(bg, nid); err != nil {
 		t.Fatal(err)
 	}
-	if n := count(t, e.db, `SELECT count(*) FROM entry_progress WHERE item_id = ?`, nid); n != 0 {
+	if n := count(t, e.db, `SELECT count(*) FROM display_progress WHERE item_id = ?`, nid); n != 0 {
 		t.Fatalf("rows = %d", n)
 	}
 	// the entry is touched when the progress moves
 	id = addBook(t, l, "i8", nil, Entry{Status: Active})
-	if _, err := e.db.Exec(`UPDATE entries SET updated_at = '2000-01-01T00:00:00Z'`); err != nil {
-		t.Fatal(err)
-	}
+	setEntryUpdated(t, e.db, "2000-01-01T00:00:00Z")
 	if err := l.Increment(bg, id); err != nil {
 		t.Fatal(err)
 	}
@@ -164,7 +163,7 @@ func TestSetActiveProgressRetainsInactiveValues(t *testing.T) {
 	}
 	// the value stays in the table but is hidden from the entry
 	var v float64
-	if err := e.db.QueryRow(`SELECT value FROM entry_progress WHERE item_id = ? AND key = 'pages'`, id).Scan(&v); err != nil || v != 120 {
+	if err := e.db.QueryRow(`SELECT value FROM display_progress WHERE item_id = ? AND key = 'pages'`, id).Scan(&v); err != nil || v != 120 {
 		t.Fatalf("retained = %v, %v", v, err)
 	}
 	if got := progressOf(t, l, id); len(got) != 0 {
@@ -185,7 +184,7 @@ func TestSetActiveProgressRetainsInactiveValues(t *testing.T) {
 	if got := progressOf(t, l, id); got["pages"] != 120 || len(got) != 1 {
 		t.Fatalf("progress = %v", got)
 	}
-	if n := count(t, e.db, `SELECT count(*) FROM entry_progress WHERE item_id = ?`, id); n != 2 {
+	if n := count(t, e.db, `SELECT count(*) FROM display_progress WHERE item_id = ?`, id); n != 2 {
 		t.Fatalf("rows = %d, want pages and percent retained", n)
 	}
 	// a set equals a combination regardless of order
@@ -327,7 +326,7 @@ func TestProgressStateFiltersAgreeWithHelpers(t *testing.T) {
 			}
 			all[k] = *v
 			// direct insert: bypasses validation so inactive and out-of-range values exist
-			if _, err := e.db.Exec(`INSERT INTO entry_progress(item_id,key,value) VALUES (?,?,?)`, id, k, *v); err != nil {
+			if _, err := e.db.Exec(`INSERT INTO run_progress(run_id,key,value) SELECT display_run_id, ?, ? FROM entries WHERE item_id = ?`, k, *v, id); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -495,7 +494,7 @@ func TestUpdateEntrySwitchesCombinationAndWritesAtomically(t *testing.T) {
 	if err := l.UpdateEntry(bg, Entry{ItemID: id, Status: Active, Progress: map[string]float64{"episode": 5}}, []string{"episode"}); err != nil {
 		t.Fatal(err)
 	}
-	if n := count(t, e.db, `SELECT count(*) FROM entry_progress WHERE item_id = ? AND key = 'position' AND value = 600`, id); n != 1 {
+	if n := count(t, e.db, `SELECT count(*) FROM display_progress WHERE item_id = ? AND key = 'position' AND value = 600`, id); n != 1 {
 		t.Fatal("position not retained")
 	}
 }
@@ -555,15 +554,15 @@ func TestUpdateEntryRetainedValueIsTheEventBaseline(t *testing.T) {
 func TestUpdateEntryRollsBackOnError(t *testing.T) {
 	e := newEnv(t)
 	l := e.lib
-	id := addShow(t, l, "ur", fp(10), Entry{Status: Active, Progress: map[string]float64{"episode": 2}, Comment: "old"})
+	id := addShow(t, l, "ur", fp(10), Entry{Status: Active, Progress: map[string]float64{"episode": 2}, Notes: "old"})
 	snapshot := func() string {
 		var pk string
 		if err := e.db.QueryRow(`SELECT progress_keys || updated_at FROM items WHERE id = ?`, id).Scan(&pk); err != nil {
 			t.Fatal(err)
 		}
 		en := mustEntry(t, l, id)
-		return fmt.Sprintf("%s %v %s %v %d", pk, en.Status, en.Comment, en.Progress,
-			count(t, e.db, `SELECT count(*) FROM entry_progress WHERE item_id = ?`, id))
+		return fmt.Sprintf("%s %v %s %v %d", pk, en.Status, en.Notes, en.Progress,
+			count(t, e.db, `SELECT count(*) FROM display_progress WHERE item_id = ?`, id))
 	}
 	before := snapshot()
 	for name, c := range map[string]struct {
@@ -571,11 +570,11 @@ func TestUpdateEntryRollsBackOnError(t *testing.T) {
 		keys []string
 		want string
 	}{
-		"above the new total":             {Entry{Status: Completed, Comment: "new", Progress: map[string]float64{"season": 1, "episode": 11}}, []string{"season", "episode"}, "above the total"},
-		"key outside the new combination": {Entry{Status: Completed, Comment: "new", Progress: map[string]float64{"position": 5}}, []string{"season", "episode"}, "not active"},
-		"ineligible combination":          {Entry{Status: Completed, Comment: "new"}, []string{"season", "position"}, "combination"},
-		"empty combination":               {Entry{Status: Completed, Comment: "new"}, []string{}, "combination"},
-		"bad status":                      {Entry{Status: "watching", Comment: "new"}, []string{"season", "episode"}, "status"},
+		"above the new total":             {Entry{Status: Completed, Notes: "new", Progress: map[string]float64{"season": 1, "episode": 11}}, []string{"season", "episode"}, "above the total"},
+		"key outside the new combination": {Entry{Status: Completed, Notes: "new", Progress: map[string]float64{"position": 5}}, []string{"season", "episode"}, "not active"},
+		"ineligible combination":          {Entry{Status: Completed, Notes: "new"}, []string{"season", "position"}, "combination"},
+		"empty combination":               {Entry{Status: Completed, Notes: "new"}, []string{}, "combination"},
+		"bad status":                      {Entry{Status: "watching", Notes: "new"}, []string{"season", "episode"}, "status"},
 		"finish before start": {Entry{Status: Completed, StartedOn: tp(day(2024, 2, 1)), FinishedOn: tp(day(2024, 1, 1))},
 			[]string{"season", "episode"}, "before the start"},
 	} {
@@ -631,7 +630,7 @@ func TestUpdateEntryZeroClearsOnlyGivenKeys(t *testing.T) {
 	if got := progressOf(t, l, id); got["episode"] != 0 || got["season"] != 3 || len(got) != 2 {
 		t.Fatalf("progress %v", got)
 	}
-	if n := count(t, e.db, `SELECT count(*) FROM entry_progress WHERE item_id = ? AND key = 'position' AND value = 600`, id); n != 1 {
+	if n := count(t, e.db, `SELECT count(*) FROM display_progress WHERE item_id = ? AND key = 'position' AND value = 600`, id); n != 1 {
 		t.Fatal("retained position touched")
 	}
 }
@@ -741,5 +740,336 @@ func TestIncrementResetsResetOnPrimaryTrack(t *testing.T) {
 	got = progressOf(t, l, id)
 	if got["episode"] != 2 || got["position"] != 300 {
 		t.Fatalf("capped increment = %v", got)
+	}
+}
+
+// releaseShow adds an active show (12 episodes) with the aired episodes 1 to 4
+// and the not yet aired episode 5, and returns its id and the clock.
+func releaseShow(t *testing.T, l *Library, sourceID string, e Entry, opts ...SaveOption) (int64, time.Time) {
+	t.Helper()
+	now := time.Date(2026, 11, 10, 12, 0, 0, 0, time.UTC)
+	id := addShow(t, l, sourceID, fp(12), e, opts...)
+	var airs []Airing
+	for n := 1; n <= 4; n++ {
+		airs = append(airs, Airing{Number: n, AirsAt: now.Add(-time.Duration(5-n) * 24 * time.Hour)})
+	}
+	airs = append(airs, Airing{Number: 5, AirsAt: now.Add(time.Hour)})
+	if err := l.SaveSchedule(bg, id, airs, now); err != nil {
+		t.Fatal(err)
+	}
+	return id, now
+}
+
+func TestMarkReleaseWatchedSets(t *testing.T) {
+	l := newLib(t)
+	id, now := releaseShow(t, l, "m1", Entry{Status: Active, Progress: map[string]float64{"episode": 1}})
+	changed, err := l.MarkReleaseWatched(bg, id, 0, 3, now)
+	if err != nil || !changed {
+		t.Fatalf("changed=%v err=%v", changed, err)
+	}
+	if got := progressOf(t, l, id)["episode"]; got != 3 {
+		t.Fatalf("episode = %v, want 3", got)
+	}
+	// a release at the very moment of now has aired (airs_at <= now)
+	if err := l.SaveSchedule(bg, id, []Airing{{Number: 4, AirsAt: now}}, now); err != nil {
+		t.Fatal(err)
+	}
+	if changed, err := l.MarkReleaseWatched(bg, id, 0, 4, now); err != nil || !changed {
+		t.Fatalf("at now: changed=%v err=%v", changed, err)
+	}
+}
+
+func TestMarkReleaseWatchedIdempotent(t *testing.T) {
+	l := newLib(t)
+	id, now := releaseShow(t, l, "m2", Entry{Status: Active})
+	if changed, err := l.MarkReleaseWatched(bg, id, 0, 2, now); err != nil || !changed {
+		t.Fatalf("first: %v %v", changed, err)
+	}
+	if changed, err := l.MarkReleaseWatched(bg, id, 0, 2, now); err != nil || changed {
+		t.Fatalf("second: changed=%v err=%v", changed, err)
+	}
+	if n := len(readEvents(t, l, id)); n != 1 {
+		t.Fatalf("%d events, want 1", n)
+	}
+}
+
+func TestMarkReleaseWatchedNeverLowers(t *testing.T) {
+	l := newLib(t)
+	id, now := releaseShow(t, l, "m3", Entry{Status: Active, Progress: map[string]float64{"episode": 4}})
+	if changed, err := l.MarkReleaseWatched(bg, id, 0, 2, now); err != nil || changed {
+		t.Fatalf("changed=%v err=%v", changed, err)
+	}
+	if got := progressOf(t, l, id)["episode"]; got != 4 {
+		t.Fatalf("episode = %v, want 4", got)
+	}
+	if n := len(readEvents(t, l, id)); n != 0 {
+		t.Fatalf("%d events, want 0", n)
+	}
+}
+
+func TestMarkReleaseWatchedClampsToTotal(t *testing.T) {
+	l := newLib(t)
+	id, now := releaseShow(t, l, "m4", Entry{Status: Active, Progress: map[string]float64{"episode": 10}})
+	// the stored schedule runs past the item's total of 12
+	if err := l.SaveSchedule(bg, id, []Airing{{Number: 13, AirsAt: now.Add(-time.Hour)}, {Number: 14, AirsAt: now.Add(-time.Minute)}}, now); err != nil {
+		t.Fatal(err)
+	}
+	if changed, err := l.MarkReleaseWatched(bg, id, 0, 13, now); err != nil || !changed {
+		t.Fatalf("changed=%v err=%v", changed, err)
+	}
+	if got := progressOf(t, l, id)["episode"]; got != 12 {
+		t.Fatalf("episode = %v, want the total 12", got)
+	}
+	// at the total the next release changes nothing
+	if changed, err := l.MarkReleaseWatched(bg, id, 0, 14, now); err != nil || changed {
+		t.Fatalf("at total: changed=%v err=%v", changed, err)
+	}
+	if n := len(readEvents(t, l, id)); n != 1 {
+		t.Fatalf("%d events, want 1", n)
+	}
+}
+
+func TestMarkReleaseWatchedRejectsUnknownRelease(t *testing.T) {
+	l := newLib(t)
+	id, now := releaseShow(t, l, "m5", Entry{Status: Active})
+	for _, c := range [][2]int{{0, 99}, {1, 2}, {0, 0}, {0, -1}} {
+		if _, err := l.MarkReleaseWatched(bg, id, c[0], c[1], now); !errors.Is(err, ErrInvalid) {
+			t.Fatalf("release %v: err = %v, want ErrInvalid", c, err)
+		}
+	}
+	if len(readEvents(t, l, id)) != 0 || progressOf(t, l, id)["episode"] != 0 {
+		t.Fatal("a rejected release changed the entry")
+	}
+	// no entry and no item
+	bare, err := l.AddToList(bg, "tv", "show", tvData("m5b", fp(3)), Entry{Status: Active})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := l.RemoveEntry(bg, bare); err != nil {
+		t.Fatal(err)
+	}
+	for _, i := range []int64{bare, 9999} {
+		if _, err := l.MarkReleaseWatched(bg, i, 0, 1, now); !errors.Is(err, ErrNoEntry) {
+			t.Fatalf("item %d: err = %v, want ErrNoEntry", i, err)
+		}
+	}
+}
+
+func TestMarkReleaseWatchedRejectsFuture(t *testing.T) {
+	l := newLib(t)
+	id, now := releaseShow(t, l, "m6", Entry{Status: Active})
+	if _, err := l.MarkReleaseWatched(bg, id, 0, 5, now); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("err = %v, want ErrInvalid", err)
+	}
+	if progressOf(t, l, id)["episode"] != 0 || len(readEvents(t, l, id)) != 0 {
+		t.Fatal("an unaired release changed the entry")
+	}
+}
+
+func TestMarkReleaseWatchedRejectsRepeatRunAndInactive(t *testing.T) {
+	l := newLib(t)
+	now := time.Date(2026, 11, 10, 12, 0, 0, 0, time.UTC)
+	// a repeat run that began before the new airings appeared
+	only, err := l.AddToList(bg, "tv", "show", tvData("m7b", fp(12)), Entry{Status: Completed})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := l.StartRun(bg, only, day(2026, 1, 1)); err != nil {
+		t.Fatal(err)
+	}
+	if err := l.SaveSchedule(bg, only, []Airing{{Number: 1, AirsAt: now.Add(-time.Hour)}}, now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := l.MarkReleaseWatched(bg, only, 0, 1, now); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("repeat run: err = %v, want ErrInvalid", err)
+	}
+	// every status but active
+	for _, st := range []Status{Planned, Paused, Dropped, Completed} {
+		id, _ := releaseShow(t, l, "m7-"+string(st), Entry{Status: st})
+		if _, err := l.MarkReleaseWatched(bg, id, 0, 2, now); !errors.Is(err, ErrInvalid) {
+			t.Fatalf("%s: err = %v, want ErrInvalid", st, err)
+		}
+		if en := mustEntry(t, l, id); en.Status != st || en.Progress["episode"] != 0 {
+			t.Fatalf("%s entry changed: %+v", st, en)
+		}
+	}
+}
+
+// groupedLib registers a copy of the tv plugin whose episode track is grouped
+// by season.
+func groupedLib(t *testing.T) *Library {
+	t.Helper()
+	e := newEnv(t)
+	p := plugintest.TVPlugin(plugintest.WithID("tvg"))
+	p.M.Kinds[0].Progress.GroupKey = "season"
+	if err := e.reg.Register(p); err != nil {
+		t.Fatal(err)
+	}
+	return e.lib
+}
+
+func TestMarkReleaseWatchedSeasonAndUnit(t *testing.T) {
+	l := groupedLib(t)
+	now := time.Date(2026, 11, 10, 12, 0, 0, 0, time.UTC)
+	past := now.Add(-time.Hour)
+	id, err := l.AddToList(bg, "tvg", "show", tvData("g1", nil), Entry{Status: Active, Progress: map[string]float64{"season": 1, "episode": 8}},
+		WithProgressKeys([]string{"season", "episode"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := l.SaveSchedule(bg, id, []Airing{{Season: 1, Number: 9, AirsAt: past}, {Season: 2, Number: 1, AirsAt: past}, {Season: 2, Number: 2, AirsAt: past}}, now); err != nil {
+		t.Fatal(err)
+	}
+	// the next season's first episode sets both tracks (the episode drops)
+	if changed, err := l.MarkReleaseWatched(bg, id, 2, 1, now); err != nil || !changed {
+		t.Fatalf("changed=%v err=%v", changed, err)
+	}
+	got := progressOf(t, l, id)
+	if got["season"] != 2 || got["episode"] != 1 {
+		t.Fatalf("progress = %v", got)
+	}
+	// an earlier release of a past season does not lower either track
+	if changed, err := l.MarkReleaseWatched(bg, id, 1, 9, now); err != nil || changed {
+		t.Fatalf("lower: changed=%v err=%v", changed, err)
+	}
+	if got := progressOf(t, l, id); got["season"] != 2 || got["episode"] != 1 {
+		t.Fatalf("lowered: %v", got)
+	}
+	// the next one in the same season moves the episode only
+	if changed, err := l.MarkReleaseWatched(bg, id, 2, 2, now); err != nil || !changed {
+		t.Fatalf("changed=%v err=%v", changed, err)
+	}
+	wantEvents(t, readEvents(t, l, id), []event{
+		{Type: "progress", Key: "season", OldNum: fp(1), NewNum: fp(2), Origin: OriginManual},
+		{Type: "progress", Key: "episode", OldNum: fp(8), NewNum: fp(1), Origin: OriginManual},
+		{Type: "progress", Key: "episode", OldNum: fp(1), NewNum: fp(2), Origin: OriginManual},
+	})
+	// the group track must be active when the release sets it
+	solo, err := l.AddToList(bg, "tvg", "show", tvData("g2", nil), Entry{Status: Active}, WithProgressKeys([]string{"episode"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := l.SaveSchedule(bg, solo, []Airing{{Season: 2, Number: 1, AirsAt: past}, {Season: 0, Number: 1, AirsAt: past}}, now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := l.MarkReleaseWatched(bg, solo, 2, 1, now); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("inactive group track: err = %v, want ErrInvalid", err)
+	}
+	// a release without a season (season 0) needs the primary track only
+	if changed, err := l.MarkReleaseWatched(bg, solo, 0, 1, now); err != nil || !changed {
+		t.Fatalf("season 0: changed=%v err=%v", changed, err)
+	}
+}
+
+func TestMarkReleaseWatchedResetsPositionAndIsManual(t *testing.T) {
+	l := newLib(t)
+	id, now := releaseShow(t, l, "m8", Entry{Status: Active, Progress: map[string]float64{"episode": 1, "position": 600}},
+		WithProgressKeys([]string{"episode", "position"}))
+	if _, err := l.MarkReleaseWatched(bg, id, 0, 3, now); err != nil {
+		t.Fatal(err)
+	}
+	got := progressOf(t, l, id)
+	if got["episode"] != 3 {
+		t.Fatalf("progress = %v", got)
+	}
+	if _, ok := got["position"]; ok {
+		t.Fatalf("position not reset: %v", got)
+	}
+	wantEvents(t, readEvents(t, l, id), []event{
+		{Type: "progress", Key: "episode", OldNum: fp(1), NewNum: fp(3), Origin: OriginManual},
+	})
+}
+
+func TestMarkReleaseWatchedEventOriginManual(t *testing.T) {
+	l := newLib(t)
+	id, now := releaseShow(t, l, "m9", Entry{Status: Active})
+	if _, err := l.MarkReleaseWatched(bg, id, 0, 1, now); err != nil {
+		t.Fatal(err)
+	}
+	evs := readEvents(t, l, id)
+	if len(evs) != 1 || evs[0].Origin != OriginManual || evs[0].Type != "progress" {
+		t.Fatalf("events = %s", showEvents(evs))
+	}
+}
+
+// TestMarkReleaseWatchedSeasonAboveTotal: a release of a season above the
+// group track's total is refused (the entry would fail validation elsewhere),
+// while a season within it is marked.
+func TestMarkReleaseWatchedSeasonAboveTotal(t *testing.T) {
+	e := newEnv(t)
+	p := plugintest.TVPlugin(plugintest.WithID("tvs"))
+	k := &p.M.Kinds[0]
+	k.Progress.GroupKey = "season"
+	k.Progress.Eligible[0].TotalField = "seasons"
+	k.Fields = append(k.Fields, plugin.FieldDef{Key: "seasons", Label: "Seasons", Type: plugin.FieldNumber, Min: fp(0), Editable: true})
+	if err := e.reg.Register(p); err != nil {
+		t.Fatal(err)
+	}
+	l := e.lib
+	now := time.Date(2026, 11, 10, 12, 0, 0, 0, time.UTC)
+	d := tvData("s1", nil)
+	d.Fields["seasons"] = plugin.FieldValue{Num: fp(1)}
+	id, err := l.AddToList(bg, "tvs", "show", d, Entry{Status: Active, Progress: map[string]float64{"season": 1, "episode": 3}},
+		WithProgressKeys([]string{"season", "episode"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	past := now.Add(-time.Hour)
+	if err := l.SaveSchedule(bg, id, []Airing{{Season: 1, Number: 4, AirsAt: past}, {Season: 2, Number: 1, AirsAt: past}}, now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := l.MarkReleaseWatched(bg, id, 2, 1, now); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("season above total: err = %v, want ErrInvalid", err)
+	}
+	if got := progressOf(t, l, id); got["season"] != 1 || got["episode"] != 3 || len(readEvents(t, l, id)) != 0 {
+		t.Fatalf("a refused release changed the entry: %v", got)
+	}
+	if changed, err := l.MarkReleaseWatched(bg, id, 1, 4, now); err != nil || !changed {
+		t.Fatalf("season within total: changed=%v err=%v", changed, err)
+	}
+	// the stored entry still validates (an unchanged save works)
+	if err := l.UpdateEntry(bg, *mustEntry(t, l, id), nil); err != nil {
+		t.Fatalf("entry no longer saves: %v", err)
+	}
+	// the shared check the calendar uses agrees
+	def := kindOf(t, l, "tvs", "show")
+	keys := []string{"season", "episode"}
+	if MarkableTracks(def, keys, map[string]float64{"season": 1}, 2) || !MarkableTracks(def, keys, map[string]float64{"season": 1}, 1) || !MarkableTracks(def, keys, nil, 2) {
+		t.Fatal("MarkableTracks ignores the group total")
+	}
+}
+
+// TestMarkReleaseWatchedUnsetSeason: a show advanced with +1 has no season
+// value, which counts as the first season: an aired release of season 1 is
+// compared by number and never lowers the episode.
+func TestMarkReleaseWatchedUnsetSeason(t *testing.T) {
+	l := groupedLib(t)
+	now := time.Date(2026, 11, 10, 12, 0, 0, 0, time.UTC)
+	past := now.Add(-time.Hour)
+	id, err := l.AddToList(bg, "tvg", "show", tvData("us1", nil), Entry{Status: Active, Progress: map[string]float64{"episode": 5}},
+		WithProgressKeys([]string{"season", "episode"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := l.SaveSchedule(bg, id, []Airing{{Season: 1, Number: 3, AirsAt: past}, {Season: 1, Number: 6, AirsAt: past}, {Season: 2, Number: 1, AirsAt: past}}, now); err != nil {
+		t.Fatal(err)
+	}
+	if changed, err := l.MarkReleaseWatched(bg, id, 1, 3, now); err != nil || changed {
+		t.Fatalf("S1E3: changed=%v err=%v", changed, err)
+	}
+	if got := progressOf(t, l, id); got["season"] != 0 || got["episode"] != 5 || len(readEvents(t, l, id)) != 0 {
+		t.Fatalf("S1E3 wrote: %v", got)
+	}
+	if changed, err := l.MarkReleaseWatched(bg, id, 1, 6, now); err != nil || !changed {
+		t.Fatalf("S1E6: changed=%v err=%v", changed, err)
+	}
+	if got := progressOf(t, l, id); got["season"] != 1 || got["episode"] != 6 {
+		t.Fatalf("S1E6: %v", got)
+	}
+	if changed, err := l.MarkReleaseWatched(bg, id, 2, 1, now); err != nil || !changed {
+		t.Fatalf("S2E1: changed=%v err=%v", changed, err)
+	}
+	if got := progressOf(t, l, id); got["season"] != 2 || got["episode"] != 1 {
+		t.Fatalf("S2E1: %v", got)
 	}
 }

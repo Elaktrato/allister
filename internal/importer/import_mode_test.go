@@ -53,10 +53,12 @@ func TestImportModesUpdateExistingEntries(t *testing.T) {
 			if err != nil || it == nil {
 				t.Fatalf("%v %v", it, err)
 			}
-			// the local entry is an old one, made at the base time
-			if _, err := e.dbh.Exec(`UPDATE entries SET updated_at = ? WHERE item_id = ?`,
-				base.Format("2006-01-02T15:04:05Z"), it.ID); err != nil {
-				t.Fatal(err)
+			// the local entry is an old one, made at the base time (the
+			// entry and its run, the entry presents the newer of the two)
+			for _, q := range []string{`UPDATE entries SET updated_at = ? WHERE item_id = ?`, `UPDATE entry_runs SET updated_at = ? WHERE item_id = ?`} {
+				if _, err := e.dbh.Exec(q, base.Format("2006-01-02T15:04:05Z"), it.ID); err != nil {
+					t.Fatal(err)
+				}
 			}
 			row := bookEntry("1", "One", plugin.Active, 42)
 			row.Rating = ip(9)

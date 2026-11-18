@@ -1,0 +1,31 @@
+{{define "title"}}{{.Title}} - Allister{{end}}
+{{define "content"}}
+<div class="mb-5 flex flex-wrap items-center gap-x-4 gap-y-3">
+  <h1 class="text-3xl font-semibold">{{.Title}}</h1>
+  <a href="{{.Return}}" class="ml-auto text-indigo-300 hover:underline">Back to the item</a>
+</div>
+<div class="max-w-3xl space-y-3">
+  <p class="text-sm text-slate-400">Find the other copy of this item in your library; the next page shows both side by side before anything changes.</p>
+  <form method="get" action="{{.Action}}" class="flex gap-2">
+    <input type="hidden" name="keep" value="{{.KeepID}}">
+    <label for="merge-q" class="sr-only">Search your library</label>
+    <input id="merge-q" type="search" name="q" value="{{.Query}}" maxlength="200" placeholder="Search your library" autocomplete="off"
+      class="min-w-0 flex-1 rounded border border-slate-700 bg-slate-900 px-3 py-2 text-sm">
+    <button type="submit" class="rounded border border-slate-700 px-4 py-2 text-sm hover:bg-slate-800">Search</button>
+  </form>
+  {{if .Results}}
+  <ul class="space-y-1">
+    {{range .Results}}
+    <li class="flex items-center gap-3 rounded border border-slate-800 bg-slate-900 p-2">
+      {{if .Cover}}<img src="{{.Cover}}" alt="" loading="lazy" class="h-12 w-8 rounded object-cover">
+      {{else}}<span class="block h-12 w-8 rounded bg-slate-800" aria-hidden="true"></span>{{end}}
+      <span class="min-w-0 flex-1 break-words">{{.Title}}</span>
+      <a href="{{.Href}}" class="rounded bg-indigo-600 px-3 py-1 text-sm font-medium hover:bg-indigo-500">Compare &amp; merge</a>
+    </li>
+    {{end}}
+  </ul>
+  {{else if .Searched}}
+  <p class="text-sm text-slate-400">Nothing of this kind found.</p>
+  {{end}}
+</div>
+{{end}}

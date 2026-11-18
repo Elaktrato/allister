@@ -57,6 +57,9 @@ type rowView struct {
 	UnmatchedHint      string
 	Return             string
 	IncrementURL       string
+	// NoteURL and NoteLabel: the "Note on <Label> <n>" link of a +1 answer
+	// (the unit just logged); "" everywhere else.
+	NoteURL, NoteLabel string
 	EditURL, RemoveURL string
 	RemoveConfirm      string
 	// the part badge "N · <series>" on the kind tabs (Series "" for an entry in no series)
@@ -65,6 +68,20 @@ type rowView struct {
 	SeriesSpinOff      bool
 	// the plugin icon and kind label on a home page card ("" on the lists)
 	BadgeIcon, BadgeLabel string
+	// RepeatMarker is the kind's badge of an active repeat run (the
+	// display run is active and not the first); "" otherwise.
+	RepeatMarker string
+	// Repeats counts the completed runs, shown as "x<n>" from 2 on, with
+	// RepeatsTitle as its explanation.
+	Repeats      int
+	RepeatsTitle string
+	// NextLabel ("<unit> <n>") and Aired (releases aired beyond the
+	// progress) are set by the home page's Up next cards only.
+	NextLabel string
+	Aired     int
+	// SelectID is the item id of the row's bulk edit checkbox on a plugin's
+	// list ("" elsewhere: no checkbox).
+	SelectID string
 }
 
 // headView is one cell of the table head: Href ("" when the column does
@@ -111,6 +128,16 @@ type listView struct {
 	SeriesTab  bool
 	SeriesRows []seriesRowView
 	Search     seriesSearch
+	// Bulk is the bulk edit bar of the rows shown (nil without rows);
+	// BulkNotice reports an applied bulk change.
+	Bulk       *bulkBar
+	BulkNotice *bulkNotice
+	// Duplicates is the number of possible duplicate pairs (full pages only;
+	// the link shows when it is above 0).
+	Duplicates    int
+	DuplicatesURL string
+	// Pick is the randomiser's result panel (nil: an empty panel).
+	Pick *pickView
 }
 
 // seriesRowView is one series of the Series tab.
@@ -138,7 +165,10 @@ type listQuery struct {
 	Tab                string // "series" for the Series tab, else ""
 	Page               int
 	Filters            listFilters
-	Rejected           []string
+	// Length is the randomiser's length filter (parsed for every list so the
+	// filter bar keeps it; only the pick applies it).
+	Length   lengthFilter
+	Rejected []string
 }
 
 // listURL builds the list URL of a plugin for a kind (only for plugins with
@@ -149,7 +179,16 @@ func listURL(m plugin.Manifest, kind, status, view string, page int) string {
 
 // filteredListURL is listURL keeping the filters f (canonical form).
 func filteredListURL(m plugin.Manifest, kind, status, view string, page int, f listFilters) string {
+	return lengthListURL(m, kind, status, view, page, f, lengthFilter{})
+}
+
+// lengthListURL is filteredListURL keeping the length filter lf as well (only
+// the randomiser reads it, but it survives navigation like the other filters).
+func lengthListURL(m plugin.Manifest, kind, status, view string, page int, f listFilters, lf lengthFilter) string {
 	q := f.values()
+	for k, v := range lf.values() {
+		q[k] = v
+	}
 	if len(m.Kinds) > 1 && kind != "" {
 		q.Set("kind", kind)
 	}
@@ -208,7 +247,9 @@ func parseListQuery(m plugin.Manifest, q url.Values) listQuery {
 	}
 	kd, _ := kindDef(m, lq.Kind)
 	var rejected []string
-	lq.Filters, rejected = parseFilters(kd, q)
+	lq.Filters, rejected = parseFilters(kd, withoutLengthParams(q))
+	lq.Rejected = append(lq.Rejected, rejected...)
+	lq.Length, rejected = parseLengthFilter(kd, q)
 	lq.Rejected = append(lq.Rejected, rejected...)
 	slices.Sort(lq.Rejected)
 	raw := q.Get("page")
@@ -266,7 +307,7 @@ func coreSort(key string) bool {
 // direction (titles A to Z, the rest highest first); the links keep the
 // filters, kind, status and view and start at page 1 (filteredListURL), in
 // the canonical form parseSort reads.
-func sortHead(m plugin.Manifest, kind, status, view string, f listFilters, key, label string) headView {
+func sortHead(m plugin.Manifest, kind, status, view string, f listFilters, lf lengthFilter, key, label string) headView {
 	cur, dir := f.Sort, f.Dir
 	if cur == "" {
 		cur = string(library.SortUpdated)
@@ -290,7 +331,7 @@ func sortHead(m plugin.Manifest, kind, status, view string, f listFilters, key, 
 	if key == string(library.SortUpdated) && g.Dir == "" { // the default order
 		g.Sort = ""
 	}
-	h.Href = filteredListURL(m, kind, status, view, 1, g)
+	h.Href = lengthListURL(m, kind, status, view, 1, g, lf)
 	return h
 }
 
@@ -328,8 +369,11 @@ func (s *server) rowView(m plugin.Manifest, row library.Row, ret string, cols []
 	}
 	for _, c := range cols {
 		cell := rowCell{Core: c.Core, Hide: c.Hide}
-		if c.Core == "" {
+		switch c.Core {
+		case "":
 			cell.Text, _ = fieldText(c.Field, it.Fields[c.Key])
+		case userTagsColumn: // drawn as a text cell
+			cell.Core, cell.Text = "", strings.Join(row.UserTags, ", ")
 		}
 		v.Cells = append(v.Cells, cell)
 	}
@@ -354,7 +398,20 @@ func (s *server) rowView(m plugin.Manifest, row library.Row, ret string, cols []
 		v.Score = strconv.Itoa(*e.Rating)
 		v.ScoreAttr = v.Score
 	}
+	v.RepeatMarker, v.Repeats, v.RepeatsTitle = repeatBadges(k, e)
 	return v
+}
+
+// repeatBadges are the repeat marker (an active repeat run) and the repeat
+// count with its title ("<Completed label> 2 times") of an entry.
+func repeatBadges(k plugin.KindDef, e library.Entry) (marker string, repeats int, title string) {
+	if e.Status == library.Active && e.RunNumber > 1 {
+		marker = k.RepeatMarker()
+	}
+	if e.Repeats >= 2 {
+		repeats, title = e.Repeats, statusLabel(k, library.Completed)+" "+strconv.Itoa(e.Repeats)+" times"
+	}
+	return marker, repeats, title
 }
 
 // unmatchedRowHint explains the "unmatched" badge.
@@ -363,6 +420,20 @@ func unmatchedRowHint(m plugin.Manifest) string {
 		return "Added manually; no " + m.Sources[0].Name + " match yet"
 	}
 	return "Added manually; not matched yet"
+}
+
+// listLibraryQuery is the library query of a parsed list request: the
+// plugin and kind, the status tab, the filters and sort, and the page. The
+// list page and a bulk change of everything a filter matches both use it,
+// so a filter selection is exactly what the list shows.
+func listLibraryQuery(m plugin.Manifest, k plugin.KindDef, lq listQuery) library.Query {
+	q := library.Query{PluginID: m.ID, Kind: k.Key, Page: lq.Page, PageSize: listPageSize}
+	lq.Filters.apply(k, &q)
+	if lq.Status != "" && lq.Status != "all" {
+		st := library.Status(lq.Status)
+		q.Status = &st
+	}
+	return q
 }
 
 // buildList loads the list page of a plugin for a parsed query.
@@ -380,12 +451,7 @@ func (s *server) buildList(r *http.Request, m plugin.Manifest, lq listQuery) (li
 		lq.Tab = "" // no series: the normal list
 	}
 	f := lq.Filters
-	q := library.Query{PluginID: m.ID, Kind: k.Key, Page: lq.Page, PageSize: listPageSize}
-	f.apply(k, &q)
-	if lq.Status != "" && lq.Status != "all" {
-		st := library.Status(lq.Status)
-		q.Status = &st
-	}
+	q := listLibraryQuery(m, k, lq)
 	counts, err := s.deps.Library.Counts(ctx, q)
 	if errors.Is(err, library.ErrInvalid) && f.active() {
 		// parseFilters checks every part against the schema, so this is a
@@ -426,9 +492,21 @@ func (s *server) buildList(r *http.Request, m plugin.Manifest, lq listQuery) (li
 			return listView{}, err
 		}
 	}
-	ret := filteredListURL(m, k.Key, lq.Status, lq.View, pg.PageNo, f)
+	var userTags []library.TermCount
+	hasUserTags := false
+	if anyEntries {
+		if hasUserTags, err = s.deps.Library.HasUserTags(ctx); err != nil {
+			return listView{}, err
+		}
+	}
+	if hasUserTags || len(f.UserTags) > 0 {
+		if userTags, err = s.deps.Library.UserTagTerms(ctx, q); err != nil {
+			return listView{}, err
+		}
+	}
+	ret := lengthListURL(m, k.Key, lq.Status, lq.View, pg.PageNo, f, lq.Length)
 	v := listView{Heading: k.LabelPlural, AnyEntries: anyEntries, Total: pg.Total, Filtered: f.narrows(), PushURL: ret, View: lq.View,
-		Filters:   buildFilterBar(m, k, lq, genres, tags),
+		Filters:   buildFilterBar(m, k, lq, genres, tags, userTags, hasUserTags),
 		SearchURL: "/" + url.PathEscape(m.ID) + "/search", EmptyNoun: lowerFirst(k.LabelPlural), Exports: s.exportLinks(m)}
 	v.Notice, v.NoticeMore = noticeKeys(lq.Rejected)
 	// the manual-add link only while the plugin has the manual route
@@ -439,17 +517,24 @@ func (s *server) buildList(r *http.Request, m plugin.Manifest, lq listQuery) (li
 	// the head sorts only by visible columns; the compact sort control
 	// (sortOptions) keeps every sort key
 	cols := s.visibleColumns(ctx, m, k)
-	v.Head.Title = sortHead(m, k.Key, lq.Status, lq.View, f, string(library.SortTitle), "Title")
+	v.Head.Title = sortHead(m, k.Key, lq.Status, lq.View, f, lq.Length, string(library.SortTitle), "Title")
 	for _, c := range cols {
 		h := headView{Label: c.Label}
 		if key := columnSort(k, c); key != "" {
-			h = sortHead(m, k.Key, lq.Status, lq.View, f, key, c.Label)
+			h = sortHead(m, k.Key, lq.Status, lq.View, f, lq.Length, key, c.Label)
 		}
 		h.Hide = c.Hide
 		v.Head.Columns = append(v.Head.Columns, h)
 	}
 	for _, row := range pg.Rows {
-		v.Rows = append(v.Rows, s.rowView(m, row, ret, cols))
+		rv := s.rowView(m, row, ret, cols)
+		rv.SelectID = strconv.FormatInt(row.Item.ID, 10)
+		v.Rows = append(v.Rows, rv)
+	}
+	if anyEntries {
+		if v.Bulk, err = s.bulkBar(ctx, m, k, lq, pg.PageNo, pg.Total); err != nil {
+			return listView{}, err
+		}
 	}
 	if err := s.markSeries(ctx, m, v.Rows, pg.Rows); err != nil {
 		return listView{}, err
@@ -458,19 +543,19 @@ func (s *server) buildList(r *http.Request, m plugin.Manifest, lq listQuery) (li
 		v.From, v.To = (pg.PageNo-1)*listPageSize+1, (pg.PageNo-1)*listPageSize+len(pg.Rows)
 	}
 	if pg.PageNo > 1 {
-		v.PrevURL = filteredListURL(m, k.Key, lq.Status, lq.View, pg.PageNo-1, f)
+		v.PrevURL = lengthListURL(m, k.Key, lq.Status, lq.View, pg.PageNo-1, f, lq.Length)
 	}
 	if pg.PageNo < pg.Pages {
-		v.NextURL = filteredListURL(m, k.Key, lq.Status, lq.View, pg.PageNo+1, f)
+		v.NextURL = lengthListURL(m, k.Key, lq.Status, lq.View, pg.PageNo+1, f, lq.Length)
 	}
 	// the view switch keeps the filters, the status and the page
-	v.ViewCardsURL = filteredListURL(m, k.Key, lq.Status, "cards", pg.PageNo, f)
-	v.ViewTableURL = filteredListURL(m, k.Key, lq.Status, "table", pg.PageNo, f)
+	v.ViewCardsURL = lengthListURL(m, k.Key, lq.Status, "cards", pg.PageNo, f, lq.Length)
+	v.ViewTableURL = lengthListURL(m, k.Key, lq.Status, "table", pg.PageNo, f, lq.Length)
 	v.Tabs = append(v.Tabs, tabView{Label: "All", Count: all,
-		Href: filteredListURL(m, k.Key, "all", lq.View, 1, f), Current: lq.Status == "" || lq.Status == "all"})
+		Href: lengthListURL(m, k.Key, "all", lq.View, 1, f, lq.Length), Current: lq.Status == "" || lq.Status == "all"})
 	for _, st := range listTabOrder {
 		v.Tabs = append(v.Tabs, tabView{Label: statusLabel(k, st), Count: counts[st],
-			Href:    filteredListURL(m, k.Key, string(st), lq.View, 1, f),
+			Href:    lengthListURL(m, k.Key, string(st), lq.View, 1, f, lq.Length),
 			Current: string(st) == lq.Status, Status: string(st)})
 	}
 	v.Kinds = kindTabs(m, k, has, lq.View, false)
@@ -546,12 +631,28 @@ const listRowsID = "list-rows"
 
 // showList renders the full list page, with the edit dialog open when dialog is set.
 func (s *server) showList(w http.ResponseWriter, r *http.Request, m plugin.Manifest, lq listQuery, dialog *entryDialog, code int) {
+	s.showListWith(w, r, m, lq, dialog, code, nil)
+}
+
+// showListPick renders the full list page with the pick panel filled.
+func (s *server) showListPick(w http.ResponseWriter, r *http.Request, m plugin.Manifest, lq listQuery, pick *pickView) {
+	s.showListWith(w, r, m, lq, nil, http.StatusOK, pick)
+}
+
+func (s *server) showListWith(w http.ResponseWriter, r *http.Request, m plugin.Manifest, lq listQuery, dialog *entryDialog, code int, pick *pickView) {
 	v, err := s.buildList(r, m, lq)
 	if err != nil {
 		s.internalError(w, r, err)
 		return
 	}
-	v.Dialog = dialog
+	v.Dialog, v.Pick = dialog, pick
+	v.BulkNotice = bulkNoticeOf(r, v.PushURL)
+	// the duplicate check is an extra: a failure is logged and hides the link
+	if n, err := s.duplicateCount(r, m.ID); err != nil {
+		log.Printf("duplicates of %s: %v", logSafe(m.ID), logSafe(err))
+	} else if n > 0 {
+		v.Duplicates, v.DuplicatesURL = n, duplicatesURL(m.ID)
+	}
 	s.renderStatus(w, r, code, "list", v)
 }
 

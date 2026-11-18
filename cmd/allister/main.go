@@ -143,6 +143,8 @@ func run() error {
 			Registry: registry,
 			Jobs:     queue,
 			SyncJobs: syncJobsByPlugin,
+			// "Update from source" downloads a taken cover through these
+			CoverJobs: coverJobs(registry),
 			// the calendar feed enqueues schedule refreshes through these
 			ScheduleJobs: scheduleJobs(registry),
 			// saving an import schedule starts its repeat chain
@@ -234,6 +236,16 @@ func syncJobs(reg *plugin.Registry) map[string]func(itemID int64) (kind string, 
 	out := map[string]func(int64) (string, any){}
 	for _, m := range reg.Manifests() {
 		out[m.ID] = jobs.SyncJobFor(m.ID)
+	}
+	return out
+}
+
+// coverJobs maps every installed plugin to its cover-only sync job
+// (web.Deps.CoverJobs).
+func coverJobs(reg *plugin.Registry) map[string]func(itemID int64) (kind string, payload any) {
+	out := map[string]func(int64) (string, any){}
+	for _, m := range reg.Manifests() {
+		out[m.ID] = jobs.CoverJobFor(m.ID)
 	}
 	return out
 }

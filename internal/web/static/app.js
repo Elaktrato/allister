@@ -127,4 +127,151 @@
       event.preventDefault();
     }
   });
+
+  // Bulk edit (progressive enhancement; without it the bar is a plain form
+  // for the ticked rows of the page). The bar floats (the classes in its
+  // data-float-class) while something is ticked and hides otherwise; the
+  // page select-all ticks every row; once every row of the page is ticked
+  // and the filter matches more, "Select all N matching" switches the form
+  // to scope=filter (any unticked row switches it back).
+  function bulkRows() {
+    return document.querySelectorAll('input[data-bulk-row][form="bulk-form"]');
+  }
+  function bulkUpdate() {
+    var bar = document.getElementById("bulk-form");
+    if (!bar) {
+      return;
+    }
+    var rows = bulkRows();
+    var ticked = 0;
+    for (var i = 0; i < rows.length; i++) {
+      if (rows[i].checked) {
+        ticked++;
+      }
+    }
+    var total = parseInt(bar.getAttribute("data-bulk-total"), 10) || 0;
+    var all = rows.length > 0 && ticked === rows.length;
+    var scope = bar.querySelector("[data-bulk-scope]");
+    if (scope && !all) {
+      scope.value = "ids";
+    }
+    var filter = scope && scope.value === "filter";
+    var count = bar.querySelector("[data-bulk-count]");
+    if (count) {
+      count.textContent = filter ? "All " + total + " matching selected" : ticked + " selected";
+    }
+    var more = bar.querySelector("[data-bulk-all-matching]");
+    if (more) {
+      more.hidden = filter || !all || total <= rows.length;
+    }
+    var pageAll = document.querySelectorAll("[data-bulk-page-all]");
+    for (var j = 0; j < pageAll.length; j++) {
+      pageAll[j].checked = all;
+      pageAll[j].indeterminate = ticked > 0 && !all;
+    }
+    var float = (bar.getAttribute("data-float-class") || "").split(/\s+/).filter(Boolean);
+    for (var k = 0; k < float.length; k++) {
+      bar.classList.toggle(float[k], ticked > 0);
+    }
+    bar.hidden = ticked === 0;
+  }
+  // only the value of the chosen action is shown (all of them without JS)
+  function bulkShowValue(select) {
+    var form = select.form;
+    if (!form) {
+      return;
+    }
+    var groups = form.querySelectorAll("[data-bulk-for]");
+    for (var i = 0; i < groups.length; i++) {
+      groups[i].hidden = groups[i].getAttribute("data-bulk-for") !== select.value;
+    }
+  }
+  function bulkInit() {
+    // a rows partial (filters, sort) brings the list's new parameters and
+    // count; the bar outside the rows region takes them over
+    var bar = document.getElementById("bulk-form");
+    var state = document.querySelector("[data-bulk-state]");
+    if (bar && state) {
+      var total = state.getAttribute("data-bulk-total") || "0";
+      bar.setAttribute("data-bulk-total", total);
+      var list = bar.querySelector("[data-bulk-list]");
+      if (list) {
+        list.value = state.getAttribute("data-bulk-list") || "";
+      }
+      var more = bar.querySelector("[data-bulk-all-matching]");
+      if (more) {
+        more.textContent = "Select all " + total + " matching";
+      }
+    }
+    var reveal = document.querySelectorAll("[data-bulk-reveal]");
+    for (var i = 0; i < reveal.length; i++) {
+      reveal[i].hidden = false;
+    }
+    var actions = document.querySelectorAll("[data-bulk-action]");
+    for (var j = 0; j < actions.length; j++) {
+      bulkShowValue(actions[j]);
+    }
+    bulkUpdate();
+    // the list reloaded after a bulk change: its own URL in the address bar
+    var notice = document.querySelector("[data-replace-url]");
+    var url = notice && notice.getAttribute("data-replace-url");
+    if (url && url.charAt(0) === "/" && url.charAt(1) !== "/" && window.history && history.replaceState) {
+      history.replaceState(null, "", url);
+    }
+  }
+  document.addEventListener("change", function (event) {
+    var el = event.target;
+    if (el.matches("[data-bulk-page-all]")) {
+      var rows = bulkRows();
+      for (var i = 0; i < rows.length; i++) {
+        rows[i].checked = el.checked;
+      }
+      bulkUpdate();
+    } else if (el.matches("[data-bulk-row]")) {
+      bulkUpdate();
+    } else if (el.matches("[data-bulk-action]")) {
+      bulkShowValue(el);
+    }
+  });
+  document.addEventListener("click", function (event) {
+    var more = event.target.closest("[data-bulk-all-matching]");
+    if (!more) {
+      return;
+    }
+    var scope = document.querySelector("#bulk-form [data-bulk-scope]");
+    if (scope) {
+      scope.value = "filter";
+    }
+    bulkUpdate();
+  });
+  // a rows partial (filters, sort) brings a new bar and new rows
+  document.addEventListener("htmx:afterSwap", bulkInit);
+  bulkInit();
+
+  // A spoiler (rendered notes and reviews) is hidden until clicked; Enter
+  // or Space on the focused spoiler does the same. The click that reveals a
+  // spoiler never follows a link inside it (the reader has not seen the
+  // target yet); once revealed, its links work normally.
+  document.addEventListener("click", function (event) {
+    var spoiler = event.target.closest(".spoiler");
+    if (!spoiler) {
+      return;
+    }
+    if (!spoiler.classList.contains("revealed")) {
+      event.preventDefault();
+      spoiler.classList.add("revealed");
+    } else if (!event.target.closest("a")) {
+      spoiler.classList.remove("revealed");
+    }
+  });
+  document.addEventListener("keydown", function (event) {
+    if (event.key !== "Enter" && event.key !== " ") {
+      return;
+    }
+    var spoiler = event.target.closest(".spoiler");
+    if (spoiler && event.target === spoiler) {
+      event.preventDefault();
+      spoiler.classList.toggle("revealed");
+    }
+  });
 })();

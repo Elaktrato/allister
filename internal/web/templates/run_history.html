@@ -1,0 +1,97 @@
+{{/* The item page's run history (newest first) and the run form. The run
+      the entry shows is edited in the entry dialog; a past run's form
+      offers only completed and dropped. Deleting asks first and is not
+      offered for the only run. */}}
+{{define "run_history"}}
+<section aria-labelledby="run-history-title">
+  <h2 id="run-history-title" class="mb-1 text-lg font-semibold">Runs</h2>
+  <ol class="divide-y divide-slate-800 rounded border border-slate-800 bg-slate-900 text-sm">
+    {{range .}}
+    <li data-run="{{.Number}}" class="space-y-1 px-3 py-2">
+      <div class="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+        <span class="font-medium">Run {{.Number}}</span>
+        <span class="text-slate-300">{{.Status}}</span>
+        {{if or .Started .Finished}}<span class="text-slate-400">{{with .Started}}<time datetime="{{.}}">{{.}}</time>{{else}}?{{end}} – {{with .Finished}}<time datetime="{{.}}">{{.}}</time>{{else}}?{{end}}</span>{{end}}
+        <span class="text-slate-300">Rating: {{.Rating}}</span>
+        <span class="ml-auto flex items-center gap-2">
+          <a href="{{.EditURL}}" hx-get="{{.EditURL}}" hx-target="#dialog-slot" hx-swap="innerHTML" class="text-indigo-300 hover:underline">Edit</a>
+          {{if .DeleteURL}}
+          <form method="post" action="{{.DeleteURL}}" hx-post="{{.DeleteURL}}" hx-confirm="{{.DeleteConfirm}}" class="inline">
+            <input type="hidden" name="return" value="{{.Return}}">
+            <button type="submit" class="text-red-300 hover:underline">Delete</button>
+          </form>
+          {{end}}
+        </span>
+      </div>
+      {{if .Review}}<div class="richtext space-y-1 break-words text-slate-400">{{richtext .Review}}</div>{{end}}
+      <details hx-get="{{.TimelineURL}}" hx-trigger="toggle once" hx-target="find [data-timeline]" hx-swap="innerHTML">
+        <summary class="cursor-pointer text-slate-300 hover:underline">Timeline</summary>
+        <div data-timeline class="mt-1 text-slate-400" aria-live="polite">Loading… <noscript><a href="{{.TimelineURL}}" class="text-indigo-300 hover:underline">Open the timeline</a></noscript></div>
+      </details>
+    </li>
+    {{end}}
+  </ol>
+</section>
+{{end}}
+
+{{/* The note on one unit of a run (count or pages track); an empty note
+      is deleted. */}}
+{{define "unit_note_dialog"}}
+<div data-dialog class="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-black/70 p-4" role="dialog" aria-modal="true" aria-labelledby="note-dialog-title">
+  <form method="post" action="{{.Action}}" hx-post="{{.Action}}" hx-target="#dialog-slot" hx-swap="innerHTML"
+    class="w-full max-w-md space-y-4 rounded border border-slate-700 bg-slate-900 p-5">
+    <input type="hidden" name="return" value="{{.Return}}">
+    <h2 id="note-dialog-title" class="text-xl font-semibold">{{.Heading}}</h2>
+    {{if .Error}}
+    <div class="rounded border border-amber-700 bg-amber-950 p-3 text-amber-200" role="alert"><p>{{.Error}}</p></div>
+    {{end}}
+    <label class="block text-sm">Note
+      <textarea name="body" rows="4" maxlength="{{.MaxBody}}" class="mt-1 w-full rounded border border-slate-700 bg-slate-950 px-3 py-2">{{.Body}}</textarea>
+      <span class="mt-1 block text-xs text-slate-400">Formatting: **bold**, *italic*, - lists, [links](https://…), ||spoilers||. An empty note is deleted.</span>
+    </label>
+    <div class="flex justify-end gap-3">
+      <a href="{{.CancelURL}}" data-dialog-close class="rounded px-4 py-2 hover:bg-slate-800">Cancel</a>
+      <button type="submit" class="rounded bg-indigo-600 px-4 py-2 font-medium hover:bg-indigo-500">Save</button>
+    </div>
+  </form>
+</div>
+{{end}}
+
+{{define "run_dialog"}}
+<div data-dialog class="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-black/70 p-4" role="dialog" aria-modal="true" aria-labelledby="run-dialog-title">
+  <form method="post" action="{{.Action}}" hx-post="{{.Action}}" hx-target="#dialog-slot" hx-swap="innerHTML"
+    class="w-full max-w-md space-y-4 rounded border border-slate-700 bg-slate-900 p-5">
+    <input type="hidden" name="return" value="{{.Return}}">
+    <h2 id="run-dialog-title" class="text-xl font-semibold">{{.Heading}}</h2>
+    {{if .Error}}
+    <div class="rounded border border-amber-700 bg-amber-950 p-3 text-amber-200" role="alert"><p>{{.Error}}</p></div>
+    {{end}}
+    <div class="grid grid-cols-2 gap-3">
+      <label class="block text-sm">Status
+        <select name="status" required class="mt-1 w-full rounded border border-slate-700 bg-slate-950 px-3 py-2">
+          {{range .Statuses}}<option value="{{.Value}}"{{if .Selected}} selected{{end}}>{{.Label}}</option>{{end}}
+        </select>
+      </label>
+      <label class="block text-sm">Rating
+        <input type="number" min="0" max="10" step="1" name="rating" value="{{.Rating}}" placeholder="0–10"
+          class="mt-1 w-full rounded border border-slate-700 bg-slate-950 px-3 py-2">
+      </label>
+    </div>
+    <div class="grid grid-cols-2 gap-3">
+      <label class="block text-sm">Started
+        <input type="date" name="started_on" value="{{.StartedOn}}" class="mt-1 w-full rounded border border-slate-700 bg-slate-950 px-3 py-2">
+      </label>
+      <label class="block text-sm">Finished
+        <input type="date" name="finished_on" value="{{.FinishedOn}}" class="mt-1 w-full rounded border border-slate-700 bg-slate-950 px-3 py-2">
+      </label>
+    </div>
+    <label class="block text-sm">Review
+      <textarea name="review" rows="4" maxlength="{{.MaxReview}}" class="mt-1 w-full rounded border border-slate-700 bg-slate-950 px-3 py-2">{{.Review}}</textarea>
+    </label>
+    <div class="flex justify-end gap-3">
+      <a href="{{.CancelURL}}" data-dialog-close class="rounded px-4 py-2 hover:bg-slate-800">Cancel</a>
+      <button type="submit" class="rounded bg-indigo-600 px-4 py-2 font-medium hover:bg-indigo-500">Save</button>
+    </div>
+  </form>
+</div>
+{{end}}

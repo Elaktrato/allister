@@ -3,12 +3,17 @@ package web
 import (
 	"context"
 	"fmt"
+	"net/http/httptest"
+	"net/url"
+	"regexp"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/allister/allister/internal/library"
 	"github.com/allister/allister/internal/plugin"
+	"github.com/allister/allister/internal/plugin/plugintest"
 )
 
 // The fixture TV source declares SupportsSchedule; the book source does not.
@@ -184,4 +189,555 @@ func TestCalendarSeasonLabels(t *testing.T) {
 	mustContain(t, b, "UID:"+idStr(id)+"-s2-5@allister\r\n", "SUMMARY:Dark — Season 2\\, Episode 5\r\n")
 	page := e.get("/calendar").Body.String()
 	mustContain(t, page, "S2E5", ">S2E5</span>")
+}
+
+func TestParseCalendarWeek(t *testing.T) {
+	berlin, err := time.LoadLocation("Europe/Berlin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 11, 11, 12, 0, 0, 0, berlin) // a Wednesday
+	cases := []struct {
+		name, raw string
+		now       time.Time
+		want      time.Time
+	}{
+		{"mid-week day gives its Monday", "2026-11-12", now, time.Date(2026, 11, 9, 0, 0, 0, 0, berlin)},
+		{"a Monday is itself", "2026-11-09", now, time.Date(2026, 11, 9, 0, 0, 0, 0, berlin)},
+		{"a Sunday belongs to the week before", "2026-11-15", now, time.Date(2026, 11, 9, 0, 0, 0, 0, berlin)},
+		{"garbage is the current week", "nope", now, time.Date(2026, 11, 9, 0, 0, 0, 0, berlin)},
+		{"empty is the current week", "", now, time.Date(2026, 11, 9, 0, 0, 0, 0, berlin)},
+		{"impossible date is the current week", "2026-02-31", now, time.Date(2026, 11, 9, 0, 0, 0, 0, berlin)},
+		{"DST end week keeps local midnight", "2026-10-22", now, time.Date(2026, 10, 19, 0, 0, 0, 0, berlin)}, // the clocks go back on its Sunday, 25 Oct
+		{"the week after the DST end", "2026-10-28", now, time.Date(2026, 10, 26, 0, 0, 0, 0, berlin)},
+		{"DST start week keeps local midnight", "2026-03-29", now, time.Date(2026, 3, 23, 0, 0, 0, 0, berlin)},
+		{"year boundary goes back a year", "2027-01-01", now, time.Date(2026, 12, 28, 0, 0, 0, 0, berlin)},
+		{"current week across the new year", "", time.Date(2027, 1, 2, 9, 0, 0, 0, berlin), time.Date(2026, 12, 28, 0, 0, 0, 0, berlin)},
+	}
+	for _, c := range cases {
+		got := parseCalendarWeek(c.raw, c.now)
+		if !got.Equal(c.want) || got.Location() != berlin || got.Hour() != 0 {
+			t.Errorf("%s: parseCalendarWeek(%q) = %v, want %v", c.name, c.raw, got, c.want)
+		}
+	}
+}
+
+// scheduleEnv has two schedule-capable plugins (tv and books) and one show
+// and one book airing in the week of Monday 2026-11-09.
+func scheduleEnv(t *testing.T) *fixtureEnv {
+	t.Helper()
+	e := newFixtureEnv(t, func(book, tv *plugintest.Plugin) {
+		book.M.Sources[0].SupportsSchedule = true
+	})
+	now := time.Date(2026, 11, 11, 12, 0, 0, 0, time.UTC)
+	e.now = &now
+	show := e.addFixture(t, "tv", "show", tvShow("1", "Dark"), library.Entry{Status: library.Active})
+	book := e.addFixture(t, "book", "book", bookItem("2", "Earthsea"), library.Entry{Status: library.Active})
+	save := func(id int64, n int, at time.Time) {
+		if err := e.lib.SaveSchedule(context.Background(), id, []library.Airing{{Number: n, AirsAt: at}}, now); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// two show releases (Thursday and Sunday) and the book on the Monday
+	if err := e.lib.SaveSchedule(context.Background(), show, []library.Airing{
+		{Number: 3, AirsAt: time.Date(2026, 11, 12, 18, 30, 0, 0, time.UTC)},
+		{Number: 4, AirsAt: time.Date(2026, 11, 15, 23, 30, 0, 0, time.UTC)},
+	}, now); err != nil {
+		t.Fatal(err)
+	}
+	save(book, 9, time.Date(2026, 11, 9, 8, 0, 0, 0, time.UTC))
+	return e
+}
+
+func TestCalendarWeekView(t *testing.T) {
+	e := scheduleEnv(t)
+	b := e.get("/calendar?view=week&week=2026-11-12").Body.String()
+	mustContain(t, b, "9 – 15 Nov 2026", ">Mon</th>", ">Sun</th>",
+		`href="/calendar?view=week&amp;week=2026-11-02"`, `href="/calendar?view=week&amp;week=2026-11-16"`,
+		"Dark", "Episode 3", "Episode 4", "Earthsea")
+	if n := strings.Count(b, `class="calendar-day`); n != 7 {
+		t.Fatalf("%d day cells, want 7", n)
+	}
+	// the Monday cell comes first and holds the book
+	if strings.Index(b, "Earthsea") > strings.Index(b, "Dark") {
+		t.Error("Monday's release is not before Thursday's")
+	}
+	// Sunday 23:30 UTC lands on Monday in a zone ahead of UTC
+	if rec := e.do("POST", "/settings/time-zone", url.Values{"time_zone": {"Europe/Berlin"}}, false); rec.Code != 303 {
+		t.Fatalf("%d", rec.Code)
+	}
+	b = e.get("/calendar?view=week&week=2026-11-09").Body.String()
+	mustNotContain(t, b, "Episode 4") // now Monday 16 Nov: next week
+	mustContain(t, e.get("/calendar?view=week&week=2026-11-16").Body.String(), "Episode 4")
+	// view toggle links stay on the same period
+	mustContain(t, b, `href="/calendar?month=2026-11"`, `href="/calendar?view=week&amp;week=2026-11-09"`)
+	// a week across the new year labels both years
+	mustContain(t, e.get("/calendar?view=week&week=2026-12-31").Body.String(), "28 Dec 2026 – 3 Jan 2027")
+	// garbage means the current week; an unknown view means the month
+	mustContain(t, e.get("/calendar?view=week&week=zzz").Body.String(), "9 – 15 Nov 2026")
+	mustContain(t, e.get("/calendar?view=year").Body.String(), "November 2026")
+}
+
+func TestCalendarPluginFilter(t *testing.T) {
+	e := scheduleEnv(t)
+	for _, u := range []string{"/calendar?plugin=tv&month=2026-11", "/calendar?view=week&week=2026-11-09&plugin=tv"} {
+		b := e.get(u).Body.String()
+		mustContain(t, b, "Dark")
+		mustNotContain(t, b, "Earthsea")
+		// navigation keeps the filter
+		mustContain(t, b, "plugin=tv")
+	}
+	b := e.get("/calendar?plugin=book&month=2026-11").Body.String()
+	mustContain(t, b, "Earthsea")
+	mustNotContain(t, b, "Dark")
+	// both without a filter
+	b = e.get("/calendar?view=week&week=2026-11-09").Body.String()
+	mustContain(t, b, "Dark", "Earthsea")
+	mustNotContain(t, b, "plugin=")
+	// the htmx partial keeps both views and the filter
+	for _, u := range []string{"/calendar?plugin=tv", "/calendar?view=week&plugin=tv"} {
+		rec := e.getWith(u, map[string]string{"HX-Request": "true", "HX-Target": "calendar-grid"})
+		body := rec.Body.String()
+		mustContain(t, body, `id="calendar-grid"`, `hx-target="#calendar-grid"`)
+		mustNotContain(t, body, "<html", "<header")
+		if v := rec.Header().Get("Vary"); v != "HX-Request, HX-Target, HX-History-Restore-Request" {
+			t.Fatalf("Vary = %q", v)
+		}
+	}
+}
+
+func TestCalendarUnknownPluginIgnored(t *testing.T) {
+	e := scheduleEnv(t)
+	b := e.get("/calendar?plugin=nope&month=2026-11").Body.String()
+	mustContain(t, b, "Dark", "Earthsea")
+	mustNotContain(t, b, "plugin=nope")
+	b = e.get("/calendar?view=week&week=2026-11-09&plugin=%00%3Cx%3E").Body.String()
+	mustContain(t, b, "Dark", "Earthsea")
+	mustNotContain(t, b, "plugin=")
+}
+
+func TestCalendarPluginSelectListsScheduleCapable(t *testing.T) {
+	// only tv declares schedules in the plain fixture
+	e := newFixtureEnv(t)
+	b := e.get("/calendar").Body.String()
+	mustContain(t, b, `<option value="">All plugins</option>`, `<option value="tv"`)
+	mustNotContain(t, b, `<option value="book"`)
+	e = scheduleEnv(t)
+	mustContain(t, e.get("/calendar?plugin=book").Body.String(), `<option value="tv">`, `<option value="book" selected>`)
+}
+
+// watchEnv has one active show with episodes 1 and 2 aired (Nov 9 and 10) and
+// episode 3 still to air (Nov 12), now being Wednesday 2026-11-11.
+func watchEnv(t *testing.T, progress float64) (*fixtureEnv, int64) {
+	t.Helper()
+	e := newFixtureEnv(t)
+	now := time.Date(2026, 11, 11, 12, 0, 0, 0, time.UTC)
+	e.now = &now
+	en := library.Entry{Status: library.Active}
+	if progress > 0 {
+		en.Progress = map[string]float64{"episode": progress}
+	}
+	id := e.addFixture(t, "tv", "show", tvShow("1", "Dark"), en)
+	if err := e.lib.SaveSchedule(context.Background(), id, []library.Airing{
+		{Number: 1, AirsAt: time.Date(2026, 11, 9, 18, 0, 0, 0, time.UTC)},
+		{Number: 2, AirsAt: time.Date(2026, 11, 10, 18, 0, 0, 0, time.UTC)},
+		{Number: 3, AirsAt: time.Date(2026, 11, 12, 18, 0, 0, 0, time.UTC)},
+	}, now); err != nil {
+		t.Fatal(err)
+	}
+	return e, id
+}
+
+func watchForm(season, number int, ret string) url.Values {
+	return url.Values{"season": {fmt.Sprint(season)}, "number": {fmt.Sprint(number)}, "return": {ret}}
+}
+
+func episodeOf(t *testing.T, e *fixtureEnv, id int64) float64 {
+	t.Helper()
+	en, err := e.lib.Entry(context.Background(), id)
+	if err != nil || en == nil {
+		t.Fatalf("entry: %v %v", en, err)
+	}
+	return en.Progress["episode"]
+}
+
+// TestCalendarMarkWatchedButton: the button is offered only for aired
+// releases beyond the progress of an active entry on its first run.
+func TestCalendarMarkWatchedButton(t *testing.T) {
+	for _, u := range []string{"/calendar?month=2026-11", "/calendar?view=week&week=2026-11-09"} {
+		e, id := watchEnv(t, 0)
+		b := e.get(u).Body.String()
+		action := fmt.Sprintf(`action="/list/%d/watched"`, id)
+		if n := strings.Count(b, action); n != 2 { // episodes 1 and 2, not the unaired 3
+			t.Fatalf("%s: %d buttons, want 2:\n%s", u, n, b)
+		}
+		mustContain(t, b, `name="number" value="1"`, `name="number" value="2"`, `aria-label="Mark Dark Episode 2 watched"`)
+		mustNotContain(t, b, `name="number" value="3"`)
+		// the form returns to the very view it was on
+		mustContain(t, b, `name="return" value="`+strings.ReplaceAll(u, "&", "&amp;")+`"`)
+	}
+	// progress at or beyond a release hides its button
+	e, id := watchEnv(t, 1)
+	b := e.get("/calendar?month=2026-11").Body.String()
+	if n := strings.Count(b, fmt.Sprintf(`action="/list/%d/watched"`, id)); n != 1 {
+		t.Fatalf("%d buttons, want 1 (episode 2 only)", n)
+	}
+	mustNotContain(t, b, `name="number" value="1"`)
+	e, _ = watchEnv(t, 2)
+	mustNotContain(t, e.get("/calendar?month=2026-11").Body.String(), "/watched")
+	// a repeat run offers none
+	e, _ = watchEnv(t, 0)
+	rep := e.addFixture(t, "tv", "show", tvShow("9", "Rerun"), library.Entry{Status: library.Completed})
+	if _, err := e.lib.StartRun(context.Background(), rep, time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.lib.SaveSchedule(context.Background(), rep, []library.Airing{{Number: 1, AirsAt: time.Date(2026, 11, 9, 18, 0, 0, 0, time.UTC)}}, *e.now); err != nil {
+		t.Fatal(err)
+	}
+	b = e.get("/calendar?month=2026-11").Body.String()
+	mustContain(t, b, "Rerun")
+	mustNotContain(t, b, fmt.Sprintf(`action="/list/%d/watched"`, rep))
+}
+
+func TestPostListWatched(t *testing.T) {
+	e, id := watchEnv(t, 0)
+	path := fmt.Sprintf("/list/%d/watched", id)
+	back := "/calendar?month=2026-11"
+	rec := e.do("POST", path, watchForm(0, 2, back), false)
+	if rec.Code != 303 || rec.Header().Get("Location") != back {
+		t.Fatalf("%d %q", rec.Code, rec.Header().Get("Location"))
+	}
+	if got := episodeOf(t, e, id); got != 2 {
+		t.Fatalf("episode = %v, want 2", got)
+	}
+	countEvents := func() int {
+		var n int
+		if err := e.d.QueryRow(`SELECT COUNT(*) FROM entry_events WHERE item_id = ?`, id).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	if countEvents() != 1 {
+		t.Fatalf("%d events, want 1", countEvents())
+	}
+	// a double submit and an older release change nothing and still succeed
+	for _, n := range []int{2, 1} {
+		if rec := e.do("POST", path, watchForm(0, n, back), false); rec.Code != 303 {
+			t.Fatalf("repeat %d: %d", n, rec.Code)
+		}
+	}
+	if episodeOf(t, e, id) != 2 || countEvents() != 1 {
+		t.Fatalf("a repeat changed the entry: episode %v, %d events", episodeOf(t, e, id), countEvents())
+	}
+	// forged: an unaired release, one that was never stored, a season that does not exist
+	for _, f := range []url.Values{watchForm(0, 3, back), watchForm(0, 99, back), watchForm(2, 1, back)} {
+		if rec := e.do("POST", path, f, false); rec.Code != 422 {
+			t.Fatalf("%v: %d, want 422", f, rec.Code)
+		}
+	}
+	if episodeOf(t, e, id) != 2 {
+		t.Fatal("a forged release moved the progress")
+	}
+	// malformed numbers
+	for _, f := range []url.Values{{"season": {"0"}}, {"season": {"x"}, "number": {"1"}}, {"season": {"0"}, "number": {"1.5"}}} {
+		if rec := e.do("POST", path, f, false); rec.Code != 400 {
+			t.Fatalf("%v: %d, want 400", f, rec.Code)
+		}
+	}
+	// unknown item and an item without entry
+	if rec := e.do("POST", "/list/9999/watched", watchForm(0, 1, back), false); rec.Code != 404 {
+		t.Fatalf("unknown item: %d", rec.Code)
+	}
+	// a paused entry is refused
+	if err := e.lib.UpsertEntry(context.Background(), library.Entry{ItemID: id, Status: library.Paused, Progress: map[string]float64{"episode": 2}}); err != nil {
+		t.Fatal(err)
+	}
+	if rec := e.do("POST", path, watchForm(0, 2, back), false); rec.Code != 422 {
+		t.Fatalf("paused: %d", rec.Code)
+	}
+}
+
+func TestPostListWatchedReturnIsSameSite(t *testing.T) {
+	for raw, want := range map[string]string{
+		"/calendar?view=week&week=2026-11-09": "/calendar?view=week&week=2026-11-09",
+		"/calendar":                           "/calendar",
+		"":                                    "/calendar",
+		"//evil.example/x":                    "/calendar",
+		"https://evil.example/":               "/calendar",
+		"/\\evil.example":                     "/calendar",
+		"evil":                                "/calendar",
+		"/a\r\nSet-Cookie: x=1":               "/calendar",
+	} {
+		e, id := watchEnv(t, 0)
+		rec := e.do("POST", fmt.Sprintf("/list/%d/watched", id), watchForm(0, 1, raw), false)
+		if rec.Code != 303 || rec.Header().Get("Location") != want {
+			t.Errorf("return %q: %d %q, want %q", raw, rec.Code, rec.Header().Get("Location"), want)
+		}
+	}
+}
+
+func TestPostListWatchedHTMXGrid(t *testing.T) {
+	e, id := watchEnv(t, 0)
+	// without the grid target the answer is the redirect
+	if rec := e.do("POST", fmt.Sprintf("/list/%d/watched", id), watchForm(0, 1, "/calendar"), true); rec.Code != 303 {
+		t.Fatalf("htmx without target: %d", rec.Code)
+	}
+	form := watchForm(0, 2, "/calendar?view=week&week=2026-11-09")
+	r := httptest.NewRequest("POST", fmt.Sprintf("/list/%d/watched", id), strings.NewReader(form.Encode()))
+	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	r.Header.Set("HX-Request", "true")
+	r.Header.Set("HX-Target", "calendar-grid")
+	rec := httptest.NewRecorder()
+	e.h.ServeHTTP(rec, r)
+	body := rec.Body.String()
+	if rec.Code != 200 {
+		t.Fatalf("%d", rec.Code)
+	}
+	mustContain(t, body, `id="calendar-grid"`, "9 – 15 Nov 2026")
+	mustNotContain(t, body, "<html", "<header")
+	// both aired episodes are now at or below the progress: no button left
+	mustNotContain(t, body, "/watched")
+	if episodeOf(t, e, id) != 2 {
+		t.Fatalf("episode = %v", episodeOf(t, e, id))
+	}
+}
+
+// TestPostListWatchedDisabledPlugin: the guard answers 404 before anything is
+// written when the item's plugin is disabled.
+func TestPostListWatchedDisabledPlugin(t *testing.T) {
+	e, id := watchEnv(t, 0)
+	if err := e.reg.SetEnabled(context.Background(), "tv", false); err != nil {
+		t.Fatal(err)
+	}
+	if rec := e.do("POST", fmt.Sprintf("/list/%d/watched", id), watchForm(0, 2, "/calendar"), false); rec.Code != 404 {
+		t.Fatalf("disabled: %d", rec.Code)
+	}
+	if err := e.reg.SetEnabled(context.Background(), "tv", true); err != nil {
+		t.Fatal(err)
+	}
+	if episodeOf(t, e, id) != 0 {
+		t.Fatal("a disabled plugin's POST changed progress")
+	}
+}
+
+// TestMarkWatchedTotalBelowRelease: a release numbered above the item's total
+// sets the total, never more.
+func TestMarkWatchedTotalBelowRelease(t *testing.T) {
+	e := newFixtureEnv(t)
+	now := time.Date(2026, 11, 11, 12, 0, 0, 0, time.UTC)
+	e.now = &now
+	d := tvShow("7", "Short")
+	d.Fields["episodes"] = plugin.FieldValue{Num: num(2)}
+	id := e.addFixture(t, "tv", "show", d, library.Entry{Status: library.Active, Progress: map[string]float64{"episode": 1}})
+	if err := e.lib.SaveSchedule(context.Background(), id, []library.Airing{{Number: 3, AirsAt: now.Add(-time.Hour)}}, now); err != nil {
+		t.Fatal(err)
+	}
+	if rec := e.do("POST", fmt.Sprintf("/list/%d/watched", id), watchForm(0, 3, "/calendar"), false); rec.Code != 303 {
+		t.Fatalf("%d", rec.Code)
+	}
+	if got := episodeOf(t, e, id); got != 2 {
+		t.Fatalf("episode = %v, want the total 2", got)
+	}
+	if rec := e.do("POST", fmt.Sprintf("/list/%d/watched", id), watchForm(0, 3, "/calendar"), false); rec.Code != 303 || episodeOf(t, e, id) != 2 {
+		t.Fatal("the second post changed something")
+	}
+}
+
+// TestCalendarMarkWatchedHiddenAtTotal: with progress at the total and a stored
+// release numbered above it, Mark watched would only clamp to what is already
+// stored, so no button is offered (it used to come back after every click).
+func TestCalendarMarkWatchedHiddenAtTotal(t *testing.T) {
+	e := newFixtureEnv(t)
+	now := time.Date(2026, 11, 11, 12, 0, 0, 0, time.UTC)
+	e.now = &now
+	d := tvShow("7", "Short")
+	d.Fields["episodes"] = plugin.FieldValue{Num: num(2)}
+	id := e.addFixture(t, "tv", "show", d, library.Entry{Status: library.Active, Progress: map[string]float64{"episode": 1}})
+	if err := e.lib.SaveSchedule(context.Background(), id, []library.Airing{{Number: 3, AirsAt: now.Add(-time.Hour)}}, now); err != nil {
+		t.Fatal(err)
+	}
+	// below the total the button clamps to it and is offered once
+	action := fmt.Sprintf(`action="/list/%d/watched"`, id)
+	mustContain(t, e.get("/calendar?month=2026-11").Body.String(), action)
+	rec := e.do("POST", fmt.Sprintf("/list/%d/watched", id), watchForm(0, 3, "/calendar"), false)
+	if rec.Code != 303 || episodeOf(t, e, id) != 2 {
+		t.Fatalf("%d, episode %v", rec.Code, episodeOf(t, e, id))
+	}
+	mustNotContain(t, e.get("/calendar?month=2026-11").Body.String(), action)
+}
+
+// TestCalendarMarkWatchedSeasonAboveTotal: a release of a season above the
+// item's season total gets no button, and a forged post answers 422.
+func TestCalendarMarkWatchedSeasonAboveTotal(t *testing.T) {
+	e := newFixtureEnv(t, func(book, tv *plugintest.Plugin) {
+		k := &tv.M.Kinds[0]
+		k.Progress.GroupKey = "season"
+		k.Progress.Eligible[0].TotalField = "seasons"
+		k.Fields = append(k.Fields, plugin.FieldDef{Key: "seasons", Label: "Seasons", Type: plugin.FieldNumber, Min: num(0), Editable: true})
+	})
+	now := time.Date(2026, 11, 11, 12, 0, 0, 0, time.UTC)
+	e.now = &now
+	d := tvShow("1", "Dark")
+	d.Fields["seasons"] = plugin.FieldValue{Num: num(1)}
+	id := e.addFixture(t, "tv", "show", d, library.Entry{Status: library.Active}, library.WithProgressKeys([]string{"season", "episode"}))
+	if err := e.lib.SaveSchedule(context.Background(), id, []library.Airing{
+		{Season: 1, Number: 1, AirsAt: time.Date(2026, 11, 9, 18, 0, 0, 0, time.UTC)},
+		{Season: 2, Number: 1, AirsAt: time.Date(2026, 11, 10, 18, 0, 0, 0, time.UTC)},
+	}, now); err != nil {
+		t.Fatal(err)
+	}
+	b := e.get("/calendar?month=2026-11").Body.String()
+	mustContain(t, b, `name="season" value="1"`)
+	mustNotContain(t, b, `name="season" value="2"`)
+	if rec := e.do("POST", fmt.Sprintf("/list/%d/watched", id), watchForm(2, 1, "/calendar"), false); rec.Code != 422 {
+		t.Fatalf("forged season above total: %d, want 422", rec.Code)
+	}
+}
+
+// TestCalendarMarkWatchedHiddenForDisabledPlugin: the calendar still lists a
+// disabled plugin's releases but offers no button the guard would refuse.
+func TestCalendarMarkWatchedHiddenForDisabledPlugin(t *testing.T) {
+	e, id := watchEnv(t, 0)
+	if !strings.Contains(e.get("/calendar?month=2026-11").Body.String(), fmt.Sprintf(`action="/list/%d/watched"`, id)) {
+		t.Fatal("setup: no button while enabled")
+	}
+	if err := e.reg.SetEnabled(context.Background(), "tv", false); err != nil {
+		t.Fatal(err)
+	}
+	mustNotContain(t, e.get("/calendar?month=2026-11").Body.String(), "/watched")
+}
+
+// TestPostListWatchedHTMXFailureShowsNotice: a refused mark from the calendar
+// grid answers the refreshed grid with a visible message (htmx swaps no error
+// status), not an error page.
+func TestPostListWatchedHTMXFailureShowsNotice(t *testing.T) {
+	e, id := watchEnv(t, 0)
+	if err := e.lib.UpsertEntry(context.Background(), library.Entry{ItemID: id, Status: library.Paused}); err != nil {
+		t.Fatal(err)
+	}
+	post := func(path string, form url.Values) *httptest.ResponseRecorder {
+		r := httptest.NewRequest("POST", path, strings.NewReader(form.Encode()))
+		r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		r.Header.Set("HX-Request", "true")
+		r.Header.Set("HX-Target", "calendar-grid")
+		rec := httptest.NewRecorder()
+		e.h.ServeHTTP(rec, r)
+		return rec
+	}
+	rec := post(fmt.Sprintf("/list/%d/watched", id), watchForm(0, 2, "/calendar?month=2026-11"))
+	if rec.Code != 200 {
+		t.Fatalf("stale mark: %d, want 200 (swappable)", rec.Code)
+	}
+	body := rec.Body.String()
+	mustContain(t, body, `id="calendar-grid"`, `role="alert"`, "Could not mark it watched")
+	mustNotContain(t, body, "<html", "<header")
+	// a plain post still gets the error page
+	if rec := e.do("POST", fmt.Sprintf("/list/%d/watched", id), watchForm(0, 2, "/calendar"), false); rec.Code != 422 {
+		t.Fatalf("plain: %d", rec.Code)
+	}
+	// a successful mark shows no notice
+	e2, id2 := watchEnv(t, 0)
+	r := httptest.NewRequest("POST", fmt.Sprintf("/list/%d/watched", id2), strings.NewReader(watchForm(0, 2, "/calendar?month=2026-11").Encode()))
+	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	r.Header.Set("HX-Request", "true")
+	r.Header.Set("HX-Target", "calendar-grid")
+	rec2 := httptest.NewRecorder()
+	e2.h.ServeHTTP(rec2, r)
+	mustNotContain(t, rec2.Body.String(), `role="alert"`)
+}
+
+// TestCalendarSwapsReplaceTheGrid: every control that targets the grid
+// replaces it (outerHTML), so the partial's root id is never nested inside the
+// target, and the select can keep focus across the swap.
+func TestCalendarSwapsReplaceTheGrid(t *testing.T) {
+	e := scheduleEnv(t)
+	b := e.get("/calendar").Body.String()
+	targets := strings.Count(b, `hx-target="#calendar-grid"`)
+	if targets < 6 { // two view links, previous, next, today, the select's form
+		t.Fatalf("%d grid targets", targets)
+	}
+	for _, m := range regexp.MustCompile(`<(?:a|form)\b[^>]*hx-target="#calendar-grid"[^>]*>`).FindAllString(b, -1) {
+		if !strings.Contains(m, `hx-swap="outerHTML"`) {
+			t.Errorf("a grid target without outerHTML: %s", m)
+		}
+	}
+	if n := strings.Count(b, `id="calendar-grid"`); n != 1 {
+		t.Errorf("%d elements with the grid id, want 1", n)
+	}
+	mustContain(t, b, `id="calendar-plugin"`)
+}
+
+// TestCalendarNoEmptyPluginInPushedURL: choosing "All plugins" submits
+// plugin= ; the address bar gets the canonical URL without it.
+func TestCalendarNoEmptyPluginInPushedURL(t *testing.T) {
+	e := scheduleEnv(t)
+	hx := map[string]string{"HX-Request": "true", "HX-Target": "calendar-grid"}
+	for u, want := range map[string]string{
+		"/calendar?month=2026-11&plugin=":             "/calendar?month=2026-11",
+		"/calendar?view=week&week=2026-11-09&plugin=": "/calendar?view=week&week=2026-11-09",
+		"/calendar?month=2026-11&plugin=nope":         "/calendar?month=2026-11",
+	} {
+		rec := e.getWith(u, hx)
+		if got := rec.Header().Get("HX-Push-Url"); got != want {
+			t.Errorf("%s: HX-Push-Url = %q, want %q", u, got, want)
+		}
+	}
+	// a chosen plugin or no parameter at all leaves the pushed URL to htmx
+	for _, u := range []string{"/calendar?month=2026-11&plugin=tv", "/calendar?month=2026-11"} {
+		if got := e.getWith(u, hx).Header().Get("HX-Push-Url"); got != "" {
+			t.Errorf("%s: HX-Push-Url = %q, want none", u, got)
+		}
+	}
+	// the form of the select has no empty option value named plugin besides All
+	mustContain(t, e.get("/calendar").Body.String(), `<option value="">All plugins</option>`)
+}
+
+// TestCalendarWeekAcrossDSTChange: the week of 19 to 25 Oct 2026 contains the
+// day the clocks go back (Europe/Berlin, 25 Oct 03:00 to 02:00). It still has
+// seven cells, and each release sits on its local day, also around the change
+// and across the midnight that ends the week.
+func TestCalendarWeekAcrossDSTChange(t *testing.T) {
+	e := newFixtureEnv(t)
+	now := time.Date(2026, 10, 21, 12, 0, 0, 0, time.UTC)
+	e.now = &now
+	if rec := e.do("POST", "/settings/time-zone", url.Values{"time_zone": {"Europe/Berlin"}}, false); rec.Code != 303 {
+		t.Fatalf("%d", rec.Code)
+	}
+	for i, r := range []struct {
+		title string
+		at    time.Time
+	}{
+		{"Alpha", time.Date(2026, 10, 18, 23, 30, 0, 0, time.UTC)},  // Mon 19 Oct 01:30 CEST
+		{"Bravo", time.Date(2026, 10, 24, 22, 30, 0, 0, time.UTC)},  // Sun 25 Oct 00:30 CEST
+		{"Charlie", time.Date(2026, 10, 25, 1, 30, 0, 0, time.UTC)}, // Sun 25 Oct 02:30 CET, after the change
+		{"Delta", time.Date(2026, 10, 25, 23, 30, 0, 0, time.UTC)},  // Mon 26 Oct 00:30 CET, next week
+		{"Echo", time.Date(2026, 10, 21, 21, 30, 0, 0, time.UTC)},   // Wed 21 Oct 23:30 CEST
+	} {
+		id := e.addFixture(t, "tv", "show", tvShow(fmt.Sprint(i), r.title), library.Entry{Status: library.Active})
+		if err := e.lib.SaveSchedule(context.Background(), id, []library.Airing{{Number: 1, AirsAt: r.at}}, now); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cells := func(url string) []string {
+		parts := strings.Split(e.get(url).Body.String(), `class="calendar-day`)
+		return parts[1:]
+	}
+	week := cells("/calendar?view=week&week=2026-10-19")
+	if len(week) != 7 {
+		t.Fatalf("%d day cells, want 7", len(week))
+	}
+	want := map[int][]string{0: {"Alpha"}, 2: {"Echo"}, 6: {"Bravo", "Charlie"}}
+	for i, c := range week {
+		for _, title := range []string{"Alpha", "Bravo", "Charlie", "Delta", "Echo"} {
+			if has, wanted := strings.Contains(c, ">"+title+"<") || strings.Contains(c, " "+title+"</a>"), slices.Contains(want[i], title); has != wanted {
+				t.Errorf("day %d: %s present = %v, want %v", i, title, has, wanted)
+			}
+		}
+	}
+	mustContain(t, e.get("/calendar?view=week&week=2026-10-19").Body.String(), "19 – 25 Oct 2026")
+	// the next week starts with Delta on its Monday
+	next := cells("/calendar?view=week&week=2026-10-26")
+	if len(next) != 7 || !strings.Contains(next[0], "Delta") {
+		t.Fatalf("next week: %d cells, Monday has Delta = %v", len(next), len(next) > 0 && strings.Contains(next[0], "Delta"))
+	}
 }

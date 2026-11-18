@@ -1,8 +1,8 @@
 package web
 
 // The home page, GET /: one page across every enabled plugin with four
-// sections, each hidden when empty: In progress (active entries as list
-// cards), Coming up (the next 7 days of stored releases, the calendar's
+// sections, each hidden when empty: Up next (active entries as list
+// cards naming the next unit and the releases aired beyond progress), Coming up (the next 7 days of stored releases, the calendar's
 // data), Series in progress and Recently updated. Every section is assembled
 // from bounded per-kind queries merged in Go; rows, cards, +1, status labels
 // and URLs come from the list's own builders.
@@ -31,7 +31,7 @@ const (
 
 // homeView is the data of home.html.
 type homeView struct {
-	Cards       []rowView  // In progress
+	Cards       []rowView  // Up next
 	ActiveAll   []homeLink // a link per plugin to its active entries
 	Days        []homeDay  // Coming up, grouped by day
 	Series      []homeSeries
@@ -63,6 +63,7 @@ type homeSeries struct {
 type homeRecent struct {
 	Title, Href, Status, StatusKey, Updated string
 	BadgeIcon, BadgeLabel                   string
+	RepeatMarker                            string // an active repeat run's badge
 }
 
 // badge is the plugin icon and kind label shown on a home entry.
@@ -117,6 +118,29 @@ func (s *server) homeEntries(ctx context.Context, ms []plugin.Manifest, status *
 	return all[:min(limit, len(all))], nil
 }
 
+// nextLabel names the unit after the entry's progress ("<label> <n+1>") for
+// an active count or pages primary track that is not at its total; "" for
+// every other kind of track.
+func nextLabel(k plugin.KindDef, keys []string, e library.Entry, fields map[string]plugin.FieldValue) string {
+	def, ok := primaryTrack(k, keys)
+	if !ok {
+		return ""
+	}
+	cur := e.Progress[def.Key]
+	if total, bounded := progressTotal(def, fields); bounded && cur >= total {
+		return ""
+	}
+	return progressLabel(k) + " " + strconv.Itoa(int(cur)+1)
+}
+
+// applyUpNext sets the Up next fields of a home card: the next unit and the
+// releases aired beyond progress (absent from aired: none). The home page and
+// the +1 answer on a home card share it.
+func applyUpNext(rv *rowView, k plugin.KindDef, row library.Row, aired map[int64]int) {
+	rv.NextLabel = nextLabel(k, row.Item.ProgressKeys, row.Entry, row.Item.Fields)
+	rv.Aired = aired[row.Item.ID]
+}
+
 // getHome renders the home page; with no plugin enabled it sends the owner to
 // Settings > Plugins.
 func (s *server) getHome(w http.ResponseWriter, r *http.Request) {
@@ -133,9 +157,19 @@ func (s *server) getHome(w http.ResponseWriter, r *http.Request) {
 		s.internalError(w, r, err)
 		return
 	}
+	ids := make([]int64, 0, len(entries))
+	for _, he := range entries {
+		ids = append(ids, he.row.Item.ID)
+	}
+	aired, err := s.deps.Library.AiredCounts(ctx, ids, s.now())
+	if err != nil {
+		s.internalError(w, r, err)
+		return
+	}
 	linked := map[string]bool{}
 	for _, he := range entries {
 		rv := s.rowView(he.m, he.row, "/", nil)
+		applyUpNext(&rv, he.k, he.row, aired)
 		rv.BadgeIcon, rv.BadgeLabel = badge(he.m, he.k)
 		v.Cards = append(v.Cards, rv)
 		if key := he.m.ID + "/" + he.k.Key; !linked[key] {
@@ -172,6 +206,7 @@ func (s *server) getHome(w http.ResponseWriter, r *http.Request) {
 		}
 		hr := homeRecent{Title: title, Href: itemURL(he.m, he.row.Item.Source, he.row.Item.SourceID, he.row.Item.Kind),
 			Status: statusLabel(he.k, he.row.Entry.Status), StatusKey: string(he.row.Entry.Status), BadgeIcon: icon, BadgeLabel: label}
+		hr.RepeatMarker, _, _ = repeatBadges(he.k, he.row.Entry)
 		if !he.row.Entry.UpdatedAt.IsZero() {
 			hr.Updated = he.row.Entry.UpdatedAt.Format("2006-01-02")
 		}

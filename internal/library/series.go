@@ -594,35 +594,101 @@ type execer interface {
 	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
 }
 
+// orderedMembers is a table of members numbered densely by position within
+// an owner: the parts of a series, the places of a custom list. A non-empty
+// block names a column that splits the owner's members into blocks numbered
+// separately (a series' main and spin-off parts each run 1..n). All names are
+// constants of this package, never input.
+type orderedMembers struct{ table, owner, block string }
+
+var (
+	seriesMembers = orderedMembers{table: "series_parts", owner: "series_id", block: "spin_off"}
+	listMembers   = orderedMembers{table: "list_items", owner: "list_id"}
+)
+
+// renumber rewrites the owner's positions densely (1..n within each block,
+// keeping the order) and returns the member item ids in block, then
+// position order, with the block of each.
+func (o orderedMembers) renumber(ctx context.Context, tx execer, ownerID int64) ([]int64, error) {
+	items, _, err := o.renumberBlocks(ctx, tx, ownerID)
+	return items, err
+}
+
+func (o orderedMembers) renumberBlocks(ctx context.Context, tx execer, ownerID int64) ([]int64, []int64, error) {
+	b, order := "0", "position, item_id"
+	if o.block != "" {
+		b, order = o.block, o.block+", position, item_id"
+	}
+	//nolint:gosec // G202: table and column names are package constants; values are bound
+	rows, err := tx.QueryContext(ctx, `SELECT item_id, `+b+` FROM `+o.table+` WHERE `+o.owner+` = ? ORDER BY `+order, ownerID)
+	if err != nil {
+		return nil, nil, err
+	}
+	var items, blocks []int64
+	var positions []int
+	next := map[int64]int{}
+	for rows.Next() {
+		var id, block int64
+		if err := rows.Scan(&id, &block); err != nil {
+			rows.Close()
+			return nil, nil, err
+		}
+		next[block]++
+		items = append(items, id)
+		blocks = append(blocks, block)
+		positions = append(positions, next[block])
+	}
+	if err := closeRows(rows); err != nil {
+		return nil, nil, err
+	}
+	for i, id := range items {
+		//nolint:gosec // G202: table and column names are package constants; values are bound
+		if _, err := tx.ExecContext(ctx, `UPDATE `+o.table+` SET position = ? WHERE `+o.owner+` = ? AND item_id = ? AND position <> ?`, positions[i], ownerID, id, positions[i]); err != nil {
+			return nil, nil, err
+		}
+	}
+	return items, blocks, nil
+}
+
+// move moves the item one place up (delta -1) or down (+1) within its block
+// of the owner's members, densely renumbered first. Moving past either end
+// of the block does nothing (moved is false); found is false when the item
+// is not a member.
+func (o orderedMembers) move(ctx context.Context, tx execer, ownerID, itemID int64, delta int) (found, moved bool, err error) {
+	items, blocks, err := o.renumberBlocks(ctx, tx, ownerID)
+	if err != nil {
+		return false, false, err
+	}
+	i := slices.Index(items, itemID)
+	if i < 0 {
+		return false, false, nil
+	}
+	j := i + delta
+	if j < 0 || j >= len(items) || blocks[j] != blocks[i] {
+		return true, false, nil
+	}
+	// positions are dense per block: the item's position is its index in
+	// the block plus one
+	first := slices.Index(blocks, blocks[i])
+	for _, p := range [][2]int{{i, j}, {j, i}} {
+		//nolint:gosec // G202: table and column names are package constants; values are bound
+		if _, err := tx.ExecContext(ctx, `UPDATE `+o.table+` SET position = ? WHERE `+o.owner+` = ? AND item_id = ?`, p[1]-first+1, ownerID, items[p[0]]); err != nil {
+			return true, false, err
+		}
+	}
+	return true, true, nil
+}
+
 // renumberSeries rewrites the positions of each block of a series (main
 // parts, spin-off parts) densely (1..n, keeping the order). A series left
 // without parts is deleted only when it holds nothing of its own (see
 // deleteEmptySeriesSQL); otherwise it stays with zero parts. It reports
 // whether the series still exists.
 func renumberSeries(ctx context.Context, tx execer, seriesID int64) (bool, error) {
-	rows, err := tx.QueryContext(ctx, `SELECT item_id, spin_off FROM series_parts WHERE series_id = ? ORDER BY spin_off, position, item_id`, seriesID)
+	items, err := seriesMembers.renumber(ctx, tx, seriesID)
 	if err != nil {
 		return false, err
 	}
-	var items []int64
-	var positions []int
-	next := map[bool]int{}
-	for rows.Next() {
-		var id int64
-		var spinOff bool
-		if err := rows.Scan(&id, &spinOff); err != nil {
-			rows.Close()
-			return false, err
-		}
-		next[spinOff]++
-		items = append(items, id)
-		positions = append(positions, next[spinOff])
-	}
-	if err := rows.Err(); err != nil {
-		rows.Close()
-		return false, err
-	}
-	rows.Close()
 	if len(items) == 0 {
 		res, err := tx.ExecContext(ctx, deleteEmptySeriesSQL, seriesID)
 		if err != nil {
@@ -630,11 +696,6 @@ func renumberSeries(ctx context.Context, tx execer, seriesID int64) (bool, error
 		}
 		n, err := res.RowsAffected()
 		if err != nil || n > 0 {
-			return false, err
-		}
-	}
-	for i, id := range items {
-		if _, err := tx.ExecContext(ctx, `UPDATE series_parts SET position = ? WHERE series_id = ? AND item_id = ? AND position <> ?`, positions[i], seriesID, id, positions[i]); err != nil {
 			return false, err
 		}
 	}
@@ -654,8 +715,16 @@ func (l *Library) AddPart(ctx context.Context, seriesID, itemID int64, positionF
 		return err
 	}
 	defer tx.Rollback()
+	if err := addPartTx(ctx, tx, seriesID, itemID, positionField); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// addPartTx is AddPart inside tx.
+func addPartTx(ctx context.Context, tx *sql.Tx, seriesID, itemID int64, positionField string) error {
 	var sPlugin, sKind string
-	err = tx.QueryRowContext(ctx, `SELECT plugin_id, kind FROM series WHERE id = ?`, seriesID).Scan(&sPlugin, &sKind)
+	err := tx.QueryRowContext(ctx, `SELECT plugin_id, kind FROM series WHERE id = ?`, seriesID).Scan(&sPlugin, &sKind)
 	if errors.Is(err, sql.ErrNoRows) {
 		return ErrNoSeries
 	}
@@ -690,10 +759,8 @@ func (l *Library) AddPart(ctx context.Context, seriesID, itemID int64, positionF
 	if _, err := tx.ExecContext(ctx, `INSERT INTO series_parts(series_id, item_id, position) VALUES (?, ?, ?)`, seriesID, itemID, pos); err != nil {
 		return mapPartInsertErr(err)
 	}
-	if _, err := renumberSeries(ctx, tx, seriesID); err != nil {
-		return err
-	}
-	return tx.Commit()
+	_, err = renumberSeries(ctx, tx, seriesID)
+	return err
 }
 
 // insertPosition returns the 1-based position among the main parts for a new
@@ -745,27 +812,15 @@ func (l *Library) MovePart(ctx context.Context, seriesID, itemID int64, delta in
 		return err
 	}
 	defer tx.Rollback()
-	var pos, total int
-	var spinOff bool
-	err = tx.QueryRowContext(ctx, `SELECT position, spin_off FROM series_parts WHERE series_id = ? AND item_id = ?`, seriesID, itemID).Scan(&pos, &spinOff)
-	if errors.Is(err, sql.ErrNoRows) {
-		return ErrNoSeries
-	}
+	found, moved, err := seriesMembers.move(ctx, tx, seriesID, itemID, delta)
 	if err != nil {
 		return err
 	}
-	if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM series_parts WHERE series_id = ? AND spin_off = ?`, seriesID, spinOff).Scan(&total); err != nil {
-		return err
+	if !found {
+		return ErrNoSeries
 	}
-	target := pos + delta
-	if target < 1 || target > total {
+	if !moved {
 		return nil
-	}
-	if _, err := tx.ExecContext(ctx, `UPDATE series_parts SET position = ? WHERE series_id = ? AND spin_off = ? AND position = ?`, pos, seriesID, spinOff, target); err != nil {
-		return err
-	}
-	if _, err := tx.ExecContext(ctx, `UPDATE series_parts SET position = ? WHERE series_id = ? AND item_id = ?`, target, seriesID, itemID); err != nil {
-		return err
 	}
 	if _, err := renumberSeries(ctx, tx, seriesID); err != nil {
 		return err
@@ -996,7 +1051,7 @@ func (l *Library) seriesRows(ctx context.Context, q SeriesQuery) ([]SeriesRow, e
 	main, spinOffs := map[int64][]Row{}, map[int64][]Row{}
 	pr, err := l.db.QueryContext(ctx, `SELECT sp.series_id, sp.spin_off, e.status, e.updated_at, i.cover_path
 		FROM series_parts sp JOIN series s ON s.id = sp.series_id
-		JOIN `+tableEntries+` e ON e.item_id = sp.item_id JOIN items i ON i.id = sp.item_id
+		JOIN `+viewEntryState+` e ON e.item_id = sp.item_id JOIN items i ON i.id = sp.item_id
 		WHERE s.plugin_id = ? ORDER BY sp.series_id, sp.spin_off, sp.position`, q.PluginID)
 	if err != nil {
 		return nil, fmt.Errorf("list series parts: %w", err)
@@ -1375,7 +1430,7 @@ func (l *Library) ActiveSeries(ctx context.Context, pluginIDs []string, limit in
 			COALESCE(MAX(e.updated_at), '') AS updated,
 			COALESCE(NULLIF(s.cover_path, ''),
 				CASE WHEN `+linkOK+` = 1 THEN NULLIF(li.cover_path, '') END,
-				(SELECT i2.cover_path FROM series_parts sp2 JOIN `+tableEntries+` e2 ON e2.item_id = sp2.item_id
+				(SELECT i2.cover_path FROM series_parts sp2 JOIN `+viewEntryState+` e2 ON e2.item_id = sp2.item_id
 					JOIN items i2 ON i2.id = sp2.item_id WHERE sp2.series_id = s.id ORDER BY sp2.spin_off, sp2.position LIMIT 1),
 				'') AS cover,
 			COALESCE(NULLIF(s.parts_total, 0),
@@ -1387,7 +1442,7 @@ func (l *Library) ActiveSeries(ctx context.Context, pluginIDs []string, limit in
 			COALESCE(SUM(`+counted+` AND e.status = 'paused'), 0) AS paused
 		FROM series s
 		LEFT JOIN series_parts sp ON sp.series_id = s.id
-		LEFT JOIN `+tableEntries+` e ON e.item_id = sp.item_id
+		LEFT JOIN `+viewEntryState+` e ON e.item_id = sp.item_id
 		LEFT JOIN items li ON li.id = s.linked_item_id
 		LEFT JOIN (SELECT DISTINCT series_id FROM series_parts WHERE spin_off = 0) hm ON hm.series_id = s.id
 		WHERE s.plugin_id IN (`+placeholders(len(pluginIDs))+`)

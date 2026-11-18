@@ -674,7 +674,9 @@ func statsTermCounts(loaded []statsKindRows, q statsQuery, which string) []libra
 			continue
 		}
 		for _, row := range l.rows {
-			if !statsDayInPeriod(row.Entry.FinishedOn, q.From, q.To) {
+			// StatsRows also returns entries that match the status through
+			// a past run only; the option counts are of display runs
+			if (q.Status != nil && row.Entry.Status != *q.Status) || !statsDayInPeriod(row.Entry.FinishedOn, q.From, q.To) {
 				continue
 			}
 			switch which {
@@ -777,12 +779,12 @@ func (s *server) buildStatsPage(ctx context.Context, q statsQuery) (*statsPage, 
 		rows := statsNarrow(l.rows, q)
 		inputs[i] = stats.Input{PluginID: l.kind.PluginID, Kind: l.kind.Kind, Rows: rows}
 		for _, row := range rows {
-			if row.Entry.Status == library.Completed && row.Entry.FinishedOn == nil {
+			if row.Entry.Status == library.Completed && row.Entry.FinishedOn == nil && (q.Status == nil || *q.Status == library.Completed) {
 				undated++
 			}
 		}
 	}
-	rep := stats.Build(inputs, stats.Options{From: q.From, To: q.To, Bucket: statsBucket(q.Period)})
+	rep := stats.Build(inputs, stats.Options{From: q.From, To: q.To, Bucket: statsBucket(q.Period), Status: q.Status})
 	if err := s.fillStatsPage(ctx, v, q, scope, rep); err != nil {
 		return nil, err
 	}
@@ -888,9 +890,12 @@ func (s *server) fillStatsPage(ctx context.Context, v *statsPage, q statsQuery, 
 	if !v.AllMedia && len(rep.Kinds) == 1 {
 		total = rep.Kinds[0].Totals
 	}
-	v.Empty = total.Entries == 0
+	// time and units of earlier runs show even when no entry's display run is
+	// in the selection
+	hasContent := total.Entries > 0 || total.TimeSeconds > 0 || total.Units > 0
+	v.Empty = !hasContent
 	switch {
-	case total.Entries > 0:
+	case hasContent:
 		v.AnyEntries = true
 	case statsNarrows(q):
 		any, err := s.statsAnyEntries(ctx, scope)
@@ -908,7 +913,7 @@ func (s *server) fillStatsPage(ctx context.Context, v *statsPage, q statsQuery, 
 	}
 	// a time total of zero means one of two different things: every entry's
 	// value is unknown (a gap to fill) or every value is a known zero
-	noTime := v.HasTime && total.Entries > 0 && total.TimeEntries == 0
+	noTime := v.HasTime && total.Entries > 0 && total.TimeEntries == 0 && total.TimeSeconds == 0
 	v.NoTime = noTime && total.MissingTime == total.Entries
 	v.KnownZeroTime = noTime && total.MissingTime == 0
 	v.Cards = statsCards(total, v.HasTime, v.HasUnits)

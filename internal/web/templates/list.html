@@ -17,9 +17,12 @@
 </nav>
 {{end}}
 {{template "list_tabs" .}}
+{{if .Duplicates}}<p class="mb-3 text-sm"><a href="{{.DuplicatesURL}}" class="text-indigo-300 hover:underline">Possible duplicates ({{.Duplicates}})</a></p>{{end}}
 {{if .SeriesTab}}{{template "series_search" .Search}}{{else if .AnyEntries}}{{template "filter_bar" .Filters}}{{end}}
+<div id="pick-result" aria-live="polite">{{with .Pick}}{{template "pick_result" .}}{{end}}</div>
 {{/* hx-history="false": htmx never snapshots this page (a snapshot keeps attributes, not typed values), so Back refetches it in full */}}
 <div id="list-rows" hx-history="false">{{template "list_rows" .}}</div>
+{{with .Bulk}}{{template "bulk_bar" .}}{{end}}
 <div id="dialog-slot" data-swap-statuses="{{dialogStatuses}}">{{with .Dialog}}{{template "entry_dialog" .}}{{end}}</div>
 {{end}}
 
@@ -43,27 +46,31 @@
 
 
 {{/* list_partial answers the filter bar and the sort links of the table head: the rows region (with the head) plus, out of band, the tabs, the Clear link, the sort control's options, the Filters badge and the genre/tag option lists (never a visible input or a select, which keep focus) */}}
-{{define "list_partial"}}{{template "list_rows" .}}{{template "list_tabs" .}}{{if not .SeriesTab}}{{with .Filters}}{{template "filter_clear" .}}{{template "filter_sort_oob" .}}{{template "filter_count" .}}{{with .Genres}}{{template "filter_term_options_oob" .}}{{end}}{{with .Tags}}{{template "filter_term_options_oob" .}}{{end}}{{end}}{{end}}{{end}}
+{{define "list_partial"}}{{template "list_rows" .}}{{template "list_tabs" .}}{{if not .SeriesTab}}{{with .Filters}}{{template "filter_clear" .}}{{template "filter_sort_oob" .}}{{template "filter_count" .}}{{with .Genres}}{{template "filter_term_options_oob" .}}{{end}}{{with .Tags}}{{template "filter_term_options_oob" .}}{{end}}{{with .UserTags}}{{template "filter_term_options_oob" .}}{{end}}{{end}}{{end}}{{end}}
 
 {{define "list_rows"}}
 {{if .Notice}}<p data-filter-notice role="status" class="mb-4 rounded border border-amber-800 bg-slate-900 p-3 text-sm text-amber-200">Ignored unknown or invalid parameters: {{range $i, $k := .Notice}}{{if $i}}, {{end}}<code>{{$k}}</code>{{end}}{{if .NoticeMore}} and {{.NoticeMore}} more{{end}}.</p>{{end}}
+{{with .BulkNotice}}<div data-bulk-notice data-replace-url="{{.ReplaceURL}}" role="status" class="mb-4 rounded border border-slate-700 bg-slate-900 p-3 text-sm text-slate-300"><p class="font-medium text-slate-100">{{.Text}}</p></div>{{end}}
 {{if .SeriesTab}}{{template "series_rows" .}}{{else}}{{template "kind_rows" .}}{{end}}
 {{end}}
 
 {{define "kind_rows"}}
+{{/* what the bulk bar (outside this region) needs after a rows partial */}}
+{{with .Bulk}}<div hidden data-bulk-state data-bulk-total="{{.Total}}" data-bulk-list="{{.List}}"></div>{{end}}
 {{if not .AnyEntries}}
 <p class="rounded border border-slate-800 bg-slate-900 p-4 text-slate-300"><strong class="font-medium text-slate-100">No {{.EmptyNoun}} in your list yet.</strong> Your list is empty: <a href="{{.SearchURL}}" class="text-indigo-300 underline">search for {{.EmptyNoun}} to add</a>{{if .ManualURL}} or <a href="{{.ManualURL}}" class="text-indigo-300 underline">add one manually</a>{{end}}.</p>
 {{else if not .Rows}}
 {{if .Filtered}}<p class="rounded border border-slate-800 bg-slate-900 p-4 text-slate-300">No {{.EmptyNoun}} match these filters.{{with .Filters.ClearURL}} <a class="text-indigo-300 underline" href="{{.}}">Clear filters</a>{{end}}</p>
 {{else}}<p class="rounded border border-slate-800 bg-slate-900 p-4 text-slate-300">Nothing here yet.</p>{{end}}
 {{else}}
-{{if eq .View "cards"}}{{template "list_cards" .}}{{else}}{{/* the table view */}}
+{{if eq .View "cards"}}{{if .Bulk}}<p hidden data-bulk-reveal class="mb-3 text-sm text-slate-300"><label><input type="checkbox" data-bulk-page-all class="h-4 w-4 accent-indigo-500"> Select all on this page</label></p>{{end}}{{template "list_cards" .}}{{else}}{{/* the table view */}}
 <div class="overflow-x-auto">
   <table class="w-full text-left text-sm">
     {{/* part of the rows region, so a rows partial brings the sort state
          (aria-sort, arrows, links with the current filters) along */}}
     <thead class="text-slate-400">
       <tr class="border-b border-slate-800">
+        {{if .Bulk}}<th scope="col" class="w-8 py-2 pr-3"><span class="sr-only">Select</span><input type="checkbox" hidden data-bulk-reveal data-bulk-page-all aria-label="Select all on this page" class="h-4 w-4 accent-indigo-500"></th>{{end}}
         <th scope="col" class="py-2 pr-3"><span class="sr-only">Cover</span></th>
         {{template "sort_th" .Head.Title}}
         {{range .Head.Columns}}{{template "sort_th" .}}{{end}}

@@ -143,13 +143,20 @@ func TestAddOtherValidationErrors(t *testing.T) {
 
 func TestAddBlankProgressAndDatesAndCommentCap(t *testing.T) {
 	e := newEnv(t)
-	f := url.Values{"status": {"planned"}, "progress": {""}, "comment": {strings.Repeat("あ", 2500)}}
+	// runes, not bytes, are counted; a comment above the cap is refused, not cut
+	long := strings.Repeat("a", library.MaxNotesRunes-10) + strings.Repeat("あ", 10)
+	f := url.Values{"status": {"planned"}, "progress": {""}, "comment": {long + "あ"}}
+	if rec := e.post(f, true); rec.Code != 422 || !strings.Contains(rec.Body.String(), "longer than 10000 characters") {
+		t.Fatalf("over the cap: %d", rec.Code)
+	}
+	assertNothingSaved(t, e)
+	f.Set("comment", long)
 	if rec := e.post(f, true); rec.Code != 204 {
 		t.Fatalf("got %d", rec.Code)
 	}
 	sv, _ := findBySource(context.Background(), e.lib, anilist.AniList, "1535")
 	en, _ := getEntry(context.Background(), e.lib, sv.ID)
-	if en.Progress != 0 || en.StartedOn != nil || len([]rune(en.Comment)) != 2000 {
+	if en.Progress != 0 || en.StartedOn != nil || en.Comment != long {
 		t.Fatalf("%+v", en)
 	}
 }
@@ -385,7 +392,7 @@ func TestAddFixtureCreatesEntryWithoutJob(t *testing.T) {
 		t.Fatalf("got %d %v %s", rec.Code, rec.Header(), rec.Body.String())
 	}
 	en := e.savedEntry(t, "book", "books", "42")
-	if en.Status != library.Active || en.Rating == nil || *en.Rating != 7 || en.Progress["pages"] != 12 || en.Comment != "good" ||
+	if en.Status != library.Active || en.Rating == nil || *en.Rating != 7 || en.Progress["pages"] != 12 || en.Notes != "good" ||
 		en.StartedOn == nil || !en.StartedOn.Equal(time.Date(2024, 3, 5, 0, 0, 0, 0, time.UTC)) {
 		t.Fatalf("%+v", en)
 	}
@@ -746,7 +753,7 @@ func TestAddRepeatedParametersFirstWins(t *testing.T) {
 		t.Fatalf("got %d %s", rec.Code, rec.Body.String())
 	}
 	en := e.savedEntry(t, "book", "books", "42")
-	if en.Status != library.Completed || *en.Rating != 6 || en.Progress["pages"] != 9 || en.Comment != "one" {
+	if en.Status != library.Completed || *en.Rating != 6 || en.Progress["pages"] != 9 || en.Notes != "one" {
 		t.Fatalf("%+v", en)
 	}
 }

@@ -483,9 +483,12 @@ func seriesOf(t *testing.T, e *env, plug, title string, ids ...string) *Series {
 
 func setStatus(t *testing.T, e *env, series int64, pos int, st Status, updated string) {
 	t.Helper()
-	if _, err := e.db.Exec(`UPDATE entries SET status = ?, updated_at = ? WHERE item_id = (SELECT item_id FROM series_parts WHERE series_id = ? AND position = ?)`, string(st), updated, series, pos); err != nil {
+	var id int64
+	if err := e.db.QueryRow(`SELECT item_id FROM series_parts WHERE series_id = ? AND position = ?`, series, pos).Scan(&id); err != nil {
 		t.Fatal(err)
 	}
+	setDisplayStatus(t, e.db, id, st)
+	setEntryUpdated(t, e.db, updated, id)
 }
 
 func TestListSeries(t *testing.T) {
@@ -840,9 +843,7 @@ func TestActiveSeriesMatchesDerivedStatus(t *testing.T) {
 		s := mustSeries(t, e, ids[0], title)
 		mustAddPart(t, e, s.ID, ids[1:]...)
 		for i, st := range c {
-			if _, err := e.db.Exec(`UPDATE entries SET status = ? WHERE item_id = ?`, string(st), ids[i]); err != nil {
-				t.Fatal(err)
-			}
+			setDisplayStatus(t, e.db, ids[i], st)
 		}
 		titleOf[s.ID] = title
 		want[title] = DeriveSeriesStatus(c, 0) == Active
@@ -885,9 +886,7 @@ func TestActiveSeriesOrderAndCounts(t *testing.T) {
 	mustAddPart(t, e, sa.ID, a2)
 	sb := mustSeries(t, e, b1, "Newer")
 	stamp := func(id int64, at string) {
-		if _, err := e.db.Exec(`UPDATE entries SET updated_at = ? WHERE item_id = ?`, at, id); err != nil {
-			t.Fatal(err)
-		}
+		setEntryUpdated(t, e.db, at, id)
 	}
 	stamp(a1, "2025-01-01T00:00:00Z")
 	stamp(a2, "2025-01-02T00:00:00Z")

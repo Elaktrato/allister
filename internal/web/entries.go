@@ -3,10 +3,10 @@ package web
 // The generic entry routes, core routes guarded by the plugin of the item
 // {id} (itemPluginGuard): POST /list/{id}/increment (+1 on the primary
 // progress), GET|POST /list/{id}/edit (the list entry: status, rating,
-// dates, comment, progress values and the active progress combination
-// among the kind's allowed ones) and POST /list/{id}/remove (deletes the
-// item). They never change the item's own data; the edit may only switch
-// its active progress combination.
+// dates, notes, the display run's review, progress values and the active
+// progress combination among the kind's allowed ones) and POST
+// /list/{id}/remove (deletes the item). They never change the item's own
+// data; the edit may only switch its active progress combination.
 
 import (
 	"errors"
@@ -15,6 +15,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/allister/allister/internal/library"
 	"github.com/allister/allister/internal/plugin"
@@ -23,6 +24,14 @@ import (
 // progressKeysField is the edit form field naming the active progress
 // combination: the keys of one allowed combination joined by commas.
 const progressKeysField = "progress_keys"
+
+// userTagField is the edit form's repeated own-tag input (one name each;
+// blank inputs are skipped).
+const userTagField = "user_tag"
+
+// blankTagInputs is the number of empty own-tag inputs the dialog offers
+// for new names.
+const blankTagInputs = 2
 
 // entryDialog is the data of entry_dialog.html.
 type entryDialog struct {
@@ -34,7 +43,28 @@ type entryDialog struct {
 	// there are several).
 	Combos []statusOpt
 	Error  string
+	// TagInputs are the values of the own-tag inputs (the entry's names,
+	// then blankTagInputs empty ones); TagNames every existing own tag, the
+	// inputs' suggestions.
+	TagInputs, TagNames []string
+	// Ask is set while the dialog asks whether moving a completed run back
+	// starts a new run or corrects the current one (see postEdit).
+	Ask *runQuestion
 }
+
+// runQuestion is the confirm state of the entry dialog: the question and the
+// label of the button that starts a new run (run_choice=new). OnlyNew drops
+// the "correct" answer: the shown run is an earlier run behind a dropped
+// repeat, which only the latest run may leave completed.
+type runQuestion struct {
+	Completed, Action string
+	OnlyNew           bool
+	StillAiring       bool // the item has upcoming releases: no new run, only "correct"
+}
+
+// runChoiceField is the entry dialog's answer to its question: "new" starts
+// the entry again, "correct" changes the completed run in place.
+const runChoiceField = "run_choice"
 
 // entryTarget is the item of an entry route with its list row.
 type entryTarget struct {
@@ -92,7 +122,6 @@ func (s *server) postIncrement(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ret := returnTarget(r.PostFormValue("return"), ref.PluginID)
-	home := ret == "/"
 	if err := s.deps.Library.Increment(r.Context(), ref.ID); err != nil {
 		if errors.Is(err, library.ErrNoEntry) {
 			s.entryNotFound(w, r)
@@ -101,6 +130,22 @@ func (s *server) postIncrement(w http.ResponseWriter, r *http.Request) {
 		s.internalError(w, r, err)
 		return
 	}
+	s.answerChange(w, r, ret, true)
+}
+
+// entryChanged answers a change made from a list row or card (+1, start
+// again): 303 to the return path, for htmx the re-rendered row, or the card
+// when the form posted view=cards (with the plugin badge when the return
+// path is the home page or a custom list).
+func (s *server) entryChanged(w http.ResponseWriter, r *http.Request, ret string) {
+	s.answerChange(w, r, ret, false)
+}
+
+// answerChange is entryChanged; offerNote adds the +1 answer's link to a
+// note on the unit just logged (see noteOffer).
+func (s *server) answerChange(w http.ResponseWriter, r *http.Request, ret string, offerNote bool) {
+	// the home page and a custom list mix plugins: their cards carry a badge
+	mixed := ret == "/" || listReturn(ret)
 	if !isPartialRequest(r) {
 		http.Redirect(w, r, ret, http.StatusSeeOther)
 		return
@@ -115,8 +160,23 @@ func (s *server) postIncrement(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	rv := rvs[0]
-	if home {
+	if offerNote {
+		rv.NoteURL, rv.NoteLabel = t.noteOffer(ret)
+	}
+	if mixed {
 		rv.BadgeIcon, rv.BadgeLabel = badge(t.man, t.kind)
+	}
+	if ret == "/" { // an Up next card on the home page
+		aired, err := s.deps.Library.AiredCounts(r.Context(), []int64{t.row.Item.ID}, s.now())
+		if err != nil {
+			s.internalError(w, r, err)
+			return
+		}
+		applyUpNext(&rv, t.kind, *t.row, aired)
+	}
+	// a row of the plugin's own list keeps its bulk edit checkbox
+	if u, err := url.Parse(ret); err == nil && u.Path == "/"+t.man.ID {
+		rv.SelectID = strconv.FormatInt(t.row.Item.ID, 10)
 	}
 	// a +1 from a card answers the card, one from the table the row
 	partial := "list_row"
@@ -156,7 +216,7 @@ func progressText(def plugin.ProgressDef, val float64) string {
 // stored progress values (active and retained), rating blank when unrated.
 func entryFormValues(k plugin.KindDef, e library.Entry, stored map[string]float64) entryValues {
 	v := entryValues{Status: string(e.Status), StartedOn: fmtDay(e.StartedOn), FinishedOn: fmtDay(e.FinishedOn),
-		Comment: e.Comment, Progress: map[string]string{}}
+		Comment: e.Notes, Review: e.Review, Progress: map[string]string{}}
 	if e.Rating != nil {
 		v.Rating = strconv.Itoa(*e.Rating)
 	}
@@ -237,6 +297,20 @@ func (t *entryTarget) dialog(v entryValues, keys []string, ret string, stored ma
 // one the return path names (its kind, status and page), else the first
 // page of the item's kind.
 func (s *server) editResponse(w http.ResponseWriter, r *http.Request, t *entryTarget, d entryDialog, code int) {
+	tags, err := s.deps.Library.UserTags(r.Context())
+	if err != nil {
+		s.internalError(w, r, err)
+		return
+	}
+	for _, tg := range tags {
+		d.TagNames = append(d.TagNames, tg.Name)
+	}
+	for _, name := range d.UserTags {
+		if strings.TrimSpace(name) != "" {
+			d.TagInputs = append(d.TagInputs, name)
+		}
+	}
+	d.TagInputs = append(d.TagInputs, make([]string, blankTagInputs)...)
 	if isPartialRequest(r) {
 		s.renderPartialStatus(w, code, "list", "entry_dialog", d)
 		return
@@ -259,7 +333,9 @@ func (s *server) getEdit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ret := returnTarget(r.URL.Query().Get("return"), t.man.ID)
-	d := t.dialog(entryFormValues(t.kind, t.row.Entry, stored), t.row.Item.ProgressKeys, ret, stored)
+	v := entryFormValues(t.kind, t.row.Entry, stored)
+	v.UserTags = t.row.UserTags
+	d := t.dialog(v, t.row.Item.ProgressKeys, ret, stored)
 	s.editResponse(w, r, t, d, http.StatusOK)
 }
 
@@ -277,7 +353,7 @@ func (s *server) getEdit(w http.ResponseWriter, r *http.Request) {
 // The save is last-write-wins: the dialog posts the values it loaded, so a
 // +1 made meanwhile (another tab) is overwritten by the posted value.
 func (s *server) postEdit(w http.ResponseWriter, r *http.Request) {
-	if !parseForm(w, r) {
+	if !parseTextForm(w, r) {
 		return
 	}
 	t, ok := s.loadEntry(w, r)
@@ -316,13 +392,83 @@ func (s *server) postEdit(w http.ResponseWriter, r *http.Request) {
 	if msg == "" {
 		msg = perr
 	}
+	if _, posted := r.PostForm["review"]; !posted {
+		// a form without the review field (an older page) keeps the review
+		v.Review, entry.Review = t.row.Entry.Review, t.row.Entry.Review
+	}
+	// the own tags; a form without their inputs (an older page) keeps them
+	tags, tagsPosted := r.PostForm[userTagField]
+	v.UserTags = t.row.UserTags
+	if tagsPosted {
+		v.UserTags = tags
+	}
+	// moving a completed run back asks first: start a new run, or correct
+	// this one (run_choice). "new" writes the dialog's changes to the new
+	// run, so that entry is the one validated.
+	choice := r.PostFormValue(runChoiceField)
+	movesBack := t.row.Entry.Status == library.Completed && entry.Status != library.Completed && entry.Status != library.Dropped
+	startNew := movesBack && choice == "new"
+	pastRun := false // the shown run is not the latest run
+	if movesBack {
+		runs, err := s.deps.Library.Runs(ctx, t.row.Item.ID)
+		if err != nil {
+			s.internalError(w, r, err)
+			return
+		}
+		pastRun = len(runs) > 0 && runs[0].Number != t.row.Entry.RunNumber
+	}
+	if msg == "" && movesBack && pastRun && choice == "correct" {
+		// a forged answer the question never offered: refused before
+		// anything (tags included) is written
+		msg = "This is an earlier run behind a dropped repeat: it can only be completed or dropped. Start it again instead."
+	}
+	var today time.Time // the new run's start, in the configured time zone
+	if startNew {
+		today = s.now().In(s.location(ctx))
+	}
 	if msg == "" {
 		for _, key := range clear {
 			if _, typed := entry.Progress[key]; !typed {
 				entry.Progress[key] = 0
 			}
 		}
+		if startNew {
+			entry = newRunEntry(t.row.Entry, entry, today)
+		}
 		msg = s.validateAgainstItem(t.kind, progressContext{Keys: keys, Fields: t.row.Item.Fields}, entry)
+	}
+	if msg == "" && movesBack && !startNew && choice != "correct" {
+		// the question; nothing is written
+		d := t.dialog(v, keys, ret, stored)
+		airing, err := s.deps.Library.StillAiring(ctx, t.row.Item.ID)
+		if err != nil {
+			s.internalError(w, r, err)
+			return
+		}
+		d.Ask = &runQuestion{Completed: statusLabel(t.kind, library.Completed), Action: t.kind.RepeatAction(), OnlyNew: pastRun, StillAiring: airing}
+		s.editResponse(w, r, t, d, http.StatusOK)
+		return
+	}
+	if msg == "" && tagsPosted {
+		// every other part is valid: a refused name is the last refusal,
+		// and nothing has been written yet
+		switch err := s.deps.Library.SetEntryTags(ctx, t.row.Item.ID, tags); {
+		case errors.Is(err, library.ErrNoEntry):
+			s.entryNotFound(w, r)
+			return
+		case errors.Is(err, library.ErrInvalid):
+			msg = invalidMessage(err)
+		case err != nil:
+			s.internalError(w, r, err)
+			return
+		}
+	}
+	if msg == "" && startNew {
+		entry.ItemID = t.row.Item.ID
+		var answered bool
+		if msg, answered = s.startAgainWith(w, r, entry, change, today, ret); answered {
+			return
+		}
 	}
 	if msg == "" {
 		entry.ItemID = t.row.Item.ID
@@ -362,4 +508,64 @@ func (s *server) postRemove(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.done(w, r, returnTarget(r.PostFormValue("return"), ref.PluginID))
+}
+
+// newRunEntry is what the entry dialog's "start again instead" writes to the
+// new run: the posted status, rating and notes, and of the dates, the
+// review and the progress only what the dialog CHANGED against the
+// completed run (posted e against the display run old). Unchanged values are
+// the completed run's and stay there: the new run keeps its own start
+// (today), no finish, no review and no progress.
+func newRunEntry(old library.Entry, e library.Entry, today time.Time) library.Entry {
+	started := time.Date(today.Year(), today.Month(), today.Day(), 0, 0, 0, 0, time.UTC)
+	if fmtDay(e.StartedOn) == fmtDay(old.StartedOn) {
+		e.StartedOn = &started
+	}
+	if fmtDay(e.FinishedOn) == fmtDay(old.FinishedOn) {
+		e.FinishedOn = nil
+	}
+	if e.Review == old.Review {
+		e.Review = ""
+	}
+	progress := map[string]float64{}
+	for key, val := range e.Progress {
+		if prev, ok := old.Progress[key]; !ok || prev != val {
+			progress[key] = val
+		}
+	}
+	e.Progress = progress
+	return e
+}
+
+// startAgainWith starts the entry again (a new run, today) and writes e to
+// it. answered reports that the response is written; otherwise msg is a
+// user-facing refusal for the dialog. e was validated against the item
+// first, so the update after the start only fails on a race (another tab);
+// then the new run is deleted again.
+func (s *server) startAgainWith(w http.ResponseWriter, r *http.Request, e library.Entry, change []string, today time.Time, ret string) (msg string, answered bool) {
+	ctx := r.Context()
+	run, err := s.deps.Library.StartRun(ctx, e.ItemID, today)
+	switch {
+	case errors.Is(err, library.ErrNoEntry):
+		s.entryNotFound(w, r)
+		return "", true
+	case errors.Is(err, library.ErrInvalid):
+		return invalidMessage(err), false
+	case err != nil:
+		s.internalError(w, r, err)
+		return "", true
+	}
+	if uerr := s.deps.Library.UpdateEntry(ctx, e, change); uerr != nil {
+		if derr := s.deps.Library.DeleteRun(ctx, run.ID); derr != nil {
+			s.internalError(w, r, errors.Join(uerr, derr))
+			return "", true
+		}
+		if errors.Is(uerr, library.ErrInvalid) {
+			return invalidMessage(uerr), false
+		}
+		s.internalError(w, r, uerr)
+		return "", true
+	}
+	s.done(w, r, ret)
+	return "", true
 }

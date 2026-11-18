@@ -56,16 +56,13 @@ func (l *Library) ConvertToSource(ctx context.Context, itemID int64, d plugin.It
 	if p.source == manualSource {
 		return invalid("the match target needs a source other than manual")
 	}
-	var existing int64
-	switch err := tx.QueryRowContext(ctx, `SELECT id FROM items WHERE plugin_id = ? AND kind = ? AND source = ? AND source_id = ?`,
-		pluginID, kindKey, p.source, p.sourceID).Scan(&existing); {
-	case err == nil:
-		return &AlreadySavedError{ExistingID: existing}
-	case !errors.Is(err, sql.ErrNoRows):
+	if existing, err := identityOwner(ctx, tx, pluginID, kindKey, p.source, p.sourceID); err != nil {
 		return fmt.Errorf("convert item: %w", err)
+	} else if existing != 0 {
+		return &AlreadySavedError{ExistingID: existing}
 	}
 
-	if _, err := tx.ExecContext(ctx, `UPDATE items SET source = ?, source_id = ?, cover_path = ?, external_url = ?,
+	if _, err := tx.ExecContext(ctx, `UPDATE items SET source = ?, source_id = ?, cover_path = ?, cover_source = '', external_url = ?,
 		sync_state = 'pending', updated_at = `+nowSQL+` WHERE id = ?`,
 		p.source, p.sourceID, d.CoverURL, d.ExternalURL, itemID); err != nil {
 		return fmt.Errorf("convert item: %w", err)
@@ -97,9 +94,9 @@ func (l *Library) ConvertToSource(ctx context.Context, itemID int64, d plugin.It
 	return nil
 }
 
-// clampProgress lowers stored progress values (active or retained) that are
-// above the total of their track in item, and bumps the entry's updated_at
-// only when a value changed.
+// clampProgress lowers stored progress values (active or retained, of every
+// run) that are above the total of their track in item, and bumps the
+// entry's updated_at only when a value changed.
 func clampProgress(ctx context.Context, tx *sql.Tx, itemID int64, kind plugin.KindDef, item *Item) error {
 	var changed int64
 	for _, def := range kind.Progress.Eligible {
@@ -107,7 +104,8 @@ func clampProgress(ctx context.Context, tx *sql.Tx, itemID int64, kind plugin.Ki
 		if !bounded {
 			continue
 		}
-		res, err := tx.ExecContext(ctx, `UPDATE `+tableEntryProgress+` SET value = ? WHERE item_id = ? AND key = ? AND value > ?`,
+		res, err := tx.ExecContext(ctx, `UPDATE `+tableRunProgress+` SET value = ?
+			WHERE run_id IN (SELECT id FROM `+tableRuns+` WHERE item_id = ?) AND key = ? AND value > ?`,
 			total, itemID, def.Key, total)
 		if err != nil {
 			return fmt.Errorf("clamp progress: %w", err)

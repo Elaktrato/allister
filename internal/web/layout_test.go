@@ -43,12 +43,12 @@ func TestSidebarOneRowPerEnabledPluginWithIcons(t *testing.T) {
 	e := newEnvWith(t, withPlugins(book, plugintest.TVPlugin()))
 	body := e.get("/settings").Body.String()
 	nav := mainNav(t, body)
-	if strings.Count(nav, "<a ") != 7 {
-		t.Fatalf("want Home, 3 plugin rows, Statistics, Calendar and Settings: %s", nav)
+	if strings.Count(nav, "<a ") != 9 {
+		t.Fatalf("want Home, 3 plugin rows, Lists, New list, Statistics, Calendar and Settings: %s", nav)
 	}
-	// manifest (registration) order, Statistics, Calendar and Settings last
+	// manifest (registration) order, the Lists group, Statistics, Calendar and Settings last
 	last := -1
-	for _, href := range []string{"/", "/anime", "/book", "/tv", "/stats", "/calendar", "/settings"} {
+	for _, href := range []string{"/", "/anime", "/book", "/tv", "/lists", "/lists#new-list", "/stats", "/calendar", "/settings"} {
 		i := strings.Index(nav, `href="`+href+`"`)
 		if i < last {
 			t.Errorf("%s out of order in %s", href, nav)
@@ -57,6 +57,7 @@ func TestSidebarOneRowPerEnabledPluginWithIcons(t *testing.T) {
 	}
 	for _, r := range []struct{ href, icon, label string }{
 		{"/", "home", "Home"}, {"/anime", "live_tv", "Anime"}, {"/book", "menu_book", "Books"}, {"/tv", "category", "Shows"},
+		{"/lists", "list_alt", "Lists"}, {"/lists#new-list", "playlist_add", "New list"},
 		{"/stats", "bar_chart", "Statistics"}, {"/calendar", "calendar_month", "Calendar"}, {"/settings", "settings", "Settings"},
 	} {
 		row := navRow(t, nav, r.href)
