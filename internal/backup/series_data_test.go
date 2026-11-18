@@ -170,18 +170,22 @@ func TestNewSeriesMemberReadsInOldShape(t *testing.T) {
 	}
 }
 
+// A series member of format 1 or 2 (no own data, no spin-off parts)
+// restores as a series with main parts and nothing of its own.
 func TestRestoreOldSeriesMember(t *testing.T) {
-	b := newEnv(t)
-	b.book("1", "", &library.Entry{Status: library.Planned})
-	body := `{"format":"allister.backup","format_version":1,"items":[],"series":[` + seriesJSON("u-old", "Old", "1") + `]}`
-	rep := mustRestore(t, b, zipOf(t, entry{name: "backup.json", body: []byte(body)}))
-	if rep.SeriesCreated != 1 || len(rep.Notes) != 0 {
-		t.Fatalf("report = %+v", rep)
-	}
-	s := b.seriesByUID("u-old")
-	if s.CoverPath != "" || s.Description != "" || s.StartedOn != nil || s.Finished || s.PartsTotal != 0 ||
-		s.LinkedItemID != 0 || s.ParentID != 0 || len(s.Fields) != 0 {
-		t.Fatalf("values = %+v", s)
+	for _, v := range []string{"1", "2"} {
+		b := newEnv(t)
+		b.book("1", "", &library.Entry{Status: library.Planned})
+		body := `{"format":"allister.backup","format_version":` + v + `,"items":[],"series":[` + seriesJSON("u-old", "Old", "1") + `]}`
+		rep := mustRestore(t, b, zipOf(t, entry{name: "backup.json", body: []byte(body)}))
+		if rep.SeriesCreated != 1 || len(rep.Notes) != 0 {
+			t.Fatalf("format %s: report = %+v", v, rep)
+		}
+		s := b.seriesByUID("u-old")
+		if s.CoverPath != "" || s.Description != "" || s.StartedOn != nil || s.Finished || s.PartsTotal != 0 ||
+			s.LinkedItemID != 0 || s.ParentID != 0 || len(s.Fields) != 0 {
+			t.Fatalf("format %s: values = %+v", v, s)
+		}
 	}
 }
 
