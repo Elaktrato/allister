@@ -316,6 +316,85 @@ func TestMergeSeriesRule(t *testing.T) {
 	})
 }
 
+// TestMergeSeriesSpinOffAndLink: the survivor takes the other's series
+// place in its block (spin-off flag and position), a merged-away spin-off
+// part leaves its block dense, and a series linked to the other item is
+// linked to the survivor afterwards.
+func TestMergeSeriesSpinOffAndLink(t *testing.T) {
+	t.Run("keep takes a spin-off place", func(t *testing.T) {
+		e := newEnv(t)
+		keep := mergeBook(t, e, "books", "k", "Dune", nil, true, "")
+		other := mergeBook(t, e, "books", "o", "Dune", nil, true, "")
+		a := mergeBook(t, e, "books", "a", "A", nil, true, "")
+		c := mergeBook(t, e, "books", "c", "C", nil, true, "")
+		d := mergeBook(t, e, "books", "d", "D", nil, true, "")
+		s, err := e.lib.CreateSeries(bg, a, "Saga")
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, id := range []int64{c, other, d} {
+			if err := e.lib.AddPart(bg, s.ID, id, ""); err != nil {
+				t.Fatal(err)
+			}
+			if err := e.lib.SetPartSpinOff(bg, s.ID, id, true); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := e.lib.MergeItems(bg, keep, other, nil); err != nil {
+			t.Fatal(err)
+		}
+		wantBlocks(t, e, s.ID, []int64{a}, []int64{c, keep, d})
+		if ser, pos, spin, err := e.lib.SeriesOfItem(bg, keep); err != nil || ser == nil || ser.ID != s.ID || pos != 2 || !spin {
+			t.Fatalf("SeriesOfItem(keep) = %+v %d %v %v", ser, pos, spin, err)
+		}
+	})
+	t.Run("a merged-away spin-off leaves its block dense", func(t *testing.T) {
+		e := newEnv(t)
+		keep := mergeBook(t, e, "books", "k", "Dune", nil, true, "")
+		other := mergeBook(t, e, "books", "o", "Dune", nil, true, "")
+		a := mergeBook(t, e, "books", "a", "A", nil, true, "")
+		c := mergeBook(t, e, "books", "c", "C", nil, true, "")
+		if _, err := e.lib.CreateSeries(bg, keep, "Mine"); err != nil {
+			t.Fatal(err)
+		}
+		s, err := e.lib.CreateSeries(bg, a, "Theirs")
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, id := range []int64{other, c} {
+			if err := e.lib.AddPart(bg, s.ID, id, ""); err != nil {
+				t.Fatal(err)
+			}
+			if err := e.lib.SetPartSpinOff(bg, s.ID, id, true); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := e.lib.MergeItems(bg, keep, other, nil); err != nil {
+			t.Fatal(err)
+		}
+		wantBlocks(t, e, s.ID, []int64{a}, []int64{c})
+	})
+	t.Run("a series linked to the other is linked to keep", func(t *testing.T) {
+		e := newEnv(t)
+		keep := mergeBook(t, e, "books", "k", "Dune", nil, true, "")
+		other := mergeBook(t, e, "books", "o", "Dune", nil, true, "")
+		a := mergeBook(t, e, "books", "a", "A", nil, true, "")
+		s, err := e.lib.CreateSeries(bg, a, "Saga")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := e.db.Exec(`UPDATE series SET linked_item_id = ? WHERE id = ?`, other, s.ID); err != nil {
+			t.Fatal(err)
+		}
+		if err := e.lib.MergeItems(bg, keep, other, nil); err != nil {
+			t.Fatal(err)
+		}
+		if got := mergeIDs(t, e.db, `SELECT linked_item_id FROM series WHERE id = ?`, s.ID); !reflect.DeepEqual(got, []int64{keep}) {
+			t.Fatalf("linked = %v, want [%d]", got, keep)
+		}
+	})
+}
+
 func TestMergeAppliesSelectedChangesAndAddsExternalIDs(t *testing.T) {
 	e := newEnv(t)
 	keep := mergeBook(t, e, "books", "k", "Dune", map[string]string{"isbn": "111"}, true, "")
