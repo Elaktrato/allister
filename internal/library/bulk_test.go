@@ -314,6 +314,31 @@ func TestBulkAddToSeries(t *testing.T) {
 	}
 }
 
+// TestBulkAddToSeriesAppendsMainParts: bulk "Add to series" adds main parts
+// after the existing main parts; the spin-off block keeps its order.
+func TestBulkAddToSeriesAppendsMainParts(t *testing.T) {
+	e := newEnv(t)
+	a := addBook(t, e.lib, "a", nil, Entry{Status: Active})
+	b := addBook(t, e.lib, "b", nil, Entry{Status: Active})
+	c := addBook(t, e.lib, "c", nil, Entry{Status: Active})
+	x := addBook(t, e.lib, "x", nil, Entry{Status: Planned})
+	y := addBook(t, e.lib, "y", nil, Entry{Status: Planned})
+	s := mustSeries(t, e, a, "Saga")
+	mustAddPart(t, e, s.ID, b, c)
+	if err := e.lib.SetPartSpinOff(bg, s.ID, b, true); err != nil {
+		t.Fatal(err)
+	}
+	wantBlocks(t, e, s.ID, []int64{a, c}, []int64{b})
+	res, err := e.lib.BulkAddToSeries(bg, []int64{y, x}, s.ID)
+	if err != nil || res.Changed != 2 {
+		t.Fatalf("result = %+v, %v", res, err)
+	}
+	wantBlocks(t, e, s.ID, []int64{a, c, y, x}, []int64{b})
+	if _, pos, spin, err := e.lib.SeriesOfItem(bg, x); err != nil || pos != 4 || spin {
+		t.Fatalf("SeriesOfItem(x) = %d %v %v", pos, spin, err)
+	}
+}
+
 func TestBulkRemove(t *testing.T) {
 	e := newEnv(t)
 	a := addBook(t, e.lib, "a", nil, Entry{Status: Active})
