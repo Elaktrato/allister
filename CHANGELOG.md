@@ -8,7 +8,7 @@ How a release is cut: move the entries under "Unreleased" to a new `## vX.Y.Z - 
 
 ### Added
 
-- **Series with their own data and spin-offs.** A series has its own cover (upload or https URL, downloaded into the cover store), description, start and end day, a finished marker, the expected number of parts and plugin-declared fields (books: Volumes, Chapters, Author), plus an optional linked entry and a parent series for spin-off series (one level). Parts can be marked spin-off: they are numbered separately and not counted towards the series' progress. With expected parts set, 5 of 12 stays in progress. Removing the last part keeps a series that holds its own data. Backups carry all of it (format 3; series covers are archived) (migration 00021).
+- **Series with their own data and spin-offs.** A series has its own cover (upload or https URL, downloaded into the cover store), description, start and end day, a finished marker, the expected number of parts and plugin-declared fields (books: Volumes, Chapters, Author), plus an optional linked entry and a parent series for spin-off series (one level). Parts can be marked spin-off: they are numbered separately and not counted towards the series' progress. With expected parts set, 5 of 12 stays in progress. Removing the last part keeps a series that holds its own data. Backups carry all of it (series covers are archived) and are now format 4: older Allister versions (v0.5.0 and earlier) refuse them instead of dropping series data, formats 1 to 3 still restore (migration 00021).
 
 ### Fixed
 
