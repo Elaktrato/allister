@@ -39,7 +39,10 @@ type env struct {
 	reg *plugin.Registry
 }
 
-func newEnv(t *testing.T) *env {
+func newEnv(t *testing.T) *env { t.Helper(); return newEnvWith(t) }
+
+// newEnvWith is newEnv with extra plugins registered after the usual ones.
+func newEnvWith(t *testing.T, extra ...plugin.Plugin) *env {
 	t.Helper()
 	d, err := db.Open(filepath.Join(t.TempDir(), "t.db"))
 	if err != nil {
@@ -49,7 +52,7 @@ func newEnv(t *testing.T) *env {
 	reg := plugin.NewRegistry(plugintest.NewMemEnabled())
 	nop := richBook(plugintest.WithID("nop")) // a kind without a primary progress key
 	nop.M.Kinds[0].Progress.PrimaryKey = ""
-	for _, p := range []plugin.Plugin{richBook(), richBook(plugintest.WithID("book2")), plugintest.TVPlugin(), nop} {
+	for _, p := range append([]plugin.Plugin{richBook(), richBook(plugintest.WithID("book2")), plugintest.TVPlugin(), nop}, extra...) {
 		if err := reg.Register(p); err != nil {
 			t.Fatal(err)
 		}
