@@ -22,6 +22,7 @@ type ResolvedSeries struct {
 	StartedOn, EndedOn                 *time.Time
 	Finished                           bool
 	PartsTotal                         int
+	ExpectedParts                      int // the set expected number (own or linked), 0 when only derived
 	Fields                             map[string]plugin.FieldValue
 	MainParts, SpinOffParts, Completed int
 	Status                             Status
@@ -99,6 +100,7 @@ func ResolveSeries(s Series, kind plugin.KindDef, linked *Item, linkedEntry *Ent
 	}
 
 	expected := expectedParts(s, kind, linked)
+	r.ExpectedParts = expected
 	r.PartsTotal = expected
 	if r.PartsTotal == 0 {
 		r.PartsTotal = len(counted)

@@ -559,3 +559,20 @@ func TestResolveDerivedDatesFallBackToSpinOffs(t *testing.T) {
 		t.Fatalf("with main: start %v end %v", r.StartedOn, r.EndedOn)
 	}
 }
+
+// TestResolveExpectedPartsSet: ExpectedParts is the set number (own or
+// linked), 0 when only derived, even when it equals the part count.
+func TestResolveExpectedPartsSet(t *testing.T) {
+	k := sagaKind()
+	main := []Row{partRow("", Planned, nil), partRow("", Planned, nil)}
+	if r := ResolveSeries(Series{Title: "S"}, k, nil, nil, main, nil); r.ExpectedParts != 0 || r.PartsTotal != 2 {
+		t.Fatalf("derived: %+v", r)
+	}
+	if r := ResolveSeries(Series{Title: "S", PartsTotal: 2}, k, nil, nil, main, nil); r.ExpectedParts != 2 {
+		t.Fatalf("own: %+v", r)
+	}
+	linked := &Item{Kind: "book", Fields: map[string]plugin.FieldValue{"volumes": {Num: fp(2)}}}
+	if r := ResolveSeries(Series{Title: "S"}, k, linked, nil, main, nil); r.ExpectedParts != 2 {
+		t.Fatalf("linked: %+v", r)
+	}
+}

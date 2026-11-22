@@ -131,12 +131,8 @@ func seriesInfo(k plugin.KindDef, res library.ResolvedSeries) []infoRow {
 	if res.Finished {
 		out = append(out, infoRow{Label: "Finished", Text: "Yes"})
 	}
-	counted := res.MainParts
-	if counted == 0 {
-		counted = res.SpinOffParts
-	}
-	if res.PartsTotal > 0 && res.PartsTotal != counted {
-		out = append(out, infoRow{Label: "Expected parts", Text: strconv.Itoa(res.PartsTotal)})
+	if res.ExpectedParts > 0 {
+		out = append(out, infoRow{Label: "Expected parts", Text: strconv.Itoa(res.ExpectedParts)})
 	}
 	for _, fd := range k.SeriesFields {
 		v, ok := res.Fields[fd.Key]
