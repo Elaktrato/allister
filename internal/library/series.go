@@ -390,6 +390,21 @@ func (l *Library) UpdateSeriesDetails(ctx context.Context, id int64, kind plugin
 	if err := checkSeriesParent(ctx, tx, id, sPlugin, d.ParentID); err != nil {
 		return err
 	}
+	if err := writeSeriesValues(ctx, tx, id, d, rows); err != nil {
+		return fmt.Errorf("update series: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE series SET updated_at = `+nowSQL+` WHERE id = ?`, id); err != nil {
+		return fmt.Errorf("update series: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("update series: %w", err)
+	}
+	return nil
+}
+
+// writeSeriesValues stores d (prepared by prepareSeriesDetails, with its
+// field rows) as the series' values and fields; updated_at is left alone.
+func writeSeriesValues(ctx context.Context, tx *sql.Tx, id int64, d SeriesDetails, rows []fieldRow) error {
 	var started, ended *string
 	if d.StartedOn != nil {
 		v := plugin.DateOnly(*d.StartedOn).Format(dateLayout)
@@ -400,22 +415,19 @@ func (l *Library) UpdateSeriesDetails(ctx context.Context, id int64, kind plugin
 		ended = &v
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE series SET title = ?, cover_path = ?, description = ?, started_on = ?, ended_on = ?,
-		finished = ?, parts_total = ?, linked_item_id = ?, parent_id = ?, updated_at = `+nowSQL+` WHERE id = ?`,
+		finished = ?, parts_total = ?, linked_item_id = ?, parent_id = ? WHERE id = ?`,
 		d.Title, nullIfEmpty(d.CoverPath), nullIfEmpty(d.Description), started, ended,
 		d.Finished, nullIfZero(int64(d.PartsTotal)), nullIfZero(d.LinkedItemID), nullIfZero(d.ParentID), id); err != nil {
-		return fmt.Errorf("update series: %w", err)
+		return err
 	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM series_fields WHERE series_id = ?`, id); err != nil {
-		return fmt.Errorf("update series: %w", err)
+		return err
 	}
 	for _, f := range rows {
 		if _, err := tx.ExecContext(ctx, `INSERT INTO series_fields(series_id, key, vtype, text, num, date, seq) VALUES (?,?,?,?,?,?,?)`,
 			id, f.key, string(f.vtype), f.text, f.num, f.date, f.seq); err != nil {
-			return fmt.Errorf("update series: %w", err)
+			return err
 		}
-	}
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("update series: %w", err)
 	}
 	return nil
 }

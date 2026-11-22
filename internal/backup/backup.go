@@ -1,6 +1,7 @@
 // Package backup writes and restores the universal backup archive: a zip
 // with backup.json (every item of every plugin, enabled or not, with its
-// parts and list entry) and covers/<name> for every local item cover.
+// parts and list entry, and every series with its data) and covers/<name>
+// for every local item and series cover.
 //
 // Archive format (format "allister.backup", format_version 3):
 //
@@ -15,7 +16,7 @@
 //	              "aliases": [library.BackupAlias, ...],      (optional, after items)
 //	              "dismissed_duplicates": [library.BackupDismissedPair, ...]}
 //	                                                          (optional, after items)
-//	covers/<name>  the file of every item whose cover is a local file
+//	covers/<name>  the file of every item or series whose cover is a local file
 //	fonts/<name>   the file of every uploaded font
 //
 // The appearance member (see appearance.go) holds the appearance settings
@@ -225,6 +226,16 @@ func Write(ctx context.Context, w io.Writer, lib *library.Library, plugins []Plu
 	err = lib.BackupSeries(ctx, func(bs library.BackupSeries) error {
 		if err := ctx.Err(); err != nil {
 			return err
+		}
+		if bs.Cover != "" {
+			if coverFile(coversDir, bs.Cover) {
+				if !seen[bs.Cover] {
+					seen[bs.Cover] = true
+					names = append(names, bs.Cover)
+				}
+			} else {
+				bs.Cover, bs.CoverMissing = "", true
+			}
 		}
 		if !first {
 			if _, err := bw.WriteString(","); err != nil {
@@ -806,9 +817,41 @@ func (rs *restorer) items(ctx context.Context, dec *json.Decoder) error {
 	return nil
 }
 
+// pendingParent is a restored series whose parent is resolved after the
+// whole series array.
+type pendingParent struct {
+	row                     Row
+	pluginID, uid, parentID string
+}
+
 // series restores the series array (after all items); the decoder stands
-// before '['. One series is one transaction.
+// before '['. One series is one transaction. Parents are set in a second
+// pass once every series of the array is restored (also when the restore is
+// aborted part way, for the series restored so far).
 func (rs *restorer) series(ctx context.Context, dec *json.Decoder) error {
+	var pending []pendingParent
+	err := rs.seriesList(ctx, dec, &pending)
+	for _, p := range pending {
+		if err != nil && !errors.Is(err, errStopped) {
+			break
+		}
+		note, perr := rs.opts.Library.RestoreSeriesParent(ctx, p.pluginID, p.uid, p.parentID)
+		if perr != nil {
+			if err == nil {
+				err = perr
+			}
+			break
+		}
+		if note != "" {
+			row := p.row
+			row.Reason = clip(note, 300)
+			addRow(&rs.rep.Notes, &rs.rep.MoreNotes, row)
+		}
+	}
+	return err
+}
+
+func (rs *restorer) seriesList(ctx context.Context, dec *json.Decoder, pending *[]pendingParent) error {
 	tok, err := dec.Token()
 	if err != nil {
 		return rs.syntax(err)
@@ -830,26 +873,34 @@ func (rs *restorer) series(ctx context.Context, dec *json.Decoder) error {
 		}
 		n++
 		var bs library.BackupSeries
+		var typeNote string
 		if err := json.Unmarshal(raw, &bs); err != nil {
-			rs.seriesSkipped(Row{Index: n, Reason: clip("the series cannot be read: "+err.Error(), 300)})
-			continue
+			// a value of the wrong type is left out; the rest decoded
+			var te *json.UnmarshalTypeError
+			if t := bytes.TrimLeft(raw, " \t\r\n"); !errors.As(err, &te) || te.Field == "" || len(t) == 0 || t[0] != '{' {
+				rs.seriesSkipped(Row{Index: n, Reason: clip("the series cannot be read: "+err.Error(), 300)})
+				continue
+			}
+			typeNote = "a value cannot be read and is not restored: " + err.Error()
 		}
 		row := Row{Index: n, Title: clip(bs.Title, 120), PluginID: clip(bs.PluginID, 60), Kind: clip(bs.Kind, 60)}
-		created, leftOut, err := rs.opts.Library.RestoreSeries(ctx, bs)
+		res, err := rs.opts.Library.RestoreSeries(ctx, bs, library.RestoreOptions{ResolveCover: rs.resolver(), ReleaseCover: rs.release})
 		switch {
 		case errors.Is(err, library.ErrInvalid):
 			row.Reason = clip("the series is not valid: "+err.Error(), 300)
 			rs.seriesSkipped(row)
 			continue
+		case errors.Is(err, errTotalTooLarge):
+			return rs.abort(rs.limitMessage(err))
 		case err != nil:
 			return err
-		case created:
+		case res.Created:
 			rs.rep.SeriesCreated++
 		default:
 			rs.rep.SeriesSkipped++
 			switch {
-			case len(leftOut) > 0: // nothing could be restored
-				row.Reason = "not created: none of its parts could be restored: " + leftOutList(leftOut)
+			case len(res.LeftOut) > 0: // nothing could be restored
+				row.Reason = "not created: none of its parts could be restored: " + leftOutList(res.LeftOut)
 				addRow(&rs.rep.Notes, &rs.rep.MoreNotes, row)
 			case len(bs.Parts) == 0:
 				row.Reason = "not created: it has no parts"
@@ -857,9 +908,20 @@ func (rs *restorer) series(ctx context.Context, dec *json.Decoder) error {
 			}
 			continue
 		}
-		if len(leftOut) > 0 {
-			row.Reason = fmt.Sprintf("%d parts left out: %s", len(leftOut), leftOutList(leftOut))
+		if len(res.LeftOut) > 0 {
+			row.Reason = fmt.Sprintf("%d parts left out: %s", len(res.LeftOut), leftOutList(res.LeftOut))
 			addRow(&rs.rep.Notes, &rs.rep.MoreNotes, row)
+		}
+		if typeNote != "" {
+			res.Notes = append([]string{typeNote}, res.Notes...)
+		}
+		for _, note := range res.Notes {
+			r := row
+			r.Reason = clip(note, 300)
+			addRow(&rs.rep.Notes, &rs.rep.MoreNotes, r)
+		}
+		if res.Parent != "" {
+			*pending = append(*pending, pendingParent{row: row, pluginID: bs.PluginID, uid: bs.UID, parentID: res.Parent})
 		}
 	}
 	if _, err := dec.Token(); err != nil {
