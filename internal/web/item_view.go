@@ -110,6 +110,7 @@ type partLink struct{ Title, Href string }
 type seriesNavView struct {
 	Title, Href, RemoveURL string
 	Position               int
+	SpinOff                bool
 	Prev, Next             *partLink
 }
 
@@ -227,7 +228,7 @@ func (s *server) itemView(ctx context.Context, li *loadedItem) (itemView, error)
 // the part navigation, or the "Make this a series" form.
 func (s *server) seriesBlock(ctx context.Context, v *itemView, li *loadedItem, lang string) error {
 	m, k, it := li.man, li.kind, li.saved
-	ser, pos, _, err := s.deps.Library.SeriesOfItem(ctx, it.ID)
+	ser, pos, spinOff, err := s.deps.Library.SeriesOfItem(ctx, it.ID)
 	if err != nil {
 		return err
 	}
@@ -246,7 +247,17 @@ func (s *server) seriesBlock(ctx context.Context, v *itemView, li *loadedItem, l
 		return err
 	}
 	base := seriesURL(m.ID, ser.UID)
-	nav := &seriesNavView{Title: ser.Title, Href: base, Position: pos,
+	order, err := s.deps.Library.SeriesPartsOrder(ctx, ser.ID)
+	if err != nil {
+		return err
+	}
+	block := map[int64]bool{}
+	for _, p := range order {
+		block[p.ItemID] = p.SpinOff
+	}
+	// previous and next stay inside the part's own block
+	rows = slices.DeleteFunc(rows, func(row library.Row) bool { return block[row.Item.ID] != spinOff })
+	nav := &seriesNavView{Title: ser.Title, Href: base, Position: pos, SpinOff: spinOff,
 		RemoveURL: base + "/parts/" + strconv.FormatInt(it.ID, 10) + "/remove"}
 	link := func(row library.Row) *partLink {
 		t := row.Title

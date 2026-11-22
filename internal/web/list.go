@@ -65,6 +65,7 @@ type rowView struct {
 	// the part badge "N · <series>" on the kind tabs (Series "" for an entry in no series)
 	Series, SeriesHref string
 	SeriesPos          int
+	SeriesSpinOff      bool
 	// the plugin icon and kind label on a home page card ("" on the lists)
 	BadgeIcon, BadgeLabel string
 	// RepeatMarker is the kind's badge of an active repeat run (the
@@ -796,7 +797,7 @@ func (s *server) markSeries(ctx context.Context, m plugin.Manifest, views []rowV
 	}
 	for i, row := range rows {
 		if ms, ok := member[row.Item.ID]; ok {
-			views[i].Series, views[i].SeriesPos, views[i].SeriesHref = ms.Title, ms.Position, seriesURL(m.ID, ms.UID)
+			views[i].Series, views[i].SeriesPos, views[i].SeriesHref, views[i].SeriesSpinOff = ms.Title, ms.Position, seriesURL(m.ID, ms.UID), ms.SpinOff
 		}
 	}
 	return nil
