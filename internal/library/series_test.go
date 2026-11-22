@@ -41,7 +41,7 @@ func TestCreateSeries(t *testing.T) {
 	if s.UID == "" || s.PluginID != "book" || s.Kind != "book" || s.Title != "Dune" || s.ID == 0 {
 		t.Fatalf("series = %+v", s)
 	}
-	got, pos, err := e.lib.SeriesOfItem(bg, id)
+	got, pos, _, err := e.lib.SeriesOfItem(bg, id)
 	if err != nil || got == nil || got.ID != s.ID || pos != 1 {
 		t.Fatalf("SeriesOfItem = %+v %d %v", got, pos, err)
 	}
@@ -49,7 +49,7 @@ func TestCreateSeries(t *testing.T) {
 		t.Fatalf("stamps not set: %+v", s)
 	}
 	other := addBook(t, e.lib, "2", fp(1), Entry{Status: Planned})
-	if got, pos, err := e.lib.SeriesOfItem(bg, other); got != nil || pos != 0 || err != nil {
+	if got, pos, _, err := e.lib.SeriesOfItem(bg, other); got != nil || pos != 0 || err != nil {
 		t.Fatalf("no series: %+v %d %v", got, pos, err)
 	}
 }
@@ -391,7 +391,7 @@ func TestDeleteSeries(t *testing.T) {
 		if n := count(t, e.db, `SELECT count(*) FROM `+tableEntries+` WHERE item_id = ?`, id); n != 1 {
 			t.Fatalf("entry %d removed", id)
 		}
-		if got, _, _ := e.lib.SeriesOfItem(bg, id); got != nil {
+		if got, _, _, _ := e.lib.SeriesOfItem(bg, id); got != nil {
 			t.Fatalf("item %d still grouped", id)
 		}
 	}
@@ -714,11 +714,11 @@ func TestRemoveEntryLeavesTheSeries(t *testing.T) {
 	if err := e.lib.RemoveEntry(bg, ids[0]); err != nil {
 		t.Fatal(err)
 	}
-	if got, _, err := e.lib.SeriesOfItem(bg, ids[0]); err != nil || got != nil {
+	if got, _, _, err := e.lib.SeriesOfItem(bg, ids[0]); err != nil || got != nil {
 		t.Fatalf("removed entry still a part: %+v %v", got, err)
 	}
 	for i, id := range ids[1:] {
-		if _, pos, err := e.lib.SeriesOfItem(bg, id); err != nil || pos != i+1 {
+		if _, pos, _, err := e.lib.SeriesOfItem(bg, id); err != nil || pos != i+1 {
 			t.Fatalf("part %d at %d (%v)", id, pos, err)
 		}
 	}

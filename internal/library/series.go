@@ -15,8 +15,14 @@ import (
 	"github.com/allister/allister/internal/plugin"
 )
 
-// maxSeriesTitleRunes is the longest series title (in runes).
-const maxSeriesTitleRunes = 300
+const (
+	// maxSeriesTitleRunes is the longest series title (in runes).
+	maxSeriesTitleRunes = 300
+	// maxSeriesDescriptionRunes is the longest series description (in runes).
+	maxSeriesDescriptionRunes = 20000
+	// maxSeriesPartsTotal is the largest expected number of parts.
+	maxSeriesPartsTotal = 100000
+)
 
 var (
 	// ErrAlreadyInSeries is returned when an item already belongs to a series.
@@ -25,12 +31,44 @@ var (
 	ErrNoSeries = errors.New("library: no such series")
 )
 
-// Series is a hand-built, ordered group of list entries of one plugin and kind.
+// Series is a hand-built, ordered group of list entries of one plugin and
+// kind, with the owner's own data. Its parts form two blocks with separate
+// dense positions: main parts and spin-off parts. Dates are calendar days;
+// PartsTotal 0 means not set; LinkedItemID and ParentID 0 mean none. Fields
+// holds the kind's series fields (loaded by the single-series reads and
+// SpinOffsOf; the list rows leave it nil).
 type Series struct {
 	ID                   int64
 	UID, PluginID, Kind  string
 	Title                string
 	CreatedAt, UpdatedAt time.Time
+	CoverPath            string
+	Description          string
+	StartedOn, EndedOn   *time.Time
+	Finished             bool
+	PartsTotal           int
+	LinkedItemID         int64
+	ParentID             int64
+	Fields               map[string]plugin.FieldValue
+}
+
+// SeriesDetails is the owner's own data of a series, replaced as a whole by
+// UpdateSeriesDetails: an empty value clears it.
+type SeriesDetails struct {
+	Title, CoverPath, Description string
+	StartedOn, EndedOn            *time.Time
+	Finished                      bool
+	PartsTotal                    int
+	LinkedItemID, ParentID        int64
+	Fields                        map[string]plugin.FieldValue
+}
+
+// SeriesPart is a part of a series and its 1-based position within its
+// block (main parts or spin-off parts).
+type SeriesPart struct {
+	ItemID   int64
+	Position int
+	SpinOff  bool
 }
 
 // cleanSeriesTitle returns the cleaned title or ErrInvalid.
@@ -48,7 +86,8 @@ func cleanSeriesTitle(title string) (string, error) {
 	return t, nil
 }
 
-const seriesCols = `s.id, s.uid, s.plugin_id, s.kind, s.title, s.created_at, s.updated_at`
+const seriesCols = `s.id, s.uid, s.plugin_id, s.kind, s.title, s.created_at, s.updated_at,
+	s.cover_path, s.description, s.started_on, s.ended_on, s.finished, s.parts_total, s.linked_item_id, s.parent_id`
 
 type rowScanner interface{ Scan(...any) error }
 
@@ -56,7 +95,10 @@ type rowScanner interface{ Scan(...any) error }
 func scanSeries(r rowScanner, extra ...any) (*Series, error) {
 	var s Series
 	var created, updated string
-	dest := append([]any{&s.ID, &s.UID, &s.PluginID, &s.Kind, &s.Title, &created, &updated}, extra...)
+	var cover, desc, started, ended sql.NullString
+	var total, linked, parent sql.NullInt64
+	dest := append([]any{&s.ID, &s.UID, &s.PluginID, &s.Kind, &s.Title, &created, &updated,
+		&cover, &desc, &started, &ended, &s.Finished, &total, &linked, &parent}, extra...)
 	if err := r.Scan(dest...); err != nil {
 		return nil, err
 	}
@@ -67,7 +109,87 @@ func scanSeries(r rowScanner, extra ...any) (*Series, error) {
 	if s.UpdatedAt, err = time.Parse(time.RFC3339, updated); err != nil {
 		return nil, fmt.Errorf("library: series updated_at: %w", err)
 	}
+	if s.StartedOn, err = parseSeriesDate("started_on", started); err != nil {
+		return nil, err
+	}
+	if s.EndedOn, err = parseSeriesDate("ended_on", ended); err != nil {
+		return nil, err
+	}
+	s.CoverPath, s.Description = cover.String, desc.String
+	s.PartsTotal, s.LinkedItemID, s.ParentID = int(total.Int64), linked.Int64, parent.Int64
 	return &s, nil
+}
+
+// parseSeriesDate decodes a stored calendar day (NULL is nil).
+func parseSeriesDate(col string, v sql.NullString) (*time.Time, error) {
+	if !v.Valid || v.String == "" {
+		return nil, nil
+	}
+	t, err := time.Parse(dateLayout, v.String)
+	if err != nil {
+		return nil, fmt.Errorf("library: series %s: %w", col, err)
+	}
+	return &t, nil
+}
+
+// attachSeriesFields loads the series fields of the given series in one query.
+func attachSeriesFields(ctx context.Context, q queryer, list ...*Series) error {
+	if len(list) == 0 {
+		return nil
+	}
+	byID := make(map[int64]*Series, len(list))
+	args := make([]any, len(list))
+	for i, s := range list {
+		byID[s.ID] = s
+		args[i] = s.ID
+	}
+	//nolint:gosec // G202: constant SQL and placeholders; values are bound
+	rows, err := q.QueryContext(ctx, `SELECT series_id, key, vtype, text, num, date FROM series_fields
+		WHERE series_id IN (`+placeholders(len(args))+`) ORDER BY series_id, key, seq`, args...)
+	if err != nil {
+		return fmt.Errorf("series fields: %w", err)
+	}
+	accs := map[int64]*fieldAcc{}
+	for rows.Next() {
+		var id int64
+		var key, vtype string
+		var text, date sql.NullString
+		var num sql.NullFloat64
+		if err := rows.Scan(&id, &key, &vtype, &text, &num, &date); err != nil {
+			rows.Close()
+			return fmt.Errorf("series fields: %w", err)
+		}
+		acc := accs[id]
+		if acc == nil {
+			acc = newFieldAcc()
+			accs[id] = acc
+		}
+		if err := acc.add(key, vtype, nullStr(text), nullNum(num), nullStr(date)); err != nil {
+			rows.Close()
+			return fmt.Errorf("series fields: %w", err)
+		}
+	}
+	if err := closeRows(rows); err != nil {
+		return fmt.Errorf("series fields: %w", err)
+	}
+	for id, acc := range accs {
+		byID[id].Fields = acc.vals
+	}
+	return nil
+}
+
+func nullStr(v sql.NullString) *string {
+	if !v.Valid {
+		return nil
+	}
+	return &v.String
+}
+
+func nullNum(v sql.NullFloat64) *float64 {
+	if !v.Valid {
+		return nil
+	}
+	return &v.Float64
 }
 
 // CreateSeries starts a series titled title with the item as its first part.
@@ -130,21 +252,228 @@ func (l *Library) SeriesByUID(ctx context.Context, pluginID, uid string) (*Serie
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNoSeries
 	}
-	return s, err
+	if err != nil {
+		return nil, err
+	}
+	if err := attachSeriesFields(ctx, l.db, s); err != nil {
+		return nil, err
+	}
+	return s, nil
 }
 
-// SeriesOfItem returns the item's series and its 1-based position, or
-// (nil, 0, nil) when the item is in no series.
-func (l *Library) SeriesOfItem(ctx context.Context, itemID int64) (*Series, int, error) {
+// SeriesOfItem returns the item's series, its 1-based position within its
+// block and whether it is a spin-off part, or (nil, 0, false, nil) when the
+// item is in no series.
+func (l *Library) SeriesOfItem(ctx context.Context, itemID int64) (*Series, int, bool, error) {
 	var pos int
-	s, err := scanSeries(l.db.QueryRowContext(ctx, `SELECT `+seriesCols+`, p.position FROM series_parts p JOIN series s ON s.id = p.series_id WHERE p.item_id = ?`, itemID), &pos)
+	var spinOff bool
+	s, err := scanSeries(l.db.QueryRowContext(ctx, `SELECT `+seriesCols+`, p.position, p.spin_off FROM series_parts p JOIN series s ON s.id = p.series_id WHERE p.item_id = ?`, itemID), &pos, &spinOff)
 	if errors.Is(err, sql.ErrNoRows) {
-		return nil, 0, nil
+		return nil, 0, false, nil
 	}
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, false, err
 	}
-	return s, pos, nil
+	if err := attachSeriesFields(ctx, l.db, s); err != nil {
+		return nil, 0, false, err
+	}
+	return s, pos, spinOff, nil
+}
+
+// prepareSeriesDetails checks d without the database and returns the field
+// rows to store. ErrInvalid names the offending field.
+func prepareSeriesDetails(kind plugin.KindDef, d *SeriesDetails) ([]fieldRow, error) {
+	title, err := cleanSeriesTitle(d.Title)
+	if err != nil {
+		return nil, err
+	}
+	d.Title = title
+	if err := checkImageRef("cover", d.CoverPath); err != nil {
+		return nil, err
+	}
+	if err := cleanText("description", d.Description, multiLine); err != nil {
+		return nil, err
+	}
+	if utf8.RuneCountInString(d.Description) > maxSeriesDescriptionRunes {
+		return nil, invalid("description is longer than %d characters", maxSeriesDescriptionRunes)
+	}
+	d.Description = plugin.MultiLine(d.Description, maxSeriesDescriptionRunes)
+	for name, t := range map[string]*time.Time{"started_on": d.StartedOn, "ended_on": d.EndedOn} {
+		if t != nil && (t.IsZero() || t.Year() < 1 || t.Year() > 9999) {
+			return nil, invalid("%s is not a valid date", name)
+		}
+	}
+	if d.PartsTotal < 0 || d.PartsTotal > maxSeriesPartsTotal {
+		return nil, invalid("parts_total must be between 0 and %d", maxSeriesPartsTotal)
+	}
+	if d.LinkedItemID < 0 || d.ParentID < 0 {
+		return nil, invalid("the linked entry and the parent series must be ids")
+	}
+	return normalizeFields(plugin.KindDef{Key: kind.Key, Fields: kind.SeriesFields}, d.Fields)
+}
+
+// UpdateSeriesDetails replaces the owner's data of the series (see
+// SeriesDetails) in one transaction and bumps its updated_at. kind is the
+// series' kind (another kind is ErrInvalid): Fields are validated against
+// its SeriesFields like entry details; a linked entry must be an item of the
+// series' plugin and of kind.SeriesLink.Kind; a parent series must be of the
+// same plugin, not the series itself and no spin-off itself, and a series
+// that has spin-offs cannot get a parent. ErrNoSeries for an unknown id,
+// ErrInvalid (naming the field) for invalid data; nothing is stored then.
+func (l *Library) UpdateSeriesDetails(ctx context.Context, id int64, kind plugin.KindDef, d SeriesDetails) error {
+	rows, err := prepareSeriesDetails(kind, &d)
+	if err != nil {
+		return err
+	}
+	tx, err := l.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("update series: %w", err)
+	}
+	defer tx.Rollback()
+	var sPlugin, sKind string
+	switch err := tx.QueryRowContext(ctx, `SELECT plugin_id, kind FROM series WHERE id = ?`, id).Scan(&sPlugin, &sKind); {
+	case errors.Is(err, sql.ErrNoRows):
+		return ErrNoSeries
+	case err != nil:
+		return fmt.Errorf("update series: %w", err)
+	}
+	if kind.Key != sKind {
+		return invalid("kind %q is not the series' kind %q", kind.Key, sKind)
+	}
+	if err := checkSeriesLink(ctx, tx, sPlugin, kind, d.LinkedItemID); err != nil {
+		return err
+	}
+	if err := checkSeriesParent(ctx, tx, id, sPlugin, d.ParentID); err != nil {
+		return err
+	}
+	var started, ended *string
+	if d.StartedOn != nil {
+		v := plugin.DateOnly(*d.StartedOn).Format(dateLayout)
+		started = &v
+	}
+	if d.EndedOn != nil {
+		v := plugin.DateOnly(*d.EndedOn).Format(dateLayout)
+		ended = &v
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE series SET title = ?, cover_path = ?, description = ?, started_on = ?, ended_on = ?,
+		finished = ?, parts_total = ?, linked_item_id = ?, parent_id = ?, updated_at = `+nowSQL+` WHERE id = ?`,
+		d.Title, nullIfEmpty(d.CoverPath), nullIfEmpty(d.Description), started, ended,
+		d.Finished, nullIfZero(int64(d.PartsTotal)), nullIfZero(d.LinkedItemID), nullIfZero(d.ParentID), id); err != nil {
+		return fmt.Errorf("update series: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM series_fields WHERE series_id = ?`, id); err != nil {
+		return fmt.Errorf("update series: %w", err)
+	}
+	for _, f := range rows {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO series_fields(series_id, key, vtype, text, num, date, seq) VALUES (?,?,?,?,?,?,?)`,
+			id, f.key, string(f.vtype), f.text, f.num, f.date, f.seq); err != nil {
+			return fmt.Errorf("update series: %w", err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("update series: %w", err)
+	}
+	return nil
+}
+
+// checkSeriesLink checks a linked entry (0 = none) against the kind's link.
+func checkSeriesLink(ctx context.Context, tx *sql.Tx, pluginID string, kind plugin.KindDef, itemID int64) error {
+	if itemID == 0 {
+		return nil
+	}
+	if kind.SeriesLink == nil {
+		return invalid("the series of kind %q cannot be linked to an entry", kind.Key)
+	}
+	var iPlugin, iKind string
+	switch err := tx.QueryRowContext(ctx, `SELECT plugin_id, kind FROM items WHERE id = ?`, itemID).Scan(&iPlugin, &iKind); {
+	case errors.Is(err, sql.ErrNoRows):
+		return invalid("the linked entry does not exist")
+	case err != nil:
+		return fmt.Errorf("update series: %w", err)
+	}
+	if iPlugin != pluginID || iKind != kind.SeriesLink.Kind {
+		return invalid("the linked entry must be of kind %q of this plugin", kind.SeriesLink.Kind)
+	}
+	return nil
+}
+
+// checkSeriesParent checks a parent series (0 = none): same plugin, not the
+// series itself, no parent of its own, and the series has no spin-offs.
+func checkSeriesParent(ctx context.Context, tx *sql.Tx, id int64, pluginID string, parentID int64) error {
+	if parentID == 0 {
+		return nil
+	}
+	if parentID == id {
+		return invalid("a series cannot be its own parent")
+	}
+	var pPlugin string
+	var grand sql.NullInt64
+	switch err := tx.QueryRowContext(ctx, `SELECT plugin_id, parent_id FROM series WHERE id = ?`, parentID).Scan(&pPlugin, &grand); {
+	case errors.Is(err, sql.ErrNoRows):
+		return invalid("the parent series does not exist")
+	case err != nil:
+		return fmt.Errorf("update series: %w", err)
+	}
+	if pPlugin != pluginID {
+		return invalid("the parent series belongs to another plugin")
+	}
+	if grand.Valid {
+		return invalid("the parent series is itself a spin-off")
+	}
+	var children int
+	if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM series WHERE parent_id = ?`, id).Scan(&children); err != nil {
+		return fmt.Errorf("update series: %w", err)
+	}
+	if children > 0 {
+		return invalid("a series with spin-offs cannot become a spin-off")
+	}
+	return nil
+}
+
+func nullIfEmpty(s string) any {
+	if s == "" {
+		return nil
+	}
+	return s
+}
+
+func nullIfZero(n int64) any {
+	if n == 0 {
+		return nil
+	}
+	return n
+}
+
+// SpinOffsOf returns the series whose parent is parentID, by title (case-
+// insensitive), with their series fields.
+func (l *Library) SpinOffsOf(ctx context.Context, parentID int64) ([]Series, error) {
+	rows, err := l.db.QueryContext(ctx, `SELECT `+seriesCols+` FROM series s WHERE s.parent_id = ?`, parentID)
+	if err != nil {
+		return nil, fmt.Errorf("spin-offs: %w", err)
+	}
+	var list []*Series
+	for rows.Next() {
+		s, err := scanSeries(rows)
+		if err != nil {
+			rows.Close()
+			return nil, fmt.Errorf("spin-offs: %w", err)
+		}
+		list = append(list, s)
+	}
+	if err := closeRows(rows); err != nil {
+		return nil, fmt.Errorf("spin-offs: %w", err)
+	}
+	if err := attachSeriesFields(ctx, l.db, list...); err != nil {
+		return nil, err
+	}
+	out := make([]Series, len(list))
+	for i, s := range list {
+		out[i] = *s
+	}
+	slices.SortStableFunc(out, func(a, b Series) int {
+		return cmp.Or(cmp.Compare(strings.ToLower(a.Title), strings.ToLower(b.Title)), cmp.Compare(a.ID, b.ID))
+	})
+	return out, nil
 }
 
 // RenameSeries sets the title of a series (ErrInvalid for a bad title,
@@ -188,49 +517,67 @@ type execer interface {
 }
 
 // orderedMembers is a table of members numbered densely by position within
-// an owner: the parts of a series, the places of a custom list. Both names
-// are constants of this package, never input.
-type orderedMembers struct{ table, owner string }
+// an owner: the parts of a series, the places of a custom list. A non-empty
+// block names a column that splits the owner's members into blocks numbered
+// separately (a series' main and spin-off parts each run 1..n). All names are
+// constants of this package, never input.
+type orderedMembers struct{ table, owner, block string }
 
 var (
-	seriesMembers = orderedMembers{table: "series_parts", owner: "series_id"}
+	seriesMembers = orderedMembers{table: "series_parts", owner: "series_id", block: "spin_off"}
 	listMembers   = orderedMembers{table: "list_items", owner: "list_id"}
 )
 
-// renumber rewrites the owner's positions densely (1..n, keeping the order)
-// and returns the member item ids in that order.
+// renumber rewrites the owner's positions densely (1..n within each block,
+// keeping the order) and returns the member item ids in block, then
+// position order, with the block of each.
 func (o orderedMembers) renumber(ctx context.Context, tx execer, ownerID int64) ([]int64, error) {
-	//nolint:gosec // G202: table and column names are package constants; values are bound
-	rows, err := tx.QueryContext(ctx, `SELECT item_id FROM `+o.table+` WHERE `+o.owner+` = ? ORDER BY position, item_id`, ownerID)
-	if err != nil {
-		return nil, err
+	items, _, err := o.renumberBlocks(ctx, tx, ownerID)
+	return items, err
+}
+
+func (o orderedMembers) renumberBlocks(ctx context.Context, tx execer, ownerID int64) ([]int64, []int64, error) {
+	b, order := "0", "position, item_id"
+	if o.block != "" {
+		b, order = o.block, o.block+", position, item_id"
 	}
-	var items []int64
+	//nolint:gosec // G202: table and column names are package constants; values are bound
+	rows, err := tx.QueryContext(ctx, `SELECT item_id, `+b+` FROM `+o.table+` WHERE `+o.owner+` = ? ORDER BY `+order, ownerID)
+	if err != nil {
+		return nil, nil, err
+	}
+	var items, blocks []int64
+	var positions []int
+	next := map[int64]int{}
 	for rows.Next() {
-		var id int64
-		if err := rows.Scan(&id); err != nil {
+		var id, block int64
+		if err := rows.Scan(&id, &block); err != nil {
 			rows.Close()
-			return nil, err
+			return nil, nil, err
 		}
+		next[block]++
 		items = append(items, id)
+		blocks = append(blocks, block)
+		positions = append(positions, next[block])
 	}
 	if err := closeRows(rows); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	for i, id := range items {
 		//nolint:gosec // G202: table and column names are package constants; values are bound
-		if _, err := tx.ExecContext(ctx, `UPDATE `+o.table+` SET position = ? WHERE `+o.owner+` = ? AND item_id = ? AND position <> ?`, i+1, ownerID, id, i+1); err != nil {
-			return nil, err
+		if _, err := tx.ExecContext(ctx, `UPDATE `+o.table+` SET position = ? WHERE `+o.owner+` = ? AND item_id = ? AND position <> ?`, positions[i], ownerID, id, positions[i]); err != nil {
+			return nil, nil, err
 		}
 	}
-	return items, nil
+	return items, blocks, nil
 }
 
-// move moves the item one place up (delta -1) or down (+1) among the
-// owner's members, densely renumbered first. Moving past either end does
-// nothing (moved is false); found is false when the item is not a member.
+// move moves the item one place up (delta -1) or down (+1) within its block
+// of the owner's members, densely renumbered first. Moving past either end
+// of the block does nothing (moved is false); found is false when the item
+// is not a member.
 func (o orderedMembers) move(ctx context.Context, tx execer, ownerID, itemID int64, delta int) (found, moved bool, err error) {
-	items, err := o.renumber(ctx, tx, ownerID)
+	items, blocks, err := o.renumberBlocks(ctx, tx, ownerID)
 	if err != nil {
 		return false, false, err
 	}
@@ -239,21 +586,25 @@ func (o orderedMembers) move(ctx context.Context, tx execer, ownerID, itemID int
 		return false, false, nil
 	}
 	j := i + delta
-	if j < 0 || j >= len(items) {
+	if j < 0 || j >= len(items) || blocks[j] != blocks[i] {
 		return true, false, nil
 	}
+	// positions are dense per block: the item's position is its index in
+	// the block plus one
+	first := slices.Index(blocks, blocks[i])
 	for _, p := range [][2]int{{i, j}, {j, i}} {
 		//nolint:gosec // G202: table and column names are package constants; values are bound
-		if _, err := tx.ExecContext(ctx, `UPDATE `+o.table+` SET position = ? WHERE `+o.owner+` = ? AND item_id = ?`, p[1]+1, ownerID, items[p[0]]); err != nil {
+		if _, err := tx.ExecContext(ctx, `UPDATE `+o.table+` SET position = ? WHERE `+o.owner+` = ? AND item_id = ?`, p[1]-first+1, ownerID, items[p[0]]); err != nil {
 			return true, false, err
 		}
 	}
 	return true, true, nil
 }
 
-// renumberSeries rewrites the positions of a series densely (1..n, keeping the
-// order) and deletes the series when it has no parts left. It reports whether
-// the series still exists.
+// renumberSeries rewrites the positions of each block of a series (main
+// parts, spin-off parts) densely (1..n, keeping the order) and deletes the
+// series when it has no parts left. It reports whether the series still
+// exists.
 func renumberSeries(ctx context.Context, tx execer, seriesID int64) (bool, error) {
 	items, err := seriesMembers.renumber(ctx, tx, seriesID)
 	if err != nil {
@@ -267,7 +618,7 @@ func renumberSeries(ctx context.Context, tx execer, seriesID int64) (bool, error
 	return true, err
 }
 
-// AddPart adds the item to the series. The item must be of the series' plugin
+// AddPart adds the item to the series' main parts. The item must be of the series' plugin
 // and kind (ErrInvalid), have an entry (ErrNoEntry) and be in no series
 // (ErrAlreadyInSeries). With a positionField the item goes after the last part
 // whose own number is not greater than the item's (parts without a number
@@ -317,7 +668,7 @@ func addPartTx(ctx context.Context, tx *sql.Tx, seriesID, itemID int64, position
 	if err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE series_parts SET position = position + 1 WHERE series_id = ? AND position >= ?`, seriesID, pos); err != nil {
+	if _, err := tx.ExecContext(ctx, `UPDATE series_parts SET position = position + 1 WHERE series_id = ? AND spin_off = 0 AND position >= ?`, seriesID, pos); err != nil {
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO series_parts(series_id, item_id, position) VALUES (?, ?, ?)`, seriesID, itemID, pos); err != nil {
@@ -327,10 +678,11 @@ func addPartTx(ctx context.Context, tx *sql.Tx, seriesID, itemID int64, position
 	return err
 }
 
-// insertPosition returns the 1-based position for a new part (see AddPart).
+// insertPosition returns the 1-based position among the main parts for a new
+// part (see AddPart).
 func insertPosition(ctx context.Context, tx *sql.Tx, seriesID, itemID int64, field string) (int, error) {
 	var total int
-	if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM series_parts WHERE series_id = ?`, seriesID).Scan(&total); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM series_parts WHERE series_id = ? AND spin_off = 0`, seriesID).Scan(&total); err != nil {
 		return 0, err
 	}
 	if field == "" {
@@ -343,7 +695,7 @@ func insertPosition(ctx context.Context, tx *sql.Tx, seriesID, itemID int64, fie
 	if !mine.Valid {
 		return total + 1, nil
 	}
-	rows, err := tx.QueryContext(ctx, `SELECT p.position, (SELECT f.num FROM item_fields f WHERE f.item_id = p.item_id AND f.key = ? AND f.num IS NOT NULL ORDER BY f.seq LIMIT 1) FROM series_parts p WHERE p.series_id = ? ORDER BY p.position`, field, seriesID)
+	rows, err := tx.QueryContext(ctx, `SELECT p.position, (SELECT f.num FROM item_fields f WHERE f.item_id = p.item_id AND f.key = ? AND f.num IS NOT NULL ORDER BY f.seq LIMIT 1) FROM series_parts p WHERE p.series_id = ? AND p.spin_off = 0 ORDER BY p.position`, field, seriesID)
 	if err != nil {
 		return 0, err
 	}
@@ -362,8 +714,9 @@ func insertPosition(ctx context.Context, tx *sql.Tx, seriesID, itemID int64, fie
 	return pos, rows.Err()
 }
 
-// MovePart moves the item one place up (delta -1) or down (+1) within the
-// series. Moving past either end does nothing; an item that is not a part of
+// MovePart moves the item one place up (delta -1) or down (+1) within its
+// block (main parts or spin-off parts). Moving past either end of the block
+// does nothing; an item that is not a part of
 // the series is ErrNoSeries.
 func (l *Library) MovePart(ctx context.Context, seriesID, itemID int64, delta int) error {
 	if delta != -1 && delta != 1 {
@@ -383,6 +736,40 @@ func (l *Library) MovePart(ctx context.Context, seriesID, itemID int64, delta in
 	}
 	if !moved {
 		return nil
+	}
+	if _, err := renumberSeries(ctx, tx, seriesID); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// SetPartSpinOff marks the part as a spin-off part (true) or a main part
+// (false). A part that changes block goes to the end of the other block and
+// both blocks are renumbered; the series stays even when no main part is
+// left. An item that is not a part is ErrNoSeries.
+func (l *Library) SetPartSpinOff(ctx context.Context, seriesID, itemID int64, spinOff bool) error {
+	tx, err := l.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	var cur bool
+	err = tx.QueryRowContext(ctx, `SELECT spin_off FROM series_parts WHERE series_id = ? AND item_id = ?`, seriesID, itemID).Scan(&cur)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrNoSeries
+	}
+	if err != nil {
+		return err
+	}
+	if cur == spinOff {
+		return nil
+	}
+	var last int
+	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(position), 0) FROM series_parts WHERE series_id = ? AND spin_off = ?`, seriesID, spinOff).Scan(&last); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE series_parts SET spin_off = ?, position = ? WHERE series_id = ? AND item_id = ?`, spinOff, last+1, seriesID, itemID); err != nil {
+		return err
 	}
 	if _, err := renumberSeries(ctx, tx, seriesID); err != nil {
 		return err
@@ -551,7 +938,7 @@ func (l *Library) seriesRows(ctx context.Context, q SeriesQuery) ([]SeriesRow, e
 	pr, err := l.db.QueryContext(ctx, `SELECT sp.series_id, e.status, e.updated_at, i.cover_path
 		FROM series_parts sp JOIN series s ON s.id = sp.series_id
 		JOIN `+viewEntryState+` e ON e.item_id = sp.item_id JOIN items i ON i.id = sp.item_id
-		WHERE s.plugin_id = ? ORDER BY sp.series_id, sp.position`, q.PluginID)
+		WHERE s.plugin_id = ? ORDER BY sp.series_id, sp.spin_off, sp.position`, q.PluginID)
 	if err != nil {
 		return nil, fmt.Errorf("list series parts: %w", err)
 	}
@@ -676,9 +1063,33 @@ func (l *Library) SeriesCounts(ctx context.Context, q SeriesQuery) (map[Status]i
 	return out, nil
 }
 
-// SeriesParts returns the series' parts as list rows in position order.
+// SeriesPartsOrder returns the series' parts: the main parts, then the
+// spin-off parts, each in position order.
+func (l *Library) SeriesPartsOrder(ctx context.Context, seriesID int64) ([]SeriesPart, error) {
+	rows, err := l.db.QueryContext(ctx, `SELECT item_id, position, spin_off FROM series_parts WHERE series_id = ? ORDER BY spin_off, position`, seriesID)
+	if err != nil {
+		return nil, fmt.Errorf("series parts: %w", err)
+	}
+	var out []SeriesPart
+	for rows.Next() {
+		var p SeriesPart
+		if err := rows.Scan(&p.ItemID, &p.Position, &p.SpinOff); err != nil {
+			rows.Close()
+			return nil, fmt.Errorf("series parts: %w", err)
+		}
+		out = append(out, p)
+	}
+	if err := closeRows(rows); err != nil {
+		return nil, fmt.Errorf("series parts: %w", err)
+	}
+	return out, nil
+}
+
+// SeriesParts returns the series' parts as list rows: the main parts, then
+// the spin-off parts, each in position order (SeriesPartsOrder tells which
+// is which).
 func (l *Library) SeriesParts(ctx context.Context, seriesID int64, lang string) ([]Row, error) {
-	rows, err := l.db.QueryContext(ctx, `SELECT item_id FROM series_parts WHERE series_id = ? ORDER BY position`, seriesID)
+	rows, err := l.db.QueryContext(ctx, `SELECT item_id FROM series_parts WHERE series_id = ? ORDER BY spin_off, position`, seriesID)
 	if err != nil {
 		return nil, fmt.Errorf("series parts: %w", err)
 	}
@@ -752,10 +1163,12 @@ func (l *Library) SeriesCandidates(ctx context.Context, pluginID, kind, text, hi
 	return l.loadRows(ctx, c.unmatched, whereSQL, whereArgs, order, orderArgs, limit, 0, lang)
 }
 
-// ItemSeries is the series an item belongs to and its 1-based position.
+// ItemSeries is the series an item belongs to, its 1-based position within
+// its block and whether it is a spin-off part.
 type ItemSeries struct {
 	UID, Title string
 	Position   int
+	SpinOff    bool
 }
 
 // SeriesOfItems returns the series membership of the given items in one
@@ -769,14 +1182,14 @@ func (l *Library) SeriesOfItems(ctx context.Context, itemIDs []int64) (map[int64
 	for i, id := range itemIDs {
 		args[i] = id
 	}
-	rows, err := l.db.QueryContext(ctx, `SELECT p.item_id, s.uid, s.title, p.position FROM series_parts p JOIN series s ON s.id = p.series_id WHERE p.item_id IN (`+placeholders(len(args))+`)`, args...) //nolint:gosec // G202: constant SQL and placeholders; values are bound
+	rows, err := l.db.QueryContext(ctx, `SELECT p.item_id, s.uid, s.title, p.position, p.spin_off FROM series_parts p JOIN series s ON s.id = p.series_id WHERE p.item_id IN (`+placeholders(len(args))+`)`, args...) //nolint:gosec // G202: constant SQL and placeholders; values are bound
 	if err != nil {
 		return nil, fmt.Errorf("series of items: %w", err)
 	}
 	for rows.Next() {
 		var id int64
 		var is ItemSeries
-		if err := rows.Scan(&id, &is.UID, &is.Title, &is.Position); err != nil {
+		if err := rows.Scan(&id, &is.UID, &is.Title, &is.Position, &is.SpinOff); err != nil {
 			rows.Close()
 			return nil, fmt.Errorf("series of items: %w", err)
 		}
@@ -809,7 +1222,7 @@ func (l *Library) ActiveSeries(ctx context.Context, pluginIDs []string, limit in
 	rows, err := l.db.QueryContext(ctx, `SELECT `+seriesCols+`,
 			COUNT(e.item_id), COALESCE(SUM(e.status = 'completed'), 0), COALESCE(MAX(e.updated_at), ''),
 			COALESCE((SELECT i2.cover_path FROM series_parts sp2 JOIN `+viewEntryState+` e2 ON e2.item_id = sp2.item_id
-				JOIN items i2 ON i2.id = sp2.item_id WHERE sp2.series_id = s.id ORDER BY sp2.position LIMIT 1), '')
+				JOIN items i2 ON i2.id = sp2.item_id WHERE sp2.series_id = s.id ORDER BY sp2.spin_off, sp2.position LIMIT 1), '')
 		FROM series s
 		LEFT JOIN series_parts sp ON sp.series_id = s.id
 		LEFT JOIN `+viewEntryState+` e ON e.item_id = sp.item_id

@@ -176,12 +176,12 @@ func (s *server) mergeMoves(r *http.Request, t *mergeTarget) (string, error) {
 		return "", err
 	}
 	plural(len(lists), "custom list", "custom lists")
-	ser, _, err := s.deps.Library.SeriesOfItem(ctx, id)
+	ser, _, _, err := s.deps.Library.SeriesOfItem(ctx, id)
 	if err != nil {
 		return "", err
 	}
 	if ser != nil {
-		own, _, err := s.deps.Library.SeriesOfItem(ctx, t.keep.item.ID)
+		own, _, _, err := s.deps.Library.SeriesOfItem(ctx, t.keep.item.ID)
 		if err != nil {
 			return "", err
 		}

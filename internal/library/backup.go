@@ -1351,7 +1351,7 @@ type BackupPartRef struct {
 func (l *Library) BackupSeries(ctx context.Context, fn func(BackupSeries) error) error {
 	rows, err := l.db.QueryContext(ctx, `SELECT `+seriesCols+`, i.plugin_id, i.kind, i.source, i.source_id
 		FROM series s JOIN series_parts p ON p.series_id = s.id JOIN items i ON i.id = p.item_id
-		ORDER BY s.id, p.position`)
+		ORDER BY s.id, p.spin_off, p.position`)
 	if err != nil {
 		return fmt.Errorf("backup series: %w", err)
 	}
