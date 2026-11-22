@@ -16,7 +16,7 @@ import (
 	"github.com/allister/allister/internal/plugin"
 )
 
-// Backup records (format_version 3 of the universal backup; BackupEntryV1 is
+// Backup records (format_version 4 of the universal backup; BackupEntryV1 is
 // the entry of format 1). The JSON names are part of the backup format:
 // change them only together with the format version. sync_state is
 // deliberately not stored: a restore decides it.

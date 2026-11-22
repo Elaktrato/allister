@@ -3,9 +3,9 @@
 // parts and list entry, and every series with its data) and covers/<name>
 // for every local item and series cover.
 //
-// Archive format (format "allister.backup", format_version 3):
+// Archive format (format "allister.backup", format_version 4):
 //
-//	backup.json  {"format": "allister.backup", "format_version": 3,
+//	backup.json  {"format": "allister.backup", "format_version": 4,
 //	              "created_at": "<RFC 3339 UTC>",
 //	              "plugins": [{"id": ..., "version": ...}],   (informational)
 //	              "appearance": {...},                        (optional)
@@ -42,7 +42,9 @@
 // instead of dropping those items. Format 3 also carries the aliases
 // (identities kept by a merge), the dismissed duplicate pairs and the
 // covers' origins; a backup without them restores as before. A restore
-// reads formats 1, 2 and 3.
+// Format 4 carries the series' own data, parent series and spin-off parts;
+// an older Allister would ignore them, so it refuses the format. A restore
+// reads formats 1 to 4.
 //
 // In backup.json "format" and "format_version" must come before "items",
 // "series", "lists", "aliases" and "dismissed_duplicates" after it, and each
@@ -91,7 +93,7 @@ const (
 	Format = "allister.backup"
 	// FormatVersion is the backup format version this code writes. A
 	// restore reads it and every older version (MinFormatVersion on).
-	FormatVersion = 3
+	FormatVersion = 4
 	// MinFormatVersion is the oldest format version a restore reads.
 	MinFormatVersion = 1
 	// MaxListed caps every row list of a Report.

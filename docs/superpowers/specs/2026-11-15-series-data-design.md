@@ -80,6 +80,7 @@ The owner's rules, in their words:
   synopses; fields validated like entry fields).
 - Covers go through the existing cover store (local files, content hash
   names), like manual entries.
+- Note: the final backup format is 4 (older Allister versions refuse it instead of dropping series data); the paragraph below is the original plan.
 - Backup `format_version` stays 1; an older Allister must still restore a new
   archive's items (new data inside the `series` member is ignored by it).
 - No media words in core; theme colours only; no inline script/style;

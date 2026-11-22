@@ -1,6 +1,7 @@
 package backup
 
 import (
+	"encoding/json"
 	"os"
 	"reflect"
 	"strings"
@@ -201,10 +202,11 @@ func TestRestoreListsMember(t *testing.T) {
 	})
 }
 
-// TestBackupFormat3KeepsBulkEvents: a bulk change's events round-trip; the
-// archive says format 3, so an Allister that does not know the origin
-// "bulk" refuses the file instead of dropping those items.
-func TestBackupFormat3KeepsBulkEvents(t *testing.T) {
+// TestBackupFormat4KeepsBulkEvents: a bulk change's events round-trip; the
+// archive says the current format (4, which includes format 3's origin
+// "bulk"), so an Allister that does not know that origin refuses the file
+// instead of dropping those items.
+func TestBackupFormat4KeepsBulkEvents(t *testing.T) {
 	a := newEnv(t)
 	one := a.book("1", "", &library.Entry{Status: library.Planned})
 	if _, err := a.lib.BulkSetStatus(bg, []int64{one}, library.Active, time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC)); err != nil {
@@ -216,8 +218,8 @@ func TestBackupFormat3KeepsBulkEvents(t *testing.T) {
 		t.Fatal("no bulk event to back up")
 	}
 	data := a.archive()
-	if d, _ := open(t, data); d.FormatVersion != 3 {
-		t.Fatalf("format = %d, want 3", d.FormatVersion)
+	if d, _ := open(t, data); d.FormatVersion != 4 {
+		t.Fatalf("format = %d, want 4", d.FormatVersion)
 	}
 	b := newEnv(t)
 	if rep := mustRestore(t, b, data); rep.Created != 1 || len(rep.Notes) != 0 {
@@ -228,12 +230,24 @@ func TestBackupFormat3KeepsBulkEvents(t *testing.T) {
 	}
 }
 
-func TestRestoreReadsFormats1To3(t *testing.T) {
-	for _, v := range []string{"1", "2", "3"} {
+func TestRestoreReadsFormats1To4(t *testing.T) {
+	for _, v := range []string{"1", "2", "3", "4"} {
 		e := newEnv(t)
 		body := `{"format":"allister.backup","format_version":` + v + `,"items":[]}`
 		if _, err := e.restore(zipOf(t, entry{name: "backup.json", body: []byte(body)}), Limits{}, nil); err != nil {
 			t.Fatalf("format %s: %v", v, err)
 		}
+	}
+}
+
+// TestRestoreReadsFormat3Archive: a format-3 file (as Allister v0.5.0
+// writes it) with an item still restores.
+func TestRestoreReadsFormat3Archive(t *testing.T) {
+	item, _ := json.Marshal(bookItem("1"))
+	body := `{"format":"allister.backup","format_version":3,"items":[` + string(item) + `]}`
+	e := newEnv(t)
+	rep, err := e.restore(zipOf(t, entry{name: "backup.json", body: []byte(body)}), Limits{}, nil)
+	if err != nil || rep.Created != 1 {
+		t.Fatalf("created = %d, err = %v", rep.Created, err)
 	}
 }
