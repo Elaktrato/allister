@@ -633,7 +633,11 @@ func TestValidateSeriesHint(t *testing.T) {
 	}{
 		{"valid", plugin.SeriesHintDef{TitleField: "author", PositionField: "pages"}, ""},
 		{"no position", plugin.SeriesHintDef{TitleField: "author"}, ""},
-		{"empty title field", plugin.SeriesHintDef{}, "kinds[0].series_hint.title_field"},
+		{"empty hint", plugin.SeriesHintDef{}, "kinds[0].series_hint: name at least one field"},
+		{"release only", plugin.SeriesHintDef{ReleaseField: "released"}, ""},
+		{"all three", plugin.SeriesHintDef{TitleField: "author", PositionField: "pages", ReleaseField: "released"}, ""},
+		{"unknown release", plugin.SeriesHintDef{ReleaseField: "nope"}, `kinds[0].series_hint.release_field: no field "nope"`},
+		{"release not date", plugin.SeriesHintDef{ReleaseField: "pages"}, `kinds[0].series_hint.release_field: field "pages" is not a date field`},
 		{"unknown title field", plugin.SeriesHintDef{TitleField: "nope"}, `kinds[0].series_hint.title_field: no field "nope"`},
 		{"title not text", plugin.SeriesHintDef{TitleField: "pages"}, `kinds[0].series_hint.title_field: field "pages" is not a text field`},
 		{"unknown position", plugin.SeriesHintDef{TitleField: "author", PositionField: "nope"}, `kinds[0].series_hint.position_field: no field "nope"`},
@@ -641,8 +645,86 @@ func TestValidateSeriesHint(t *testing.T) {
 	}
 	for _, tc := range tests {
 		m := book()
+		m.Kinds[0].Fields = append(m.Kinds[0].Fields, plugin.FieldDef{Key: "released", Label: "Released", Type: plugin.FieldDate})
 		h := tc.hint
 		m.Kinds[0].SeriesHint = &h
+		err := plugin.Validate(m)
+		if tc.want == "" {
+			if err != nil {
+				t.Errorf("%s: %v", tc.name, err)
+			}
+			continue
+		}
+		if err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("%s: %v, want %q", tc.name, err, tc.want)
+		}
+	}
+}
+
+func TestValidateSeriesFields(t *testing.T) {
+	ok := plugin.FieldDef{Key: "volumes", Label: "Volumes", Type: plugin.FieldNumber}
+	tests := []struct {
+		name   string
+		fields []plugin.FieldDef
+		want   string
+	}{
+		{"valid", []plugin.FieldDef{ok, {Key: "writer", Label: "Writer", Type: plugin.FieldText}}, ""},
+		{"reserved description", []plugin.FieldDef{{Key: "description", Label: "D", Type: plugin.FieldText}}, `kinds[0].series_fields[0].key: "description" is reserved`},
+		{"reserved parts_total", []plugin.FieldDef{ok, {Key: "parts_total", Label: "P", Type: plugin.FieldNumber}}, `kinds[0].series_fields[1].key: "parts_total" is reserved`},
+		{"duplicate", []plugin.FieldDef{ok, ok}, `kinds[0].series_fields[1].key: duplicate "volumes"`},
+		{"bad key", []plugin.FieldDef{{Key: "Bad Key", Label: "B", Type: plugin.FieldText}}, "not a valid key"},
+		{"no label", []plugin.FieldDef{{Key: "x", Type: plugin.FieldText}}, "kinds[0].series_fields[0].label: required"},
+		{"bad type", []plugin.FieldDef{{Key: "x", Label: "X", Type: "stars"}}, "unknown field type"},
+		{"enum without values", []plugin.FieldDef{{Key: "x", Label: "X", Type: plugin.FieldEnum}}, "enum field needs at least one value"},
+	}
+	for _, tc := range tests {
+		m := book()
+		m.Kinds[0].SeriesFields = tc.fields
+		err := plugin.Validate(m)
+		if tc.want == "" {
+			if err != nil {
+				t.Errorf("%s: %v", tc.name, err)
+			}
+			continue
+		}
+		if err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("%s: %v, want %q", tc.name, err, tc.want)
+		}
+	}
+}
+
+func TestValidateSeriesLink(t *testing.T) {
+	tests := []struct {
+		name string
+		link plugin.SeriesLinkDef
+		want string
+	}{
+		{"valid", plugin.SeriesLinkDef{Kind: "novel", DescriptionField: "blurb", StartField: "begun", EndField: "ended", PartsField: "count"}, ""},
+		{"kind only", plugin.SeriesLinkDef{Kind: "novel"}, ""},
+		{"empty kind", plugin.SeriesLinkDef{}, "kinds[0].series_link.kind: required"},
+		{"unknown kind", plugin.SeriesLinkDef{Kind: "nope"}, `kinds[0].series_link.kind: no kind "nope"`},
+		{"unknown field", plugin.SeriesLinkDef{Kind: "novel", DescriptionField: "nope"}, `kinds[0].series_link.description_field: no field "nope" on kind "novel"`},
+		{"description not text", plugin.SeriesLinkDef{Kind: "novel", DescriptionField: "count"}, `kinds[0].series_link.description_field: field "count" is not a text field`},
+		{"start not date", plugin.SeriesLinkDef{Kind: "novel", StartField: "blurb"}, `kinds[0].series_link.start_field: field "blurb" is not a date field`},
+		{"end not date", plugin.SeriesLinkDef{Kind: "novel", EndField: "count"}, `kinds[0].series_link.end_field: field "count" is not a date field`},
+		{"parts not number", plugin.SeriesLinkDef{Kind: "novel", PartsField: "begun"}, `kinds[0].series_link.parts_field: field "begun" is not a number field`},
+	}
+	for _, tc := range tests {
+		m := book()
+		other := m.Kinds[0]
+		other.Key, other.Label, other.LabelPlural = "novel", "Novel", "Novels"
+		other.SeriesHint, other.SeriesFields, other.SeriesLink = nil, nil, nil
+		other.Columns = nil
+		other.Fields = []plugin.FieldDef{
+			{Key: "blurb", Label: "Blurb", Type: plugin.FieldText},
+			{Key: "begun", Label: "Begun", Type: plugin.FieldDate},
+			{Key: "ended", Label: "Ended", Type: plugin.FieldDate},
+			{Key: "count", Label: "Count", Type: plugin.FieldNumber},
+			{Key: "pages", Label: "Pages", Type: plugin.FieldNumber},
+		}
+		m.Kinds = append(m.Kinds, other)
+		l := tc.link
+		m.Kinds[0].SeriesLink = &l
 		err := plugin.Validate(m)
 		if tc.want == "" {
 			if err != nil {

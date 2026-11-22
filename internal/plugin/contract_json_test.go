@@ -55,7 +55,9 @@ func TestManifestJSONRoundTrip(t *testing.T) {
 			TitleLanguages: []string{"en", "ja"},
 			TitleFallback:  []string{"ja", "en"},
 			Columns:        []plugin.ColumnDef{{Key: "n", Label: "Number", Default: true, Hide: "md"}, {Key: "rating"}},
-			SeriesHint:     &plugin.SeriesHintDef{TitleField: "e", PositionField: "n"},
+			SeriesHint:     &plugin.SeriesHintDef{TitleField: "e", PositionField: "n", ReleaseField: "d"},
+			SeriesFields:   []plugin.FieldDef{{Key: "sf", Label: "SF", Type: plugin.FieldNumber, Min: fptr(1)}},
+			SeriesLink:     &plugin.SeriesLinkDef{Kind: "k", DescriptionField: "e", StartField: "d", EndField: "d", PartsField: "n"},
 			Repeat:         &plugin.RepeatDef{Action: "Redo", Marker: "Redoing"},
 			Stats: &plugin.StatsDef{
 				Time:  &plugin.StatsTimeDef{Label: "Time", DurationKey: "d", CompletedField: "n", UnitsKey: "x", PerUnitField: "n"},
@@ -270,6 +272,51 @@ func TestKindSeriesHintJSON(t *testing.T) {
 	b, _ = json.Marshal(plugin.KindDef{Key: "k", SeriesHint: &plugin.SeriesHintDef{TitleField: "s"}})
 	if strings.Contains(string(b), "position_field") {
 		t.Fatalf("position not omitted: %s", b)
+	}
+}
+
+func TestSeriesHintReleaseJSON(t *testing.T) {
+	k := plugin.KindDef{Key: "k", SeriesHint: &plugin.SeriesHintDef{ReleaseField: "started_on"}}
+	b, err := json.Marshal(k)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(b), `"series_hint":{"release_field":"started_on"}`) {
+		t.Fatalf("json = %s", b)
+	}
+	roundTrip(t, "release-only hint", k)
+	k.SeriesHint = &plugin.SeriesHintDef{TitleField: "t", PositionField: "p", ReleaseField: "r"}
+	b, _ = json.Marshal(k)
+	if !strings.Contains(string(b), `"series_hint":{"title_field":"t","position_field":"p","release_field":"r"}`) {
+		t.Fatalf("json = %s", b)
+	}
+	roundTrip(t, "full hint", k)
+}
+
+func TestKindSeriesFieldsAndLinkJSON(t *testing.T) {
+	k := plugin.KindDef{Key: "k",
+		SeriesFields: []plugin.FieldDef{{Key: "volumes", Label: "Volumes", Type: plugin.FieldNumber}},
+		SeriesLink:   &plugin.SeriesLinkDef{Kind: "s", DescriptionField: "synopsis", StartField: "a", EndField: "b", PartsField: "volumes"}}
+	b, err := json.Marshal(k)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		`"series_fields":[{"key":"volumes"`,
+		`"series_link":{"kind":"s","description_field":"synopsis","start_field":"a","end_field":"b","parts_field":"volumes"}`,
+	} {
+		if !strings.Contains(string(b), want) {
+			t.Errorf("json %s lacks %s", b, want)
+		}
+	}
+	roundTrip(t, "kind with series data", k)
+	b, _ = json.Marshal(plugin.KindDef{Key: "k", SeriesLink: &plugin.SeriesLinkDef{Kind: "s"}})
+	if strings.Contains(string(b), "series_fields") || strings.Contains(string(b), "description_field") || strings.Contains(string(b), "parts_field") {
+		t.Fatalf("not omitted: %s", b)
+	}
+	b, _ = json.Marshal(plugin.KindDef{Key: "k"})
+	if strings.Contains(string(b), "series_fields") || strings.Contains(string(b), "series_link") {
+		t.Fatalf("not omitted: %s", b)
 	}
 }
 

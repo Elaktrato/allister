@@ -26,6 +26,7 @@ func showKind() plugin.KindDef {
 		Key:         KindShow,
 		Label:       "Show",
 		LabelPlural: "Shows",
+		SeriesHint:  &plugin.SeriesHintDef{ReleaseField: "started_on"},
 		Fields: []plugin.FieldDef{
 			{Key: "type", Label: "Type", Type: plugin.FieldEnum, EnumValues: []string{"series", "miniseries", "reality", "documentary", "other"}, Show: true, Editable: true, Filterable: true},
 			{Key: "year", Label: "Year", Type: plugin.FieldNumber, Min: num(1900), Max: num(2100), Show: true, Editable: true, Filterable: true, Sortable: true},

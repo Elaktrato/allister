@@ -126,7 +126,13 @@ func bookKind() plugin.KindDef {
 		Key:         KindBook,
 		Label:       "Book",
 		LabelPlural: "Books",
-		SeriesHint:  &plugin.SeriesHintDef{TitleField: "series", PositionField: "series_number"},
+		SeriesHint:  &plugin.SeriesHintDef{TitleField: "series", PositionField: "series_number", ReleaseField: "published_on"},
+		SeriesFields: []plugin.FieldDef{
+			{Key: "volumes", Label: "Volumes", Type: plugin.FieldNumber, Min: num(1), Max: num(10000), Show: true, Editable: true},
+			{Key: "chapters", Label: "Chapters", Type: plugin.FieldNumber, Min: num(1), Max: num(100000), Show: true, Editable: true},
+			{Key: "author", Label: "Author", Type: plugin.FieldText, Show: true, Editable: true},
+		},
+		SeriesLink: &plugin.SeriesLinkDef{Kind: KindSeries, DescriptionField: "synopsis", StartField: "published_on", EndField: "ended_on", PartsField: "volumes"},
 		Fields: []plugin.FieldDef{
 			{Key: "author", Label: "Author", Type: plugin.FieldText, Show: true, Editable: true, Filterable: true},
 			{Key: "pages", Label: "Pages", Type: plugin.FieldNumber, Min: num(1), Max: num(100000), Show: true, Editable: true},
@@ -193,6 +199,7 @@ func seriesKind() plugin.KindDef {
 			{Key: "year", Label: "Year", Type: plugin.FieldNumber, Min: num(1000), Max: num(2100), Show: true, Editable: true, Filterable: true, Sortable: true},
 			{Key: "synopsis", Label: "Synopsis", Type: plugin.FieldText, Editable: true},
 			{Key: "published_on", Label: "Published", Type: plugin.FieldDate, Show: true, Editable: true},
+			{Key: "ended_on", Label: "Ended", Type: plugin.FieldDate, Show: true, Editable: true},
 		},
 		Genres:   plugin.TermDef{Enabled: true, Label: "Genres", Editable: true, Filterable: true},
 		Tags:     plugin.TermDef{Enabled: true, Label: "Tags", Editable: true, Filterable: true},
