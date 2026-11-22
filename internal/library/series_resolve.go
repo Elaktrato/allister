@@ -28,19 +28,27 @@ type ResolvedSeries struct {
 }
 
 // ResolveSeries resolves s (of kind) from its own data, the linked item and
-// its entry (nil when not linked) and the main parts' rows in order. It
-// reads no database: SpinOffParts is left to the caller. The linked item
+// its entry (nil when not linked), the main parts' rows and the spin-off
+// parts' rows, each in order. It reads no database. The linked item
 // counts only when kind declares a SeriesLink of the item's kind; it fills
 // the description, dates and expected parts through the link's fields, each
 // series field from its same-named field, and "finished" when the owner's
 // marker is not set but it has an end date. Derived values come from the
 // main parts: the start is the earliest date of the kind's release field,
-// the end the latest one when the series is finished, the expected parts
-// their number. The cover is the own cover, else the linked cover, else the
-// first main part's cover. linkedEntry is accepted for callers that load it;
+// the end the latest one when the series is finished. The status, Completed,
+// the derived expected parts (their number) and the cover fallback count the
+// main parts, or the spin-off parts when there is no main part. The cover is
+// the own cover, else the linked cover, else the first counted part's
+// cover. linkedEntry is accepted for callers that load it;
 // the resolution reads the linked item's fields only.
-func ResolveSeries(s Series, kind plugin.KindDef, linked *Item, linkedEntry *Entry, main []Row) ResolvedSeries {
-	r := ResolvedSeries{Series: s, MainParts: len(main), Fields: map[string]plugin.FieldValue{}}
+func ResolveSeries(s Series, kind plugin.KindDef, linked *Item, linkedEntry *Entry, main, spinOffs []Row) ResolvedSeries {
+	r := ResolvedSeries{Series: s, MainParts: len(main), SpinOffParts: len(spinOffs), Fields: map[string]plugin.FieldValue{}}
+	// counted are the parts behind the status, the progress and the cover
+	// fallback: the main parts, or the spin-off parts when there is no main part.
+	counted := main
+	if len(main) == 0 {
+		counted = spinOffs
+	}
 	link := kind.SeriesLink
 	if link == nil || linked == nil || linked.Kind != link.Kind {
 		link, linked = nil, nil
@@ -56,8 +64,8 @@ func ResolveSeries(s Series, kind plugin.KindDef, linked *Item, linkedEntry *Ent
 	if r.Cover == "" && linked != nil {
 		r.Cover = linked.CoverPath
 	}
-	if r.Cover == "" && len(main) > 0 {
-		r.Cover = main[0].Item.CoverPath
+	if r.Cover == "" && len(counted) > 0 {
+		r.Cover = counted[0].Item.CoverPath
 	}
 
 	r.Description = s.Description
@@ -92,7 +100,7 @@ func ResolveSeries(s Series, kind plugin.KindDef, linked *Item, linkedEntry *Ent
 	expected := expectedParts(s, kind, linked)
 	r.PartsTotal = expected
 	if r.PartsTotal == 0 {
-		r.PartsTotal = len(main)
+		r.PartsTotal = len(counted)
 	}
 
 	for k, v := range s.Fields {
@@ -109,8 +117,8 @@ func ResolveSeries(s Series, kind plugin.KindDef, linked *Item, linkedEntry *Ent
 		}
 	}
 
-	statuses := make([]Status, len(main))
-	for i, row := range main {
+	statuses := make([]Status, len(counted))
+	for i, row := range counted {
 		statuses[i] = row.Entry.Status
 		if row.Entry.Status == Completed {
 			r.Completed++
@@ -173,8 +181,8 @@ func fieldValueSet(t plugin.FieldType, v plugin.FieldValue) bool {
 }
 
 // LoadResolvedSeries loads what s needs for ResolveSeries (its main parts'
-// rows with titles for lang, the linked item and its entry) and resolves it,
-// with the number of spin-off parts.
+// and spin-off parts' rows with titles for lang, the linked item and its
+// entry) and resolves it.
 func (l *Library) LoadResolvedSeries(ctx context.Context, s *Series, lang string) (ResolvedSeries, error) {
 	kind, err := l.kindDef(s.PluginID, s.Kind)
 	if err != nil {
@@ -189,16 +197,16 @@ func (l *Library) LoadResolvedSeries(ctx context.Context, s *Series, lang string
 		return ResolvedSeries{}, err
 	}
 	spinOff := map[int64]bool{}
-	spinOffs := 0
 	for _, p := range order {
 		if p.SpinOff {
 			spinOff[p.ItemID] = true
-			spinOffs++
 		}
 	}
-	main := make([]Row, 0, len(rows))
+	var main, spinOffs []Row
 	for _, row := range rows {
-		if !spinOff[row.Item.ID] {
+		if spinOff[row.Item.ID] {
+			spinOffs = append(spinOffs, row)
+		} else {
 			main = append(main, row)
 		}
 	}
@@ -214,7 +222,5 @@ func (l *Library) LoadResolvedSeries(ctx context.Context, s *Series, lang string
 			}
 		}
 	}
-	r := ResolveSeries(*s, kind, linked, linkedEntry, main)
-	r.SpinOffParts = spinOffs
-	return r, nil
+	return ResolveSeries(*s, kind, linked, linkedEntry, main, spinOffs), nil
 }
