@@ -270,6 +270,38 @@ func TestSeriesAddForwardsPositionField(t *testing.T) {
 	}
 }
 
+func TestSeriesCandidatesSkipHintWithoutTitleField(t *testing.T) {
+	fe := newFixtureEnv(t, func(_, tv *plugintest.Plugin) {
+		k := &tv.M.Kinds[0]
+		k.Fields = append(k.Fields, plugin.FieldDef{Key: "aired", Label: "Aired", Type: plugin.FieldDate, Editable: true})
+		k.SeriesHint = &plugin.SeriesHintDef{ReleaseField: "aired"}
+	})
+	first := fe.addFixture(t, "tv", "show", tvShow("1", "Alpha"), library.Entry{Status: library.Planned})
+	fe.addFixture(t, "tv", "show", tvShow("2", "Beta"), library.Entry{Status: library.Planned})
+	ser, err := fe.lib.CreateSeries(bg, first, "Beta")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := fe.get(seriesURL("tv", ser.UID) + "/candidates")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("candidates: %d %s", rec.Code, rec.Body.String())
+	}
+	mustContain(t, rec.Body.String(), "Beta")
+}
+
+func TestMakeSeriesPrefillSkipsHintWithoutTitleField(t *testing.T) {
+	fe := newFixtureEnv(t, func(_, tv *plugintest.Plugin) {
+		k := &tv.M.Kinds[0]
+		k.Fields = append(k.Fields, plugin.FieldDef{Key: "aired", Label: "Aired", Type: plugin.FieldDate, Editable: true})
+		k.SeriesHint = &plugin.SeriesHintDef{ReleaseField: "aired"}
+	})
+	d := tvShow("5", "Solo")
+	d.Fields["aired"] = plugin.FieldValue{Date: day(2020, 1, 2)}
+	fe.addFixture(t, "tv", "show", d, library.Entry{Status: library.Planned})
+	body := fe.get("/tv/tvdata/5").Body.String()
+	mustContain(t, body, "Make this a series", `value="Solo"`)
+}
+
 func hintBook(book, _ *plugintest.Plugin) {
 	book.M.Kinds[0].SeriesHint = &plugin.SeriesHintDef{TitleField: "author"}
 }
