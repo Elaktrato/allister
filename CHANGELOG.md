@@ -6,8 +6,13 @@ How a release is cut: move the entries under "Unreleased" to a new `## vX.Y.Z - 
 
 ## Unreleased
 
+### Added
+
+- **Series with their own data and spin-offs.** A series has its own cover (upload or https URL, downloaded into the cover store), description, start and end day, a finished marker, the expected number of parts and plugin-declared fields (books: Volumes, Chapters, Author), plus an optional linked entry and a parent series for spin-off series (one level). Parts can be marked spin-off: they are numbered separately and not counted towards the series' progress. With expected parts set, 5 of 12 stays in progress. Removing the last part keeps a series that holds its own data. Backups carry all of it (format 3; series covers are archived) (migration 00021).
+
 ### Fixed
 
+- Cover downloads refuse a URL with userinfo (`user@host`), whitespace or a line break before making any request.
 - **Plugin authors: `group_key` now needs a `primary_key`.** A manifest that sets `group_key` without a primary progress track is refused at load (it had no defined meaning). No bundled plugin is affected.
 - **Calendar plugin select keeps keyboard focus** after you change it, and the grid no longer nests a second copy of itself in the page.
 - **No empty `plugin=` in the calendar address** after choosing "All plugins".
