@@ -104,7 +104,7 @@ func TestSeriesAddFromList(t *testing.T) {
 	if rec.Code != http.StatusSeeOther || rec.Header().Get("Location") != base {
 		t.Fatalf("add: %d", rec.Code)
 	}
-	if _, n, _ := fe.lib.SeriesOfItem(bg, extra); n != 4 {
+	if _, n, _, _ := fe.lib.SeriesOfItem(bg, extra); n != 4 {
 		t.Fatalf("position = %d", n)
 	}
 	rec = fe.do("POST", base+"/parts", url.Values{"item": {idStr(extra)}}, false)
@@ -127,7 +127,7 @@ func TestSeriesMoveRemoveDelete(t *testing.T) {
 	ser, ids := fe.tvSeries(t, "Saga")
 	base := seriesURL("tv", ser.UID)
 	pos := func(id int64) int {
-		_, n, err := fe.lib.SeriesOfItem(bg, id)
+		_, n, _, err := fe.lib.SeriesOfItem(bg, id)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -265,7 +265,7 @@ func TestSeriesAddForwardsPositionField(t *testing.T) {
 	if rec.Code != http.StatusSeeOther {
 		t.Fatalf("add: %d", rec.Code)
 	}
-	if _, pos, _ := fe.lib.SeriesOfItem(bg, two); pos != 2 {
+	if _, pos, _, _ := fe.lib.SeriesOfItem(bg, two); pos != 2 {
 		t.Fatalf("position = %d, want 2", pos)
 	}
 }
@@ -315,7 +315,7 @@ func TestMakeSeriesFromOverview(t *testing.T) {
 	if rec.Code != http.StatusSeeOther {
 		t.Fatalf("post: %d %s", rec.Code, rec.Body.String())
 	}
-	ser, n, err := fe.lib.SeriesOfItem(bg, id)
+	ser, n, _, err := fe.lib.SeriesOfItem(bg, id)
 	if err != nil || ser == nil || n != 1 || ser.Title != "Solo Saga" {
 		t.Fatalf("series = %+v %d %v", ser, n, err)
 	}
@@ -385,7 +385,7 @@ func TestSearchAddIntoSeries(t *testing.T) {
 	if len(items) != 1 {
 		t.Fatal("not saved")
 	}
-	if s, n, _ := fe.lib.SeriesOfItem(bg, items[0].ID); s == nil || s.ID != ser.ID || n != 4 {
+	if s, n, _, _ := fe.lib.SeriesOfItem(bg, items[0].ID); s == nil || s.ID != ser.ID || n != 4 {
 		t.Fatalf("not attached: %+v %d", s, n)
 	}
 	// an item already in the list is attached without a second add
@@ -394,7 +394,7 @@ func TestSearchAddIntoSeries(t *testing.T) {
 	if rec.Code != http.StatusSeeOther {
 		t.Fatalf("listed: %d", rec.Code)
 	}
-	if _, n, _ := fe.lib.SeriesOfItem(bg, listed); n != 5 {
+	if _, n, _, _ := fe.lib.SeriesOfItem(bg, listed); n != 5 {
 		t.Fatalf("listed position %d", n)
 	}
 	// in another series: 409
@@ -529,7 +529,7 @@ func TestSeriesMoveRemoveRefuseBadAndForeignItems(t *testing.T) {
 	if got := fe.partIDs(t, ser); len(got) != len(ids) {
 		t.Fatalf("parts changed: %v", got)
 	}
-	if _, n, _ := fe.lib.SeriesOfItem(bg, oids[0]); n != 1 {
+	if _, n, _, _ := fe.lib.SeriesOfItem(bg, oids[0]); n != 1 {
 		t.Fatal("foreign part touched")
 	}
 }

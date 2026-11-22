@@ -213,7 +213,7 @@ func TestBulkSeriesSelectListsOnlyThisPluginAndKind(t *testing.T) {
 
 	// a series of another kind is refused like a missing one
 	solo := fe.addFixture(t, "tv", "show", tvShow("solo", "Solo"), library.Entry{Status: library.Planned})
-	fs, _, _ := fe.lib.SeriesOfItem(bg, film)
+	fs, _, _, _ := fe.lib.SeriesOfItem(bg, film)
 	rec := fe.do("POST", "/tv/bulk", url.Values{"ids": {idStr(solo)}, "list": {"kind=show"}, "action": {"series"}, "to_series": {strconv.FormatInt(fs.ID, 10)}}, false)
 	if rec.Code != http.StatusUnprocessableEntity {
 		t.Fatalf("other kind's series: %d", rec.Code)

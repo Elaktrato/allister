@@ -227,7 +227,7 @@ func (s *server) itemView(ctx context.Context, li *loadedItem) (itemView, error)
 // the part navigation, or the "Make this a series" form.
 func (s *server) seriesBlock(ctx context.Context, v *itemView, li *loadedItem, lang string) error {
 	m, k, it := li.man, li.kind, li.saved
-	ser, pos, err := s.deps.Library.SeriesOfItem(ctx, it.ID)
+	ser, pos, _, err := s.deps.Library.SeriesOfItem(ctx, it.ID)
 	if err != nil {
 		return err
 	}
