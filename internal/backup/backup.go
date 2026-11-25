@@ -10,6 +10,7 @@
 //	              "plugins": [{"id": ..., "version": ...}],   (informational)
 //	              "appearance": {...},                        (optional)
 //	              "time_zone": "Europe/Berlin",               (optional)
+//	              "list_paging": "pages",                     (optional)
 //	              "progress_upgrades": [library.BackupProgressUpgrade, ...],
 //	                                                          (optional, before items)
 //	              "items": [library.BackupItem, ...],
@@ -171,13 +172,14 @@ func (l Limits) withDefaults() Limits {
 // (deflated, written item by item in batches, never held in memory) followed
 // by covers/<name> (stored: images are already compressed) for every local
 // cover file found in coversDir, then fonts/<name> for every uploaded font
-// of app (nil: no appearance member and no fonts). timeZone, when not empty,
-// is the stored time zone setting ("time_zone" member). A local cover whose
+// of app (nil: no appearance member and no fonts). general holds the stored
+// General settings: each one that is not empty is written as its member
+// ("time_zone", "list_paging"). A local cover whose
 // name is not acceptable or whose file is missing is written as
 // "cover": "" with "cover_missing": true. A write error stops the stream
 // and is returned (the caller has usually sent headers already and can
 // only log it).
-func Write(ctx context.Context, w io.Writer, lib *library.Library, plugins []PluginVersion, coversDir string, app *appearance.Service, timeZone string, now time.Time) error {
+func Write(ctx context.Context, w io.Writer, lib *library.Library, plugins []PluginVersion, coversDir string, app *appearance.Service, general Settings, now time.Time) error {
 	zw := zip.NewWriter(w)
 	jw, err := zw.CreateHeader(&zip.FileHeader{Name: jsonName, Method: zip.Deflate, Modified: now.UTC()})
 	if err != nil {
@@ -199,8 +201,9 @@ func Write(ctx context.Context, w io.Writer, lib *library.Library, plugins []Plu
 		Plugins          []PluginVersion                 `json:"plugins"`
 		Appearance       *appearanceMember               `json:"appearance,omitempty"`
 		TimeZone         string                          `json:"time_zone,omitempty"`
+		ListPaging       string                          `json:"list_paging,omitempty"`
 		ProgressUpgrades []library.BackupProgressUpgrade `json:"progress_upgrades"`
-	}{Format, FormatVersion, now.UTC().Format(time.RFC3339), plugins, look, timeZone, upgrades})
+	}{Format, FormatVersion, now.UTC().Format(time.RFC3339), plugins, look, general.TimeZone, general.ListPaging, upgrades})
 	if err != nil {
 		return fmt.Errorf("backup: %w", err)
 	}
@@ -390,6 +393,20 @@ type Options struct {
 	Appearance *appearance.Service
 	// TimeZone restores the time zone setting; when nil it is skipped.
 	TimeZone TimeZoneStore
+	// ListPaging restores the list paging setting; when nil it is skipped.
+	ListPaging ListPagingStore
+}
+
+// Settings are the General settings a backup carries ("" for one not set).
+type Settings struct {
+	TimeZone   string // an IANA zone name
+	ListPaging string // "scroll" or "pages"
+}
+
+// ListPagingStore is the stored list paging setting a restore may fill.
+type ListPagingStore interface {
+	StoredListPaging(ctx context.Context) (string, error)
+	SetListPaging(ctx context.Context, v string) error
 }
 
 // TimeZoneStore is the stored time zone setting a restore may fill.
@@ -501,6 +518,7 @@ type restorer struct {
 	fonts   map[string]*zip.File
 	looked  bool // the appearance member was handled
 	zoned   bool // the time zone member was handled
+	paged   bool // the list paging member was handled
 	version int  // the accepted format version
 	done    map[string]coverResult
 	budget  *budget
@@ -642,7 +660,7 @@ func (rs *restorer) decode(ctx context.Context, dec *json.Decoder) error {
 			clip(version, 20), MinFormatVersion, FormatVersion)
 	}
 	seen := map[string]bool{}
-	// pending holds appearance and time zone members read before the header
+	// pending holds appearance and General settings members read before the header
 	// was checked
 	type member struct {
 		key string
@@ -652,9 +670,12 @@ func (rs *restorer) decode(ctx context.Context, dec *json.Decoder) error {
 	flush := func() error {
 		for _, m := range pending {
 			var err error
-			if m.key == "time_zone" {
+			switch m.key {
+			case "time_zone":
 				err = rs.restoreTimeZone(ctx, m.raw)
-			} else {
+			case "list_paging":
+				err = rs.restoreListPaging(ctx, m.raw)
+			default:
 				err = rs.restoreAppearance(ctx, m.raw)
 			}
 			if err != nil {
@@ -751,7 +772,7 @@ func (rs *restorer) decode(ctx context.Context, dec *json.Decoder) error {
 			if !seen["items"] {
 				rs.upgrades = ups
 			}
-		case "appearance", "time_zone":
+		case "appearance", "time_zone", "list_paging":
 			var raw json.RawMessage
 			if err := rs.member(dec, &raw, seen["items"]); err != nil {
 				return err

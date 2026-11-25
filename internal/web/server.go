@@ -112,7 +112,7 @@ type server struct {
 	maxBackupBody int64
 	spoolHook     func(path string)
 	// backupWrite produces the download (backup.Write; tests replace it).
-	backupWrite func(ctx context.Context, w io.Writer, lib *library.Library, plugins []backup.PluginVersion, coversDir string, app *appearance.Service, timeZone string, now time.Time) error
+	backupWrite func(ctx context.Context, w io.Writer, lib *library.Library, plugins []backup.PluginVersion, coversDir string, app *appearance.Service, general backup.Settings, now time.Time) error
 	// appearance is Deps.Appearance (or the default one).
 	appearance *appearance.Service
 	// rand returns a uniform number in [0, n) for n > 0 (the randomiser's

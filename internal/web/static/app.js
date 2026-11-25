@@ -248,7 +248,8 @@
   // page's rows. When the order moved while scrolling (a +1 brings an entry
   // to the top), an entry can come again: the later copy is dropped, so
   // every entry is loaded once. The bulk state below then counts the
-  // appended rows (the select-all covers every loaded row).
+  // appended rows (the select-all covers every loaded row; with "Select
+  // all N matching" chosen, the appended rows are ticked too).
   document.addEventListener("htmx:afterSwap", function (event) {
     var source = event.detail.requestConfig && event.detail.requestConfig.elt;
     if (!source || !source.closest || !source.closest("[data-list-more]")) {
@@ -264,6 +265,15 @@
         }
       } else {
         seen[rows[i].value] = true;
+      }
+    }
+    // "Select all N matching" stays chosen: the appended rows are part of
+    // the filter's selection, so they are ticked before bulkInit counts
+    var scope = document.querySelector("#bulk-form [data-bulk-scope]");
+    if (scope && scope.value === "filter") {
+      var added = bulkRows();
+      for (var j = 0; j < added.length; j++) {
+        added[j].checked = true;
       }
     }
   });

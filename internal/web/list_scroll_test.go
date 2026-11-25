@@ -270,4 +270,16 @@ func TestAppJSHandlesAppendedRows(t *testing.T) {
 	}
 	mustContain(t, string(js), `document.addEventListener("htmx:afterSwap", bulkInit)`,
 		`querySelectorAll('input[data-bulk-row][form="bulk-form"]')`, `closest("[data-list-more]")`)
+	// "Select all N matching" survives a load: the sentinel handler (which
+	// runs before bulkInit) ticks the appended rows while the scope is filter
+	h := string(js)[strings.Index(string(js), `closest("[data-list-more]")`):]
+	h = h[:strings.Index(h, `document.addEventListener("htmx:afterSwap", bulkInit)`)]
+	mustContain(t, h, `querySelector("#bulk-form [data-bulk-scope]")`, `scope.value === "filter"`, `.checked = true`)
+}
+
+// A click on "Load more" and the intersect trigger never both load.
+func TestListMoreLinkSyncs(t *testing.T) {
+	e := newFixtureEnv(t)
+	manyShows(t, e, 101)
+	mustContain(t, sentinel(e.listGet(t, "/tv?view=table")), `hx-sync="closest [data-list-more]:drop"`)
 }

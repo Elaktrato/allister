@@ -256,6 +256,35 @@ func (rs *restorer) restoreAppearanceSettings(ctx context.Context, app *appearan
 	return nil
 }
 
+// restoreListPaging applies the "list_paging" member when this installation
+// has none of its own and the value is a mode (a restore never overwrites).
+func (rs *restorer) restoreListPaging(ctx context.Context, raw json.RawMessage) error {
+	st := rs.opts.ListPaging
+	if st == nil || string(raw) == "null" || rs.paged {
+		return nil
+	}
+	rs.paged = true
+	var v string
+	if json.Unmarshal(raw, &v) != nil || v == "" {
+		rs.note("The Lists setting of the backup was not restored: it is not a list paging.")
+		return nil
+	}
+	cur, err := st.StoredListPaging(ctx)
+	if err != nil {
+		return err
+	}
+	if cur != "" {
+		rs.note("Lists setting kept: this installation has its own.")
+		return nil
+	}
+	if err := st.SetListPaging(ctx, v); err != nil {
+		rs.note("The Lists setting of the backup was not restored: %s is not a list paging.", clip(v, 60))
+		return nil
+	}
+	rs.note("Lists setting restored.")
+	return nil
+}
+
 // restoreTimeZone applies the "time_zone" member when this installation has
 // none of its own and the name is valid (a restore never overwrites).
 func (rs *restorer) restoreTimeZone(ctx context.Context, raw json.RawMessage) error {

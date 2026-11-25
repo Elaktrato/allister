@@ -12,7 +12,7 @@
   <input type="hidden" name="list" value="{{.List}}" data-bulk-list>
   <input type="hidden" name="scope" value="ids" data-bulk-scope>
   <div class="flex flex-wrap items-center gap-3 text-sm">
-    <span data-bulk-count class="font-medium">Tick entries on this page, then choose what to change.</span>
+    <span data-bulk-count class="font-medium">Tick entries, then choose what to change.</span>
     <button type="button" hidden data-bulk-all-matching class="text-indigo-300 underline">Select all {{.Total}} matching</button>
     {{template "bulk_fields" .}}
     <button type="submit" class="rounded bg-indigo-600 px-4 py-2 font-medium hover:bg-indigo-500">Apply</button>

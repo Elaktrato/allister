@@ -484,6 +484,16 @@ func (s *Store) ListPaging(ctx context.Context) string {
 	return v
 }
 
+// StoredListPaging is the list paging the owner stored, "" when none (or a
+// value that is no mode, which is never used).
+func (s *Store) StoredListPaging(ctx context.Context) (string, error) {
+	v, ok, err := s.Get(ctx, KeyListPaging)
+	if err != nil || !ok || !ValidListPaging(v) {
+		return "", err
+	}
+	return v, nil
+}
+
 // SetListPaging stores the list paging; anything but a mode is refused.
 func (s *Store) SetListPaging(ctx context.Context, v string) error {
 	if !ValidListPaging(v) {
