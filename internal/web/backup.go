@@ -103,11 +103,12 @@ func (s *server) getBackupDownload(w http.ResponseWriter, r *http.Request) {
 	h.Set("X-Content-Type-Options", "nosniff")
 	h.Set("Cache-Control", "no-store")
 	cw := &countingWriter{w: w}
-	zone := ""
+	var general backup.Settings
 	if s.deps.Settings != nil {
-		zone, _ = s.deps.Settings.StoredTimeZone(r.Context())
+		general.TimeZone, _ = s.deps.Settings.StoredTimeZone(r.Context())
+		general.ListPaging, _ = s.deps.Settings.StoredListPaging(r.Context())
 	}
-	err := s.backupWrite(r.Context(), cw, s.deps.Library, plugins, s.deps.CoversDir, s.appearance, zone, now)
+	err := s.backupWrite(r.Context(), cw, s.deps.Library, plugins, s.deps.CoversDir, s.appearance, general, now)
 	if err == nil {
 		return
 	}
@@ -194,6 +195,7 @@ func (s *server) postBackupRestore(w http.ResponseWriter, r *http.Request) {
 	}
 	if s.deps.Settings != nil {
 		opts.TimeZone = s.deps.Settings
+		opts.ListPaging = s.deps.Settings
 	}
 	rep, err := backup.Restore(r.Context(), f, fi.Size(), opts)
 	var rej *backup.RejectError

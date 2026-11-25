@@ -19,7 +19,6 @@ import (
 	"errors"
 	"net/http"
 	"net/url"
-	"slices"
 	"strconv"
 	"strings"
 
@@ -298,17 +297,36 @@ func (s *server) bulkSelection(w http.ResponseWriter, r *http.Request, m plugin.
 		return ids, true
 	}
 	var ids []int64
+	seen := make(map[int64]bool, len(r.PostForm["ids"]))
 	for _, raw := range r.PostForm["ids"] {
 		id, err := strconv.ParseInt(raw, 10, 64)
 		if !isASCIIDigits(raw, maxIDDigits) || err != nil || id <= 0 {
 			http.Error(w, "bad entry id", http.StatusBadRequest)
 			return nil, false
 		}
-		if !slices.Contains(ids, id) {
+		if !seen[id] {
+			seen[id] = true
 			ids = append(ids, id)
 		}
 	}
 	return ids, true
+}
+
+// bulkTooMany answers a bulk form too large to read (more ids than
+// maxTextFormBytes holds): the form again for the plugin's list, without a
+// selection, asking for the filter scope instead (422).
+func (s *server) bulkTooMany(w http.ResponseWriter, r *http.Request, m plugin.Manifest) {
+	lq := parseListQuery(m, url.Values{})
+	lq.View = s.resolveView(r.Context(), m, "")
+	k, _ := kindDef(m, lq.Kind)
+	bar, err := s.bulkBar(r.Context(), m, k, lq, 1, 0)
+	if err != nil {
+		s.internalError(w, r, err)
+		return
+	}
+	s.renderStatus(w, r, http.StatusUnprocessableEntity, "bulk_confirm", bulkConfirmView{
+		Title: "Bulk edit", Bar: *bar, Scope: "ids", CancelURL: "/" + url.PathEscape(m.ID),
+		Error: "Too many entries selected; use “Select all N matching” in the bar instead."})
 }
 
 // bulkKeep splits ids into those of plugin m (and of kind, when given) and
@@ -352,7 +370,17 @@ func (s *server) postBulk(w http.ResponseWriter, r *http.Request, pluginID strin
 		s.errorPage(w, r, http.StatusNotFound, "Not found", "There is no such list.", "")
 		return
 	}
-	if !parseForm(w, r) {
+	// a "Select all loaded" after a long scroll posts every loaded id (and
+	// the confirmation posts them again): the text-form limit, and beyond
+	// it the form with a message instead of a bare 413
+	r.Body = http.MaxBytesReader(w, r.Body, maxTextFormBytes)
+	if err := r.ParseForm(); err != nil {
+		var tooBig *http.MaxBytesError
+		if !errors.As(err, &tooBig) {
+			http.Error(w, "bad request", http.StatusBadRequest)
+			return
+		}
+		s.bulkTooMany(w, r, m)
 		return
 	}
 	ctx := r.Context()

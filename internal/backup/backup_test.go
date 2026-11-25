@@ -142,7 +142,7 @@ func (e *env) show(id string, en *library.Entry) int64 {
 func (e *env) archive() []byte {
 	e.t.Helper()
 	var b bytes.Buffer
-	if err := Write(bg, &b, e.lib, []PluginVersion{{ID: "book", Version: "1.0.0"}}, e.covers, nil, "", clock); err != nil {
+	if err := Write(bg, &b, e.lib, []PluginVersion{{ID: "book", Version: "1.0.0"}}, e.covers, nil, Settings{}, clock); err != nil {
 		e.t.Fatal(err)
 	}
 	return b.Bytes()
@@ -859,7 +859,7 @@ func TestBackupWriteStopsOnWriteError(t *testing.T) {
 		e.book(fmt.Sprint(i), "", nil)
 	}
 	boom := errors.New("client gone")
-	err := Write(bg, failAfter{n: 1000, err: boom}, e.lib, nil, e.covers, nil, "", clock)
+	err := Write(bg, failAfter{n: 1000, err: boom}, e.lib, nil, e.covers, nil, Settings{}, clock)
 	if !errors.Is(err, boom) {
 		t.Fatalf("err = %v", err)
 	}
