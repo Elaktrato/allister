@@ -619,6 +619,11 @@ type RestoreOptions struct {
 	// save or sync that stores byte-identical content between the
 	// ImageReferenced check and the caller's delete can lose its file.
 	ReleaseCover func(ctx context.Context, stored string)
+	// AppliedUpgrades lists the progress upgrades the backup's database had
+	// applied (its "progress_upgrades" member; nil for a backup without it,
+	// which was written before any ran). Every upgrade of the item's kind
+	// not listed here is applied to the restored item's keys.
+	AppliedUpgrades []BackupProgressUpgrade
 }
 
 // RestoreResult reports one restored backup item. ItemID and SyncPending are
@@ -692,7 +697,9 @@ type tagName struct{ name, key string }
 // otherwise (SyncPending), so the normal sync refetches credits' photos,
 // downloads remote covers and fills gaps. When the item is not written
 // after its cover was stored, ReleaseCover gets the unreferenced file.
-// The plugin need not be enabled.
+// The plugin need not be enabled. Progress upgrades of the kind that the
+// backup did not record as applied (RestoreOptions.AppliedUpgrades) switch
+// the item's keys first, as ApplyProgressUpgrades would have.
 //
 // The returned error is reserved for failures that are not about the item
 // (database errors, a ResolveCover error, context cancellation).
@@ -701,6 +708,9 @@ func (l *Library) RestoreItem(ctx context.Context, bi BackupItem, opts RestoreOp
 	if _, ok := l.reg.Manifest(bi.PluginID); !ok {
 		res.Outcome, res.Reason = RestoreUnknownPlugin, "the plugin is not installed"
 		return res, nil
+	}
+	if def, err := l.kindDef(bi.PluginID, bi.Kind); err == nil { // an unknown kind fails in planRestore
+		bi.ProgressKeys = restoredKeys(def, bi.PluginID, bi.ProgressKeys, opts.AppliedUpgrades)
 	}
 	plan, err := l.planRestore(bi)
 	if err != nil {

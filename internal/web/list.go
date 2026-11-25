@@ -383,7 +383,13 @@ func (s *server) rowView(m plugin.Manifest, row library.Row, ret string, cols []
 	}
 	for _, def := range k.Progress.Eligible {
 		if slices.Contains(it.ProgressKeys, def.Key) {
-			v.Progress = append(v.Progress, progressCell{Label: def.Label, Value: fmtProgress(def, e.Progress[def.Key], it.Fields)})
+			cell := progressCell{Label: def.Label, Value: fmtProgress(def, e.Progress[def.Key], it.Fields)}
+			// a secondary track never set reads "–" rather than "0 / 12";
+			// the primary (+1) track keeps its 0
+			if _, stored := e.Progress[def.Key]; !stored && k.Progress.PrimaryKey != "" && def.Key != k.Progress.PrimaryKey {
+				cell.Value = "–"
+			}
+			v.Progress = append(v.Progress, cell)
 		}
 	}
 	v.ShowLabels = len(v.Progress) > 1

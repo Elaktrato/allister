@@ -986,6 +986,8 @@ func TestValidateProgressUpgrades(t *testing.T) {
 		{"empty from", []plugin.ProgressUpgrade{up("a", nil, []string{"season", "episode"})}, `kinds[0].progress.upgrades[0].from: required`},
 		{"to does not contain from", []plugin.ProgressUpgrade{up("a", []string{"season", "episode"}, []string{"episode", "position"})}, `kinds[0].progress.upgrades[0].to: must contain every key of from`},
 		{"same set", []plugin.ProgressUpgrade{up("a", []string{"episode"}, []string{"episode"})}, `kinds[0].progress.upgrades[0].to: must add at least one key to from`},
+		{"duplicate from key", []plugin.ProgressUpgrade{up("a", []string{"episode", "episode"}, []string{"season", "episode"})}, `kinds[0].progress.upgrades[0].from: "episode" listed twice`},
+		{"duplicate to key", []plugin.ProgressUpgrade{up("a", []string{"episode"}, []string{"season", "episode", "season"})}, `kinds[0].progress.upgrades[0].to: "season" listed twice`},
 	}
 	for _, tc := range tests {
 		m := tv()
