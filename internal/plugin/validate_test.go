@@ -964,3 +964,41 @@ func TestLengthInMinutes(t *testing.T) {
 		}
 	}
 }
+
+// TestValidateProgressUpgrades: an upgrade names a unique id and moves items
+// from one allowed combination to a larger allowed one that contains it.
+func TestValidateProgressUpgrades(t *testing.T) {
+	up := func(id string, from, to []string) plugin.ProgressUpgrade {
+		return plugin.ProgressUpgrade{ID: id, From: from, To: to}
+	}
+	tests := []struct {
+		name string
+		ups  []plugin.ProgressUpgrade
+		want string
+	}{
+		{"valid", []plugin.ProgressUpgrade{up("add_season", []string{"episode"}, []string{"season", "episode"})}, ""},
+		{"valid in any order", []plugin.ProgressUpgrade{up("a", []string{"episode"}, []string{"episode", "season"}), up("b", []string{"episode"}, []string{"position", "episode"})}, ""},
+		{"none", nil, ""},
+		{"bad id", []plugin.ProgressUpgrade{up("Bad Id", []string{"episode"}, []string{"season", "episode"})}, `kinds[0].progress.upgrades[0].id: "Bad Id" is not a valid key`},
+		{"duplicate id", []plugin.ProgressUpgrade{up("a", []string{"episode"}, []string{"season", "episode"}), up("a", []string{"episode"}, []string{"episode", "position"})}, `kinds[0].progress.upgrades[1].id: duplicate "a"`},
+		{"from not allowed", []plugin.ProgressUpgrade{up("a", []string{"season"}, []string{"season", "episode"})}, `kinds[0].progress.upgrades[0].from: not one of the allowed combinations`},
+		{"to not allowed", []plugin.ProgressUpgrade{up("a", []string{"episode"}, []string{"season", "episode", "position"})}, `kinds[0].progress.upgrades[0].to: not one of the allowed combinations`},
+		{"empty from", []plugin.ProgressUpgrade{up("a", nil, []string{"season", "episode"})}, `kinds[0].progress.upgrades[0].from: required`},
+		{"to does not contain from", []plugin.ProgressUpgrade{up("a", []string{"season", "episode"}, []string{"episode", "position"})}, `kinds[0].progress.upgrades[0].to: must contain every key of from`},
+		{"same set", []plugin.ProgressUpgrade{up("a", []string{"episode"}, []string{"episode"})}, `kinds[0].progress.upgrades[0].to: must add at least one key to from`},
+	}
+	for _, tc := range tests {
+		m := tv()
+		m.Kinds[0].Progress.Upgrades = tc.ups
+		err := plugin.Validate(m)
+		if tc.want == "" {
+			if err != nil {
+				t.Errorf("%s: %v", tc.name, err)
+			}
+			continue
+		}
+		if err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("%s: %v, want %q", tc.name, err, tc.want)
+		}
+	}
+}

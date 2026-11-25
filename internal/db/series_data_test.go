@@ -89,7 +89,7 @@ func TestSeriesDataMigrationUpgradesFrom20(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer d.Close()
-	if v, err := goose.GetDBVersion(d); err != nil || v != 21 {
+	if v, err := goose.GetDBVersion(d); err != nil || v != latestVersion {
 		t.Fatalf("version = %d, %v", v, err)
 	}
 	checks := []struct {

@@ -503,6 +503,7 @@ func validateProgress(p *problems, path string, ps ProgressSpec, fields map[stri
 			p.add(path+".primary_key", "%q must be a count or pages progress, not %s", ps.PrimaryKey, t)
 		}
 	}
+	validateUpgrades(p, path, ps)
 	if ps.GroupKey != "" {
 		t, ok := types[ps.GroupKey]
 		switch {
@@ -514,6 +515,55 @@ func validateProgress(p *problems, path string, ps ProgressSpec, fields map[stri
 			p.add(path+".group_key", "must differ from the primary key")
 		case t != Count:
 			p.add(path+".group_key", "%q must be a count progress, not %s", ps.GroupKey, t)
+		}
+	}
+}
+
+// validateUpgrades checks the progress upgrades of a kind: unique key ids,
+// From and To allowed combinations, To a strict superset of From.
+func validateUpgrades(p *problems, path string, ps ProgressSpec) {
+	allowed := func(keys []string) bool {
+		for _, c := range ps.Combinations {
+			if sameSet(c, keys) {
+				return true
+			}
+		}
+		return false
+	}
+	ids := map[string]bool{}
+	for i, u := range ps.Upgrades {
+		up := fmt.Sprintf("%s.upgrades[%d]", path, i)
+		if !keyRe.MatchString(u.ID) {
+			p.add(up+".id", "%q is not a valid key", u.ID)
+		} else if ids[u.ID] {
+			p.add(up+".id", "duplicate %q", u.ID)
+		}
+		ids[u.ID] = true
+		fromOK, toOK := len(u.From) > 0, len(u.To) > 0
+		for _, side := range []struct {
+			name string
+			keys []string
+			ok   *bool
+		}{{"from", u.From, &fromOK}, {"to", u.To, &toOK}} {
+			switch {
+			case len(side.keys) == 0:
+				p.add(up+"."+side.name, "required")
+			case !allowed(side.keys):
+				p.add(up+"."+side.name, "not one of the allowed combinations")
+				*side.ok = false
+			}
+		}
+		if !fromOK || !toOK {
+			continue
+		}
+		for _, k := range u.From {
+			if !slices.Contains(u.To, k) {
+				p.add(up+".to", "must contain every key of from (%q is missing)", k)
+				break
+			}
+		}
+		if sameSet(u.From, u.To) {
+			p.add(up+".to", "must add at least one key to from")
 		}
 	}
 }
