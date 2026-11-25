@@ -225,6 +225,8 @@ type importerRef struct {
 	source   plugin.Source
 	srcInfo  plugin.SourceInfo
 	fallback []sourceRef
+	// idle is the run's idle cutoff (Handler reads it once per run).
+	idle idleRule
 }
 
 // resolve finds the importer of an installed plugin (enabled or not).
@@ -500,6 +502,7 @@ func (r *Runner) Handler() jobs.Handler {
 		if _, err := r.d.DB.ExecContext(ctx, `UPDATE imports SET state=?, note='' WHERE id=? AND state=?`, stateRunning, p.ImportID, statePending); err != nil {
 			return fmt.Errorf("import %d: %w", p.ImportID, err)
 		}
+		r.loadIdle(ctx, ref)
 		for {
 			if err := ctx.Err(); err != nil {
 				return fmt.Errorf("import %d: %w", p.ImportID, err)
@@ -633,7 +636,7 @@ func (r *Runner) process(ctx context.Context, ref *importerRef, importID int64, 
 		return r.record(ctx, importID, pr.seq, outcomeSkipped, 0, fmt.Sprintf("unknown kind %q", plugin.SingleLine(rc.entry.Kind, 40)))
 	}
 	rc.kind = kind
-	r.applyIdle(ctx, rc)
+	r.applyIdle(rc)
 	if rc.idType != "" {
 		rc.value = plugin.SingleLine(rc.entry.ExternalIDs[rc.idType], maxTitleRunes)
 	}
@@ -959,8 +962,9 @@ func (r *Runner) handleSaved(ctx context.Context, rc *rowCtx, saved *library.Ite
 			}
 		}
 		// the idle pause of an Active entry needs no newer row: only the
-		// status changes, the entry's own later edits stay
-		if rc.mode != ModeSkip && rc.idle.paused && le.Status == library.Active {
+		// status changes, and only when the entry's own last change is past
+		// the cutoff too (a status set by hand since then stays)
+		if rc.mode != ModeSkip && rc.idle.paused && le.Status == library.Active && rc.ref.idle.idleSince(le.UpdatedAt, r.now()) {
 			updated, uerr := r.d.Library.ApplyImport(dctx, saved.ID, library.Entry{Status: library.Paused}, nil)
 			if uerr != nil {
 				return r.record(dctx, rc.importID, rc.seq, outcomeFailed, saved.ID, uerr.Error())

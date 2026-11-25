@@ -17,8 +17,38 @@ import (
 // an update. For an existing entry the import keeps a shown Completed or
 // Dropped status, keeps a Paused one unless the row's last activity is
 // known (and so within the cutoff), and under every mode but skip pauses a
-// shown Active entry whose row is idle even when the row is not newer: the
-// change follows from the cutoff, not from the source.
+// shown Active entry whose row is idle even when the row is not newer (the
+// change follows from the cutoff, not from the source) - but only when the
+// entry's own last change is older than the cutoff too, so a status the
+// user set by hand is not undone by a re-import with nothing new.
+
+// idleRule is an import run's idle cutoff, read once per run.
+type idleRule struct {
+	days int // 0: the rule does not apply
+	loc  *time.Location
+}
+
+// loadIdle reads the cutoff and the time zone of ref's plugin for one run.
+func (r *Runner) loadIdle(ctx context.Context, ref *importerRef) {
+	ref.idle = idleRule{}
+	if !ref.info.IdlePause {
+		return
+	}
+	days, loc := settings.DefaultIdleDays, time.UTC
+	if r.d.Settings != nil {
+		days, loc = r.d.Settings.IdleDays(ctx, ref.manifest.ID), r.d.Settings.TimeLocation(ctx)
+	}
+	if days > 0 {
+		ref.idle = idleRule{days: days, loc: loc}
+	}
+}
+
+// idleSince reports whether t's calendar day lies more than the cutoff
+// before now's (both in the configured zone).
+func (ir idleRule) idleSince(t, now time.Time) bool {
+	today := plugin.DateOnly(now.In(ir.loc))
+	return plugin.DateOnly(t.In(ir.loc)).Before(today.AddDate(0, 0, -ir.days))
+}
 
 // idleState is the idle rule's view of one row.
 type idleState struct {
@@ -28,24 +58,16 @@ type idleState struct {
 
 // applyIdle evaluates the idle rule for rc's row and, for an idle Active
 // row, changes its status to Paused.
-func (r *Runner) applyIdle(ctx context.Context, rc *rowCtx) {
-	if !rc.ref.info.IdlePause {
+func (r *Runner) applyIdle(rc *rowCtx) {
+	rule := rc.ref.idle
+	if rule.days <= 0 {
 		return
 	}
-	days, loc := settings.DefaultIdleDays, time.UTC
-	if r.d.Settings != nil {
-		days, loc = r.d.Settings.IdleDays(ctx, rc.pluginID()), r.d.Settings.TimeLocation(ctx)
-	}
-	if days <= 0 {
-		return
-	}
-	rc.idle.days = days
+	rc.idle.days = rule.days
 	if rc.entry.Status != plugin.Active || rc.entry.LastActive == nil {
 		return
 	}
-	today := plugin.DateOnly(r.now().In(loc))
-	last := plugin.DateOnly(rc.entry.LastActive.In(loc))
-	if last.Before(today.AddDate(0, 0, -days)) {
+	if rule.idleSince(*rc.entry.LastActive, r.now()) {
 		rc.entry.Status = plugin.Paused
 		rc.idle.paused = true
 	}

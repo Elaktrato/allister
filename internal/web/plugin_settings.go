@@ -150,6 +150,7 @@ type idleForm struct {
 	// Active, Paused, Kept name the kind's status labels in the help text.
 	Active, Paused, Kept string
 	Error                string
+	On                   bool // the stored cutoff is above 0
 }
 
 // idleImporters names m's IdlePause importers ("" when it has none).
@@ -163,6 +164,35 @@ func idleImporters(m plugin.Manifest) string {
 	return strings.Join(names, ", ")
 }
 
+// idleKind is the kind m's IdlePause importers bring rows of, when that is
+// one kind: the manifest's only kind, or else the one kind every such
+// importer's ResolveVia source declares. An importer does not declare the
+// kinds of its rows, so a plugin with several kinds and no such source (or
+// sources of several kinds) has none, and the help text uses the neutral
+// core status names.
+func idleKind(m plugin.Manifest) (plugin.KindDef, bool) {
+	if len(m.Kinds) == 1 {
+		return m.Kinds[0], true
+	}
+	key := ""
+	for _, im := range m.Importers {
+		if !im.IdlePause {
+			continue
+		}
+		var kinds []string
+		for _, src := range m.Sources {
+			if src.ID == im.ResolveVia {
+				kinds = src.Kinds
+			}
+		}
+		if len(kinds) != 1 || (key != "" && kinds[0] != key) {
+			return plugin.KindDef{}, false
+		}
+		key = kinds[0]
+	}
+	return kindDef(m, key)
+}
+
 // idleFormFor is m's idle form showing value (nil without an IdlePause
 // importer).
 func idleFormFor(m plugin.Manifest, value, msg string) *idleForm {
@@ -170,10 +200,13 @@ func idleFormFor(m plugin.Manifest, value, msg string) *idleForm {
 	if names == "" {
 		return nil
 	}
-	k := m.Kinds[0]
+	label := statsStatusLabel
+	if k, ok := idleKind(m); ok {
+		label = func(st library.Status) string { return statusLabel(k, st) }
+	}
 	return &idleForm{Action: pluginSettingsURL(m.ID) + "/idle", Value: value, Max: settings.MaxIdleDays, Importers: names,
-		Active: statusLabel(k, library.Active), Paused: statusLabel(k, library.Paused),
-		Kept: statusLabel(k, library.Completed) + " and " + statusLabel(k, library.Dropped), Error: msg}
+		Active: label(library.Active), Paused: label(library.Paused),
+		Kept: label(library.Completed) + " and " + label(library.Dropped), Error: msg}
 }
 
 // importForm is one importer of the plugin on its settings page.
@@ -230,7 +263,10 @@ func (s *server) pluginSettingsData(r *http.Request, m plugin.Manifest) (pluginS
 		}
 		v.Imports = append(v.Imports, f)
 	}
-	v.Idle = idleFormFor(m, strconv.Itoa(s.deps.Settings.IdleDays(ctx, m.ID)), "")
+	days := s.deps.Settings.IdleDays(ctx, m.ID)
+	if v.Idle = idleFormFor(m, strconv.Itoa(days), ""); v.Idle != nil {
+		v.Idle.On = days > 0
+	}
 	var err error
 	v.MissingKeys, v.OtherSources, err = s.sourceKeyState(ctx, m)
 	return v, err
@@ -268,8 +304,10 @@ func (s *server) postIdleDays(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		v.LangOptions, v.Lang = opts, s.titleLang(ctx, m)
+		on := v.Idle.On
 		v.Idle = idleFormFor(m, plugin.SingleLine(raw, 20),
 			"Enter a whole number of days from 0 to "+strconv.Itoa(settings.MaxIdleDays)+".")
+		v.Idle.On = on
 		s.renderStatus(w, r, http.StatusUnprocessableEntity, "settings_plugin", v)
 		return
 	}
