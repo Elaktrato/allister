@@ -6,6 +6,8 @@ How a release is cut: move the entries under "Unreleased" to a new `## vX.Y.Z - 
 
 ## Unreleased
 
+## v0.6.0 - 2026-11-25
+
 ### Added
 
 - **Lists load more while scrolling.** The list pages (table and cards, and the Series tab) no longer stop after 100 entries with Previous and Next: the next 100 load when you scroll to the end, the address bar keeps only the filters, and bulk edit's page select-all becomes "Select all loaded". Settings > General > Lists switches back to **Split into pages** (setting `list_paging`, carried by the backup and restored only into an installation without its own). Without JavaScript a "Load more" link opens the next page.
