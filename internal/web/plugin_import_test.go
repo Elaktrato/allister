@@ -116,3 +116,40 @@ func TestPluginSettingsNoIdleFieldWithoutIdlePause(t *testing.T) {
 	e := newFixtureEnv(t)
 	mustNotContain(t, e.get("/settings/plugins/tv").Body.String(), `name="idle_days"`, "/idle")
 }
+
+// TestIdleFormLabelsFromTargetedKind: the help text names the statuses of
+// the kind the IdlePause importer resolves into (its ResolveVia source's
+// kinds); when that is not one kind, the neutral core names are used.
+func TestIdleFormLabelsFromTargetedKind(t *testing.T) {
+	first := plugin.KindDef{Key: "a", Statuses: plugin.StatusLabels{Planned: "PA", Active: "AA", Paused: "PsA", Completed: "CA", Dropped: "DA"}}
+	second := plugin.KindDef{Key: "b", Statuses: plugin.StatusLabels{Planned: "PB", Active: "AB", Paused: "PsB", Completed: "CB", Dropped: "DB"}}
+	m := plugin.Manifest{ID: "p", Kinds: []plugin.KindDef{first, second},
+		Sources:   []plugin.SourceInfo{{ID: "s", Kinds: []string{"b"}}},
+		Importers: []plugin.ImporterInfo{{ID: "i", Name: "I", AccountLabel: "U", IdlePause: true, ResolveVia: "s"}}}
+	f := idleFormFor(m, "30", "")
+	if f.Active != "AB" || f.Paused != "PsB" || f.Kept != "CB and DB" {
+		t.Fatalf("targeted kind: %+v", f)
+	}
+	m.Sources[0].Kinds = nil
+	f = idleFormFor(m, "30", "")
+	if f.Active != "Active" || f.Paused != "Paused" || f.Kept != "Completed and Dropped" {
+		t.Fatalf("several kinds: %+v", f)
+	}
+	m.Kinds = m.Kinds[:1]
+	if f = idleFormFor(m, "30", ""); f.Active != "AA" {
+		t.Fatalf("single kind: %+v", f)
+	}
+}
+
+// TestIdleFormHelpWhileOn: the "keep their status" line is shown only while
+// the rule is on.
+func TestIdleFormHelpWhileOn(t *testing.T) {
+	e := newFixtureEnv(t, func(book, tv *plugintest.Plugin) { tv.M.Importers[1].IdlePause = true })
+	mustContain(t, e.get("/settings/plugins/tv").Body.String(), "entries keep their status while this is on")
+	if err := e.set.SetIdleDays(context.Background(), "tv", 0); err != nil {
+		t.Fatal(err)
+	}
+	page := e.get("/settings/plugins/tv").Body.String()
+	mustContain(t, page, "The rule is off.")
+	mustNotContain(t, page, "keep their status")
+}

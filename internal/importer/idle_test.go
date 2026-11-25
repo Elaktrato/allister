@@ -59,8 +59,14 @@ func setStatus(t *testing.T, e *genEnv, isbn string, st library.Status) int64 {
 
 func backdate(t *testing.T, e *genEnv, itemID int64) {
 	t.Helper()
+	backdateTo(t, e, itemID, time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC))
+}
+
+// backdateTo makes the entry's (and its run's) last change at.
+func backdateTo(t *testing.T, e *genEnv, itemID int64, at time.Time) {
+	t.Helper()
 	for _, q := range []string{`UPDATE entries SET updated_at = ? WHERE item_id = ?`, `UPDATE entry_runs SET updated_at = ? WHERE item_id = ?`} {
-		if _, err := e.dbh.Exec(q, "2020-01-01T00:00:00Z", itemID); err != nil {
+		if _, err := e.dbh.Exec(q, at.UTC().Format("2006-01-02T15:04:05Z"), itemID); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -166,7 +172,9 @@ func TestIdlePausesExistingActiveEntryWithoutNewerRow(t *testing.T) {
 	if err := e.lib.UpsertEntry(context.Background(), *en); err != nil { // a manual change after the last activity
 		t.Fatal(err)
 	}
-	row := activeRow("1", 99, daysAgo(40))
+	// ... but itself longer ago than the cutoff, like the last activity
+	backdateTo(t, e, it.ID, *daysAgo(45))
+	row := activeRow("1", 99, daysAgo(60))
 	importRows(t, e, ModeNewer, row)
 	_, got := e.item("book", "book", "isbn", "1")
 	if got.Status != library.Paused {
@@ -248,5 +256,51 @@ func TestIdlePausedStaysWithoutKnownActivity(t *testing.T) {
 	importRows(t, e, ModeAlways, activeRow("1", 20, nil))
 	if _, en := e.item("book", "book", "isbn", "1"); en.Status != library.Paused || en.Progress["pages"] != 20 {
 		t.Fatalf("%+v", en)
+	}
+}
+
+// TestIdleRepauseRespectsManualEdit: a game paused by the rule and set back
+// to Active by hand is not paused again by a row that is not newer while the
+// manual change is within the cutoff; once that change is older than the
+// cutoff too, the next import pauses it.
+func TestIdleRepauseRespectsManualEdit(t *testing.T) {
+	e := idleEnv(t)
+	row := activeRow("1", 10, daysAgo(60))
+	importRows(t, e, ModeNewer, row)
+	if got := statusOf(t, e, "1"); got != library.Paused {
+		t.Fatalf("first import: %q", got)
+	}
+	it, en := e.item("book", "book", "isbn", "1")
+	en.Status = library.Active
+	if err := e.lib.UpsertEntry(context.Background(), *en); err != nil {
+		t.Fatal(err)
+	}
+	backdateTo(t, e, it.ID, *daysAgo(0)) // changed by hand today
+	importRows(t, e, ModeNewer, row)
+	if got := statusOf(t, e, "1"); got != library.Active {
+		t.Fatalf("manual edit undone: %q", got)
+	}
+	backdateTo(t, e, it.ID, *daysAgo(31)) // the edit is now past the cutoff
+	importRows(t, e, ModeNewer, row)
+	if got := statusOf(t, e, "1"); got != library.Paused {
+		t.Fatalf("idle past the cutoff: %q", got)
+	}
+}
+
+// TestIdleKeepsCompletedAndDroppedInNewerMode: under "newer" an idle row that
+// is not newer leaves a Completed or Dropped entry alone.
+func TestIdleKeepsCompletedAndDroppedInNewerMode(t *testing.T) {
+	for _, st := range []library.Status{library.Completed, library.Dropped} {
+		e := idleEnv(t)
+		importRows(t, e, ModeSkip, activeRow("1", 10, daysAgo(200)))
+		id := setStatus(t, e, "1", st)
+		backdateTo(t, e, id, *daysAgo(100)) // after the row's activity, past the cutoff
+		importRows(t, e, ModeNewer, activeRow("1", 80, daysAgo(200)))
+		if _, en := e.item("book", "book", "isbn", "1"); en.Status != st || en.Progress["pages"] != 10 {
+			t.Errorf("%s: %+v", st, en)
+		}
+		if r := e.report(); r.Updated != 0 {
+			t.Errorf("%s: report %+v", st, r)
+		}
 	}
 }
