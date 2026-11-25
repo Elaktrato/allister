@@ -188,6 +188,7 @@ func newServer(deps Deps, now func() time.Time) (*server, http.Handler) {
 	mux.HandleFunc("GET /{$}", s.getHome)
 	mux.HandleFunc("GET /settings", s.getSettings)
 	mux.HandleFunc("POST /settings/time-zone", s.postTimeZone)
+	mux.HandleFunc("POST /settings/list-paging", s.postListPaging)
 	mux.HandleFunc("GET /settings/import", s.getImport)
 	mux.HandleFunc("POST /settings/import", s.postImport)
 	mux.HandleFunc("POST /settings/import/cancel", s.postImportCancel)

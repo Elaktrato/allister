@@ -22,6 +22,8 @@ The search bar above the list (`q`) and the Filters panel next to it (every othe
 
 Unknown or invalid parameters are ignored, and a notice names them.
 
+**Loading more rows.** A list (table or cards, and the Series tab) shows 100 entries at a time. By default it loads the next 100 when you scroll to the end: the last row is followed by a "Load more" element that htmx fetches once it scrolls into view (or when it is clicked), and swaps for the next rows and a new "Load more" while more are left. The address bar keeps the filters only, never a page number, so Back, a reload or a bookmark opens the list from the top, and changing a filter, the sort or a tab starts at the first 100 again. "Select all loaded" in the bulk edit ticks every row loaded so far; "Select all N matching" still selects everything the filter matches. If the order changes while you scroll (a +1 moves an entry to the top of "recently updated"), an entry the next rows bring again is dropped, and one that moved up into rows already loaded shows only after a reload. Without JavaScript "Load more" is a link to the next page (`page=2`, ...). The other mode, **Split into pages** (Settings > General), shows "Showing 1–100 of N" with Previous and Next links instead. The request "Load more" sends is the list URL with `page` and the headers `HX-Request: true` and `HX-Target: list-more`; it answers only the rows (table rows, cards, or the Series tab's rows) and the next "Load more", without changing the address bar (`Vary: HX-Request, HX-Target, HX-History-Restore-Request`, like the list). A page beyond the end answers nothing.
+
 ## Statistics
 
 The Statistics page (`/stats`, in the sidebar) sums your list by the day each entry was finished. Each media kind declares how its time and units are counted (see [Statistics](plugins.md#statistics) in the plugin guide); a kind without a declaration only adds to the entry counts. The page is a plain GET form: every choice is in the URL, so a view can be bookmarked, and it works without JavaScript. Parameters:
@@ -79,6 +81,8 @@ A series is a named, ordered group of list entries of one plugin and kind (see t
 Backup, restore and export are described under "Series in backups and exports" below. In an older Allister, a new backup's spin-off parts restore as ordinary parts at the end of their series.
 
 ## Settings > General
+
+**Lists** (stored as the setting `list_paging`: `scroll` or `pages`; unset or anything else means `scroll`). **Load more while scrolling (default)** or **Split into pages**, for every plugin's list and Series tab; see [Loading more rows](#searching-your-list). A plain form (`POST /settings/list-paging`, field `list_paging`); another value is refused with a message (422). The setting is not part of the backup.
 
 **Time zone** (stored as the setting `time_zone`, an IANA name such as `Europe/Berlin`). The home page's Coming up and the calendar page group their days and show their times in this zone, on the server, so a heading and its times always agree (a 23:30 UTC release is under Tuesday at 00:30 for Europe/Berlin). Empty means the default: the `TZ` environment variable when it names a valid zone, else UTC. An unknown name is refused with a message. "Use this browser's zone" fills the field with the browser's zone (it still needs Save). The `/calendar.ics` feed always uses UTC; calendar apps convert. The zone database is built into the binary. The universal backup carries the setting; a restore applies it only when this installation has none of its own.
 

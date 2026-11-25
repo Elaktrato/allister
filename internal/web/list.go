@@ -101,23 +101,30 @@ type listHead struct {
 }
 
 type listView struct {
-	Heading              string // the kind's plural label
-	Title                string // the page title when it is not "<Heading> list"
-	AddLabel             string // "Add book": the search link's text
-	Kinds                []tabView
-	Head                 listHead
-	Tabs                 []tabView
-	TabsOOB              bool   // the tabs ride along with a rows partial
-	PushURL              string // the canonical URL of what is shown (filters applied, page clamped)
-	View                 string // "cards" or "table": how the rows are shown
-	Filters              filterBar
-	Filtered             bool     // a filter narrows the rows
-	Notice               []string // rejected parameter keys (shown escaped)
-	NoticeMore           int      // rejected keys beyond Notice
-	Rows                 []rowView
-	AnyEntries           bool
-	Total, From, To      int
-	PrevURL, NextURL     string
+	Heading          string // the kind's plural label
+	Title            string // the page title when it is not "<Heading> list"
+	AddLabel         string // "Add book": the search link's text
+	Kinds            []tabView
+	Head             listHead
+	Tabs             []tabView
+	TabsOOB          bool   // the tabs ride along with a rows partial
+	PushURL          string // the canonical URL of what is shown (filters applied, page clamped)
+	View             string // "cards" or "table": how the rows are shown
+	Filters          filterBar
+	Filtered         bool     // a filter narrows the rows
+	Notice           []string // rejected parameter keys (shown escaped)
+	NoticeMore       int      // rejected keys beyond Notice
+	Rows             []rowView
+	AnyEntries       bool
+	Total, From, To  int
+	PrevURL, NextURL string
+	// Page is the page shown (after clamping). Scroll is the scroll mode
+	// (Settings > General): the rows end with a sentinel that loads NextURL's
+	// rows (list_more) instead of the pager's Next link; MoreColSpan is the
+	// number of table columns the sentinel row spans.
+	Page                 int
+	Scroll               bool
+	MoreColSpan          int
 	ViewCardsURL         string // the view switch: the same list in cards
 	ViewTableURL         string // … and in the table
 	SearchURL, ManualURL string
@@ -165,7 +172,10 @@ type listQuery struct {
 	Kind, Status, View string
 	Tab                string // "series" for the Series tab, else ""
 	Page               int
-	Filters            listFilters
+	// More marks the scroll sentinel's request (the next page's rows only):
+	// its rows return to the list's first page, the URL the address bar keeps.
+	More    bool
+	Filters listFilters
 	// Length is the randomiser's length filter (parsed for every list so the
 	// filter bar keeps it; only the pick applies it).
 	Length   lengthFilter
@@ -534,8 +544,12 @@ func (s *server) buildList(r *http.Request, m plugin.Manifest, lq listQuery) (li
 		h.Hide = c.Hide
 		v.Head.Columns = append(v.Head.Columns, h)
 	}
+	rowRet := ret
+	if lq.More {
+		rowRet = lengthListURL(m, k.Key, lq.Status, lq.View, 1, f, lq.Length)
+	}
 	for _, row := range pg.Rows {
-		rv := s.rowView(m, row, ret, cols)
+		rv := s.rowView(m, row, rowRet, cols)
 		rv.SelectID = strconv.FormatInt(row.Item.ID, 10)
 		v.Rows = append(v.Rows, rv)
 	}
@@ -549,6 +563,12 @@ func (s *server) buildList(r *http.Request, m plugin.Manifest, lq listQuery) (li
 	}
 	if pg.Total > 0 {
 		v.From, v.To = (pg.PageNo-1)*listPageSize+1, (pg.PageNo-1)*listPageSize+len(pg.Rows)
+	}
+	v.Page, v.Scroll = pg.PageNo, s.scrollLists(ctx)
+	// select (with the bulk bar), cover, title, the columns, actions
+	v.MoreColSpan = 3 + len(cols)
+	if v.Bulk != nil {
+		v.MoreColSpan++
 	}
 	if pg.PageNo > 1 {
 		v.PrevURL = lengthListURL(m, k.Key, lq.Status, lq.View, pg.PageNo-1, f, lq.Length)
@@ -619,6 +639,10 @@ func (s *server) getList(w http.ResponseWriter, r *http.Request, pluginID string
 	if err != nil {
 		lq.Rejected = append(lq.Rejected, "(unreadable parameter)")
 	}
+	if isPartialRequest(r) && r.Header.Get("HX-Target") == listMoreID {
+		s.listMore(w, r, m, lq)
+		return
+	}
 	if isPartialRequest(r) && r.Header.Get("HX-Target") == listRowsID {
 		v, err := s.buildList(r, m, lq)
 		if err != nil {
@@ -636,6 +660,28 @@ func (s *server) getList(w http.ResponseWriter, r *http.Request, pluginID string
 
 // listRowsID is the id of the rows region the filter bar targets.
 const listRowsID = "list-rows"
+
+// listMoreID is the id of the scroll sentinel at the end of the rows.
+const listMoreID = "list-more"
+
+// listMore answers the scroll sentinel: the rows (or cards, or series) of the
+// requested page and the next sentinel, without pushing a URL (the address
+// bar keeps the list's filters). A page past the end (the list shrank since
+// the sentinel was rendered) answers nothing rather than the last page
+// again.
+func (s *server) listMore(w http.ResponseWriter, r *http.Request, m plugin.Manifest, lq listQuery) {
+	lq.More = true
+	v, err := s.buildList(r, m, lq)
+	if err != nil {
+		s.internalError(w, r, err)
+		return
+	}
+	if v.Page < lq.Page {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+	s.renderPartial(w, "list", "list_more_partial", v)
+}
 
 // showList renders the full list page, with the edit dialog open when dialog is set.
 func (s *server) showList(w http.ResponseWriter, r *http.Request, m plugin.Manifest, lq listQuery, dialog *entryDialog, code int) {
@@ -763,6 +809,7 @@ func (s *server) buildSeriesTab(r *http.Request, m plugin.Manifest, lq listQuery
 	if pg.Total > 0 {
 		v.From, v.To = (pg.Page-1)*listPageSize+1, (pg.Page-1)*listPageSize+len(pg.Rows)
 	}
+	v.Page, v.Scroll = pg.Page, s.scrollLists(ctx)
 	if pg.Page > 1 {
 		v.PrevURL = at(lq.Status, pg.Page-1)
 	}

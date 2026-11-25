@@ -489,3 +489,26 @@ func TestIdleDays(t *testing.T) {
 		}
 	}
 }
+
+func TestListPagingDefaultsToScroll(t *testing.T) {
+	s, _ := newStore(t)
+	ctx := context.Background()
+	if got := s.ListPaging(ctx); got != ListPagingScroll {
+		t.Fatalf("unset = %q", got)
+	}
+	if err := s.SetListPaging(ctx, "endless"); err == nil {
+		t.Fatal("invalid paging stored")
+	}
+	if err := s.SetListPaging(ctx, ListPagingPages); err != nil {
+		t.Fatal(err)
+	}
+	if got := s.ListPaging(ctx); got != ListPagingPages {
+		t.Fatalf("stored = %q", got)
+	}
+	if err := s.Set(ctx, KeyListPaging, "bogus"); err != nil {
+		t.Fatal(err)
+	}
+	if got := s.ListPaging(ctx); got != ListPagingScroll {
+		t.Fatalf("bogus = %q", got)
+	}
+}

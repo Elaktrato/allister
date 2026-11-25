@@ -6,6 +6,7 @@
 {{define "list_cards"}}
 <div data-cards class="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
   {{range .Rows}}{{template "list_card" .}}{{end}}
+  {{template "list_more" .}}
 </div>
 {{end}}
 

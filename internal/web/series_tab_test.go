@@ -111,6 +111,7 @@ func TestSeriesTabSortByTitle(t *testing.T) {
 // The pager links of the Series tab stay on the tab and keep its parameters.
 func TestSeriesTabPaginationKeepsTab(t *testing.T) {
 	fe := newFixtureEnv(t)
+	pagesMode(t, fe.env)
 	for i := 0; i < listPageSize+1; i++ {
 		n := strconv.Itoa(i)
 		id := fe.addFixture(t, "tv", "show", tvShow("p"+n, "Show "+n), library.Entry{Status: library.Planned})

@@ -25,6 +25,7 @@
 {{if eq .View "cards"}}
 <div data-cards class="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
   {{range .SeriesRows}}{{template "series_card" .}}{{end}}
+  {{template "list_more" .}}
 </div>
 {{else}}
 <div class="overflow-x-auto">
@@ -40,16 +41,11 @@
       </tr>
     </thead>
     {{range .SeriesRows}}{{template "series_row" .}}{{end}}
+    {{template "list_more" .}}
   </table>
 </div>
 {{end}}
-<div class="mt-4 flex items-center justify-between text-sm text-slate-400">
-  <p>Showing {{.From}}–{{.To}} of {{.Total}}</p>
-  <p class="flex gap-4">
-    {{if .PrevURL}}<a href="{{.PrevURL}}" class="text-indigo-300 hover:underline">Previous</a>{{end}}
-    {{if .NextURL}}<a href="{{.NextURL}}" class="text-indigo-300 hover:underline">Next</a>{{end}}
-  </p>
-</div>
+{{template "list_pager" .}}
 {{end}}
 {{end}}
 

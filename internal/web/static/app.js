@@ -244,7 +244,31 @@
     }
     bulkUpdate();
   });
-  // a rows partial (filters, sort) brings a new bar and new rows
+  // The list's scroll sentinel (data-list-more) swaps itself for the next
+  // page's rows. When the order moved while scrolling (a +1 brings an entry
+  // to the top), an entry can come again: the later copy is dropped, so
+  // every entry is loaded once. The bulk state below then counts the
+  // appended rows (the select-all covers every loaded row).
+  document.addEventListener("htmx:afterSwap", function (event) {
+    var source = event.detail.requestConfig && event.detail.requestConfig.elt;
+    if (!source || !source.closest || !source.closest("[data-list-more]")) {
+      return;
+    }
+    var seen = {};
+    var rows = bulkRows();
+    for (var i = 0; i < rows.length; i++) {
+      if (seen[rows[i].value]) {
+        var el = rows[i].closest("[data-row], [data-card]");
+        if (el) {
+          el.remove();
+        }
+      } else {
+        seen[rows[i].value] = true;
+      }
+    }
+  });
+  // a rows partial (filters, sort) brings a new bar and new rows; the
+  // sentinel brings more rows
   document.addEventListener("htmx:afterSwap", bulkInit);
   bulkInit();
 
