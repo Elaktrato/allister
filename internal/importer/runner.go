@@ -30,6 +30,7 @@ import (
 	"github.com/allister/allister/internal/jobs"
 	"github.com/allister/allister/internal/library"
 	"github.com/allister/allister/internal/plugin"
+	"github.com/allister/allister/internal/settings"
 )
 
 // KindRun is the job kind handled by Runner.Handler.
@@ -152,6 +153,9 @@ type Deps struct {
 	// web.Deps.SyncJobs (cmd/allister builds one map for both). A plugin
 	// without an entry gets no sync job.
 	SyncJobs map[string]func(itemID int64) (kind string, payload any)
+	// Settings gives the idle cutoff of a plugin with an IdlePause importer
+	// and the time zone of "today"; nil means the default cutoff in UTC.
+	Settings *settings.Store
 	// Now and Sleep replace time.Now and a context-aware sleep (tests); nil
 	// gets the real ones.
 	Now   func() time.Time
@@ -610,6 +614,7 @@ type rowCtx struct {
 	value    string
 	// generatedTitle: the title is Submit's "<id label> #<id>", not the file's
 	generatedTitle bool
+	idle           idleState
 }
 
 func (rc *rowCtx) pluginID() string { return rc.ref.manifest.ID }
@@ -628,6 +633,7 @@ func (r *Runner) process(ctx context.Context, ref *importerRef, importID int64, 
 		return r.record(ctx, importID, pr.seq, outcomeSkipped, 0, fmt.Sprintf("unknown kind %q", plugin.SingleLine(rc.entry.Kind, 40)))
 	}
 	rc.kind = kind
+	r.applyIdle(ctx, rc)
 	if rc.idType != "" {
 		rc.value = plugin.SingleLine(rc.entry.ExternalIDs[rc.idType], maxTitleRunes)
 	}
@@ -869,7 +875,7 @@ func (r *Runner) saveFound(dctx context.Context, rc *rowCtx, data plugin.ItemDat
 			}
 		}
 	}
-	entry, notes := buildEntry(kind, &library.Item{ProgressKeys: kind.Progress.Defaults, Fields: data.Fields}, rc.entry)
+	entry, notes := rc.build(&library.Item{ProgressKeys: kind.Progress.Defaults, Fields: data.Fields})
 	id, err := r.d.Library.AddToList(dctx, rc.pluginID(), kind.Key, data, entry)
 	var exists *library.AlreadySavedError
 	switch {
@@ -929,13 +935,14 @@ func (r *Runner) handleSaved(ctx context.Context, rc *rowCtx, saved *library.Ite
 		syncNote = r.syncJob(dctx, rc.pluginID(), saved.ID)
 	}
 	if le != nil {
+		status := rc.idleStatus(le.Status)
 		// a "newer" row without a source timestamp cannot prove it is newer
 		if rc.mode == ModeAlways || (rc.mode == ModeNewer && rc.entry.UpdatedAt != nil) {
 			newerThan := rc.entry.UpdatedAt
 			if rc.mode == ModeAlways {
 				newerThan = nil
 			}
-			upd := library.Entry{Status: library.Status(rc.entry.Status), Rating: rc.entry.Rating, Progress: rc.entry.Progress}
+			upd := library.Entry{Status: status, Rating: rc.entry.Rating, Progress: rc.entry.Progress}
 			updated, uerr := r.d.Library.ApplyImport(dctx, saved.ID, upd, newerThan)
 			if uerr != nil {
 				return r.record(dctx, rc.importID, rc.seq, outcomeFailed, saved.ID, uerr.Error())
@@ -945,12 +952,26 @@ func (r *Runner) handleSaved(ctx context.Context, rc *rowCtx, saved *library.Ite
 				if inactive := inactiveProgress(saved.ProgressKeys, rc.entry.Progress); len(inactive) > 0 {
 					note += "; progress not active: " + strings.Join(inactive, ", ")
 				}
+				if status == library.Paused && le.Status != library.Paused {
+					note = joinNotes(note, rc.idleNote())
+				}
 				return r.record(dctx, rc.importID, rc.seq, outcomeUpdated, saved.ID, joinNotes(note, syncNote))
+			}
+		}
+		// the idle pause of an Active entry needs no newer row: only the
+		// status changes, the entry's own later edits stay
+		if rc.mode != ModeSkip && rc.idle.paused && le.Status == library.Active {
+			updated, uerr := r.d.Library.ApplyImport(dctx, saved.ID, library.Entry{Status: library.Paused}, nil)
+			if uerr != nil {
+				return r.record(dctx, rc.importID, rc.seq, outcomeFailed, saved.ID, uerr.Error())
+			}
+			if updated {
+				return r.record(dctx, rc.importID, rc.seq, outcomeUpdated, saved.ID, joinNotes(rc.idleNote(), syncNote))
 			}
 		}
 		return r.record(dctx, rc.importID, rc.seq, outcomeSkipped, saved.ID, joinNotes("already in your list", syncNote))
 	}
-	entry, notes := buildEntry(rc.kind, saved, rc.entry)
+	entry, notes := rc.build(saved)
 	entry.ItemID = saved.ID
 	err = r.d.Library.CreateEntry(dctx, entry)
 	switch {
@@ -962,6 +983,15 @@ func (r *Runner) handleSaved(ctx context.Context, rc *rowCtx, saved *library.Ite
 	label := strings.ToLower(rc.kind.Label)
 	return r.record(dctx, rc.importID, rc.seq, outcomeImported, saved.ID,
 		joinNotes(append([]string{"added to your list (" + label + " was already saved)"}, append(notes, syncNote)...)...))
+}
+
+// build is buildEntry for the row, with the note of an idle pause.
+func (rc *rowCtx) build(item *library.Item) (library.Entry, []string) {
+	entry, notes := buildEntry(rc.kind, item, rc.entry)
+	if n := rc.idleNote(); n != "" {
+		notes = append(notes, n)
+	}
+	return entry, notes
 }
 
 // inactiveProgress lists the row's progress keys the entry does not track.
@@ -1041,7 +1071,7 @@ func (r *Runner) saveManual(ctx context.Context, rc *rowCtx, reason, outcome str
 	if u := plugin.HTTPSURL(rc.entry.CoverURL); u != "" {
 		d.CoverURL = u
 	}
-	entry, notes := buildEntry(rc.kind, &library.Item{ProgressKeys: rc.kind.Progress.Defaults, Fields: d.Fields}, rc.entry)
+	entry, notes := rc.build(&library.Item{ProgressKeys: rc.kind.Progress.Defaults, Fields: d.Fields})
 	id, err := r.d.Library.AddToList(ctx, rc.pluginID(), rc.kind.Key, d, entry, library.WithSyncState("pending"))
 	switch {
 	case errors.Is(err, library.ErrAlreadySaved):

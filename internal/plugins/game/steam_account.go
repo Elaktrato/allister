@@ -7,6 +7,7 @@ import (
 	"io"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/allister/allister/internal/plugin"
 )
@@ -38,9 +39,11 @@ func (steamAccountImporter) Parse(context.Context, io.Reader) (plugin.ParseResul
 // ImportAccount validates the SteamID64, fetches the owned games and returns
 // one entry per game: the appid as the Steam external id, the playtime in
 // seconds, Active when the game has been played and Planned when it has not,
-// and the store header image as cover. A missing or refused key is bad input
-// with a pointer to the settings (not a retryable configuration error); an
-// empty library keeps the client's "make your profile public" reason.
+// the store header image as cover, and the last play (rtime_last_played) as
+// both LastActive and UpdatedAt (nil when Steam reports none). A missing or
+// refused key is bad input with a pointer to the settings (not a retryable
+// configuration error); an empty library keeps the client's "make your
+// profile public" reason.
 func (si steamAccountImporter) ImportAccount(ctx context.Context, steamID string) (plugin.ParseResult, error) {
 	steamID = strings.TrimSpace(steamID)
 	if !isSteamID64(steamID) {
@@ -74,6 +77,14 @@ func (si steamAccountImporter) ImportAccount(ctx context.Context, steamID string
 		if minutes == 0 {
 			status = plugin.Planned
 		}
+		// The last play is both the source's modification time ("update
+		// when newer" sees a new play) and the row's last activity (the core's
+		// idle rule pauses a game not played for a while).
+		var lastPlayed *time.Time
+		if g.RtimeLastPlayed > 0 {
+			t := time.Unix(g.RtimeLastPlayed, 0).UTC()
+			lastPlayed = &t
+		}
 		res.Entries = append(res.Entries, plugin.ParsedEntry{
 			Kind:        KindGame,
 			Title:       plugin.SingleLine(g.Name, maxTitleRunes),
@@ -81,6 +92,8 @@ func (si steamAccountImporter) ImportAccount(ctx context.Context, steamID string
 			Status:      status,
 			Progress:    map[string]float64{"playtime": float64(minutes) * 60},
 			CoverURL:    plugin.HTTPSURL(steamHeaderURL(g.AppID)),
+			UpdatedAt:   lastPlayed,
+			LastActive:  lastPlayed,
 		})
 	}
 	return res, nil

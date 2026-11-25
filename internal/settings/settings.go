@@ -11,6 +11,7 @@ import (
 	"maps"
 	"os"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -139,6 +140,44 @@ func (s *Store) ImportSchedule(ctx context.Context, id, importer string) string 
 // checks it).
 func (s *Store) SetImportSchedule(ctx context.Context, id, importer, schedule string) error {
 	return s.Set(ctx, importKey(id, importer, "schedule"), schedule)
+}
+
+// DefaultIdleDays is a plugin's idle cutoff when none is stored, and
+// MaxIdleDays the largest one accepted (0 turns the rule off).
+const (
+	DefaultIdleDays = 30
+	MaxIdleDays     = 3650
+)
+
+// idleDaysKey is the settings key of a plugin's idle cutoff in days.
+func idleDaysKey(id string) string { return "plugin." + id + ".idle_days" }
+
+// IdleDays is plugin id's idle cutoff in days (0: off). Nothing stored, an
+// unreadable setting or a stored value that is not an integer from 0 to
+// MaxIdleDays is DefaultIdleDays.
+func (s *Store) IdleDays(ctx context.Context, id string) int {
+	v, ok, err := s.Get(ctx, idleDaysKey(id))
+	if err != nil {
+		log.Printf("settings: read idle days %s: %v", id, err)
+		return DefaultIdleDays
+	}
+	if !ok {
+		return DefaultIdleDays
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil || n < 0 || n > MaxIdleDays {
+		return DefaultIdleDays
+	}
+	return n
+}
+
+// SetIdleDays stores plugin id's idle cutoff; a value outside 0 to
+// MaxIdleDays is refused.
+func (s *Store) SetIdleDays(ctx context.Context, id string, days int) error {
+	if days < 0 || days > MaxIdleDays {
+		return fmt.Errorf("settings: idle days %d outside 0 to %d", days, MaxIdleDays)
+	}
+	return s.Set(ctx, idleDaysKey(id), strconv.Itoa(days))
 }
 
 // homeViewKey and homeStatusesKey are the settings keys holding a plugin's

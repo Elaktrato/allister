@@ -66,7 +66,8 @@ func TestManifestJSONRoundTrip(t *testing.T) {
 		}},
 		Sources: []plugin.SourceInfo{{ID: "s", Name: "S", RequestsPerMinute: 30, ExternalIDTypes: []string{"s"}, SupportsLookup: true, LinkLabel: "View on S", URLPatterns: []string{"s.example/{id}"}, Kinds: []string{"k"}, KeyLabel: "API key", KeyHelp: "Get one at example.test.", KeyOptional: true,
 			KeyFields: []plugin.KeyField{{Name: "client_id", Label: "Client ID"}, {Name: "client_secret", Label: "Client Secret", Secret: true}}}},
-		Importers: []plugin.ImporterInfo{{ID: "i", Name: "I", FileHint: "csv", Accept: []string{".csv"}, ExternalIDType: "s", ExternalIDLabel: "S id", ResolveVia: "s", ResolveViaFallback: []string{"s2"}, ResolveByTitle: true, ManualRows: true, FallbackTitleLang: "en", UnmatchedNote: "No S match for #{id}."}},
+		Importers: []plugin.ImporterInfo{{ID: "i", Name: "I", FileHint: "csv", Accept: []string{".csv"}, ExternalIDType: "s", ExternalIDLabel: "S id", ResolveVia: "s", ResolveViaFallback: []string{"s2"}, ResolveByTitle: true, ManualRows: true, FallbackTitleLang: "en", UnmatchedNote: "No S match for #{id}."},
+			{ID: "a", Name: "A", AccountLabel: "User", IdlePause: true}},
 		Exporters: []plugin.ExporterInfo{{ID: "x", Name: "X", Extension: ".json", MIME: "application/json"}},
 	}
 	roundTrip(t, "full manifest", full)
@@ -108,6 +109,10 @@ func TestRuntimeDataJSONRoundTrip(t *testing.T) {
 		Fields: map[string]plugin.FieldValue{"pages": {Num: fptr(300)}},
 	}
 	roundTrip(t, "parsedentry", entry)
+	active := time.Date(2024, 3, 5, 18, 4, 5, 0, time.UTC)
+	withTimes := entry
+	withTimes.UpdatedAt, withTimes.LastActive = &active, &active
+	roundTrip(t, "parsedentry with times", withTimes)
 	roundTrip(t, "skipped", plugin.SkippedRow{Line: 4, Title: "T", Reason: "bad"})
 	roundTrip(t, "airing", plugin.Airing{Season: 2, Number: 5, AirsAt: day})
 	roundTrip(t, "parseresult", plugin.ParseResult{Entries: []plugin.ParsedEntry{entry}, Skipped: []plugin.SkippedRow{{Line: 1, Reason: "r"}}, Ignored: 2})
@@ -331,6 +336,26 @@ func TestExportEntrySeriesJSON(t *testing.T) {
 	b, _ = json.Marshal(plugin.ExportEntry{Kind: "k"})
 	if strings.Contains(string(b), "series") {
 		t.Fatalf("zero values not omitted: %s", b)
+	}
+}
+
+func TestIdlePauseJSON(t *testing.T) {
+	on, _ := json.Marshal(plugin.ImporterInfo{ID: "i", Name: "I", AccountLabel: "User", IdlePause: true})
+	if !strings.Contains(string(on), `"idle_pause":true`) {
+		t.Errorf("set: %s", on)
+	}
+	off, _ := json.Marshal(plugin.ImporterInfo{ID: "i", Name: "I"})
+	if strings.Contains(string(off), "idle_pause") {
+		t.Errorf("unset must be omitted: %s", off)
+	}
+	day := time.Date(2024, 3, 5, 0, 0, 0, 0, time.UTC)
+	set, _ := json.Marshal(plugin.ParsedEntry{Kind: "k", LastActive: &day})
+	if !strings.Contains(string(set), `"last_active":"2024-03-05T00:00:00Z"`) {
+		t.Errorf("last_active set: %s", set)
+	}
+	unset, _ := json.Marshal(plugin.ParsedEntry{Kind: "k"})
+	if strings.Contains(string(unset), "last_active") {
+		t.Errorf("last_active unset must be omitted: %s", unset)
 	}
 }
 

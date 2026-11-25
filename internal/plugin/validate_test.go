@@ -24,6 +24,14 @@ func TestValidateAcceptsFixtures(t *testing.T) {
 	}
 }
 
+func TestValidateAcceptsIdlePauseOnAccountImporter(t *testing.T) {
+	m := plugintest.TVPlugin().Manifest()
+	m.Importers[1].IdlePause = true
+	if err := plugin.Validate(m); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestValidateRejects(t *testing.T) {
 	tests := []struct {
 		name string
@@ -169,6 +177,8 @@ func TestValidateRejects(t *testing.T) {
 		{"duplicate importer", book, func(m *plugin.Manifest) { m.Importers = append(m.Importers, m.Importers[0]) }, `importers[1].id: duplicate`},
 		{"fallback unknown source", book, func(m *plugin.Manifest) { m.Importers[0].ResolveViaFallback = []string{"ghost"} }, `importers[0].resolve_via_fallback[0]: unknown source "ghost"`},
 		{"fallback duplicates primary", book, func(m *plugin.Manifest) { m.Importers[0].ResolveViaFallback = []string{"books"} }, `importers[0].resolve_via_fallback[0]: duplicate source "books"`},
+		{"idle pause on a file importer", book, func(m *plugin.Manifest) { m.Importers[0].IdlePause = true },
+			`importers[0].idle_pause: requires account_label`},
 		{"fallback without primary", book, func(m *plugin.Manifest) {
 			m.Importers[0].ResolveVia = ""
 			m.Importers[0].ResolveViaFallback = []string{"books"}

@@ -453,3 +453,39 @@ func TestTimeZoneNameLogsAnUnreadableSetting(t *testing.T) {
 		t.Errorf("no log line: %q", buf.String())
 	}
 }
+
+// TestIdleDays: the idle cutoff is stored per plugin (plugin.<id>.idle_days);
+// nothing stored, or a value that is not a number in range, is the default
+// of 30; 0 is a real value (off); out-of-range values are refused.
+func TestIdleDays(t *testing.T) {
+	s, exec := newStore(t)
+	ctx := context.Background()
+	if got := s.IdleDays(ctx, "a"); got != DefaultIdleDays || DefaultIdleDays != 30 {
+		t.Fatalf("unset = %d, default %d", got, DefaultIdleDays)
+	}
+	for _, days := range []int{0, 1, 3650} {
+		if err := s.SetIdleDays(ctx, "a", days); err != nil {
+			t.Fatalf("set %d: %v", days, err)
+		}
+		if got := s.IdleDays(ctx, "a"); got != days {
+			t.Fatalf("set %d, got %d", days, got)
+		}
+	}
+	if v, ok, _ := s.Get(ctx, "plugin.a.idle_days"); !ok || v != "3650" {
+		t.Fatalf("stored %q %v", v, ok)
+	}
+	if got := s.IdleDays(ctx, "b"); got != DefaultIdleDays {
+		t.Fatalf("other plugin = %d", got)
+	}
+	for _, bad := range []int{-1, 3651} {
+		if err := s.SetIdleDays(ctx, "a", bad); err == nil {
+			t.Fatalf("set %d accepted", bad)
+		}
+	}
+	for _, junk := range []string{"x", "-5", "99999", ""} {
+		exec(`INSERT INTO settings(key, value) VALUES('plugin.c.idle_days', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`, junk)
+		if got := s.IdleDays(ctx, "c"); got != DefaultIdleDays {
+			t.Fatalf("stored %q read as %d", junk, got)
+		}
+	}
+}

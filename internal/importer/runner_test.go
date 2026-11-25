@@ -15,6 +15,7 @@ import (
 	"github.com/allister/allister/internal/library"
 	"github.com/allister/allister/internal/plugin"
 	"github.com/allister/allister/internal/plugin/plugintest"
+	"github.com/allister/allister/internal/settings"
 )
 
 // genEnv runs the generic runner over the book and tv fixture plugins. The
@@ -38,6 +39,7 @@ type genEnv struct {
 	dbh      *sql.DB
 	// bookPlugin is the registered book fixture (tests change its sources).
 	bookPlugin *plugintest.Plugin
+	settings   *settings.Store
 }
 
 func pf(f float64) *float64 { return &f }
@@ -73,7 +75,9 @@ func newGenEnvWithFallback(t *testing.T) *genEnv { return newGenEnvWith(t, true,
 
 func newGenEnvManual(t *testing.T) *genEnv { return newGenEnvWith(t, false, true) }
 
-func newGenEnvWith(t *testing.T, fallback, manual bool) *genEnv {
+// newGenEnvWith builds the env; tweaks change the book fixture before it is
+// registered.
+func newGenEnvWith(t *testing.T, fallback, manual bool, tweaks ...func(*plugintest.Plugin)) *genEnv {
 	t.Helper()
 	d := openDB(t)
 	e := &genEnv{t: t, q: &fakeQueue{inner: jobs.NewQueue(d)}, clk: &clock{t: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)},
@@ -100,6 +104,9 @@ func newGenEnvWith(t *testing.T, fallback, manual bool) *genEnv {
 		bk.M.Importers[0].ManualRows = true
 	}
 	bk.Importers = map[string]plugin.Importer{"books-csv": e.bookImp}
+	for _, tw := range tweaks {
+		tw(bk)
+	}
 
 	tv := plugintest.TVPlugin()
 	tv.M.Importers[0].FallbackTitleLang = ""
@@ -127,7 +134,8 @@ func newGenEnvWith(t *testing.T, fallback, manual bool) *genEnv {
 		}
 	}
 	e.lib = library.New(d, e.reg)
-	e.im = New(Deps{DB: d, Library: e.lib, Registry: e.reg, Queue: e.q,
+	e.settings = settings.New(d)
+	e.im = New(Deps{DB: d, Library: e.lib, Registry: e.reg, Queue: e.q, Settings: e.settings,
 		SyncJobs: map[string]func(int64) (string, any){
 			"book": jobs.SyncJobFor("book"), "tv": jobs.SyncJobFor("tv"), "ebook": jobs.SyncJobFor("ebook")},
 		Now: e.clk.now, Sleep: e.clk.sleep})

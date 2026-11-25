@@ -101,6 +101,9 @@ type steamGame struct {
 	// IconHash is the icon's file hash (Steam names the field img_icon_url,
 	// but it is not a URL); unused, kept for the record.
 	IconHash string `json:"img_icon_url"`
+	// RtimeLastPlayed is the last time the game was played, in Unix seconds;
+	// 0 when it never was (or Steam does not know).
+	RtimeLastPlayed int64 `json:"rtime_last_played"`
 }
 
 // ownedGames fetches the account's library through the official Web API. The
