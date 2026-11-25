@@ -30,7 +30,7 @@ func TestManagingMigration(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer d.Close()
-	if v, err := goose.GetDBVersion(d); err != nil || v != latestVersion || latestVersion != 21 {
+	if v, err := goose.GetDBVersion(d); err != nil || v != latestVersion || latestVersion != 22 {
 		t.Fatalf("version = %d, %v", v, err)
 	}
 	if n := rowCount(t, d, `SELECT COUNT(*) FROM entry_events`); n != 3 {

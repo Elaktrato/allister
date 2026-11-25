@@ -13,6 +13,11 @@ How a release is cut: move the entries under "Unreleased" to a new `## vX.Y.Z - 
 - **Ratings on cards.** List cards and the home page's cards show the entry's score ("★ 8") when it is rated; 0 is a rating and shows, an unrated entry shows nothing.
 - **Cards show every active track.** A card's progress line lists all tracks the entry follows, in the order the plugin declares them, joined by " · " ("Chapter 45 / 120 · Volume 5 / 12"); +1 still raises only the +1 track. The table is unchanged.
 
+### Changed
+
+- **Manga tracks Chapter + Volume.** Every manga follows chapters and volumes: +1 still adds a chapter, and a volume typed in the Edit dialog is saved (before, it was dropped while only chapters were active). Existing manga that tracked chapters only switch once at the first start (migration 00022 records it); a volume stored before shows again, and nothing is logged as activity. Chapter only and Volume only stay available in the Edit dialog.
+- **Plugin authors: progress upgrades.** A kind can declare `progress.upgrades` (`{id, from, to}`) to move existing items from one allowed combination to a larger one once per installation; see [docs/plugins.md](docs/plugins.md).
+
 ### Fixed
 
 - Cover downloads refuse a URL with userinfo (`user@host`), whitespace or a line break before making any request.

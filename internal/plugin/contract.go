@@ -143,6 +143,22 @@ type ProgressSpec struct {
 	// GroupKey names an eligible count track that groups the primary track's
 	// units (a release's season maps to it). Optional; empty for none.
 	GroupKey string `json:"group_key,omitempty"`
+	// Upgrades move existing items from one allowed combination to a larger
+	// one (a plugin that now tracks more by default). The core applies each
+	// upgrade once per installation, at startup; items switched back to From
+	// afterwards keep it. Optional.
+	Upgrades []ProgressUpgrade `json:"upgrades,omitempty"`
+}
+
+// ProgressUpgrade switches every item whose active progress keys equal From
+// (as a set) to To. ID (a key, unique within the kind) records that the
+// upgrade ran; never reuse or rename it. From and To are allowed
+// combinations and To contains From plus at least one more key. Stored
+// values are kept: an added key shows the value it held while inactive.
+type ProgressUpgrade struct {
+	ID   string   `json:"id"`
+	From []string `json:"from"`
+	To   []string `json:"to"`
 }
 
 // SectionType is one of the core's fixed page building blocks.

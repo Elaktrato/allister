@@ -54,3 +54,24 @@ func TestSeriesHintReleaseField(t *testing.T) {
 		t.Fatalf("series fields/link = %+v %+v", k.SeriesFields, k.SeriesLink)
 	}
 }
+
+// TestMangaTracksChaptersAndVolumes: a manga tracks Chapter + Volume by
+// default (chapters stay the +1 key), the single tracks stay available, and
+// items that tracked chapters only are upgraded once to both.
+func TestMangaTracksChaptersAndVolumes(t *testing.T) {
+	m := manifest()
+	if err := plugin.Validate(m); err != nil {
+		t.Fatal(err)
+	}
+	p := m.Kinds[0].Progress
+	if !reflect.DeepEqual(p.Defaults, []string{"chapter", "volume"}) || p.PrimaryKey != "chapter" {
+		t.Fatalf("defaults %q, primary %q", p.Defaults, p.PrimaryKey)
+	}
+	if want := [][]string{{"chapter", "volume"}, {"chapter"}, {"volume"}}; !reflect.DeepEqual(p.Combinations, want) {
+		t.Fatalf("combinations %q, want %q", p.Combinations, want)
+	}
+	want := []plugin.ProgressUpgrade{{ID: "chapter_volume", From: []string{"chapter"}, To: []string{"chapter", "volume"}}}
+	if !reflect.DeepEqual(p.Upgrades, want) {
+		t.Fatalf("upgrades %+v, want %+v", p.Upgrades, want)
+	}
+}

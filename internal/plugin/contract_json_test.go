@@ -48,8 +48,9 @@ func TestManifestJSONRoundTrip(t *testing.T) {
 			Progress: plugin.ProgressSpec{
 				Eligible:     []plugin.ProgressDef{{Key: "x", Type: plugin.Count, Label: "X", LabelPlural: "Xes", TotalField: "n"}, {Key: "y", Type: plugin.Percent, Label: "Y", ResetOnPrimary: true}, {Key: "d", Type: plugin.Duration, Label: "D"}},
 				Defaults:     []string{"x"},
-				Combinations: [][]string{{"x"}, {"y"}},
+				Combinations: [][]string{{"x"}, {"y"}, {"x", "d"}},
 				PrimaryKey:   "x",
+				Upgrades:     []plugin.ProgressUpgrade{{ID: "add_d", From: []string{"x"}, To: []string{"x", "d"}}},
 			},
 			Sections:       []plugin.SectionDef{{Type: plugin.SectionPeople, Label: "Cast", Field: "n", Roles: []string{"actor"}}},
 			TitleLanguages: []string{"en", "ja"},

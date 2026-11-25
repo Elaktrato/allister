@@ -62,9 +62,13 @@ func manifest() plugin.Manifest {
 					{Key: "chapter", Type: plugin.Count, Label: "Chapter", TotalField: "chapters"},
 					{Key: "volume", Type: plugin.Count, Label: "Volume", TotalField: "volumes"},
 				},
-				Defaults:     []string{"chapter"},
-				Combinations: [][]string{{"chapter"}, {"volume"}},
+				// Chapter + Volume by default: +1 adds chapters, the volume
+				// is typed by hand. Items that tracked chapters only switch
+				// once (the upgrade); a stored volume shows again.
+				Defaults:     []string{"chapter", "volume"},
+				Combinations: [][]string{{"chapter", "volume"}, {"chapter"}, {"volume"}},
 				PrimaryKey:   "chapter",
+				Upgrades:     []plugin.ProgressUpgrade{{ID: "chapter_volume", From: []string{"chapter"}, To: []string{"chapter", "volume"}}},
 			},
 			Stats: &plugin.StatsDef{
 				Units: &plugin.StatsUnitsDef{Key: "chapter", LabelPlural: "Chapters"},

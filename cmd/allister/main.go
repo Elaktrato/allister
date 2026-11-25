@@ -105,6 +105,12 @@ func run() error {
 	queue := jobs.NewQueue(database, jobs.WithMinInterval(2*time.Second),
 		jobs.WithPluginGate(registry.IsEnabled))
 	lib := library.New(database, registry)
+	// Plugins that now track more by default switch existing items once.
+	if n, err := lib.ApplyProgressUpgrades(workerCtx); err != nil {
+		log.Printf("startup: %v", err)
+	} else if n > 0 {
+		log.Printf("startup: %d items track new progress keys", n)
+	}
 	queue.Register(jobs.KindSyncItem, jobs.SyncItem(jobs.SyncDeps{
 		Library:   lib,
 		Registry:  registry,
