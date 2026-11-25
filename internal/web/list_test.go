@@ -206,6 +206,7 @@ func TestEmptyListShowsHint(t *testing.T) {
 
 func TestListPagination(t *testing.T) {
 	e := newEnv(t)
+	pagesMode(t, e)
 	for i := 0; i < 101; i++ {
 		st := library.Active
 		if i >= 90 {
@@ -238,6 +239,7 @@ func TestListPagination(t *testing.T) {
 	mustNotContain(t, d, "Next")
 	// 101 rows of one status paginate with the filter in links
 	e2 := newEnv(t)
+	pagesMode(t, e2)
 	for i := 0; i < 101; i++ {
 		e2.addEntry(t, anilist.AniList, fmt.Sprint(i+1), nil, library.Active, 0)
 	}
@@ -584,6 +586,7 @@ func TestMalformedReturnDoesNotPanic(t *testing.T) {
 
 func TestListPageParamClamping(t *testing.T) {
 	e := newEnv(t)
+	pagesMode(t, e)
 	for i := 0; i < 101; i++ {
 		e.addEntry(t, anilist.AniList, fmt.Sprint(i+1), nil, library.Active, 0)
 	}
@@ -882,6 +885,7 @@ func TestListKindSwitchOnlyForMultiKindPlugins(t *testing.T) {
 
 func TestListPaginationViaLibrary(t *testing.T) {
 	e := newFixtureEnv(t)
+	pagesMode(t, e.env)
 	for i := 0; i < 101; i++ {
 		st := library.Active
 		if i >= 90 {

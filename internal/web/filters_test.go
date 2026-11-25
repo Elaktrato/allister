@@ -529,6 +529,7 @@ func TestSortOptionsAndDirection(t *testing.T) {
 
 func TestFiltersSurvivePaginationLinks(t *testing.T) {
 	e := newFixtureEnv(t)
+	pagesMode(t, e.env)
 	for i := 0; i < 101; i++ {
 		e.addFixture(t, "tv", "show", showWith(fmt.Sprint(i+1), fmt.Sprintf("Show %03d", i+1), []string{"Drama"}), library.Entry{Status: library.Active})
 	}

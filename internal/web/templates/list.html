@@ -63,14 +63,14 @@
 {{if .Filtered}}<p class="rounded border border-slate-800 bg-slate-900 p-4 text-slate-300">No {{.EmptyNoun}} match these filters.{{with .Filters.ClearURL}} <a class="text-indigo-300 underline" href="{{.}}">Clear filters</a>{{end}}</p>
 {{else}}<p class="rounded border border-slate-800 bg-slate-900 p-4 text-slate-300">Nothing here yet.</p>{{end}}
 {{else}}
-{{if eq .View "cards"}}{{if .Bulk}}<p hidden data-bulk-reveal class="mb-3 text-sm text-slate-300"><label><input type="checkbox" data-bulk-page-all class="h-4 w-4 accent-indigo-500"> Select all on this page</label></p>{{end}}{{template "list_cards" .}}{{else}}{{/* the table view */}}
+{{if eq .View "cards"}}{{if .Bulk}}<p hidden data-bulk-reveal class="mb-3 text-sm text-slate-300"><label><input type="checkbox" data-bulk-page-all class="h-4 w-4 accent-indigo-500"> {{template "bulk_page_all" .}}</label></p>{{end}}{{template "list_cards" .}}{{else}}{{/* the table view */}}
 <div class="overflow-x-auto">
   <table class="w-full text-left text-sm">
     {{/* part of the rows region, so a rows partial brings the sort state
          (aria-sort, arrows, links with the current filters) along */}}
     <thead class="text-slate-400">
       <tr class="border-b border-slate-800">
-        {{if .Bulk}}<th scope="col" class="w-8 py-2 pr-3"><span class="sr-only">Select</span><input type="checkbox" hidden data-bulk-reveal data-bulk-page-all aria-label="Select all on this page" class="h-4 w-4 accent-indigo-500"></th>{{end}}
+        {{if .Bulk}}<th scope="col" class="w-8 py-2 pr-3"><span class="sr-only">Select</span><input type="checkbox" hidden data-bulk-reveal data-bulk-page-all aria-label="{{template "bulk_page_all" .}}" class="h-4 w-4 accent-indigo-500"></th>{{end}}
         <th scope="col" class="py-2 pr-3"><span class="sr-only">Cover</span></th>
         {{template "sort_th" .Head.Title}}
         {{range .Head.Columns}}{{template "sort_th" .}}{{end}}
@@ -79,19 +79,54 @@
     </thead>
     <tbody>
       {{range .Rows}}{{template "list_row" .}}{{end}}
+      {{template "list_more" .}}
     </tbody>
   </table>
 </div>
 {{end}}
+{{template "list_pager" .}}
+{{end}}
+{{end}}
+
+{{/* the select-all of the loaded rows: in scroll mode every row loaded so far */}}
+{{define "bulk_page_all"}}{{if .Scroll}}Select all loaded{{else}}Select all on this page{{end}}{{end}}
+
+{{/* under the rows: in pages mode the pager; in scroll mode, while the
+     list has more than one page, the total (the next rows come with the
+     sentinel at the end of the rows) and Previous when a page after the
+     first was opened directly (no JavaScript) */}}
+{{define "list_pager"}}
 <div class="mt-4 flex items-center justify-between text-sm text-slate-400">
-  <p>Showing {{.From}}–{{.To}} of {{.Total}}</p>
+  {{if and .Scroll (or .PrevURL .NextURL)}}<p>{{.Total}} in total</p>
+  <p class="flex gap-4">{{if .PrevURL}}<a href="{{.PrevURL}}" class="text-indigo-300 hover:underline">Previous</a>{{end}}</p>
+  {{else}}<p>Showing {{.From}}–{{.To}} of {{.Total}}</p>
   <p class="flex gap-4">
     {{if .PrevURL}}<a href="{{.PrevURL}}" class="text-indigo-300 hover:underline">Previous</a>{{end}}
     {{if .NextURL}}<a href="{{.NextURL}}" class="text-indigo-300 hover:underline">Next</a>{{end}}
-  </p>
+  </p>{{end}}
 </div>
 {{end}}
-{{end}}
+
+{{/* list_more is the sentinel at the end of the rows (scroll mode, more
+     pages left): htmx loads the next page's rows when it scrolls into view
+     and swaps it for them and the next sentinel. Its link is the next page
+     without JavaScript, and loads the rows with htmx when clicked. The
+     table, the Series table (one tbody per series) and the cards each get
+     the element their container takes. */}}
+{{define "list_more"}}{{if and .Scroll .NextURL}}
+{{- if .SeriesTab}}{{if eq .View "cards"}}{{template "list_more_div" .}}{{else}}<tbody id="list-more" data-list-more hx-get="{{.NextURL}}" hx-trigger="intersect once" hx-target="this" hx-swap="outerHTML"><tr><td colspan="6" class="py-4 text-center text-sm">{{template "list_more_link" .}}</td></tr></tbody>{{end}}
+{{- else if eq .View "cards"}}{{template "list_more_div" .}}
+{{- else}}<tr id="list-more" data-list-more hx-get="{{.NextURL}}" hx-trigger="intersect once" hx-target="this" hx-swap="outerHTML"><td colspan="{{.MoreColSpan}}" class="py-4 text-center text-sm">{{template "list_more_link" .}}</td></tr>{{end}}
+{{- end}}{{end}}
+{{define "list_more_div"}}<div id="list-more" data-list-more hx-get="{{.NextURL}}" hx-trigger="intersect once" hx-target="this" hx-swap="outerHTML" class="col-span-full py-4 text-center text-sm">{{template "list_more_link" .}}</div>{{end}}
+{{define "list_more_link"}}<a href="{{.NextURL}}" hx-get="{{.NextURL}}" hx-target="closest [data-list-more]" hx-swap="outerHTML" class="text-indigo-300 hover:underline">Load more</a>{{end}}
+
+{{/* the sentinel's answer: the next page's rows or cards and the next sentinel, nothing else */}}
+{{define "list_more_partial"}}
+{{- if .SeriesTab}}{{if eq .View "cards"}}{{range .SeriesRows}}{{template "series_card" .}}{{end}}{{else}}{{range .SeriesRows}}{{template "series_row" .}}{{end}}{{end}}
+{{- else if eq .View "cards"}}{{range .Rows}}{{template "list_card" .}}{{end}}
+{{- else}}{{range .Rows}}{{template "list_row" .}}{{end}}{{end}}
+{{- template "list_more" .}}{{end}}
 
 {{/* a table head cell: a sort link (plain GET; with htmx it refreshes the rows region like the filter bar) or plain text */}}
 {{define "sort_th"}}<th scope="col"{{with .Sort}} aria-sort="{{.}}"{{end}} class="{{if .Hide}}hidden {{end}}py-2 pr-3 font-medium{{template "cell_hide" .Hide}}">

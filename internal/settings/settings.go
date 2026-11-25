@@ -456,3 +456,38 @@ func (s *Store) TimeLocation(ctx context.Context) *time.Location {
 	}
 	return loc
 }
+
+// KeyListPaging is the settings key of how the list pages load their rows:
+// ListPagingScroll (load more while scrolling, the default) or
+// ListPagingPages (split into pages with Previous and Next).
+const KeyListPaging = "list_paging"
+
+// The values of KeyListPaging.
+const (
+	ListPagingScroll = "scroll"
+	ListPagingPages  = "pages"
+)
+
+// ValidListPaging reports whether v is a value of KeyListPaging.
+func ValidListPaging(v string) bool { return v == ListPagingScroll || v == ListPagingPages }
+
+// ListPaging is the stored list paging; unset, unreadable or not a mode
+// means ListPagingScroll.
+func (s *Store) ListPaging(ctx context.Context) string {
+	v, ok, err := s.Get(ctx, KeyListPaging)
+	if err != nil {
+		log.Printf("settings: read %s: %v (loading more while scrolling)", KeyListPaging, err)
+	}
+	if !ok || !ValidListPaging(v) {
+		return ListPagingScroll
+	}
+	return v
+}
+
+// SetListPaging stores the list paging; anything but a mode is refused.
+func (s *Store) SetListPaging(ctx context.Context, v string) error {
+	if !ValidListPaging(v) {
+		return fmt.Errorf("settings: %q is not a list paging", v)
+	}
+	return s.Set(ctx, KeyListPaging, v)
+}

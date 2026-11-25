@@ -34,7 +34,8 @@ func (s *server) generalView(r *http.Request, tz timeZoneView) map[string]any {
 	for _, m := range s.deps.Registry.Manifests() {
 		ps = append(ps, generalPlugin{Name: m.Name, Href: pluginSettingsURL(m.ID)})
 	}
-	return map[string]any{"Plugins": ps, "Version": version.Get().String(), "TimeZone": tz}
+	return map[string]any{"Plugins": ps, "Version": version.Get().String(), "TimeZone": tz,
+		"ListPaging": s.listPaging(r.Context())}
 }
 
 // getPlugins renders the plugins section of Settings: every installed plugin
