@@ -234,6 +234,7 @@ func TestManifestImportersAndExporter(t *testing.T) {
 		ManualRows:         true,
 		FallbackTitleLang:  "en",
 		UnmatchedNote:      "Imported from Steam; IGDB and the Steam store had no match for #{id}.",
+		IdlePause:          true,
 	}
 	for _, c := range []struct {
 		idx  int

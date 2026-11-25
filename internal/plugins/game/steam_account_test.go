@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/allister/allister/internal/plugin"
 )
@@ -156,6 +157,48 @@ func TestSteamAccountLibrary(t *testing.T) {
 	req := rec.only(t, "api")
 	if got := req.query.Get("steamid"); got != "76561198000000000" {
 		t.Errorf("steamid = %q, want the trimmed id", got)
+	}
+}
+
+// TestSteamAccountLastPlayed: rtime_last_played (Unix seconds) becomes the
+// row's LastActive and UpdatedAt (UTC instants), so "update when newer"
+// sees a play after the entry's last change; 0 (never played, or Steam does
+// not know) leaves both nil.
+func TestSteamAccountLastPlayed(t *testing.T) {
+	rec := &steamTestRecorder{}
+	api := func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `{"response":{"game_count":3,"games":[
+			{"appid":440,"name":"Played","playtime_forever":90,"rtime_last_played":1700000000},
+			{"appid":730,"name":"Unknown","playtime_forever":30,"rtime_last_played":0},
+			{"appid":570,"name":"Never","playtime_forever":0}
+		]}}`)
+	}
+	c, _ := newSteamTestClient(t, rec, api, nil, "secret-key")
+	res, err := steamAccountImporter{c: c}.ImportAccount(context.Background(), "76561198000000000")
+	if err != nil {
+		t.Fatalf("ImportAccount: %v", err)
+	}
+	if len(res.Entries) != 3 {
+		t.Fatalf("entries = %+v", res.Entries)
+	}
+	want := time.Unix(1700000000, 0).UTC()
+	played := res.Entries[0]
+	if played.LastActive == nil || !played.LastActive.Equal(want) || played.LastActive.Location() != time.UTC {
+		t.Errorf("last active = %v, want %v UTC", played.LastActive, want)
+	}
+	if played.UpdatedAt == nil || !played.UpdatedAt.Equal(want) {
+		t.Errorf("updated at = %v, want %v", played.UpdatedAt, want)
+	}
+	if played.Status != plugin.Active {
+		t.Errorf("played status = %q, want Active (the core applies the idle rule)", played.Status)
+	}
+	for _, e := range res.Entries[1:] {
+		if e.LastActive != nil || e.UpdatedAt != nil {
+			t.Errorf("%s: last active %v, updated at %v, want nil", e.Title, e.LastActive, e.UpdatedAt)
+		}
+	}
+	if res.Entries[1].Status != plugin.Active || res.Entries[2].Status != plugin.Planned {
+		t.Errorf("statuses = %q, %q", res.Entries[1].Status, res.Entries[2].Status)
 	}
 }
 

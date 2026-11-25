@@ -65,3 +65,54 @@ func TestPluginSettingsImportSection(t *testing.T) {
 		t.Fatalf("unknown mode: %d", rec.Code)
 	}
 }
+
+// TestPluginSettingsIdleDays: a plugin with an IdlePause importer gets the
+// idle cutoff field (default 30, labelled generically); saving stores it,
+// invalid input answers the page with a message and 422; a plugin without
+// such an importer shows no field and refuses the route.
+func TestPluginSettingsIdleDays(t *testing.T) {
+	e := newFixtureEnv(t, func(book, tv *plugintest.Plugin) { tv.M.Importers[1].IdlePause = true })
+	page := e.get("/settings/plugins/tv").Body.String()
+	mustContain(t, page, `action="/settings/plugins/tv/idle"`, `name="idle_days" value="30"`,
+		"Pause entries without activity for", "(0 = off)", `min="0"`, `max="3650"`)
+
+	rec := e.do("POST", "/settings/plugins/tv/idle", url.Values{"idle_days": {" 45 "}}, false)
+	if rec.Code != http.StatusSeeOther || rec.Header().Get("Location") != "/settings/plugins/tv#idle" {
+		t.Fatalf("%d %q %s", rec.Code, rec.Header().Get("Location"), rec.Body.String())
+	}
+	ctx := context.Background()
+	if got := e.set.IdleDays(ctx, "tv"); got != 45 {
+		t.Fatalf("idle days = %d", got)
+	}
+	mustContain(t, e.get("/settings/plugins/tv").Body.String(), `name="idle_days" value="45"`)
+	if rec := e.do("POST", "/settings/plugins/tv/idle", url.Values{"idle_days": {"0"}}, false); rec.Code != http.StatusSeeOther || e.set.IdleDays(ctx, "tv") != 0 {
+		t.Fatalf("off: %d %d", rec.Code, e.set.IdleDays(ctx, "tv"))
+	}
+	for _, bad := range []string{"", "-1", "3651", "abc", "1.5", "<b>9</b>"} {
+		rec := e.do("POST", "/settings/plugins/tv/idle", url.Values{"idle_days": {bad}}, false)
+		if rec.Code != http.StatusUnprocessableEntity {
+			t.Fatalf("%q: %d", bad, rec.Code)
+		}
+		mustContain(t, rec.Body.String(), "whole number of days from 0 to 3650", `name="idle_days"`)
+		mustNotContain(t, rec.Body.String(), "<b>9</b>")
+		if got := e.set.IdleDays(ctx, "tv"); got != 0 {
+			t.Fatalf("%q changed the setting to %d", bad, got)
+		}
+	}
+
+	// the book fixture has no IdlePause importer: no field, no route
+	mustNotContain(t, e.get("/settings/plugins/book").Body.String(), `name="idle_days"`)
+	if rec := e.do("POST", "/settings/plugins/book/idle", url.Values{"idle_days": {"10"}}, false); rec.Code != http.StatusNotFound {
+		t.Fatalf("book: %d", rec.Code)
+	}
+	if rec := e.do("POST", "/settings/plugins/nope/idle", url.Values{"idle_days": {"10"}}, false); rec.Code != http.StatusNotFound {
+		t.Fatalf("unknown plugin: %d", rec.Code)
+	}
+}
+
+// TestPluginSettingsNoIdleFieldWithoutIdlePause: without the opt-in the
+// account importer's plugin shows no idle field.
+func TestPluginSettingsNoIdleFieldWithoutIdlePause(t *testing.T) {
+	e := newFixtureEnv(t)
+	mustNotContain(t, e.get("/settings/plugins/tv").Body.String(), `name="idle_days"`, "/idle")
+}

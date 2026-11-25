@@ -156,6 +156,9 @@ func Validate(m Manifest) error {
 		case utf8.RuneCountInString(n) > maxUnmatchedNoteRunes:
 			p.add(path+".unmatched_note", "longer than %d characters", maxUnmatchedNoteRunes)
 		}
+		if im.IdlePause && im.AccountLabel == "" {
+			p.add(path+".idle_pause", "requires account_label")
+		}
 		if im.ResolveVia == "" {
 			if im.ResolveByTitle {
 				p.add(path+".resolve_by_title", "resolve_by_title needs resolve_via")

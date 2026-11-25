@@ -437,6 +437,13 @@ type ImporterInfo struct {
 	ManualRows        bool   `json:"manual_rows,omitempty"`
 	FallbackTitleLang string `json:"fallback_title_lang,omitempty"`
 	UnmatchedNote     string `json:"unmatched_note,omitempty"`
+	// IdlePause says the importer's rows carry ParsedEntry.LastActive and
+	// opts the plugin into the core's idle rule: the plugin's settings page
+	// offers a cutoff in days, and a row whose status is Active but whose
+	// last activity is older than the cutoff is imported as Paused (an
+	// existing Completed or Dropped entry keeps its status). It requires
+	// AccountLabel (an account importer, which is the one that repeats).
+	IdlePause bool `json:"idle_pause,omitempty"`
 }
 
 // ExporterInfo describes an export format.

@@ -3,8 +3,9 @@ package web
 // A plugin's own settings page, GET /settings/plugins/{id}: the title
 // language of the plugin's items (POST /settings/plugins/{id}/title-language),
 // what its list opens with — the view and the status (POST
-// /settings/plugins/{id}/home) — and, per kind, the columns of its list
-// table (POST /settings/plugins/{id}/columns).
+// /settings/plugins/{id}/home), per kind, the columns of its list table
+// (POST /settings/plugins/{id}/columns) and, for a plugin with an IdlePause
+// importer, the idle cutoff in days (POST /settings/plugins/{id}/idle).
 // Every choice is validated against what the plugin's manifest declares; the
 // page answers for every installed plugin (enabled or not, like its Enable
 // button), unknown ids get the 404 page and are never echoed.
@@ -16,11 +17,13 @@ import (
 	"net/http"
 	"net/url"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/allister/allister/internal/importer"
 	"github.com/allister/allister/internal/library"
 	"github.com/allister/allister/internal/plugin"
+	"github.com/allister/allister/internal/settings"
 )
 
 // pluginSettingsURL is the settings page of plugin id.
@@ -129,12 +132,48 @@ type pluginSettingsView struct {
 	HomeStatuses []option
 	Imports      []importForm
 	Error        string
+	Idle         *idleForm
 	Columns      []columnsForm
 	// MissingKeys names the plugin's sources that declare a key label and
 	// have no effective key; OtherSources says the plugin also has a source
 	// that needs no key, so the rest still works.
 	MissingKeys  []string
 	OtherSources bool
+}
+
+// idleForm is the idle cutoff of a plugin with an IdlePause importer.
+type idleForm struct {
+	Action    string
+	Value     string // the stored days, or the refused input
+	Max       int
+	Importers string // the names of the IdlePause importers
+	// Active, Paused, Kept name the kind's status labels in the help text.
+	Active, Paused, Kept string
+	Error                string
+}
+
+// idleImporters names m's IdlePause importers ("" when it has none).
+func idleImporters(m plugin.Manifest) string {
+	var names []string
+	for _, im := range m.Importers {
+		if im.IdlePause {
+			names = append(names, im.Name)
+		}
+	}
+	return strings.Join(names, ", ")
+}
+
+// idleFormFor is m's idle form showing value (nil without an IdlePause
+// importer).
+func idleFormFor(m plugin.Manifest, value, msg string) *idleForm {
+	names := idleImporters(m)
+	if names == "" {
+		return nil
+	}
+	k := m.Kinds[0]
+	return &idleForm{Action: pluginSettingsURL(m.ID) + "/idle", Value: value, Max: settings.MaxIdleDays, Importers: names,
+		Active: statusLabel(k, library.Active), Paused: statusLabel(k, library.Paused),
+		Kept: statusLabel(k, library.Completed) + " and " + statusLabel(k, library.Dropped), Error: msg}
 }
 
 // importForm is one importer of the plugin on its settings page.
@@ -191,9 +230,54 @@ func (s *server) pluginSettingsData(r *http.Request, m plugin.Manifest) (pluginS
 		}
 		v.Imports = append(v.Imports, f)
 	}
+	v.Idle = idleFormFor(m, strconv.Itoa(s.deps.Settings.IdleDays(ctx, m.ID)), "")
 	var err error
 	v.MissingKeys, v.OtherSources, err = s.sourceKeyState(ctx, m)
 	return v, err
+}
+
+// postIdleDays stores the idle cutoff (field idle_days, a whole number of
+// days from 0 to settings.MaxIdleDays; 0 turns the rule off) of a plugin
+// with an IdlePause importer; other plugins get the 404 page. Invalid input
+// answers the page with a message and 422.
+func (s *server) postIdleDays(w http.ResponseWriter, r *http.Request) {
+	m, ok := s.settingsPlugin(w, r)
+	if !ok {
+		return
+	}
+	if idleImporters(m) == "" {
+		s.errorPage(w, r, http.StatusNotFound, "Not found", "This plugin has no such setting.", "")
+		return
+	}
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+	ctx := r.Context()
+	raw := strings.TrimSpace(r.PostForm.Get("idle_days"))
+	days, err := strconv.Atoi(raw)
+	if err != nil || days < 0 || days > settings.MaxIdleDays || raw != strconv.Itoa(days) {
+		v, verr := s.pluginSettingsData(r, m)
+		if verr != nil {
+			s.internalError(w, r, verr)
+			return
+		}
+		opts, verr := s.titleLangOptions(ctx, m)
+		if verr != nil {
+			s.internalError(w, r, verr)
+			return
+		}
+		v.LangOptions, v.Lang = opts, s.titleLang(ctx, m)
+		v.Idle = idleFormFor(m, plugin.SingleLine(raw, 20),
+			"Enter a whole number of days from 0 to "+strconv.Itoa(settings.MaxIdleDays)+".")
+		s.renderStatus(w, r, http.StatusUnprocessableEntity, "settings_plugin", v)
+		return
+	}
+	if err := s.deps.Settings.SetIdleDays(ctx, m.ID, days); err != nil {
+		s.internalError(w, r, err)
+		return
+	}
+	http.Redirect(w, r, pluginSettingsURL(m.ID)+"#idle", http.StatusSeeOther)
 }
 
 // sourceKeyState names m's sources that declare a key label and have no

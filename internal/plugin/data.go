@@ -107,7 +107,12 @@ type ParsedEntry struct {
 	// UpdatedAt is the entry's source-side modification time when the source
 	// knows one (an account import does; a file export usually does not).
 	UpdatedAt *time.Time `json:"updated_at,omitempty"`
-	Notes     []string   `json:"notes,omitempty"`
+	// LastActive is the source's time of the user's last activity on the
+	// row's item (an instant, not a calendar day); nil when the source does
+	// not know it. The import runner reads it for an importer with
+	// ImporterInfo.IdlePause.
+	LastActive *time.Time `json:"last_active,omitempty"`
+	Notes      []string   `json:"notes,omitempty"`
 }
 
 // SkippedRow reports an input row an importer could not use.

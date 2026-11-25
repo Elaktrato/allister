@@ -113,7 +113,7 @@ func run() error {
 	queue.Register(jobs.KindSchedule, jobs.Schedule(jobs.ScheduleDeps{Library: lib, Registry: registry}))
 	syncJobsByPlugin := syncJobs(registry)
 	imports := importer.New(importer.Deps{
-		DB: database, Library: lib, Registry: registry, Queue: queue, SyncJobs: syncJobsByPlugin,
+		DB: database, Library: lib, Registry: registry, Queue: queue, SyncJobs: syncJobsByPlugin, Settings: settingsStore,
 	})
 	queue.Register(importer.KindRun, imports.Handler())
 	queue.Register(jobs.KindScheduledImport, jobs.ScheduledImport(jobs.ScheduledImportDeps{

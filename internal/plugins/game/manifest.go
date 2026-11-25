@@ -121,6 +121,7 @@ func manifest() plugin.Manifest {
 			ResolveViaFallback: []string{SourceSteam},
 			ManualRows:         true, FallbackTitleLang: "en",
 			UnmatchedNote: "Imported from Steam; IGDB and the Steam store had no match for #{id}.",
+			IdlePause:     true,
 		}},
 		Exporters: []plugin.ExporterInfo{{ID: ExporterJSON, Name: "JSON", Extension: ".json", MIME: "application/json"}},
 	}

@@ -327,10 +327,13 @@ type ImporterInfo struct {
 	FallbackTitleLang string   // title language of an unmatched row's manual item
 	UnmatchedNote     string   // <= 200 characters; "{id}", "{title}" and "{year}" are filled in
 	AccountLabel      string   // non-empty: the importer takes an account name, not a file
+	IdlePause         bool     // rows carry LastActive; the core's idle rule applies (needs AccountLabel)
 }
 ```
 
 An importer may also implement the optional `AccountImporter` capability (`ImportAccount(ctx, account string) (ParseResult, error)`) and declare it with `AccountLabel` (for example "Username"): the plugin settings page then offers a name field instead of the file picker, and the generic import page leaves it out. The rows are the same `ParsedEntry` values; a row may carry `UpdatedAt` (the entry's source-side modification time) so the user can choose to update existing entries only when the source is newer.
+
+A row may also carry `LastActive` (`last_active`, an instant: the user's last activity on the item at the source). An account importer that always sends it can set `IdlePause` (JSON `idle_pause`; `Validate` refuses it without `AccountLabel`: `idle_pause: requires account_label`). The plugin's settings page then offers an idle cutoff in days (setting `plugin.<id>.idle_days`, 0 to 3650, default 30, 0 = off), and with a cutoff above 0 the core applies a generic rule to the importer's rows: a row whose status is `Active` and whose `LastActive` lies more than that many calendar days before today (in the configured time zone) is imported as `Paused`, for new and updated entries. For an existing entry the import keeps a shown `Completed` or `Dropped` status (score and progress still apply as usual), keeps `Paused` unless the row's `LastActive` is known and within the cutoff, and under every mode except Skip pauses an entry shown as `Active` whose row is idle even when the row is not newer (only the status changes then). The changes are logged with the `import` origin, so they never count as activity, and an import still never starts a run. A row without `LastActive` is never paused.
 
 `Parse` receives the uploaded file (at most 20 MiB) and returns `ParseResult{Entries, Skipped, Ignored}`. Each `ParsedEntry` holds the kind, title, external ids, status class, rating (0 to 10), progress per track key, calendar-day dates (UTC midnight, see `plugin.DateOnly`), comment, optional cover URL, item fields (`Fields`) and notes. `Fields` supplies item data for a manual row and fills only the fields a source left empty. `Skipped` lists rows the user should hear about. `Ignored` only counts rows meant for another media type. Return `ErrBadInput` (wrapped, with a readable reason) when the file is not in your format.
 
