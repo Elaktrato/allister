@@ -2,6 +2,7 @@ package library
 
 import (
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/allister/allister/internal/plugin"
@@ -98,5 +99,49 @@ func TestApplyProgressUpgrades(t *testing.T) {
 	}
 	if got := countRows(t, e, `SELECT count(*) FROM progress_upgrades WHERE plugin_id = 'tv2' AND kind = 'show' AND upgrade_id = 'add_season'`); got != 1 {
 		t.Errorf("upgrade recorded %d times, want once", got)
+	}
+}
+
+// TestApplyProgressUpgradesContinuesAfterAnError: an upgrade that fails (a
+// damaged item) is reported, and the next upgrade still runs.
+func TestApplyProgressUpgradesContinuesAfterAnError(t *testing.T) {
+	other := upgradingTV()
+	other.M.ID = "tv3"
+	e := newEnvWith(t, upgradingTV(), other)
+	bad := mustSave(t, e.lib, "tv2", "show", tvData("1", nil), WithProgressKeys([]string{"episode"}))
+	if _, err := e.db.Exec(`UPDATE items SET progress_keys = 'not json' WHERE id = ?`, bad); err != nil {
+		t.Fatal(err)
+	}
+	good := mustSave(t, e.lib, "tv3", "show", tvData("2", nil), WithProgressKeys([]string{"episode"}))
+	n, err := e.lib.ApplyProgressUpgrades(bg)
+	if err == nil || !strings.Contains(err.Error(), "tv2/show/add_season") {
+		t.Fatalf("error %v, want the failed upgrade named", err)
+	}
+	if n != 1 {
+		t.Fatalf("upgraded %d, want 1", n)
+	}
+	if got := mustItem(t, e.lib, good).ProgressKeys; !slices.Equal(got, []string{"season", "episode"}) {
+		t.Fatalf("next upgrade did not run: %q", got)
+	}
+}
+
+// TestRestoreAppliesUpgradesTheBackupDidNotRun: RestoreItem applies every
+// upgrade of the item's kind that AppliedUpgrades does not list to the
+// restored keys; a listed one leaves them.
+func TestRestoreAppliesUpgradesTheBackupDidNotRun(t *testing.T) {
+	e := newEnvWith(t, upgradingTV())
+	bi := BackupItem{PluginID: "tv2", Kind: "show", Source: "tvdata", SourceID: "1", Titles: []plugin.Title{{Lang: "en", Text: "One"}}, ProgressKeys: []string{"episode"}}
+	if res, err := e.lib.RestoreItem(bg, bi, RestoreOptions{}); err != nil || res.Outcome != RestoreCreated {
+		t.Fatalf("%+v %v", res, err)
+	} else if got := mustItem(t, e.lib, res.ItemID).ProgressKeys; !slices.Equal(got, []string{"season", "episode"}) {
+		t.Fatalf("keys %q, want the upgrade applied", got)
+	}
+	bi.SourceID = "2"
+	res, err := e.lib.RestoreItem(bg, bi, RestoreOptions{AppliedUpgrades: []BackupProgressUpgrade{{PluginID: "tv2", Kind: "show", ID: "add_season"}}})
+	if err != nil || res.Outcome != RestoreCreated {
+		t.Fatalf("%+v %v", res, err)
+	}
+	if got := mustItem(t, e.lib, res.ItemID).ProgressKeys; !slices.Equal(got, []string{"episode"}) {
+		t.Fatalf("keys %q, want the backup's keys kept", got)
 	}
 }

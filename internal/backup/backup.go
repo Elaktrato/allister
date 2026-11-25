@@ -10,6 +10,8 @@
 //	              "plugins": [{"id": ..., "version": ...}],   (informational)
 //	              "appearance": {...},                        (optional)
 //	              "time_zone": "Europe/Berlin",               (optional)
+//	              "progress_upgrades": [library.BackupProgressUpgrade, ...],
+//	                                                          (optional, before items)
 //	              "items": [library.BackupItem, ...],
 //	              "series": [library.BackupSeries, ...],      (optional, after items)
 //	              "lists": [library.BackupList, ...],         (optional, after items)
@@ -18,6 +20,13 @@
 //	                                                          (optional, after items)
 //	covers/<name>  the file of every item or series whose cover is a local file
 //	fonts/<name>   the file of every uploaded font
+//
+// The progress_upgrades member lists the plugin progress upgrades the
+// database had applied (library.ApplyProgressUpgrades). A restore applies
+// every installed upgrade it does not list to the items it creates, so a
+// backup without the member (written before any upgrade ran, or by an
+// older Allister, which also ignores it) gets them; one after "items" comes
+// too late and is ignored. The format version stays 4.
 //
 // The appearance member (see appearance.go) holds the appearance settings
 // and the list of uploaded fonts; it and the fonts/ entries are ignored by
@@ -48,7 +57,7 @@
 //
 // In backup.json "format" and "format_version" must come before "items",
 // "series", "lists", "aliases" and "dismissed_duplicates" after it, and each
-// of these seven members appears once; a restore
+// of these seven members (and "progress_upgrades") appears once; a restore
 // refuses anything else (before restoring an item where it can be detected
 // that early). One item's JSON is limited to Limits.MaxItemBytes.
 //
@@ -179,14 +188,19 @@ func Write(ctx context.Context, w io.Writer, lib *library.Library, plugins []Plu
 		plugins = []PluginVersion{}
 	}
 	look, fonts := appearanceOf(ctx, app)
+	upgrades, err := lib.BackupProgressUpgrades(ctx)
+	if err != nil {
+		return fmt.Errorf("backup: %w", err)
+	}
 	head, err := json.Marshal(struct {
-		Format        string            `json:"format"`
-		FormatVersion int               `json:"format_version"`
-		CreatedAt     string            `json:"created_at"`
-		Plugins       []PluginVersion   `json:"plugins"`
-		Appearance    *appearanceMember `json:"appearance,omitempty"`
-		TimeZone      string            `json:"time_zone,omitempty"`
-	}{Format, FormatVersion, now.UTC().Format(time.RFC3339), plugins, look, timeZone})
+		Format           string                          `json:"format"`
+		FormatVersion    int                             `json:"format_version"`
+		CreatedAt        string                          `json:"created_at"`
+		Plugins          []PluginVersion                 `json:"plugins"`
+		Appearance       *appearanceMember               `json:"appearance,omitempty"`
+		TimeZone         string                          `json:"time_zone,omitempty"`
+		ProgressUpgrades []library.BackupProgressUpgrade `json:"progress_upgrades"`
+	}{Format, FormatVersion, now.UTC().Format(time.RFC3339), plugins, look, timeZone, upgrades})
 	if err != nil {
 		return fmt.Errorf("backup: %w", err)
 	}
@@ -492,6 +506,8 @@ type restorer struct {
 	budget  *budget
 	rep     *Report
 	limiter *itemLimiter
+	// upgrades are the progress upgrades the backup lists as applied
+	upgrades []library.BackupProgressUpgrade
 }
 
 // itemLimiter bounds the bytes the decoder may read while one item is being
@@ -596,7 +612,8 @@ func (rs *restorer) index(zr *zip.Reader) *zip.File {
 // decode reads backup.json token by token: "format" and "format_version"
 // must come before "items", "series", "lists", "aliases" and
 // "dismissed_duplicates" after it (as Write puts them), and each of the
-// seven may appear once; items are decoded one by one.
+// seven (and "progress_upgrades") may appear once; items are decoded one by
+// one.
 func (rs *restorer) decode(ctx context.Context, dec *json.Decoder) error {
 	dec.UseNumber()
 	tok, err := dec.Token()
@@ -654,7 +671,7 @@ func (rs *restorer) decode(ctx context.Context, dec *json.Decoder) error {
 		}
 		key, _ := tok.(string)
 		switch key {
-		case "format", "format_version", "items", "series", "lists", "aliases", "dismissed_duplicates":
+		case "format", "format_version", "items", "series", "lists", "aliases", "dismissed_duplicates", "progress_upgrades":
 			if seen[key] {
 				msg := fmt.Sprintf("backup.json has more than one %q member", key)
 				if !seen["items"] {
@@ -719,6 +736,20 @@ func (rs *restorer) decode(ctx context.Context, dec *json.Decoder) error {
 			}
 			if err := rs.merges(ctx, dec, key); err != nil {
 				return err
+			}
+		case "progress_upgrades":
+			// it decides the keys of every restored item, so it counts only
+			// before "items"; one after them is skipped
+			var ups []library.BackupProgressUpgrade
+			if err := rs.member(dec, &ups, seen["items"]); err != nil {
+				var te *json.UnmarshalTypeError
+				if seen["items"] || !errors.As(err, &te) {
+					return err
+				}
+				return reject("%s: \"progress_upgrades\" is not a list of upgrades.", notBackup)
+			}
+			if !seen["items"] {
+				rs.upgrades = ups
 			}
 		case "appearance", "time_zone":
 			var raw json.RawMessage
@@ -1126,7 +1157,7 @@ func (rs *restorer) item(ctx context.Context, index int, raw json.RawMessage) er
 			Source: clip(id.Source, 60), SourceID: clip(id.SourceID, 100), Reason: clip("the item cannot be read: "+err.Error(), 300)})
 		return nil
 	}
-	res, err := rs.opts.Library.RestoreItem(ctx, bi, library.RestoreOptions{ResolveCover: rs.resolver(), ReleaseCover: rs.release})
+	res, err := rs.opts.Library.RestoreItem(ctx, bi, library.RestoreOptions{ResolveCover: rs.resolver(), ReleaseCover: rs.release, AppliedUpgrades: rs.upgrades})
 	if err != nil {
 		if errors.Is(err, errTotalTooLarge) {
 			return rs.abort(rs.limitMessage(err))

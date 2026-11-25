@@ -520,7 +520,8 @@ func validateProgress(p *problems, path string, ps ProgressSpec, fields map[stri
 }
 
 // validateUpgrades checks the progress upgrades of a kind: unique key ids,
-// From and To allowed combinations, To a strict superset of From.
+// From and To allowed combinations without a key listed twice, To a strict
+// superset of From.
 func validateUpgrades(p *problems, path string, ps ProgressSpec) {
 	allowed := func(keys []string) bool {
 		for _, c := range ps.Combinations {
@@ -545,9 +546,18 @@ func validateUpgrades(p *problems, path string, ps ProgressSpec) {
 			keys []string
 			ok   *bool
 		}{{"from", u.From, &fromOK}, {"to", u.To, &toOK}} {
+			dup := ""
+			for i, k := range side.keys {
+				if dup == "" && slices.Contains(side.keys[:i], k) {
+					dup = k
+				}
+			}
 			switch {
 			case len(side.keys) == 0:
 				p.add(up+"."+side.name, "required")
+			case dup != "":
+				p.add(up+"."+side.name, "%q listed twice", dup)
+				*side.ok = false
 			case !allowed(side.keys):
 				p.add(up+"."+side.name, "not one of the allowed combinations")
 				*side.ok = false

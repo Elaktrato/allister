@@ -338,7 +338,8 @@ func TestTVPluginEpisodeAndPositionProgress(t *testing.T) {
 	if rec.Code != 200 {
 		t.Fatalf("increment: %d", rec.Code)
 	}
-	mustContain(t, rec.Body.String(), "<span>4 / 26</span>", "<span>0:00:00</span>")
+	// the reset position is no longer stored: it reads "–" like any unset secondary track
+	mustContain(t, rec.Body.String(), "<span>4 / 26</span>", "<span>–</span>")
 	if en, _ := e.lib.Entry(context.Background(), mustID(t, dark)); en == nil || en.Progress["episode"] != 4 {
 		t.Fatalf("entry %+v", en)
 	}
