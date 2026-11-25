@@ -52,6 +52,7 @@ type rowView struct {
 	CanIncrement       bool
 	IncrementLabel     string
 	Score, ScoreAttr   string
+	Rated              bool // the entry has a rating (0 included): the card shows Score
 	PartialSync        bool
 	Unmatched          bool
 	UnmatchedHint      string
@@ -397,6 +398,7 @@ func (s *server) rowView(m plugin.Manifest, row library.Row, ret string, cols []
 	if e.Rating != nil {
 		v.Score = strconv.Itoa(*e.Rating)
 		v.ScoreAttr = v.Score
+		v.Rated = true
 	}
 	v.RepeatMarker, v.Repeats, v.RepeatsTitle = repeatBadges(k, e)
 	return v
