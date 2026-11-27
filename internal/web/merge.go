@@ -202,7 +202,8 @@ func (s *server) mergePage(r *http.Request, t *mergeTarget, ticked map[string]bo
 	if err != nil {
 		return changesView{}, err
 	}
-	in := plugin.ItemData{ItemSummary: plugin.ItemSummary{Fields: t.other.item.Fields, CoverURL: t.other.item.CoverPath}}
+	in := plugin.ItemData{ItemSummary: plugin.ItemSummary{Fields: t.other.item.Fields, CoverURL: t.other.item.CoverPath},
+		BannerURL: t.other.item.BannerPath}
 	rows := changeRows(t.kind, t.keep.item, in, changes)
 	if ticked != nil {
 		for i := range rows {
@@ -240,7 +241,8 @@ func (s *server) getMerge(w http.ResponseWriter, r *http.Request, pluginID strin
 // afterMerge queues the survivor's jobs: the normal sync when a manual
 // survivor took over the other's source link (Deps.SyncJobs; it downloads
 // a remote cover too), else the cover-only job when the merge gave it a
-// remote cover (Deps.CoverJobs). A failed read is logged and ignored.
+// remote cover, banner or trailer thumbnail (Deps.CoverJobs). A failed read
+// is logged and ignored.
 func (s *server) afterMerge(ctx context.Context, t *mergeTarget) {
 	keep := t.keep.item
 	if keep.Source == manualSource && t.other.item.Source != manualSource {
@@ -252,7 +254,15 @@ func (s *server) afterMerge(ctx context.Context, t *mergeTarget) {
 		log.Printf("merge %s item %d: %v", logSafe(t.man.ID), keep.ID, err)
 		return
 	}
-	if isRemoteCover(it.CoverPath) && it.CoverPath != keep.CoverPath {
+	thumb := func(it *library.Item) string {
+		if it.Trailer == nil {
+			return ""
+		}
+		return it.Trailer.ThumbnailURL
+	}
+	if (isRemoteCover(it.CoverPath) && it.CoverPath != keep.CoverPath) ||
+		(isRemoteCover(it.BannerPath) && it.BannerPath != keep.BannerPath) ||
+		(isRemoteCover(thumb(it)) && thumb(it) != thumb(keep)) {
 		s.enqueueCover(ctx, t.man.ID, keep.ID)
 	}
 }

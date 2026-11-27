@@ -21,6 +21,8 @@ import (
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	"github.com/allister/allister/internal/plugin"
 )
 
 // MaxListNameRunes is the longest custom list name.
@@ -559,11 +561,14 @@ func (l *Library) searchLibrary(ctx context.Context, text string, langs map[stri
 		return nil, nil
 	}
 	vis, visArgs := l.visiblePlugins("items.plugin_id")
-	args := append(append(append([]any{containsPattern(text)}, visArgs...), condArgs...), limit)
+	args := append(append(append([]any{containsPattern(text)}, visArgs...), condArgs...), plugin.AltTitleLang, limit)
+	// the matches up to the limit by the first stored title that is not an
+	// alternative one (then the first stored title)
 	//nolint:gosec // G202: constant SQL and placeholders; values are bound
 	rows, err := l.db.QueryContext(ctx, `SELECT items.id, items.plugin_id`+fromSQL+`
 		WHERE EXISTS (SELECT 1 FROM item_titles t WHERE t.item_id = items.id AND lower(t.text) LIKE ? ESCAPE '\') AND `+vis+cond+`
-		ORDER BY (SELECT lower(t.text) FROM item_titles t WHERE t.item_id = items.id ORDER BY t.rowid LIMIT 1), items.id LIMIT ?`, args...)
+		ORDER BY lower(COALESCE((SELECT t.text FROM item_titles t WHERE t.item_id = items.id AND t.lang <> ? ORDER BY t.rowid LIMIT 1),
+		  (SELECT t.text FROM item_titles t WHERE t.item_id = items.id ORDER BY t.rowid LIMIT 1))), items.id LIMIT ?`, args...)
 	if err != nil {
 		return nil, fmt.Errorf("search library: %w", err)
 	}

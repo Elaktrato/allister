@@ -26,7 +26,8 @@ type Appearance struct {
 }
 
 // Appearances returns the person's appearances ordered by the lower-cased
-// first stored title, then item id, then credit position. An unknown person
+// first stored title that is not an alternative one (any first title when
+// there is none), then item id, then credit position. An unknown person
 // has none.
 func (l *Library) Appearances(ctx context.Context, personID int64) ([]Appearance, error) {
 	rows, err := l.db.QueryContext(ctx, `SELECT i.id, i.plugin_id, i.kind, i.source, i.source_id, i.cover_path, a.role, a.with_role, a.mirror,
@@ -40,7 +41,8 @@ func (l *Library) Appearances(ctx context.Context, personID int64) ([]Appearance
 		) a
 		JOIN items i ON i.id = a.item_id
 		LEFT JOIN `+tablePeople+` w ON w.id = a.other
-		ORDER BY lower(COALESCE((SELECT t.text FROM item_titles t WHERE t.item_id = i.id ORDER BY t.rowid LIMIT 1), '')), i.id, a.seq`, personID)
+		ORDER BY lower(COALESCE((SELECT t.text FROM item_titles t WHERE t.item_id = i.id AND t.lang <> ?2 ORDER BY t.rowid LIMIT 1),
+		  (SELECT t.text FROM item_titles t WHERE t.item_id = i.id ORDER BY t.rowid LIMIT 1), '')), i.id, a.seq`, personID, plugin.AltTitleLang)
 	if err != nil {
 		return nil, fmt.Errorf("appearances: %w", err)
 	}

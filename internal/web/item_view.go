@@ -117,8 +117,17 @@ type seriesNavView struct {
 // makeSeriesView is the "Make this a series" form (Title is the prefill).
 type makeSeriesView struct{ Action, Title string }
 
+// trailerView is the trailer tile: the video page (Href, opened in a new
+// tab) and the local thumbnail (Thumb, "" until it is downloaded).
+type trailerView struct{ Href, Thumb string }
+
 type itemView struct {
 	Title, Cover string
+	// Banner is the local banner image of a kind that declares one ("" for
+	// none, and while it is not downloaded); Trailer the trailer tile of a
+	// kind that declares one.
+	Banner  string
+	Trailer *trailerView
 	// Series is set for a part of a series, MakeSeries for a listed entry in
 	// none, AddToSeriesURL (with SeriesTitle) when the overview was reached
 	// from a search into a series and the entry can join it.
@@ -213,6 +222,7 @@ func (s *server) itemView(ctx context.Context, li *loadedItem) (itemView, error)
 	} else {
 		v.Cover = httpURL(d.CoverURL)
 	}
+	v.Banner, v.Trailer = extrasView(k, d)
 	if v.Entry == nil {
 		v.AddURL = addPath(m, d.Source, d.ID, d.Kind)
 	}
@@ -222,6 +232,46 @@ func (s *server) itemView(ctx context.Context, li *loadedItem) (itemView, error)
 		}
 	}
 	return v, nil
+}
+
+// extrasView is the banner and trailer of the item, each only when the kind
+// declares it. Images come from the local store only: a URL not yet
+// downloaded (and every image of a live item) shows no banner and a trailer
+// tile without thumbnail, so the page never loads a third-party resource;
+// the trailer link needs https.
+func extrasView(k plugin.KindDef, d plugin.ItemData) (string, *trailerView) {
+	local := func(ref string) string {
+		if isRemoteCover(ref) {
+			return ""
+		}
+		return covers.Src(ref)
+	}
+	var banner string
+	if k.Banner {
+		banner = local(d.BannerURL)
+	}
+	var tr *trailerView
+	if k.Trailer && d.Trailer != nil {
+		if href := httpsURL(d.Trailer.URL); href != "" {
+			tr = &trailerView{Href: href, Thumb: local(d.Trailer.ThumbnailURL)}
+		}
+	}
+	return banner, tr
+}
+
+// itemLinks are the source link (when ok) followed by the item's own
+// labelled links (https only).
+func itemLinks(m plugin.Manifest, d plugin.ItemData) []extLink {
+	var out []extLink
+	if l, ok := sourceLink(m, d); ok {
+		out = append(out, l)
+	}
+	for _, l := range d.Links {
+		if href := httpsURL(l.URL); href != "" {
+			out = append(out, extLink{Label: l.Label, Href: href})
+		}
+	}
+	return out
 }
 
 // seriesBlock fills the series parts of the overview of a listed saved item:
@@ -457,9 +507,9 @@ func (s *server) section(li *loadedItem, sec plugin.SectionDef, lang string) (se
 				sv.Info = append(sv.Info, infoRow{Label: fd.Label, Text: text, Href: href})
 			}
 		}
-		// the source link, unless a links section shows it
-		if l, ok := sourceLink(m, d); ok && !hasSection(k, plugin.SectionLinks) {
-			sv.Links = []extLink{l}
+		// the links, unless a links section shows them
+		if !hasSection(k, plugin.SectionLinks) {
+			sv.Links = itemLinks(m, d)
 		}
 		return sv, len(sv.Info) > 0 || len(sv.Links) > 0
 	case plugin.SectionText:
@@ -541,9 +591,7 @@ func (s *server) section(li *loadedItem, sec plugin.SectionDef, lang string) (se
 		sv.LoadURL = recommendationsURL(m, d.Source, d.ID, d.Kind)
 		return sv, true
 	case plugin.SectionLinks:
-		if l, ok := sourceLink(m, d); ok {
-			sv.Links = []extLink{l}
-		}
+		sv.Links = itemLinks(m, d)
 		return sv, len(sv.Links) > 0
 	}
 	return sv, false

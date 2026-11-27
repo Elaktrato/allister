@@ -24,7 +24,7 @@
     {{range .Info}}<div><dt class="inline text-slate-400">{{.Label}}:</dt> <dd class="inline">{{if .Href}}<a href="{{.Href}}" rel="noopener noreferrer" class="text-indigo-300 hover:underline">{{.Text}}</a>{{else}}{{.Text}}{{end}}</dd></div>{{end}}
   </dl>
   {{end}}
-  {{range .Links}}<a href="{{.Href}}" rel="noopener noreferrer" class="mt-1 inline-block text-sm text-indigo-300 hover:underline">{{.Label}}</a>{{end}}
+  {{with .Links}}<p class="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-sm">{{range .}}<a href="{{.Href}}" rel="noopener noreferrer" class="text-indigo-300 hover:underline">{{.Label}}</a>{{end}}</p>{{end}}
 </section>
 {{end}}
 
@@ -117,6 +117,8 @@
 {{define "section_links"}}
 <section>
   {{template "section_heading" .Heading}}
-  {{range .Links}}<a href="{{.Href}}" rel="noopener noreferrer" class="text-sm text-indigo-300 hover:underline">{{.Label}}</a>{{end}}
+  <ul class="flex flex-wrap gap-x-4 gap-y-1 text-sm">
+    {{range .Links}}<li><a href="{{.Href}}" rel="noopener noreferrer" class="text-indigo-300 hover:underline">{{.Label}}</a></li>{{end}}
+  </ul>
 </section>
 {{end}}

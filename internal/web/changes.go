@@ -36,8 +36,9 @@ type changesView struct {
 
 // changeRow is one differing part. Stored and Incoming are display texts;
 // Added and Removed the entries of a list part. Checked: the box starts
-// ticked (the stored side is empty). Cover marks the cover row, whose sides
-// show as thumbnails (StoredCover and IncomingCover, image URLs or "").
+// ticked (the stored side is empty). Cover marks an image row (the cover or
+// the banner), whose sides show as thumbnails (StoredCover and
+// IncomingCover, image URLs or "").
 type changeRow struct {
 	Key, Label, Stored, Incoming string
 	Checked                      bool
@@ -67,14 +68,17 @@ func foldText(s string) string {
 
 // changeRows turns the library's changes into rows; field values are
 // formatted like the overview formats them (units, dates), from the stored
-// item and the incoming data; the cover row shows both images.
+// item and the incoming data; the cover and banner rows show both images.
 func changeRows(k plugin.KindDef, it *library.Item, in plugin.ItemData, changes []library.Change) []changeRow {
 	rows := make([]changeRow, 0, len(changes))
 	for _, c := range changes {
 		row := changeRow{Key: c.Key, Label: c.Label, Stored: c.Stored, Incoming: c.Incoming, Checked: c.StoredEmpty,
 			Added: c.Added, Removed: c.Removed}
-		if c.Key == "cover" {
+		switch c.Key {
+		case "cover":
 			row.Cover, row.StoredCover, row.IncomingCover = true, covers.Src(it.CoverPath), covers.Src(in.CoverURL)
+		case "banner":
+			row.Cover, row.StoredCover, row.IncomingCover = true, covers.Src(it.BannerPath), covers.Src(in.BannerURL)
 		}
 		if key, ok := strings.CutPrefix(c.Key, "field."); ok {
 			if fd, ok := fieldDef(k, key); ok {
@@ -197,8 +201,9 @@ func (s *server) getRefresh(w http.ResponseWriter, r *http.Request, pluginID str
 
 // postRefresh asks the source again and applies the posted keys (the ticked
 // rows) from that answer; values in the form are never used. A key that is
-// not a current difference is ignored. A taken remote cover is downloaded by
-// the plugin's cover-only job (Deps.CoverJobs). Success redirects to the
+// not a current difference is ignored. A taken remote cover, banner or
+// trailer thumbnail is downloaded by the plugin's cover-only job
+// (Deps.CoverJobs), enqueued once. Success redirects to the
 // overview with ?updated=N, N the number of parts written.
 func (s *server) postRefresh(w http.ResponseWriter, r *http.Request, pluginID string) {
 	t, ok := s.refreshTarget(w, r, pluginID)
@@ -231,12 +236,24 @@ func (s *server) postRefresh(w http.ResponseWriter, r *http.Request, pluginID st
 		s.changesFail(w, r, t, err)
 		return
 	}
-	for _, k := range applied {
-		if k == "cover" && isRemoteCover(d.CoverURL) {
-			s.enqueueCover(ctx, pluginID, t.item.ID)
-		}
+	if takesRemoteImage(applied, d) {
+		s.enqueueCover(ctx, pluginID, t.item.ID)
 	}
 	http.Redirect(w, r, updatedURL(t.overview, len(applied)), http.StatusSeeOther)
+}
+
+// takesRemoteImage reports whether the written keys took a remote image of d
+// (the cover, the banner or the trailer thumbnail).
+func takesRemoteImage(applied []string, d plugin.ItemData) bool {
+	for _, k := range applied {
+		switch {
+		case k == "cover" && isRemoteCover(d.CoverURL),
+			k == "banner" && isRemoteCover(d.BannerURL),
+			k == "trailer" && d.Trailer != nil && isRemoteCover(d.Trailer.ThumbnailURL):
+			return true
+		}
+	}
+	return false
 }
 
 func isRemoteCover(s string) bool {

@@ -1088,3 +1088,13 @@ func TestRestoreHostileSeriesMember(t *testing.T) {
 		}
 	})
 }
+
+// TestIdentityTitleSkipsAltTitles: a restore row is named by the first title
+// that is not an alternative one.
+func TestIdentityTitleSkipsAltTitles(t *testing.T) {
+	bi := library.BackupItem{PluginID: "book", Kind: "book", Source: "books", SourceID: "1"}
+	bi.Titles = []plugin.Title{{Lang: plugin.AltTitleLang, Text: "Synonym"}, {Lang: "en", Text: "Real"}}
+	if got := identity(0, bi).Title; got != "Real" {
+		t.Fatalf("title = %q, want Real", got)
+	}
+}

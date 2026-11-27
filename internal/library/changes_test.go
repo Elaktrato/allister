@@ -442,3 +442,89 @@ func TestApplyChangesWithoutCreditsKeepsCredits(t *testing.T) {
 		t.Fatalf("credits changed: %+v", after)
 	}
 }
+
+// TestItemChangesBannerTrailerLinks: the banner, the trailer and the links
+// are whole-part rows; an empty incoming value is never a difference.
+func TestItemChangesBannerTrailerLinks(t *testing.T) {
+	e := newEnv(t)
+	id := changesBook(t, e)
+	in := plugin.ItemData{
+		BannerURL: "https://img.example/banner.jpg",
+		Trailer:   &plugin.Trailer{URL: "https://v.example/watch?v=x", ThumbnailURL: "https://img.example/thumb.jpg"},
+		Links:     []plugin.Link{{Label: "Stream A", URL: "https://a.example/1"}, {Label: "Stream B", URL: "https://b.example/1"}},
+	}
+	cs, err := e.lib.ItemChanges(ctx, id, in, nil, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := changeKeys(cs), []string{"banner", "trailer", "links"}; !slices.Equal(got, want) {
+		t.Fatalf("keys = %v, want %v", got, want)
+	}
+	for _, c := range cs {
+		if !c.StoredEmpty || c.Stored != "" {
+			t.Fatalf("%s: stored side = %+v, want empty", c.Key, c)
+		}
+	}
+	if b := changeByKey(cs, "banner"); b.Label != "Banner" || b.Incoming != "https://img.example/banner.jpg" {
+		t.Fatalf("banner = %+v", *b)
+	}
+	if tr := changeByKey(cs, "trailer"); tr.Label != "Trailer" || tr.Incoming != "https://v.example/watch?v=x" {
+		t.Fatalf("trailer = %+v", *tr)
+	}
+	if l := changeByKey(cs, "links"); l.Label != "Links" || !slices.Equal(l.Added, []string{"Stream A", "Stream B"}) {
+		t.Fatalf("links = %+v", *l)
+	}
+	// an empty incoming value is no difference
+	for name, empty := range map[string]plugin.ItemData{
+		"nothing":       {},
+		"empty trailer": {Trailer: &plugin.Trailer{}, Links: []plugin.Link{}},
+	} {
+		if cs, err := e.lib.ItemChanges(ctx, id, empty, nil, false); err != nil || len(cs) != 0 {
+			t.Fatalf("%s: changes = %+v, %v", name, cs, err)
+		}
+	}
+	// apply the links only
+	applied, err := e.lib.ApplyChanges(ctx, id, in, nil, false, []string{"links"})
+	if err != nil || !slices.Equal(applied, []string{"links"}) {
+		t.Fatalf("apply = %v, %v", applied, err)
+	}
+	it := mustItem(t, e.lib, id)
+	if !reflect.DeepEqual(it.Links, in.Links) || it.BannerPath != "" || it.Trailer != nil {
+		t.Fatalf("after links: links %+v banner %q trailer %+v", it.Links, it.BannerPath, it.Trailer)
+	}
+	if applied, err = e.lib.ApplyChanges(ctx, id, in, nil, false, []string{"banner", "trailer"}); err != nil || !slices.Equal(applied, []string{"banner", "trailer"}) {
+		t.Fatalf("apply = %v, %v", applied, err)
+	}
+	it = mustItem(t, e.lib, id)
+	if it.BannerPath != in.BannerURL || it.Trailer == nil || *it.Trailer != *in.Trailer {
+		t.Fatalf("after banner, trailer: %q %+v", it.BannerPath, it.Trailer)
+	}
+	// stored equal: no difference (links in another order neither)
+	same := in
+	same.Links = []plugin.Link{in.Links[1], in.Links[0]}
+	if cs, err := e.lib.ItemChanges(ctx, id, same, nil, false); err != nil || len(cs) != 0 {
+		t.Fatalf("equal: changes = %+v, %v", cs, err)
+	}
+	// downloaded images (local files of unknown origin) are no difference
+	// from a URL, like a cover; another trailer link is
+	mustExec(t, e.db, `UPDATE items SET banner_path = 'b.jpg', trailer_thumb = 't.jpg' WHERE id = ?`, id)
+	if cs, err := e.lib.ItemChanges(ctx, id, same, nil, false); err != nil || len(cs) != 0 {
+		t.Fatalf("downloaded: changes = %+v, %v", cs, err)
+	}
+	other := same
+	other.BannerURL = "https://img.example/banner2.jpg"
+	other.Trailer = &plugin.Trailer{URL: "https://v.example/watch?v=y", ThumbnailURL: "https://img.example/thumb2.jpg"}
+	other.Links = []plugin.Link{{Label: "Stream A", URL: "https://a.example/2"}}
+	cs, err = e.lib.ItemChanges(ctx, id, other, nil, false)
+	if err != nil || !slices.Equal(changeKeys(cs), []string{"trailer", "links"}) {
+		t.Fatalf("changed: keys = %v, %v", changeKeys(cs), err)
+	}
+	if tr := changeByKey(cs, "trailer"); tr.Stored != "https://v.example/watch?v=x" || tr.Incoming != "https://v.example/watch?v=y" || tr.StoredEmpty {
+		t.Fatalf("trailer = %+v", *tr)
+	}
+	// an incoming value that cannot be stored is ErrInvalid
+	bad := plugin.ItemData{Links: []plugin.Link{{Label: "L", URL: "http://l.example/"}}}
+	if _, err := e.lib.ItemChanges(ctx, id, bad, nil, false); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("bad link: err = %v", err)
+	}
+}

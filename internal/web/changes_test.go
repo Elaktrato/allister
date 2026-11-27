@@ -289,3 +289,32 @@ func TestRefreshShowsCoversAsThumbnails(t *testing.T) {
 	e.tv.Data.CoverURL = "https://img.example/new.jpg"
 	mustContain(t, e.get("/tv/tvdata/1/refresh").Body.String(), `<img src="https://img.example/old.jpg"`, `<img src="https://img.example/new.jpg"`)
 }
+
+// TestRefreshBannerTrailerLinks: the banner, trailer and links are rows of
+// the comparison (the banner as images); taking a remote banner or trailer
+// thumbnail enqueues the cover-only download once, taking the links alone
+// downloads nothing.
+func TestRefreshBannerTrailerLinks(t *testing.T) {
+	e, id := refreshEnv(t, func(_, tv *plugintest.Plugin) { tv.M.Kinds[0].Banner, tv.M.Kinds[0].Trailer = true, true })
+	e.tv.Data.BannerURL = "https://img.example/banner.jpg"
+	e.tv.Data.Trailer = &plugin.Trailer{URL: "https://v.example/watch?v=x", ThumbnailURL: "https://img.example/thumb.jpg"}
+	e.tv.Data.Links = []plugin.Link{{Label: "Stream Site", URL: "https://stream.example/1"}}
+	b := e.get("/tv/tvdata/1/refresh").Body.String()
+	mustContain(t, b, `value="banner" checked`, `value="trailer" checked`, `value="links" checked`,
+		`<img src="https://img.example/banner.jpg"`, "https://v.example/watch?v=x", "Stream Site")
+	rec := e.do("POST", "/tv/tvdata/1/refresh", url.Values{"key": {"links"}}, false)
+	if rec.Code != 303 || len(e.jobs.got) != 0 {
+		t.Fatalf("links: %d, enqueued %+v", rec.Code, e.jobs.got)
+	}
+	if got := e.item(t, id).Links; !reflect.DeepEqual(got, e.tv.Data.Links) {
+		t.Fatalf("links %+v", got)
+	}
+	rec = e.do("POST", "/tv/tvdata/1/refresh", url.Values{"key": {"banner", "trailer"}}, false)
+	if rec.Code != 303 || rec.Header().Get("Location") != "/tv/tvdata/1?updated=2" {
+		t.Fatalf("got %d %q", rec.Code, rec.Header().Get("Location"))
+	}
+	want := []enqueued{{jobs.KindSyncItem, jobs.SyncPayload{ItemID: id, PluginID: "tv", CoverOnly: true}}}
+	if !reflect.DeepEqual(e.jobs.got, want) {
+		t.Fatalf("enqueued %+v", e.jobs.got)
+	}
+}

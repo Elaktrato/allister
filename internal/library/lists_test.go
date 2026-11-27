@@ -456,3 +456,24 @@ func TestMergeCandidates(t *testing.T) {
 		t.Fatalf("other kind: %d rows, %v", len(rows), err)
 	}
 }
+
+// TestSearchLibraryOrderSkipsAltTitles: the search picks its matches (up
+// to the limit) by the first stored title that is not an alternative one.
+func TestSearchLibraryOrderSkipsAltTitles(t *testing.T) {
+	e := newEnv(t)
+	d := bookData("alt-1")
+	d.Titles = []plugin.Title{{Lang: plugin.AltTitleLang, Text: "Aaa Kingdom"}, {Lang: "fr", Text: "Zed Kingdom"}}
+	if _, err := e.lib.AddToList(bg, "book", "book", d, Entry{Status: Planned}); err != nil {
+		t.Fatal(err)
+	}
+	addTitledBook(t, e.lib, "alt-2", "Mmm Kingdom", Entry{Status: Planned})
+	// the limit keeps the first match by that order: Mmm before Zed, the
+	// alternative Aaa ignored
+	rows, err := e.lib.SearchLibrary(bg, "kingdom", nil, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 1 || rows[0].Item.SourceID != "alt-2" {
+		t.Fatalf("limit 1 = %+v, want alt-2", rows)
+	}
+}
