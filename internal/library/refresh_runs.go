@@ -33,6 +33,12 @@ const (
 // usable credential.
 const RefreshStoppedCredential = "credential"
 
+// refreshGrace is how long a run without any pending or running job may
+// still be enqueuing its jobs: an older one was interrupted (a crash during
+// the start) or its done jobs were pruned, and reconcileRefreshRuns
+// finishes it.
+const refreshGrace = 5 * time.Minute
+
 // maxFailedTitles bounds the failed titles a run keeps.
 const maxFailedTitles = 50
 
@@ -216,16 +222,20 @@ const refreshJobRunSQL = `CASE WHEN json_valid(j.payload_json) THEN json_extract
 
 // reconcileRefreshRuns finishes unfinished runs that no job will ever
 // count again: no job of the run is pending or running, and either every
-// item's job was enqueued (the queue gave up on some, or they are gone) or
-// the run was stopped. Their uncounted items count as failed.
+// item's job was enqueued (the queue gave up on some, or they are gone),
+// the run was stopped, or it started more than refreshGrace ago (its start
+// was interrupted while enqueuing, or its done jobs were pruned). Their
+// uncounted items count as failed.
 func reconcileRefreshRuns(ctx context.Context, x execer) error {
 	_, err := x.ExecContext(ctx, `UPDATE source_refresh_runs SET finished_at = `+nowSQL+`,
 		failed = MAX(failed, total - updated - unchanged)
 		WHERE finished_at IS NULL
 		AND NOT EXISTS (SELECT 1 FROM jobs j WHERE j.kind = ? AND j.state IN ('pending','running')
 			AND `+refreshJobRunSQL+` = source_refresh_runs.id)
-		AND (stopped <> '' OR (SELECT COUNT(*) FROM jobs j WHERE j.kind = ?
-			AND `+refreshJobRunSQL+` = source_refresh_runs.id) >= total)`, RefreshJobKind, RefreshJobKind)
+		AND (stopped <> '' OR started_at < strftime('%Y-%m-%dT%H:%M:%SZ', 'now', ?)
+			OR (SELECT COUNT(*) FROM jobs j WHERE j.kind = ?
+			AND `+refreshJobRunSQL+` = source_refresh_runs.id) >= total)`,
+		RefreshJobKind, fmt.Sprintf("-%d seconds", int(refreshGrace/time.Second)), RefreshJobKind)
 	if err != nil {
 		return fmt.Errorf("reconcile refresh runs: %w", err)
 	}
