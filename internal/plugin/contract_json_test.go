@@ -41,6 +41,7 @@ func TestManifestJSONRoundTrip(t *testing.T) {
 			Fields: []plugin.FieldDef{
 				{Key: "n", Label: "N", Type: plugin.FieldNumber, Unit: "pcs", Min: fptr(0), Max: fptr(10), Show: true, Editable: true, Filterable: true, Sortable: true, Required: true},
 				{Key: "e", Label: "E", Type: plugin.FieldEnum, EnumValues: []string{"a", "b"}},
+				{Key: "s", Label: "S", Type: plugin.FieldNumber, Show: true, SourceRefresh: true},
 			},
 			Genres:   plugin.TermDef{Enabled: true, Label: "Genres", Editable: true, Filterable: true},
 			Tags:     plugin.TermDef{Enabled: true, Label: "Tags", Editable: true, Filterable: true},

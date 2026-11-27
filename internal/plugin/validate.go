@@ -760,6 +760,9 @@ func validateFieldList(p *problems, path string, list []FieldDef, reserved []str
 		if !validFieldType(f.Type) {
 			p.add(fp+".type", "unknown field type %q", f.Type)
 		}
+		if f.SourceRefresh && f.Editable {
+			p.add(fp+".source_refresh", "only fields that are not editable may be refreshed from the source")
+		}
 		if f.Type == FieldEnum && len(f.EnumValues) == 0 {
 			p.add(fp+".enum_values", "enum field needs at least one value")
 		}

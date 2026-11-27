@@ -148,8 +148,9 @@ func fillTitles(stored, in []plugin.Title) []plugin.Title {
 }
 
 // fillField is the value a fill writes to one field: the incoming value
-// where none is stored, a stored list with the missing incoming values
-// appended (up to maxListValues), or none (ok false).
+// where none is stored or the field is a SourceRefresh statistic, a stored
+// list with the missing incoming values appended (up to maxListValues), or
+// none (ok false).
 func fillField(fd plugin.FieldDef, stored, in map[string]plugin.FieldValue) (plugin.FieldValue, bool) {
 	v, ok := in[fd.Key]
 	if !ok {
@@ -161,6 +162,11 @@ func fillField(fd plugin.FieldDef, stored, in map[string]plugin.FieldValue) (plu
 	}
 	sv, has := stored[fd.Key]
 	if !has {
+		return v, true
+	}
+	if fd.SourceRefresh && !fd.Editable {
+		// a value the source keeps current: the incoming one replaces it
+		// (an equal value is no difference, so nothing is written)
 		return v, true
 	}
 	if fd.Type != plugin.FieldList || len(sv.List) == 0 {

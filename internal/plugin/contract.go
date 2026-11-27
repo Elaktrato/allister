@@ -99,6 +99,11 @@ type FieldDef struct {
 	Sortable   bool      `json:"sortable,omitempty"`
 	Required   bool      `json:"required,omitempty"`
 	Unit       string    `json:"unit,omitempty"`
+	// SourceRefresh marks a value the source keeps current (a statistic
+	// such as a community score): the bulk update from source replaces it
+	// even when one is stored. Only a field that is not Editable may set
+	// it, so it never overwrites an owner's edit.
+	SourceRefresh bool `json:"source_refresh,omitempty"`
 }
 
 // StatusLabels names the five status classes for one media kind.

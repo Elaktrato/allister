@@ -66,8 +66,8 @@ func TestBooksManifest(t *testing.T) {
 		{Key: "release_status", Label: "Release status", Type: plugin.FieldEnum, EnumValues: []string{"finished", "releasing", "upcoming", "hiatus", "cancelled"}, Show: true, Editable: true, Filterable: true},
 		{Key: "country", Label: "Country", Type: plugin.FieldText, Show: true, Editable: true, Filterable: true},
 		{Key: "adult", Label: "Adult", Type: plugin.FieldEnum, EnumValues: []string{"yes", "no"}, Show: true, Editable: true, Filterable: true},
-		{Key: "community_score", Label: "Community score", Type: plugin.FieldNumber, Unit: "%", Min: num(0), Max: num(100), Show: true, Sortable: true},
-		{Key: "popularity", Label: "Popularity", Type: plugin.FieldNumber, Min: num(0), Max: num(100000000), Show: true, Sortable: true},
+		{Key: "community_score", Label: "Community score", Type: plugin.FieldNumber, Unit: "%", Min: num(0), Max: num(100), Show: true, Sortable: true, SourceRefresh: true},
+		{Key: "popularity", Label: "Popularity", Type: plugin.FieldNumber, Min: num(0), Max: num(100000000), Show: true, Sortable: true, SourceRefresh: true},
 	}
 	for _, w := range wantExtras {
 		if i := slices.IndexFunc(series.Fields, func(f plugin.FieldDef) bool { return f.Key == w.Key }); i < 0 || !reflect.DeepEqual(series.Fields[i], w) {
