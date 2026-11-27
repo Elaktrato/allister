@@ -52,6 +52,30 @@ func checkHTTPURL(path, s string) error {
 	return nil
 }
 
+// checkHTTPSURL accepts "" or an https URL with a host.
+func checkHTTPSURL(path, s string) error {
+	if err := checkHTTPURL(path, s); err != nil {
+		return err
+	}
+	if s != "" {
+		if u, _ := url.Parse(s); !strings.EqualFold(u.Scheme, "https") {
+			return invalid("%s must be an https URL", path)
+		}
+	}
+	return nil
+}
+
+// checkHTTPSImageRef is checkImageRef with https as the only remote scheme.
+func checkHTTPSImageRef(path, s string) error {
+	if err := checkImageRef(path, s); err != nil {
+		return err
+	}
+	if strings.Contains(s, "://") {
+		return checkHTTPSURL(path, s)
+	}
+	return nil
+}
+
 // checkImageRef accepts "", an http(s) URL, or a plain local file base name
 // (no path separators, no "..", no ":" so "javascript:" and "data:" fail).
 func checkImageRef(path, s string) error {

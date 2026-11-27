@@ -209,3 +209,25 @@ func (a *fieldAcc) add(key, vtype string, text *string, num *float64, date *stri
 	a.vals[key] = v
 	return nil
 }
+
+// listCompat reads stored values as the current field types of the plugin's
+// kind where a plugin update changed a field compatibly: a single text value
+// of a field that is now a list reads as a one-element list (a list filter
+// matches it too, since both store the value in the text column). Values of
+// an uninstalled plugin or kind stay as stored.
+func (l *Library) listCompat(pluginID, kind string, vals map[string]plugin.FieldValue) {
+	if len(vals) == 0 {
+		return
+	}
+	def, err := l.kindDef(pluginID, kind)
+	if err != nil {
+		return
+	}
+	for _, fd := range def.Fields {
+		v, ok := vals[fd.Key]
+		if !ok || fd.Type != plugin.FieldList || len(v.List) > 0 || v.Text == "" || v.Num != nil || v.Date != nil {
+			continue
+		}
+		vals[fd.Key] = plugin.FieldValue{List: []string{v.Text}}
+	}
+}

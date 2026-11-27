@@ -14,10 +14,11 @@ const manualSource = "manual"
 
 // ConvertToSource turns the manual item itemID into the source item d, in
 // place and in one transaction. The item keeps its id, so its entry, progress
-// and credits stay attached. Source, source id, cover and external URL are
-// replaced; titles, fields, genres, tags and relations are replaced with the
-// same validation and insert code as SaveItem; the external ids of the types
-// present in d.ExternalIDs are replaced while ids of other types are kept;
+// and credits stay attached. Source, source id, cover, banner, trailer and
+// external URL are replaced; titles, fields, genres, tags, relations and
+// links are replaced with the same validation and insert code as SaveItem;
+// the external ids of the types present in d.ExternalIDs are replaced while
+// ids of other types are kept;
 // sync_state becomes "pending" so the sync job fetches the rest.
 //
 // The entry is left untouched, except that a progress value above a total of
@@ -62,9 +63,10 @@ func (l *Library) ConvertToSource(ctx context.Context, itemID int64, d plugin.It
 		return &AlreadySavedError{ExistingID: existing}
 	}
 
+	trailerURL, trailerThumb := trailerColumns(p.trailer)
 	if _, err := tx.ExecContext(ctx, `UPDATE items SET source = ?, source_id = ?, cover_path = ?, cover_source = '', external_url = ?,
-		sync_state = 'pending', updated_at = `+nowSQL+` WHERE id = ?`,
-		p.source, p.sourceID, d.CoverURL, d.ExternalURL, itemID); err != nil {
+		banner_path = ?, trailer_url = ?, trailer_thumb = ?, sync_state = 'pending', updated_at = `+nowSQL+` WHERE id = ?`,
+		p.source, p.sourceID, d.CoverURL, d.ExternalURL, p.banner, trailerURL, trailerThumb, itemID); err != nil {
 		return fmt.Errorf("convert item: %w", err)
 	}
 	for _, q := range []string{
@@ -72,6 +74,7 @@ func (l *Library) ConvertToSource(ctx context.Context, itemID int64, d plugin.It
 		`DELETE FROM item_fields WHERE item_id = ?`,
 		`DELETE FROM ` + tableRelations + ` WHERE item_id = ?`,
 		`DELETE FROM item_terms WHERE item_id = ?`,
+		`DELETE FROM item_links WHERE item_id = ?`,
 	} {
 		if _, err := tx.ExecContext(ctx, q, itemID); err != nil {
 			return fmt.Errorf("convert item: %w", err)

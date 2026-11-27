@@ -429,6 +429,7 @@ func (s *server) loadSaved(ctx context.Context, m plugin.Manifest, k plugin.Kind
 	li := &loadedItem{man: m, kind: k, saved: it, data: plugin.ItemData{
 		ItemSummary: plugin.ItemSummary{Source: it.Source, ID: it.SourceID, Kind: it.Kind, Titles: it.Titles, Fields: it.Fields, CoverURL: it.CoverPath},
 		ExternalURL: it.ExternalURL, ExternalIDs: it.ExternalIDs, Relations: it.Relations, Genres: it.Genres, Tags: it.Tags,
+		BannerURL: it.BannerPath, Trailer: it.Trailer, Links: it.Links,
 	}}
 	var err error
 	if li.entry, err = s.deps.Library.Entry(ctx, it.ID); err != nil {

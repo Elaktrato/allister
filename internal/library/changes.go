@@ -152,7 +152,7 @@ type mergeCover struct{ source string }
 // validation error of an incoming value is kept on its part. mc, when set,
 // is a merge's cover rule.
 func (l *Library) changeParts(ctx context.Context, q queryer, itemID int64, in plugin.ItemData, credits []plugin.Credit, withCredits bool, mc *mergeCover) (plugin.KindDef, []changePart, error) {
-	it, err := loadItem(ctx, q, `id = ?`, itemID)
+	it, err := l.loadItem(ctx, q, `id = ?`, itemID)
 	if err != nil {
 		return plugin.KindDef{}, nil, err
 	}

@@ -3,6 +3,7 @@ package library
 import (
 	"context"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -586,5 +587,180 @@ func TestItemByPluginSourceAcrossKinds(t *testing.T) {
 	}
 	if got, err := l.ItemByPluginSource(ctx, "book", "other", "7"); err != nil || len(got) != 0 {
 		t.Fatalf("other source %+v %v", got, err)
+	}
+}
+
+func TestSaveItemStoresBannerTrailerLinks(t *testing.T) {
+	l := newLib(t)
+	d := bookData("1")
+	d.BannerURL = "https://img.example/b.jpg"
+	d.Trailer = &plugin.Trailer{URL: "https://www.youtube.com/watch?v=x", ThumbnailURL: "https://img.example/t.jpg"}
+	d.Links = []plugin.Link{{Label: "Stream B", URL: "https://b.example/1"}, {Label: "Stream A", URL: "https://a.example/1"}}
+	it := mustItem(t, l, mustSave(t, l, "book", "book", d))
+	if it.BannerPath != d.BannerURL {
+		t.Fatalf("banner = %q", it.BannerPath)
+	}
+	if it.Trailer == nil || *it.Trailer != *d.Trailer {
+		t.Fatalf("trailer = %+v", it.Trailer)
+	}
+	if !reflect.DeepEqual(it.Links, d.Links) {
+		t.Fatalf("links = %+v", it.Links)
+	}
+	// an item without them reads back empty
+	plain := mustItem(t, l, mustSave(t, l, "book", "book", bookData("2")))
+	if plain.BannerPath != "" || plain.Trailer != nil || plain.Links != nil {
+		t.Fatalf("plain item = %q %+v %+v", plain.BannerPath, plain.Trailer, plain.Links)
+	}
+
+	bad := func(name string, mod func(*plugin.ItemData)) {
+		t.Helper()
+		d := bookData("bad")
+		mod(&d)
+		_, err := l.SaveItem(ctx, "book", "book", d)
+		if !errors.Is(err, ErrInvalid) {
+			t.Fatalf("%s: err = %v, want ErrInvalid", name, err)
+		}
+	}
+	bad("too many links", func(d *plugin.ItemData) {
+		for i := range 21 {
+			d.Links = append(d.Links, plugin.Link{Label: fmt.Sprintf("L%d", i), URL: fmt.Sprintf("https://l.example/%d", i)})
+		}
+	})
+	bad("http link", func(d *plugin.ItemData) { d.Links = []plugin.Link{{Label: "L", URL: "http://l.example/"}} })
+	bad("javascript link", func(d *plugin.ItemData) { d.Links = []plugin.Link{{Label: "L", URL: "javascript:alert(1)"}} })
+	bad("empty link label", func(d *plugin.ItemData) { d.Links = []plugin.Link{{Label: " ", URL: "https://l.example/"}} })
+	bad("control in link label", func(d *plugin.ItemData) { d.Links = []plugin.Link{{Label: "a\nb", URL: "https://l.example/"}} })
+	bad("http banner", func(d *plugin.ItemData) { d.BannerURL = "http://img.example/b.jpg" })
+	bad("http trailer", func(d *plugin.ItemData) { d.Trailer = &plugin.Trailer{URL: "http://v.example/x"} })
+	bad("trailer without url", func(d *plugin.ItemData) {
+		d.Trailer = &plugin.Trailer{ThumbnailURL: "https://img.example/t.jpg"}
+	})
+	bad("http trailer thumbnail", func(d *plugin.ItemData) {
+		d.Trailer = &plugin.Trailer{URL: "https://v.example/x", ThumbnailURL: "http://img.example/t.jpg"}
+	})
+	// exactly 20 links are fine
+	ok := bookData("20")
+	for i := range 20 {
+		ok.Links = append(ok.Links, plugin.Link{Label: fmt.Sprintf("L%d", i), URL: fmt.Sprintf("https://l.example/%d", i)})
+	}
+	if got := mustItem(t, l, mustSave(t, l, "book", "book", ok)); len(got.Links) != 20 {
+		t.Fatalf("links = %d", len(got.Links))
+	}
+}
+
+// TestTextValueReadsAsListAfterTypeChange: a plugin update that turns a text
+// field into a list field keeps the stored single value as a one-element list.
+func TestTextValueReadsAsListAfterTypeChange(t *testing.T) {
+	d, err := db.Open(filepath.Join(t.TempDir(), "t.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { d.Close() })
+	withStudio := func(typ plugin.FieldType) *Library {
+		p := plugintest.BookPlugin()
+		p.M.Kinds[0].Fields = append(p.M.Kinds[0].Fields,
+			plugin.FieldDef{Key: "studio", Label: "Studio", Type: typ, Editable: true, Filterable: true})
+		reg := plugin.NewRegistry(plugintest.NewMemEnabled())
+		if err := reg.Register(p); err != nil {
+			t.Fatal(err)
+		}
+		return New(d, reg)
+	}
+	before := withStudio(plugin.FieldText)
+	data := bookData("1")
+	data.Fields["studio"] = plugin.FieldValue{Text: "Studio A"}
+	id, err := before.AddToList(ctx, "book", "book", data, Entry{Status: Planned})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	after := withStudio(plugin.FieldList)
+	it := mustItem(t, after, id)
+	if got := it.Fields["studio"]; got.Text != "" || !reflect.DeepEqual(got.List, []string{"Studio A"}) {
+		t.Fatalf("studio = %+v", got)
+	}
+	q := Query{PluginID: "book", Kind: "book", Filters: []Filter{{Key: "studio", Op: OpIn, Values: []string{"Studio A"}}}}
+	pg, err := after.List(ctx, q, "en")
+	if err != nil || len(pg.Rows) != 1 || pg.Rows[0].Item.ID != id {
+		t.Fatalf("filter: %+v %v", pg, err)
+	}
+	if got := pg.Rows[0].Item.Fields["studio"]; !reflect.DeepEqual(got.List, []string{"Studio A"}) {
+		t.Fatalf("row studio = %+v", got)
+	}
+	// saving the item writes list rows
+	if err := after.UpdateDetails(ctx, id, DetailsUpdate{Titles: it.Titles, Fields: it.Fields, Genres: it.Genres}); err != nil {
+		t.Fatal(err)
+	}
+	if n := count(t, d, `SELECT COUNT(*) FROM item_fields WHERE item_id = ? AND key = 'studio' AND vtype = 'list' AND text = 'Studio A'`, id); n != 1 {
+		t.Fatalf("list rows = %d", n)
+	}
+	if n := count(t, d, `SELECT COUNT(*) FROM item_fields WHERE item_id = ? AND key = 'studio' AND vtype <> 'list'`, id); n != 0 {
+		t.Fatalf("text rows left = %d", n)
+	}
+}
+
+// TestItemEditsKeepBannerTrailerLinks: the write paths that replace parts of
+// an item (details edit, update from source, merge) leave the banner, the
+// trailer and the links alone; matching a manual item to a source takes the
+// source's.
+func TestItemEditsKeepBannerTrailerLinks(t *testing.T) {
+	e := newEnv(t)
+	withExtras := func(id string) plugin.ItemData {
+		d := bookData(id)
+		d.BannerURL = "https://img.example/b" + id + ".jpg"
+		d.Trailer = &plugin.Trailer{URL: "https://v.example/" + id, ThumbnailURL: "t" + id + ".jpg"} // a downloaded thumbnail
+		d.Links = []plugin.Link{{Label: "Site " + id, URL: "https://s.example/" + id}}
+		return d
+	}
+	want := withExtras("1")
+	id, err := e.lib.AddToList(bg, "book", "book", want, Entry{Status: Planned})
+	if err != nil {
+		t.Fatal(err)
+	}
+	check := func(step string) {
+		t.Helper()
+		it := mustItem(t, e.lib, id)
+		if it.BannerPath != want.BannerURL || it.Trailer == nil || *it.Trailer != *want.Trailer || !reflect.DeepEqual(it.Links, want.Links) {
+			t.Fatalf("%s: banner %q trailer %+v links %+v", step, it.BannerPath, it.Trailer, it.Links)
+		}
+	}
+	it := mustItem(t, e.lib, id)
+	if err := e.lib.UpdateDetails(bg, id, DetailsUpdate{Titles: []plugin.Title{{Lang: "en", Text: "Edited"}}, Fields: it.Fields}); err != nil {
+		t.Fatal(err)
+	}
+	check("details edit")
+	in := bookData("1")
+	in.Titles = []plugin.Title{{Lang: "en", Text: "From source"}}
+	changes, err := e.lib.ItemChanges(bg, id, in, nil, false)
+	if err != nil || len(changes) == 0 {
+		t.Fatalf("changes %+v %v", changes, err)
+	}
+	var keys []string
+	for _, c := range changes {
+		keys = append(keys, c.Key)
+	}
+	if _, err := e.lib.ApplyChanges(bg, id, in, nil, false, keys); err != nil {
+		t.Fatal(err)
+	}
+	check("update from source")
+	other, err := e.lib.AddToList(bg, "book", "book", bookData("2"), Entry{Status: Planned})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := e.lib.MergeItems(bg, id, other, nil); err != nil {
+		t.Fatal(err)
+	}
+	check("merge")
+
+	man := bookData("m")
+	man.Source = "manual"
+	mid := mustSave(t, e.lib, "book", "book", man, WithSyncState("done"))
+	src := withExtras("9")
+	if err := e.lib.ConvertToSource(bg, mid, src); err != nil {
+		t.Fatal(err)
+	}
+	got := mustItem(t, e.lib, mid)
+	if got.BannerPath != src.BannerURL || got.Trailer == nil || *got.Trailer != *src.Trailer || !reflect.DeepEqual(got.Links, src.Links) {
+		t.Fatalf("convert: banner %q trailer %+v links %+v", got.BannerPath, got.Trailer, got.Links)
 	}
 }

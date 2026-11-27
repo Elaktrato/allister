@@ -342,6 +342,7 @@ func (l *Library) backupParts(ctx context.Context, ids []int64, items []BackupIt
 	for i, acc := range accs {
 		if acc != nil && len(acc.vals) > 0 {
 			items[i].Fields = acc.vals
+			l.listCompat(items[i].PluginID, items[i].Kind, items[i].Fields)
 		}
 	}
 

@@ -57,7 +57,7 @@ func (l *Library) MergeItems(ctx context.Context, keepID, otherID int64, keys []
 		return fmt.Errorf("merge items: %w", err)
 	}
 	defer tx.Rollback()
-	p, err := loadMergePair(ctx, tx, keepID, otherID)
+	p, err := l.loadMergePair(ctx, tx, keepID, otherID)
 	if err != nil {
 		return err
 	}
@@ -128,7 +128,7 @@ func (l *Library) MergeItems(ctx context.Context, keepID, otherID int64, keys []
 // credits only when MergeItems would compare them. It changes nothing and
 // refuses the pairs MergeItems refuses (ErrInvalid).
 func (l *Library) MergeChanges(ctx context.Context, keepID, otherID int64) ([]Change, error) {
-	p, err := loadMergePair(ctx, l.db, keepID, otherID)
+	p, err := l.loadMergePair(ctx, l.db, keepID, otherID)
 	if err != nil {
 		return nil, err
 	}
@@ -154,15 +154,15 @@ func (p mergePair) withCredits() bool {
 // loadMergePair reads both items through q and refuses what cannot be
 // merged: the same item, an unknown one, or items of another plugin or kind
 // (ErrInvalid).
-func loadMergePair(ctx context.Context, q queryer, keepID, otherID int64) (mergePair, error) {
+func (l *Library) loadMergePair(ctx context.Context, q queryer, keepID, otherID int64) (mergePair, error) {
 	if keepID == otherID {
 		return mergePair{}, invalid("an item cannot be merged with itself")
 	}
-	keep, err := loadItem(ctx, q, `id = ?`, keepID)
+	keep, err := l.loadItem(ctx, q, `id = ?`, keepID)
 	if err != nil {
 		return mergePair{}, err
 	}
-	other, in, credits, err := itemDataTx(ctx, q, otherID)
+	other, in, credits, err := l.itemDataTx(ctx, q, otherID)
 	if err != nil {
 		return mergePair{}, err
 	}
@@ -182,14 +182,15 @@ func loadMergePair(ctx context.Context, q queryer, keepID, otherID int64) (merge
 // itemDataTx reads the item through q as incoming data for ApplyChanges:
 // its parts as plugin.ItemData and its credits. All are zero (and the item
 // nil) for an unknown id.
-func itemDataTx(ctx context.Context, q queryer, id int64) (*Item, plugin.ItemData, []plugin.Credit, error) {
-	it, err := loadItem(ctx, q, `id = ?`, id)
+func (l *Library) itemDataTx(ctx context.Context, q queryer, id int64) (*Item, plugin.ItemData, []plugin.Credit, error) {
+	it, err := l.loadItem(ctx, q, `id = ?`, id)
 	if err != nil || it == nil {
 		return nil, plugin.ItemData{}, nil, err
 	}
 	d := plugin.ItemData{
 		ItemSummary: plugin.ItemSummary{Source: it.Source, ID: it.SourceID, Kind: it.Kind, Titles: it.Titles, Fields: it.Fields, CoverURL: it.CoverPath},
 		ExternalURL: it.ExternalURL, ExternalIDs: it.ExternalIDs, Relations: it.Relations, Genres: it.Genres, Tags: it.Tags,
+		BannerURL: it.BannerPath, Trailer: it.Trailer, Links: it.Links,
 	}
 	saved, err := loadCredits(ctx, q, id)
 	if err != nil {

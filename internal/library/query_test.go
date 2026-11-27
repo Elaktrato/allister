@@ -1149,3 +1149,62 @@ func TestStatsRowsRefusesOverLimit(t *testing.T) {
 		t.Fatalf("at the limit: %d rows, %v", len(rows), err)
 	}
 }
+
+func TestResolveTitleSkipsAltTitles(t *testing.T) {
+	alt := plugin.Title{Lang: plugin.AltTitleLang, Text: "Alt"}
+	if got := ResolveTitle([]plugin.Title{alt, {Lang: "en", Text: "Real"}}, "ja", nil); got != "Real" {
+		t.Fatalf("got %q, want Real", got)
+	}
+	if got := ResolveTitle([]plugin.Title{alt}, "ja", nil); got != "Alt" {
+		t.Fatalf("only alt: got %q, want Alt", got)
+	}
+	// the alternative language is never a display language either
+	if got := ResolveTitle([]plugin.Title{alt, {Lang: "en", Text: "Real"}}, plugin.AltTitleLang, []string{plugin.AltTitleLang}); got != "Real" {
+		t.Fatalf("alt preferred: got %q, want Real", got)
+	}
+}
+
+func TestSortTitleSkipsAltTitles(t *testing.T) {
+	l := newLib(t)
+	save := func(id string, titles ...plugin.Title) {
+		t.Helper()
+		d := bookData(id)
+		d.Titles = titles
+		if _, err := l.AddToList(bg, "book", "book", d, Entry{Status: Planned}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// "Zeta" shows as its title although its first stored row is the alt "Aaa"
+	save("1", plugin.Title{Lang: plugin.AltTitleLang, Text: "Aaa"}, plugin.Title{Lang: "fr", Text: "Zeta"})
+	save("2", plugin.Title{Lang: "fr", Text: "Mid"})
+	for _, lang := range []string{"de", plugin.AltTitleLang} {
+		q := bookQ
+		q.Sort = Sort{Kind: SortTitle}
+		pg, err := l.List(bg, q, lang)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := titlesOf(pg); !slices.Equal(got, []string{"Mid", "Zeta"}) {
+			t.Fatalf("%s: order = %q", lang, got)
+		}
+	}
+}
+
+func TestTextSearchFindsAltTitles(t *testing.T) {
+	l := newLib(t)
+	d := bookData("1")
+	d.Titles = []plugin.Title{{Lang: "en", Text: "Real"}, {Lang: plugin.AltTitleLang, Text: "Synonym Xyz"}}
+	if _, err := l.AddToList(bg, "book", "book", d, Entry{Status: Planned}); err != nil {
+		t.Fatal(err)
+	}
+	bookT(t, l, "2", "Other", nil, Entry{})
+	q := bookQ
+	q.Text = "xyz"
+	pg, err := l.List(bg, q, "en")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := titlesOf(pg); !slices.Equal(got, []string{"Real"}) {
+		t.Fatalf("found %q", got)
+	}
+}
