@@ -31,6 +31,7 @@ func gameKind() plugin.KindDef {
 		Fields: []plugin.FieldDef{
 			{Key: "year", Label: "Year", Type: plugin.FieldNumber, Min: num(1950), Max: num(2100), Show: true, Editable: true, Filterable: true, Sortable: true},
 			{Key: "released_on", Label: "Released", Type: plugin.FieldDate, Show: true, Editable: true},
+			{Key: "release_status", Label: "Release status", Type: plugin.FieldEnum, EnumValues: []string{"released", "early_access", "upcoming", "cancelled", "delisted", "other"}, Show: true, Editable: true, Filterable: true},
 			{Key: "platforms", Label: "Platforms", Type: plugin.FieldText, Show: true, Editable: true, Filterable: true},
 			{Key: "developer", Label: "Developer", Type: plugin.FieldText, Show: true, Editable: true, Filterable: true},
 			{Key: "publisher", Label: "Publisher", Type: plugin.FieldText, Show: true, Editable: true, Filterable: true},
@@ -77,6 +78,7 @@ func gameKind() plugin.KindDef {
 			{Key: "developer", Hide: "md"},
 			{Key: "publisher", Hide: "lg"},
 			{Key: "released_on", Hide: "lg"},
+			{Key: "release_status", Hide: "lg"},
 			{Key: "time_main", Hide: "lg"},
 			{Key: "time_extra", Hide: "lg"},
 			{Key: "time_complete", Hide: "lg"},
