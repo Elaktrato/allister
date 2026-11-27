@@ -1,4 +1,4 @@
-# Source extras: release status, AniList data, banners, trailers, bulk update (design, 2026-11-27)
+# Source extras: release status, AniList data, banners, trailers, bulk update (design, 2026-11-27, approved)
 
 ## Intent
 
