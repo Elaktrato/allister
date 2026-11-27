@@ -84,6 +84,12 @@ func checkCredits(credits []plugin.Credit) error {
 // insertCredits writes checked credits of the item inside tx, upserting their
 // people (see SaveCredits).
 func insertCredits(ctx context.Context, tx *sql.Tx, itemID int64, pluginID, source string, credits []plugin.Credit) error {
+	return insertCreditsFrom(ctx, tx, itemID, pluginID, source, credits, 0)
+}
+
+// insertCreditsFrom is insertCredits numbering the credits from seq first
+// (an append after the stored credits).
+func insertCreditsFrom(ctx context.Context, tx *sql.Tx, itemID int64, pluginID, source string, credits []plugin.Credit, first int) error {
 	for i, c := range credits {
 		pid, err := upsertPerson(ctx, tx, pluginID, source, c.Person)
 		if err != nil {
@@ -98,7 +104,7 @@ func insertCredits(ctx context.Context, tx *sql.Tx, itemID int64, pluginID, sour
 			with = id
 		}
 		if _, err := tx.ExecContext(ctx, `INSERT INTO credits(item_id, seq, role, detail, person_id, counterpart_person_id, counterpart_role)
-			VALUES (?,?,?,?,?,?,?)`, itemID, i, c.Role, c.Detail, pid, with, c.WithRole); err != nil {
+			VALUES (?,?,?,?,?,?,?)`, itemID, first+i, c.Role, c.Detail, pid, with, c.WithRole); err != nil {
 			return fmt.Errorf("save credits: %w", err)
 		}
 	}
