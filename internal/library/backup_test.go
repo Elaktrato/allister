@@ -825,3 +825,206 @@ func TestRestoreSkipsExistingItemEvents(t *testing.T) {
 		t.Fatalf("existing entry touched: %+v", en)
 	}
 }
+
+// extrasBook is a book with a local banner, a trailer with a local
+// thumbnail and two links.
+func extrasBook(id string) plugin.ItemData {
+	d := bookData(id)
+	d.BannerURL = "banner-" + id + ".png"
+	d.Trailer = &plugin.Trailer{URL: "https://v.example/" + id, ThumbnailURL: "thumb-" + id + ".png"}
+	d.Links = []plugin.Link{{Label: "Site", URL: "https://s.example/" + id}, {Label: "Wiki", URL: "https://w.example/" + id}}
+	return d
+}
+
+// TestBackupRoundTripBannerTrailerLinks: the banner, the trailer and the
+// links are backed up (local files by name, remote ones as URLs) and
+// restored into an empty library unchanged.
+func TestBackupRoundTripBannerTrailerLinks(t *testing.T) {
+	a := newEnv(t)
+	mustSave(t, a.lib, "book", "book", extrasBook("1"))
+	remote := bookData("2")
+	remote.BannerURL = "https://img.example/b2.jpg"
+	remote.Trailer = &plugin.Trailer{URL: "https://v.example/2", ThumbnailURL: "https://img.example/t2.jpg"}
+	mustSave(t, a.lib, "book", "book", remote)
+	noThumb := bookData("3")
+	noThumb.Trailer = &plugin.Trailer{URL: "https://v.example/3"}
+	mustSave(t, a.lib, "book", "book", noThumb)
+	before := collect(t, a.lib, 200)
+	if b := before[0]; b.Banner != "banner-1.png" || b.Trailer == nil || b.Trailer.URL != "https://v.example/1" ||
+		b.Trailer.Thumbnail != "thumb-1.png" || len(b.Links) != 2 || b.Links[1].Label != "Wiki" {
+		t.Fatalf("backup item = %+v", b)
+	}
+	if b := before[1]; b.Banner != "https://img.example/b2.jpg" || b.Trailer.Thumbnail != "https://img.example/t2.jpg" || b.Links != nil {
+		t.Fatalf("remote item = %+v", b)
+	}
+	raw, err := json.Marshal(before[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{`"banner":"banner-1.png"`, `"trailer":{"url":"https://v.example/1","thumbnail":"thumb-1.png"}`,
+		`"links":[{"label":"Site","url":"https://s.example/1"},`} {
+		if !strings.Contains(string(raw), want) {
+			t.Fatalf("json lacks %s: %s", want, raw)
+		}
+	}
+
+	b := newEnv(t)
+	var resolved []string
+	opts := RestoreOptions{ResolveCover: func(_ context.Context, name string) (string, string, error) {
+		resolved = append(resolved, name)
+		return name, "", nil
+	}}
+	for i, r := range restoreAll(t, b.lib, before, opts) {
+		if r.Outcome != RestoreCreated || len(r.Notes) != 0 {
+			t.Fatalf("result %d = %+v", i, r)
+		}
+	}
+	if !slices.Contains(resolved, "banner-1.png") || !slices.Contains(resolved, "thumb-1.png") || slices.Contains(resolved, "https://img.example/b2.jpg") {
+		t.Fatalf("resolved = %v", resolved)
+	}
+	if after := collect(t, b.lib, 200); !reflect.DeepEqual(before, after) {
+		ja, _ := json.MarshalIndent(before, "", " ")
+		jb, _ := json.MarshalIndent(after, "", " ")
+		t.Fatalf("round trip differs:\nA: %s\nB: %s", ja, jb)
+	}
+}
+
+// TestRestoreBannerTrailerFilesAndSync: a banner or thumbnail file that
+// cannot be restored is left empty with a note (the trailer link stays), a
+// restored file name is stored, and a manual item with a remote banner or
+// thumbnail is synced so it is downloaded.
+func TestRestoreBannerTrailerFilesAndSync(t *testing.T) {
+	e := newEnv(t)
+	bi := BackupItem{PluginID: "book", Kind: "book", Source: "books", SourceID: "1", Titles: []plugin.Title{{Lang: "en", Text: "T"}},
+		Banner: "gone.png", Trailer: &BackupTrailer{URL: "https://v.example/1", Thumbnail: "gone-too.png"}}
+	res, err := e.lib.RestoreItem(bg, bi, RestoreOptions{})
+	if err != nil || res.Outcome != RestoreCreated || len(res.Notes) != 2 ||
+		!strings.Contains(res.Notes[0], "banner") || !strings.Contains(res.Notes[1], "trailer thumbnail") {
+		t.Fatalf("result = %+v, %v", res, err)
+	}
+	it := mustItem(t, e.lib, res.ItemID)
+	if it.BannerPath != "" || it.Trailer == nil || it.Trailer.URL != "https://v.example/1" || it.Trailer.ThumbnailURL != "" {
+		t.Fatalf("item = %q %+v", it.BannerPath, it.Trailer)
+	}
+	// the resolver's note names what was left out
+	bi.SourceID = "2"
+	res, err = e.lib.RestoreItem(bg, bi, RestoreOptions{ResolveCover: func(_ context.Context, name string) (string, string, error) {
+		if name == "gone.png" {
+			return "", "the file covers/gone.png is missing from the backup", nil
+		}
+		return "stored-" + name, "", nil
+	}})
+	if err != nil || res.Outcome != RestoreCreated || len(res.Notes) != 1 ||
+		res.Notes[0] != "the file covers/gone.png is missing from the backup: restored without a banner" {
+		t.Fatalf("result = %+v, %v", res, err)
+	}
+	if it := mustItem(t, e.lib, res.ItemID); it.BannerPath != "" || it.Trailer.ThumbnailURL != "stored-gone-too.png" {
+		t.Fatalf("item = %q %+v", it.BannerPath, it.Trailer)
+	}
+	// bad values fail the row
+	for _, tc := range []struct {
+		name, want string
+		mod        func(*BackupItem)
+	}{
+		{"banner path", "file name", func(b *BackupItem) { b.Banner = "../x.png" }},
+		{"banner http", "https", func(b *BackupItem) { b.Banner = "http://img.example/b.jpg" }},
+		{"thumbnail path", "file name", func(b *BackupItem) { b.Trailer.Thumbnail = "a/b.png" }},
+		{"trailer without link", "link", func(b *BackupItem) { b.Trailer.URL = "" }},
+		{"link http", "https", func(b *BackupItem) { b.Links = []plugin.Link{{Label: "L", URL: "http://x.example/"}} }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			bad := bi
+			bad.SourceID = "bad-" + tc.name
+			tr := *bi.Trailer
+			bad.Trailer = &tr
+			tc.mod(&bad)
+			res, err := e.lib.RestoreItem(bg, bad, RestoreOptions{})
+			if err != nil || res.Outcome != RestoreFailed || !strings.Contains(res.Reason, tc.want) {
+				t.Fatalf("result = %+v, %v", res, err)
+			}
+		})
+	}
+	// a cover that is not restored keeps no origin
+	withCover := BackupItem{PluginID: "book", Kind: "book", Source: "books", SourceID: "c", Titles: []plugin.Title{{Lang: "en", Text: "C"}},
+		Cover: "gone-cover.png", CoverSource: "https://img.example/c.jpg", Banner: "kept.png"}
+	res, err = e.lib.RestoreItem(bg, withCover, RestoreOptions{ResolveCover: func(_ context.Context, name string) (string, string, error) {
+		if name == "gone-cover.png" {
+			return "", "", nil
+		}
+		return name, "", nil
+	}})
+	if err != nil || res.Outcome != RestoreCreated {
+		t.Fatalf("result = %+v, %v", res, err)
+	}
+	if it := mustItem(t, e.lib, res.ItemID); it.CoverPath != "" || it.BannerPath != "kept.png" {
+		t.Fatalf("item = %q %q", it.CoverPath, it.BannerPath)
+	}
+	if n := count(t, e.db, `SELECT COUNT(*) FROM items WHERE id = ? AND cover_source <> ''`, res.ItemID); n != 0 {
+		t.Fatal("cover source kept without the cover file")
+	}
+	// a manual item with a remote banner or thumbnail is synced (downloaded)
+	for i, mod := range []func(*BackupItem){
+		func(b *BackupItem) { b.Banner = "https://img.example/b.jpg" },
+		func(b *BackupItem) {
+			b.Trailer = &BackupTrailer{URL: "https://v.example/m", Thumbnail: "https://img.example/t.jpg"}
+		},
+	} {
+		manual := BackupItem{PluginID: "book", Kind: "book", Source: "manual", SourceID: fmt.Sprint("m", i),
+			Titles: []plugin.Title{{Lang: "en", Text: "M"}}, Fields: map[string]plugin.FieldValue{"author": {Text: "A"}}}
+		mod(&manual)
+		res, err := e.lib.RestoreItem(bg, manual, RestoreOptions{})
+		if err != nil || res.Outcome != RestoreCreated || !res.SyncPending {
+			t.Fatalf("manual %d = %+v, %v", i, res, err)
+		}
+	}
+}
+
+// TestRestoreItemReleasesBannerAndThumbnail: when the item is not written,
+// every image file stored for it is handed back.
+func TestRestoreItemReleasesBannerAndThumbnail(t *testing.T) {
+	e := newEnv(t)
+	if _, err := e.db.Exec(`CREATE TRIGGER fail_boom BEFORE INSERT ON item_titles WHEN NEW.text = 'Boom'
+		BEGIN SELECT RAISE(ABORT, 'boom'); END`); err != nil {
+		t.Fatal(err)
+	}
+	var released []string
+	opts := RestoreOptions{
+		ResolveCover: func(_ context.Context, name string) (string, string, error) { return "stored-" + name, "", nil },
+		ReleaseCover: func(_ context.Context, stored string) { released = append(released, stored) },
+	}
+	boom := BackupItem{PluginID: "book", Kind: "book", Source: "books", SourceID: "boom", Titles: []plugin.Title{{Lang: "en", Text: "Boom"}},
+		Cover: "c.png", Banner: "b.png", Trailer: &BackupTrailer{URL: "https://v.example/b", Thumbnail: "t.png"}}
+	if _, err := e.lib.RestoreItem(bg, boom, opts); err == nil {
+		t.Fatal("trigger did not fail the transaction")
+	}
+	slices.Sort(released)
+	if !reflect.DeepEqual(released, []string{"stored-b.png", "stored-c.png", "stored-t.png"}) {
+		t.Fatalf("released = %v", released)
+	}
+}
+
+// TestRestoreTextIntoListField: an older backup holding a text value of a
+// field the kind now declares as a list restores it as a one-element list.
+func TestRestoreTextIntoListField(t *testing.T) {
+	e := newEnv(t)
+	bi := BackupItem{PluginID: "book", Kind: "book", Source: "books", SourceID: "1", Titles: []plugin.Title{{Lang: "en", Text: "T"}},
+		Fields: map[string]plugin.FieldValue{"translators": {Text: "Only One"}, "author": {Text: "A"}}}
+	res, err := e.lib.RestoreItem(bg, bi, RestoreOptions{})
+	if err != nil || res.Outcome != RestoreCreated {
+		t.Fatalf("result = %+v, %v", res, err)
+	}
+	it := mustItem(t, e.lib, res.ItemID)
+	if got := it.Fields["translators"]; got.Text != "" || !reflect.DeepEqual(got.List, []string{"Only One"}) {
+		t.Fatalf("translators = %+v", got)
+	}
+	if got := it.Fields["author"]; got.Text != "A" {
+		t.Fatalf("author = %+v", got)
+	}
+	if n := count(t, e.db, `SELECT COUNT(*) FROM item_fields WHERE item_id = ? AND key = 'translators' AND vtype = 'list'`, res.ItemID); n != 1 {
+		t.Fatalf("list rows = %d", n)
+	}
+	// the backup's map is not changed
+	if bi.Fields["translators"].Text != "Only One" {
+		t.Fatalf("input changed: %+v", bi.Fields)
+	}
+}

@@ -322,7 +322,7 @@ func TestBackupRoundTripsAllPluginsIncludingDisabled(t *testing.T) {
 	}
 	data := a.archive()
 	d, files := open(t, data)
-	if d.Format != "allister.backup" || d.FormatVersion != 4 || d.CreatedAt != "2026-11-10T09:30:00Z" || len(d.Plugins) != 1 {
+	if d.Format != "allister.backup" || d.FormatVersion != 5 || d.CreatedAt != "2026-11-10T09:30:00Z" || len(d.Plugins) != 1 {
 		t.Fatalf("header = %+v", d)
 	}
 	if len(d.Items) != 454 {
@@ -505,7 +505,7 @@ func TestBackupIncludesEveryItemCover(t *testing.T) {
 func TestBackupRefusesNewerFormat(t *testing.T) {
 	item, _ := json.Marshal(bookItem("1"))
 	for _, tc := range []struct{ name, json, want string }{
-		{"newer", header("5") + string(item) + "]}", "format version 5"},
+		{"newer", header("6") + string(item) + "]}", "format version 6"},
 		{"zero", header("0") + string(item) + "]}", "format version 0"},
 		{"negative", header("-1") + string(item) + "]}", "format version -1"},
 		{"fraction", header("1.5") + string(item) + "]}", "format version"},
@@ -532,8 +532,100 @@ func TestBackupRefusesNewerFormat(t *testing.T) {
 	// the version message names the supported version too
 	e := newEnv(t)
 	_, err := e.restore(zipOf(t, entry{name: "backup.json", body: []byte(header("7") + "]}")}), Limits{}, nil)
-	if err == nil || !strings.Contains(err.Error(), "7") || !strings.Contains(err.Error(), "versions 1 to 4") {
+	if err == nil || !strings.Contains(err.Error(), "7") || !strings.Contains(err.Error(), "versions 1 to 5") {
 		t.Fatalf("err = %v", err)
+	}
+	// every older format still restores
+	for _, v := range []string{"2", "3", "4", "5"} {
+		e := newEnv(t)
+		rep := mustRestore(t, e, zipOf(t, entry{name: "backup.json", body: []byte(header(v) + string(item) + "]}")}))
+		if rep.Created != 1 {
+			t.Fatalf("format %s: created %d", v, rep.Created)
+		}
+	}
+}
+
+// TestBackupRoundTripBannerTrailerLinks: banners and trailer thumbnails are
+// archived like covers (a missing file is marked), the trailer and the links
+// travel in backup.json, and a restore into an empty data dir brings back
+// the same values and files.
+func TestBackupRoundTripBannerTrailerLinks(t *testing.T) {
+	a := newEnv(t)
+	banner, thumb := a.saveCover(11), a.saveCover(12)
+	save := func(id string, mod func(*plugin.ItemData)) {
+		d := plugin.ItemData{ItemSummary: plugin.ItemSummary{Source: "books", ID: id, Kind: "book", Titles: []plugin.Title{{Lang: "en", Text: "Book " + id}}}}
+		mod(&d)
+		if _, err := a.lib.SaveItem(bg, "book", "book", d); err != nil {
+			t.Fatal(err)
+		}
+	}
+	save("1", func(d *plugin.ItemData) {
+		d.BannerURL = banner
+		d.Trailer = &plugin.Trailer{URL: "https://v.example/1", ThumbnailURL: thumb}
+		d.Links = []plugin.Link{{Label: "Site", URL: "https://s.example/1"}, {Label: "Wiki", URL: "https://w.example/1"}}
+	})
+	save("2", func(d *plugin.ItemData) {
+		d.BannerURL = "https://img.example/b2.jpg"
+		d.Trailer = &plugin.Trailer{URL: "https://v.example/2", ThumbnailURL: "https://img.example/t2.jpg"}
+	})
+	save("3", func(d *plugin.ItemData) { // shares the banner file of item 1
+		d.BannerURL = banner
+	})
+	save("gone", func(d *plugin.ItemData) {
+		d.BannerURL = "deadbeef.png"
+		d.Trailer = &plugin.Trailer{URL: "https://v.example/g", ThumbnailURL: "feedface.png"}
+	})
+	data := a.archive()
+	d, files := open(t, data)
+	if d.FormatVersion != 5 {
+		t.Fatalf("format version = %d", d.FormatVersion)
+	}
+	want := []string{"backup.json", "covers/" + banner, "covers/" + thumb}
+	sort.Strings(want)
+	if got := keys(files); !reflect.DeepEqual(got, want) {
+		t.Fatalf("files = %v, want %v", got, want)
+	}
+	by := map[string]library.BackupItem{}
+	for _, it := range d.Items {
+		by[it.SourceID] = it
+	}
+	if g := by["gone"]; g.Banner != "" || !g.BannerMissing || g.Trailer == nil || g.Trailer.URL != "https://v.example/g" ||
+		g.Trailer.Thumbnail != "" || !g.Trailer.ThumbnailMissing {
+		t.Fatalf("missing files = %+v %+v", g, g.Trailer)
+	}
+	if o := by["1"]; o.BannerMissing || o.Trailer.ThumbnailMissing {
+		t.Fatalf("present files marked missing: %+v", o)
+	}
+
+	b := newEnv(t)
+	rep := mustRestore(t, b, data)
+	if rep.Created != 4 || len(rep.Notes) != 0 {
+		t.Fatalf("report = %+v", rep)
+	}
+	check := func(id, wantBanner string, wantTrailer *plugin.Trailer, wantLinks []plugin.Link) {
+		t.Helper()
+		it, err := b.lib.ItemBySource(bg, "book", "book", "books", id)
+		if err != nil || it == nil {
+			t.Fatalf("item %s: %v", id, err)
+		}
+		if it.BannerPath != wantBanner || !reflect.DeepEqual(it.Trailer, wantTrailer) || !reflect.DeepEqual(it.Links, wantLinks) {
+			t.Fatalf("item %s = %q %+v %+v", id, it.BannerPath, it.Trailer, it.Links)
+		}
+	}
+	check("1", banner, &plugin.Trailer{URL: "https://v.example/1", ThumbnailURL: thumb},
+		[]plugin.Link{{Label: "Site", URL: "https://s.example/1"}, {Label: "Wiki", URL: "https://w.example/1"}})
+	check("2", "https://img.example/b2.jpg", &plugin.Trailer{URL: "https://v.example/2", ThumbnailURL: "https://img.example/t2.jpg"}, nil)
+	check("3", banner, nil, nil)
+	check("gone", "", &plugin.Trailer{URL: "https://v.example/g"}, nil)
+	for _, name := range []string{banner, thumb} {
+		got, err := os.ReadFile(filepath.Join(b.covers, name))
+		if err != nil || !bytes.Equal(got, files["covers/"+name]) {
+			t.Fatalf("restored file %s: %v", name, err)
+		}
+	}
+	// restoring again changes nothing (merge)
+	if rep := mustRestore(t, b, data); rep.Created != 0 || rep.Skipped != 4 {
+		t.Fatalf("second restore = %+v", rep)
 	}
 }
 
