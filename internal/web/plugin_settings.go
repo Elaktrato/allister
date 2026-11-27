@@ -204,6 +204,29 @@ func (s *server) summaryHider(ctx context.Context, m plugin.Manifest, k plugin.K
 	}
 }
 
+// relatedHider is summaryHider for the related rows of a page of kind k
+// of m: a stored relation carries no flag of its own, so a row is also
+// hidden when its source and id name a library item of m that is hidden
+// (one query, only while m hides adult items and there are relations). On
+// a failed lookup only the summaries' own flags hide, with the error.
+func (s *server) relatedHider(ctx context.Context, m plugin.Manifest, k plugin.KindDef, rels []plugin.Relation) (func(plugin.ItemSummary) bool, error) {
+	own := s.summaryHider(ctx, m, k)
+	if len(rels) == 0 || s.deps.Library == nil || !s.hideAdult(ctx, m) {
+		return own, nil
+	}
+	fields := map[string]string{}
+	for _, kd := range m.Kinds {
+		fields[kd.Key] = kd.AdultField
+	}
+	flagged, err := s.deps.Library.FlaggedSources(ctx, m.ID, fields)
+	if err != nil {
+		return own, err
+	}
+	return func(sum plugin.ItemSummary) bool {
+		return own(sum) || flagged[library.SourceKey{Source: sum.Source, ID: sum.ID}]
+	}, nil
+}
+
 // hiddenItems returns the ids of the items of ms that are hidden (their
 // kind's hidden field has the value "yes"), for views that read no Query.
 func (s *server) hiddenItems(ctx context.Context, ms []plugin.Manifest) (map[int64]bool, error) {

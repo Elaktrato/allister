@@ -1179,6 +1179,50 @@ func (l *Library) Terms(ctx context.Context, q Query, kind string) ([]TermCount,
 	return out, nil
 }
 
+// SourceKey names an item by its source and source id.
+type SourceKey struct{ Source, ID string }
+
+// FlaggedSources returns the source and source id of the items of
+// pluginID whose kind's field (fields maps a kind to its field key) has the
+// value "yes", in one query: the summaries a page shows (stored relations,
+// which carry no flag of their own) are hidden when they name such an
+// item. Kinds with an empty key are skipped; no kinds name none.
+func (l *Library) FlaggedSources(ctx context.Context, pluginID string, fields map[string]string) (map[SourceKey]bool, error) {
+	out := map[SourceKey]bool{}
+	var (
+		conds []string
+		args  = []any{pluginID}
+	)
+	for kind, key := range fields {
+		if key != "" {
+			conds = append(conds, `(items.kind = ? AND f.key = ?)`)
+			args = append(args, kind, key)
+		}
+	}
+	if len(conds) == 0 {
+		return out, nil
+	}
+	//nolint:gosec // G202: constant SQL conditions and placeholders; values are bound
+	rows, err := l.db.QueryContext(ctx, `SELECT DISTINCT items.source, items.source_id FROM items
+		JOIN item_fields f ON f.item_id = items.id
+		WHERE items.plugin_id = ? AND f.text = 'yes' AND (`+strings.Join(conds, " OR ")+`)`, args...)
+	if err != nil {
+		return nil, fmt.Errorf("flagged sources: %w", err)
+	}
+	for rows.Next() {
+		var k SourceKey
+		if err := rows.Scan(&k.Source, &k.ID); err != nil {
+			rows.Close()
+			return nil, fmt.Errorf("flagged sources: %w", err)
+		}
+		out[k] = true
+	}
+	if err := closeRows(rows); err != nil {
+		return nil, fmt.Errorf("flagged sources: %w", err)
+	}
+	return out, nil
+}
+
 // FlaggedItems returns the ids of the items of pluginID and kind whose field
 // key has the value "yes" (the rows Query.HideField leaves out), for views
 // that do not read through a Query. An empty key names none.

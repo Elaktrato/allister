@@ -274,7 +274,7 @@ func (s *server) search(w http.ResponseWriter, r *http.Request, pluginID string)
 		}
 	}
 	if q != "" {
-		s.runSearch(r, m, si, k, q, &v)
+		s.runSearch(r, m, si, k, q, true, &v)
 	}
 	status := http.StatusOK
 	if v.Status != 0 {
@@ -297,7 +297,10 @@ func (s *server) search(w http.ResponseWriter, r *http.Request, pluginID string)
 	s.renderStatus(w, r, status, "search", v)
 }
 
-func (s *server) runSearch(r *http.Request, m plugin.Manifest, si plugin.SourceInfo, k plugin.KindDef, q string, v *searchView) {
+// runSearch asks the source si for q and fills v with the results. With
+// hideAdult the plugin's hide-adult setting applies (the add-from-source
+// search); the match search of a manual item lists every result.
+func (s *server) runSearch(r *http.Request, m plugin.Manifest, si plugin.SourceInfo, k plugin.KindDef, q string, hideAdult bool, v *searchView) {
 	v.Searched = true
 	src := s.source(m.ID, si.ID)
 	if src == nil {
@@ -324,7 +327,10 @@ func (s *server) runSearch(r *http.Request, m plugin.Manifest, si plugin.SourceI
 	}
 	lang := s.titleLang(r.Context(), m)
 	text := textField(k)
-	hidden := s.summaryHider(r.Context(), m, k)
+	hidden := func(plugin.ItemSummary) bool { return false }
+	if hideAdult {
+		hidden = s.summaryHider(r.Context(), m, k)
+	}
 	for _, it := range res {
 		if len(v.Results) == maxSearchResults {
 			break

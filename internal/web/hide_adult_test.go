@@ -169,3 +169,49 @@ func TestHideAdultSetting(t *testing.T) {
 	}
 	mustContain(t, e.get("/tv?view=table").Body.String(), "Flagged Show")
 }
+
+// The setting hides adult results of the add-from-source search only: the
+// match search of a manual item lists every result, since the item to
+// match may well be an adult one.
+func TestHideAdultLeavesMatchSearch(t *testing.T) {
+	e := newFixtureEnv(t, flaggedTV)
+	manual := ratedShow("man1", "Manual Show", "")
+	manual.Source = "manual"
+	e.addFixture(t, "tv", "show", manual, library.Entry{Status: library.Active})
+	e.tv.Summaries = []plugin.ItemSummary{ratedSummary("31", "Flagged Hit", "yes"), ratedSummary("32", "Plain Hit", "")}
+	if rec := e.do("POST", "/settings/plugins/tv/adult", url.Values{"hide_adult": {"1"}}, false); rec.Code != http.StatusSeeOther {
+		t.Fatalf("on: %d", rec.Code)
+	}
+	match := e.do("GET", "/tv/manual/man1/match/search?q=show", nil, true)
+	if match.Code != http.StatusOK {
+		t.Fatalf("match search: %d", match.Code)
+	}
+	mustContain(t, match.Body.String(), "Flagged Hit", "Plain Hit")
+	add := e.get("/tv/search?q=show").Body.String()
+	mustContain(t, add, "Plain Hit")
+	mustNotContain(t, add, "Flagged Hit")
+}
+
+// A stored relation carries no adult flag of its own: the Related row of a
+// library item hides it when it points to a library item that is flagged.
+func TestHideAdultRelatedToFlaggedLibraryItem(t *testing.T) {
+	e := newFixtureEnv(t, flaggedTV)
+	e.addFixture(t, "tv", "show", ratedShow("2", "Flagged Show", "yes"), library.Entry{Status: library.Active})
+	e.addFixture(t, "tv", "show", ratedShow("1", "Plain Show", "no"), library.Entry{Status: library.Active})
+	owner := ratedShow("9", "Owner Show", "no")
+	owner.Relations = []plugin.Relation{
+		{Kind: "sequel", Item: plugin.ItemSummary{Source: "tvdata", ID: "2", Kind: "show", Titles: ttl("Flagged Sequel")}},
+		{Kind: "prequel", Item: plugin.ItemSummary{Source: "tvdata", ID: "1", Kind: "show", Titles: ttl("Plain Prequel")}},
+		{Kind: "side_story", Item: plugin.ItemSummary{Source: "tvdata", ID: "77", Kind: "show", Titles: ttl("Unknown Side")}},
+	}
+	e.addFixture(t, "tv", "show", owner, library.Entry{Status: library.Active})
+	e.tv.Errs = map[string]error{plugintest.OpDetails: plugin.ErrUnavailable}
+
+	mustContain(t, e.get("/tv/tvdata/9").Body.String(), "Flagged Sequel", "Plain Prequel", "Unknown Side")
+	if rec := e.do("POST", "/settings/plugins/tv/adult", url.Values{"hide_adult": {"1"}}, false); rec.Code != http.StatusSeeOther {
+		t.Fatalf("on: %d", rec.Code)
+	}
+	b := e.get("/tv/tvdata/9").Body.String()
+	mustContain(t, b, "Plain Prequel", "Unknown Side")
+	mustNotContain(t, b, "Flagged Sequel")
+}

@@ -201,7 +201,7 @@ func (s *server) getMatchSearch(w http.ResponseWriter, r *http.Request, pluginID
 	q := cleanQuery(r.URL.Query().Get("q"))
 	v.Search.Query = q
 	if q != "" { // an empty query makes no source call
-		s.runSearch(r, t.man, si, t.kind, q, &v.Search)
+		s.runSearch(r, t.man, si, t.kind, q, false, &v.Search)
 	}
 	status := http.StatusOK
 	if v.Search.Status != 0 {
