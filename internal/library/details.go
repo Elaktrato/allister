@@ -262,6 +262,28 @@ func (l *Library) SetCoverPathIf(ctx context.Context, itemID int64, expected, na
 		WHERE id = ? AND cover_path = ?`, name, origin, itemID, expected)
 }
 
+// SetBannerPath replaces the item's banner with name only while it still
+// holds from (compare-and-set, like SetCoverPathIf), so a background
+// download never overwrites a banner changed meanwhile. It reports whether
+// the banner was set; an unknown item or another current value is false, nil.
+func (l *Library) SetBannerPath(ctx context.Context, itemID int64, from, to string) (bool, error) {
+	if err := checkHTTPSImageRef("banner", to); err != nil {
+		return false, err
+	}
+	return l.compareAndSet(ctx, "set banner path", `UPDATE items SET banner_path = ?, updated_at = `+nowSQL+`
+		WHERE id = ? AND banner_path = ?`, to, itemID, from)
+}
+
+// SetTrailerThumb replaces the item's trailer thumbnail with to only while
+// it still holds from (compare-and-set). It reports whether it was set.
+func (l *Library) SetTrailerThumb(ctx context.Context, itemID int64, from, to string) (bool, error) {
+	if err := checkHTTPSImageRef("trailer thumbnail", to); err != nil {
+		return false, err
+	}
+	return l.compareAndSet(ctx, "set trailer thumbnail", `UPDATE items SET trailer_thumb = ?, updated_at = `+nowSQL+`
+		WHERE id = ? AND trailer_thumb = ?`, to, itemID, from)
+}
+
 // SetPersonImagePathIf is SetCoverPathIf for a person's image.
 func (l *Library) SetPersonImagePathIf(ctx context.Context, personID int64, expected, name string) (bool, error) {
 	if err := checkImageRef("person image", name); err != nil {
