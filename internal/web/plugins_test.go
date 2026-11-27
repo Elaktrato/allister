@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/allister/allister/internal/jobs"
@@ -18,11 +19,25 @@ import (
 	"github.com/allister/allister/internal/plugins/anime"
 )
 
-// withPlugins builds a registry with the real anime plugin followed by extra.
+// offlineAniList is the URL of a local stand-in for the AniList endpoint
+// that answers every request with 503 (unavailable): a test plugin built on
+// the real client never reaches the real service. Started once, it lives
+// as long as the test binary.
+var offlineAniList = sync.OnceValue(func() string {
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "offline", http.StatusServiceUnavailable)
+	})).URL
+})
+
+// offlineAnime is the real anime plugin on the offline AniList stand-in.
+func offlineAnime() plugin.Plugin { return anime.New(anime.Options{AniListURL: offlineAniList()}) }
+
+// withPlugins builds a registry with the real anime plugin (on the offline
+// AniList stand-in) followed by extra.
 func withPlugins(extra ...plugin.Plugin) func(plugin.EnabledStore) *plugin.Registry {
 	return func(es plugin.EnabledStore) *plugin.Registry {
 		r := plugin.NewRegistry(es)
-		r.Register(anime.New(anime.Options{}))
+		r.Register(offlineAnime())
 		for _, p := range extra {
 			r.Register(p) // refusals show up in Problems
 		}
@@ -411,7 +426,7 @@ func TestStoreErrorFallsBackToDefault(t *testing.T) {
 	on, off := plugintest.BookPlugin(), plugintest.TVPlugin(plugintest.WithDefaultEnabled(false))
 	e := newEnvWith(t, func(plugin.EnabledStore) *plugin.Registry {
 		r := plugin.NewRegistry(failingEnabled{})
-		r.Register(anime.New(anime.Options{}))
+		r.Register(offlineAnime())
 		r.Register(on)
 		r.Register(off)
 		return r

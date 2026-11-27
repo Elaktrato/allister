@@ -13,7 +13,6 @@ import (
 
 	"github.com/allister/allister/internal/plugin"
 	"github.com/allister/allister/internal/plugin/plugintest"
-	"github.com/allister/allister/internal/plugins/anime"
 )
 
 // codepointsFile is upstream's name list of the pinned font (see PINS.md):
@@ -210,7 +209,7 @@ func TestIconNamesExistInThePinnedFont(t *testing.T) {
 			t.Errorf("%s: icon span renders .%s, which no check covers (see the covered list)", file, field)
 		}
 	}
-	for _, p := range []plugin.Plugin{anime.New(anime.Options{}), plugintest.BookPlugin(), plugintest.TVPlugin()} {
+	for _, p := range []plugin.Plugin{offlineAnime(), plugintest.BookPlugin(), plugintest.TVPlugin()} {
 		m := p.Manifest()
 		if m.Icon != "" && !names[m.Icon] {
 			t.Errorf("plugin %s: icon %q is not in the pinned font", m.ID, m.Icon)
