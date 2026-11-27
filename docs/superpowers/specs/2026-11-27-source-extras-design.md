@@ -25,18 +25,20 @@ already in the library must get the new data as well, through a bulk
   | Season (Winter/Spring/Summer/Fall), anime only | filter (with the existing year filter) |
   | Country of origin (JP, KR, CN, TW, ...) | filter |
   | Adult flag | filter, plus a per-plugin setting to hide adult items |
-  | All studios, anime only | the studio field becomes a list, filterable; existing values kept |
+  | All animation studios, anime only (no producers or licensors: owner decision) | the studio field becomes a list, filterable; existing values kept |
   | Community score (AniList average, 0-100) | shown on the item page, sortable; never mixed with the owner's score |
   | Popularity | sortable (and shown on the item page) |
-  | Alternative titles (synonyms) | stored as titles, so search finds them |
+  | Alternative titles (synonyms) | stored as titles, so search finds them; never the displayed title |
   | Streaming links | the item page's Links section |
   | Banner | a wide image at the top of the item page, downloaded into the local image store like covers |
   | Trailer | the item page: a locally stored thumbnail with a play button linking out to the video site |
 
 - **Bulk "Update from source"** on each plugin's settings page: for every
   sourced item of that plugin in the library, ask the source and **fill
-  only what is empty** on the stored item (owner decision, option 1).
-  Nothing already set changes, owner edits included. It runs in the
+  only what is empty** on the stored item (owner decision, option 1);
+  for lists, **add what is missing, never remove or change an element**
+  (owner decision after the builder check). Nothing already set changes,
+  owner edits included. It runs in the
   background at the source's pace, survives a restart, shows its progress
   and result on the settings page, and can be run again at any time.
 - The single-item "Update from source" comparison page shows the new data
@@ -120,16 +122,21 @@ edits).
   (text, filterable), `adult` (a yes/no value, filterable: the builder
   picks the field shape, e.g. an enum yes/no, since there is no boolean
   field type), `community_score` (number 0-100, sortable, shown),
-  `popularity` (number, sortable, shown); `studio` becomes a list of all
-  the media's studios, main studios first, filterable, keeping its key so
+  `popularity` (number, sortable, shown); `studio` becomes a list of the
+  media's animation studios (`isAnimationStudio`; producers and licensors
+  left out, owner decision), main studios first, filterable, keeping its key so
   columns, filters and stored values carry over (an existing single value
   becomes a one-element list).
 - Manga and light novels: the same minus `season` and studios.
 - Games: `release_status` (enum, from IGDB's game status; the builder maps
   IGDB's values onto a short list such as released, early access,
   upcoming, cancelled, delisted, other).
-- Synonyms become titles of a dedicated title language the kinds declare
-  (shown in the Titles section, matched by the text search).
+- Synonyms become titles of a dedicated alternative-title language the
+  kinds declare separately from `TitleLanguages` (Claude's call, a new
+  data-only contract declaration, validated and JSON round-trip tested):
+  shown in the Titles section and matched by the text search, but never
+  offered as a display language, never part of the fallback order and
+  never used as the displayed title, not even as "first stored title".
 
 ### Hiding adult items
 
@@ -137,7 +144,9 @@ A per-plugin setting "Hide adult items" (`plugin.<id>.hide_adult`, default
 off so nothing disappears after the update), shown only for plugins whose
 kinds declare the adult flag (the contract names the field, data-only).
 When on, adult items leave the lists, cards, home page, random pick and
-calendar; the item page still opens by link, statistics still count them
+calendar, other items' Related and Recommendations sections and the
+add-from-source search results (Claude's call); the item page still opens
+by link, statistics still count them
 (Claude's call: hiding is about what is on screen, not what is counted).
 
 ### Item page
@@ -156,10 +165,16 @@ calendar; the item page still opens by link, statistics still count them
   confirmation names the number of sourced items it will ask about.
 - The run asks each item's source (Details, and People when the kind shows
   credits), computes the differences with the existing compare core
-  (`library.ItemChanges`) and applies only those whose stored side is
-  empty (`StoredEmpty`), through `ApplyChanges`; lists (genres, tags,
-  titles, relations, credits) are filled only when the stored list is
-  empty, as the comparison page pre-ticks them today. Changes are not
+  (`library.ItemChanges`) and applies, in one transaction per item:
+  - single values (fields, the cover, the banner, the trailer) only where
+    the stored side is empty (`StoredEmpty`);
+  - lists (titles including synonyms, list fields such as studios,
+    genres, tags, links, relations, credits) as an **additive merge**:
+    elements the source has and the item lacks are appended, nothing is
+    removed, reordered or changed (an element that exists with different
+    details, e.g. a tag's rank, is left as stored). This needs its own
+    compare/apply path beside `ApplyChanges`, which replaces a part as a
+    whole; the single-item comparison page keeps its whole-part rows. Changes are not
   entry events (item data only).
 - Paced and retried through the jobs queue (one job per item, the plugin
   gate pauses it while the plugin is disabled, rate limits retry later);
