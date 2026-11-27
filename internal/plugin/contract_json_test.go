@@ -55,11 +55,12 @@ func TestManifestJSONRoundTrip(t *testing.T) {
 			Sections:       []plugin.SectionDef{{Type: plugin.SectionPeople, Label: "Cast", Field: "n", Roles: []string{"actor"}}},
 			TitleLanguages: []string{"en", "ja"},
 			TitleFallback:  []string{"ja", "en"},
-			Columns:        []plugin.ColumnDef{{Key: "n", Label: "Number", Default: true, Hide: "md"}, {Key: "rating"}},
-			SeriesHint:     &plugin.SeriesHintDef{TitleField: "e", PositionField: "n", ReleaseField: "d"},
-			SeriesFields:   []plugin.FieldDef{{Key: "sf", Label: "SF", Type: plugin.FieldNumber, Min: fptr(1), Editable: true}},
-			SeriesLink:     &plugin.SeriesLinkDef{Kind: "k", DescriptionField: "e", StartField: "d", EndField: "d", PartsField: "n"},
-			Repeat:         &plugin.RepeatDef{Action: "Redo", Marker: "Redoing"},
+			AltTitles:      true, Banner: true, Trailer: true, AdultField: "n",
+			Columns:      []plugin.ColumnDef{{Key: "n", Label: "Number", Default: true, Hide: "md"}, {Key: "rating"}},
+			SeriesHint:   &plugin.SeriesHintDef{TitleField: "e", PositionField: "n", ReleaseField: "d"},
+			SeriesFields: []plugin.FieldDef{{Key: "sf", Label: "SF", Type: plugin.FieldNumber, Min: fptr(1), Editable: true}},
+			SeriesLink:   &plugin.SeriesLinkDef{Kind: "k", DescriptionField: "e", StartField: "d", EndField: "d", PartsField: "n"},
+			Repeat:       &plugin.RepeatDef{Action: "Redo", Marker: "Redoing"},
 			Stats: &plugin.StatsDef{
 				Time:  &plugin.StatsTimeDef{Label: "Time", DurationKey: "d", CompletedField: "n", UnitsKey: "x", PerUnitField: "n"},
 				Units: &plugin.StatsUnitsDef{Key: "x", LabelPlural: "Units"},
@@ -102,7 +103,11 @@ func TestRuntimeDataJSONRoundTrip(t *testing.T) {
 		ItemSummary: summary, ExternalURL: "http://e", ExternalIDs: map[string]string{"s": "1"},
 		Relations: []plugin.Relation{{Kind: "PREQUEL", Item: summary}},
 		Genres:    []string{"Drama"}, Tags: []plugin.Tag{{Name: "T", Rank: iptr(80)}},
+		BannerURL: "https://b/x.jpg", Trailer: &plugin.Trailer{URL: "https://t/v", ThumbnailURL: "https://t/i.jpg"},
+		Links: []plugin.Link{{Label: "Site", URL: "https://s/x"}},
 	})
+	roundTrip(t, "trailer without thumbnail", plugin.Trailer{URL: "https://t/v"})
+	roundTrip(t, "link", plugin.Link{Label: "L", URL: "https://l"})
 	entry := plugin.ParsedEntry{
 		Kind: "k", Title: "T", ExternalIDs: map[string]string{"mal": "5"}, Status: plugin.Completed, Rating: iptr(0),
 		Progress: map[string]float64{"episode": 12, "position": 90}, StartedOn: &day, FinishedOn: &day,

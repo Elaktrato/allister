@@ -289,7 +289,9 @@ func validateKind(p *problems, path string, k KindDef) {
 	}
 	seenLang := map[string]bool{}
 	for i, l := range k.TitleLanguages {
-		if l == "" {
+		if l == AltTitleLang {
+			p.add(fmt.Sprintf("%s.title_languages[%d]", path, i), "%q is reserved for alternative titles", l)
+		} else if l == "" {
 			p.add(fmt.Sprintf("%s.title_languages[%d]", path, i), "empty language")
 		} else if seenLang[l] {
 			p.add(fmt.Sprintf("%s.title_languages[%d]", path, i), "duplicate %q", l)
@@ -300,6 +302,8 @@ func validateKind(p *problems, path string, k KindDef) {
 	for i, l := range k.TitleFallback {
 		at := fmt.Sprintf("%s.title_fallback[%d]", path, i)
 		switch {
+		case l == AltTitleLang:
+			p.add(at, "%q is reserved for alternative titles", l)
 		case !slices.Contains(k.TitleLanguages, l) || l == "":
 			p.add(at, "%q is not one of the title languages", l)
 		case seenFallback[l]:
@@ -326,6 +330,18 @@ func validateKind(p *problems, path string, k KindDef) {
 
 	fields := validateFieldList(p, path+".fields", k.Fields, nil)
 	validateFieldList(p, path+".series_fields", k.SeriesFields, ReservedSeriesKeys())
+	if k.AdultField != "" {
+		ap := path + ".adult_field"
+		i := slices.IndexFunc(k.Fields, func(f FieldDef) bool { return f.Key == k.AdultField })
+		switch {
+		case i < 0:
+			p.add(ap, "unknown field %q", k.AdultField)
+		case k.Fields[i].Type != FieldEnum:
+			p.add(ap, "field %q must be an enum field", k.AdultField)
+		case !slices.Contains(k.Fields[i].EnumValues, "yes"):
+			p.add(ap, "field %q must offer the value \"yes\"", k.AdultField)
+		}
+	}
 	// the series edit form always offers every series field and stores none
 	// as required, so a manifest cannot ask otherwise
 	for i, f := range k.SeriesFields {
