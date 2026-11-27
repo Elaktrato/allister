@@ -1,6 +1,7 @@
-// Package anilist is the AniList GraphQL client of the anime plugin (Client)
-// together with the types it returns (Anime, SearchResult, CastMember, ...)
-// and its error sentinels. Only the anime plugin uses it.
+// Package anilist is the AniList GraphQL client of the anime, manga and book
+// plugins (Client) together with the types it returns (Media, SearchResult,
+// CastMember, ...), its error sentinels and the mapping of the extras the
+// three plugins share (extras.go).
 package anilist
 
 import (
@@ -62,8 +63,10 @@ const searchFormatQuery = `query ($q: String, $perPage: Int, $type: MediaType, $
 // mapped by the same code.
 const mediaFields = `id idMal ` + titleFields + ` format episodes duration chapters volumes seasonYear
     startDate { year month day } endDate { year month day } source status
+    season countryOfOrigin isAdult averageScore popularity synonyms bannerImage
+    trailer { id site thumbnail } externalLinks { url site type }
     description(asHtml: true) coverImage { large }
-    studios(isMain: true) { nodes { name } } siteUrl
+    studios { edges { isMain node { name isAnimationStudio } } } siteUrl
     staff(perPage: 10) { edges { role node { name { full } image { medium } siteUrl } } }
     genres tags { name rank isMediaSpoiler }
     relations { edges { relationType node { id type format ` + titleFields + ` } } }
@@ -278,14 +281,40 @@ type apiMedia struct {
 	CoverImage  struct {
 		Large string `json:"large"`
 	} `json:"coverImage"`
+	// Studios holds nodes for a search (main studios only) and edges for
+	// a media query (every studio with its main and animation flags).
 	Studios struct {
 		Nodes []struct {
 			Name string `json:"name"`
 		} `json:"nodes"`
+		Edges []struct {
+			IsMain bool `json:"isMain"`
+			Node   struct {
+				Name              string `json:"name"`
+				IsAnimationStudio bool   `json:"isAnimationStudio"`
+			} `json:"node"`
+		} `json:"edges"`
 	} `json:"studios"`
-	SiteURL string `json:"siteUrl"`
-	Status  string `json:"status"`
-	Staff   struct {
+	SiteURL         string   `json:"siteUrl"`
+	Status          string   `json:"status"`
+	Season          string   `json:"season"`
+	CountryOfOrigin string   `json:"countryOfOrigin"`
+	IsAdult         bool     `json:"isAdult"`
+	AverageScore    *int     `json:"averageScore"`
+	Popularity      *int     `json:"popularity"`
+	Synonyms        []string `json:"synonyms"`
+	BannerImage     string   `json:"bannerImage"`
+	Trailer         *struct {
+		ID        string `json:"id"`
+		Site      string `json:"site"`
+		Thumbnail string `json:"thumbnail"`
+	} `json:"trailer"`
+	ExternalLinks []struct {
+		URL  string `json:"url"`
+		Site string `json:"site"`
+		Type string `json:"type"`
+	} `json:"externalLinks"`
+	Staff struct {
 		Edges []struct {
 			Role string `json:"role"`
 			Node struct {
@@ -349,7 +378,27 @@ func (m apiMedia) searchResult() SearchResult {
 	if len(m.Studios.Nodes) > 0 {
 		r.Studio = m.Studios.Nodes[0].Name
 	}
+	if studios := m.animationStudios(true); len(studios) > 0 {
+		r.Studio = studios[0]
+	}
 	return r
+}
+
+// animationStudios returns the names of the animation studios among the
+// studio edges, main studios first (only those when mainOnly).
+func (m apiMedia) animationStudios(mainOnly bool) []string {
+	var main, other []string
+	for _, e := range m.Studios.Edges {
+		name := strings.TrimSpace(e.Node.Name)
+		switch {
+		case name == "" || !e.Node.IsAnimationStudio:
+		case e.IsMain:
+			main = append(main, name)
+		case !mainOnly:
+			other = append(other, name)
+		}
+	}
+	return append(main, other...)
 }
 
 // Search implements Provider. An empty query returns no results
@@ -550,6 +599,20 @@ func (m *apiMedia) media() Media {
 		ExternalURL:    m.SiteURL,
 		Status:         m.Status,
 		Format:         m.Format,
+		Season:         m.Season,
+		Country:        m.CountryOfOrigin,
+		Adult:          m.IsAdult,
+		AverageScore:   m.AverageScore,
+		Popularity:     m.Popularity,
+		Synonyms:       m.Synonyms,
+		Studios:        m.animationStudios(false),
+		BannerURL:      m.BannerImage,
+	}
+	if t := m.Trailer; t != nil {
+		a.Trailer = &TrailerRef{ID: t.ID, Site: t.Site, Thumbnail: t.Thumbnail}
+	}
+	for _, l := range m.ExternalLinks {
+		a.StreamingLinks = append(a.StreamingLinks, LinkRef{Site: l.Site, URL: l.URL, Type: l.Type})
 	}
 	for _, e := range m.Staff.Edges {
 		a.Staff = append(a.Staff, StaffMember{Role: e.Role, Name: e.Node.Name.Full,

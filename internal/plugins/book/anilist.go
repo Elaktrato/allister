@@ -168,6 +168,8 @@ func novelData(m anilist.Media) plugin.ItemData {
 		day := plugin.DateOnly(*m.EndDate)
 		d.Fields["ended_on"] = plugin.FieldValue{Date: &day}
 	}
+	// the shared AniList extras (a light novel has no season or studios)
+	anilist.AddExtras(&d, m)
 	return d
 }
 

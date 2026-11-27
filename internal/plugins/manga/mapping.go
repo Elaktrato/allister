@@ -69,7 +69,8 @@ func toSummary(r anilist.SearchResult) plugin.ItemSummary {
 	}
 }
 
-// ItemData maps the full detail of a manga.
+// ItemData maps the full detail of a manga, with the shared AniList extras
+// (anilist.AddExtras; a manga has no season or studios).
 func ItemData(m anilist.Media) plugin.ItemData {
 	d := plugin.ItemData{
 		ItemSummary: toSummary(m.SearchResult),
@@ -89,6 +90,7 @@ func ItemData(m anilist.Media) plugin.ItemData {
 		day := plugin.DateOnly(*m.EndDate)
 		d.Fields["ended_on"] = plugin.FieldValue{Date: &day}
 	}
+	anilist.AddExtras(&d, m)
 	for _, g := range m.Genres {
 		if g = plugin.SingleLine(g, maxTermRunes); g != "" && len(d.Genres) < maxGenres {
 			d.Genres = append(d.Genres, g)

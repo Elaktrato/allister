@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -751,5 +752,67 @@ func TestAiringScheduleAsksForTheLatestPage(t *testing.T) {
 		if !strings.Contains(req, want) {
 			t.Errorf("request lacks %q: %s", want, req)
 		}
+	}
+}
+
+// TestMediaParsesExtras: the media query carries the extras (season,
+// country, adult flag, scores, synonyms, banner, trailer, external links)
+// and every animation studio, main studios first, producers left out.
+func TestMediaParsesExtras(t *testing.T) {
+	var req string
+	m, err := serve(t, 200, fixture(t, "media_extras.json"), &req).Media(context.Background(), TypeAnime, "21")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"season", "countryOfOrigin", "isAdult", "averageScore", "popularity", "synonyms",
+		"bannerImage", "trailer { id site thumbnail }", "externalLinks { url site type }",
+		"studios { edges { isMain node { name isAnimationStudio } } }"} {
+		if !strings.Contains(req, want) {
+			t.Errorf("media query lacks %q", want)
+		}
+	}
+	if strings.Contains(req, "isMain: true") {
+		t.Error("media query still asks for main studios only")
+	}
+	if m.Status != "RELEASING" || m.Season != "FALL" || m.Country != "JP" || m.Adult {
+		t.Errorf("status/season/country/adult = %q/%q/%q/%v", m.Status, m.Season, m.Country, m.Adult)
+	}
+	if m.AverageScore == nil || *m.AverageScore != 87 || m.Popularity == nil || *m.Popularity != 612345 {
+		t.Errorf("scores = %v/%v", m.AverageScore, m.Popularity)
+	}
+	if want := []string{"OP", "ワンピース"}; !slices.Equal(m.Synonyms, want) {
+		t.Errorf("synonyms = %q", m.Synonyms)
+	}
+	if want := []string{"Toei Animation", "Second Studio"}; !slices.Equal(m.Studios, want) {
+		t.Errorf("studios = %q", m.Studios)
+	}
+	if m.Studio != "Toei Animation" {
+		t.Errorf("studio = %q", m.Studio)
+	}
+	if m.BannerURL != "https://s4.anilist.co/file/anilistcdn/media/anime/banner/21-wf37VakJmZqs.jpg" {
+		t.Errorf("banner = %q", m.BannerURL)
+	}
+	if m.Trailer == nil || *m.Trailer != (TrailerRef{ID: "l_98K4_6UQ0", Site: "youtube", Thumbnail: "https://i.ytimg.com/vi/l_98K4_6UQ0/hqdefault.jpg"}) {
+		t.Errorf("trailer = %+v", m.Trailer)
+	}
+	wantLinks := []LinkRef{
+		{Site: "Crunchyroll", URL: "https://www.crunchyroll.com/one-piece", Type: "STREAMING"},
+		{Site: "Twitter", URL: "https://twitter.com/Eiichiro_Staff", Type: "SOCIAL"},
+		{Site: "Netflix", URL: "https://www.netflix.com/title/80107103", Type: "STREAMING"},
+	}
+	if !slices.Equal(m.StreamingLinks, wantLinks) {
+		t.Errorf("links = %+v", m.StreamingLinks)
+	}
+}
+
+// TestMediaWithoutExtras: a media without the extras has none (no trailer,
+// no studios), and the search keeps reading the main studio.
+func TestMediaWithoutExtras(t *testing.T) {
+	m, err := serve(t, 200, []byte(`{"data":{"Media":{"id":1,"title":{"romaji":"A"},"trailer":null}}}`), nil).Media(context.Background(), TypeAnime, "1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m.Trailer != nil || m.Studios != nil || m.Studio != "" || m.AverageScore != nil || m.Popularity != nil || m.Synonyms != nil || m.StreamingLinks != nil {
+		t.Fatalf("extras = %+v", m)
 	}
 }

@@ -1,8 +1,12 @@
 package anime
 
 import (
+	"fmt"
+	"slices"
+	"strings"
 	"testing"
 
+	"github.com/allister/allister/internal/plugin"
 	"github.com/allister/allister/internal/plugins/anilist"
 )
 
@@ -95,5 +99,147 @@ func TestItemDataRelationURLs(t *testing.T) {
 		if got := d.Relations[i].Item.URL; got != w {
 			t.Errorf("relation %d url = %q, want %q", i, got, w)
 		}
+	}
+}
+
+func intp(n int) *int { return &n }
+
+// extrasMedia is an AniList media with every extra set.
+func extrasMedia() anilist.Media {
+	return anilist.Media{
+		SearchResult: anilist.SearchResult{Source: anilist.AniList, ID: "21", Type: "TV",
+			Titles: []anilist.Title{{Lang: "ja-latn", Text: "One Piece"}, {Lang: "en", Text: "ONE PIECE"}},
+			Studio: "Toei Animation"},
+		Status: "RELEASING", Season: "FALL", Country: "JP", Adult: true,
+		AverageScore: intp(87), Popularity: intp(612345),
+		Synonyms: []string{" OP ", "One Piece", "", "ワン\tピース", "OP"},
+		Studios:  []string{"Toei Animation", "Second Studio"},
+		StreamingLinks: []anilist.LinkRef{
+			{Site: "Crunchyroll", URL: "https://www.crunchyroll.com/one-piece", Type: "STREAMING"},
+			{Site: "Official Site", URL: "https://one-piece.com", Type: "INFO"},
+			{Site: "Netflix", URL: "https://www.netflix.com/title/80107103", Type: "STREAMING"},
+		},
+		BannerURL: "https://s4.anilist.co/banner/21.jpg",
+		Trailer:   &anilist.TrailerRef{ID: "l_98K4_6UQ0", Site: "youtube", Thumbnail: "https://i.ytimg.com/vi/l_98K4_6UQ0/hqdefault.jpg"},
+	}
+}
+
+func TestItemDataExtras(t *testing.T) {
+	d := ItemData(extrasMedia())
+	f := d.Fields
+	for key, want := range map[string]string{"release_status": "releasing", "season": "fall", "country": "JP", "adult": "yes"} {
+		if f[key].Text != want {
+			t.Errorf("%s = %q, want %q", key, f[key].Text, want)
+		}
+	}
+	if v := f["community_score"].Num; v == nil || *v != 87 {
+		t.Errorf("community score = %v", v)
+	}
+	if v := f["popularity"].Num; v == nil || *v != 612345 {
+		t.Errorf("popularity = %v", v)
+	}
+	if want := []string{"Toei Animation", "Second Studio"}; !slices.Equal(f["studio"].List, want) || f["studio"].Text != "" {
+		t.Errorf("studio = %+v", f["studio"])
+	}
+	wantTitles := []plugin.Title{{Lang: "ja-latn", Text: "One Piece"}, {Lang: "en", Text: "ONE PIECE"},
+		{Lang: plugin.AltTitleLang, Text: "OP"}, {Lang: plugin.AltTitleLang, Text: "ワン ピース"}}
+	if !slices.Equal(d.Titles, wantTitles) {
+		t.Errorf("titles = %+v", d.Titles)
+	}
+	wantLinks := []plugin.Link{{Label: "Crunchyroll", URL: "https://www.crunchyroll.com/one-piece"},
+		{Label: "Netflix", URL: "https://www.netflix.com/title/80107103"}}
+	if !slices.Equal(d.Links, wantLinks) {
+		t.Errorf("links = %+v", d.Links)
+	}
+	if d.BannerURL != "https://s4.anilist.co/banner/21.jpg" {
+		t.Errorf("banner = %q", d.BannerURL)
+	}
+	if want := (plugin.Trailer{URL: "https://www.youtube.com/watch?v=l_98K4_6UQ0", ThumbnailURL: "https://i.ytimg.com/vi/l_98K4_6UQ0/hqdefault.jpg"}); d.Trailer == nil || *d.Trailer != want {
+		t.Errorf("trailer = %+v", d.Trailer)
+	}
+}
+
+// TestItemDataExtrasGuards: unknown enum values, out-of-range numbers,
+// non-https links and images are dropped; lists are capped at 20.
+func TestItemDataExtrasGuards(t *testing.T) {
+	m := extrasMedia()
+	m.Status, m.Season, m.Country, m.Adult = "PAUSED", "MONSOON", " J\tPXXXXXXXX ", false
+	m.AverageScore, m.Popularity = intp(101), intp(-1)
+	m.BannerURL = "http://s4.anilist.co/banner/21.jpg"
+	m.Synonyms, m.StreamingLinks, m.Studios = nil, nil, nil
+	for i := range 30 {
+		m.Synonyms = append(m.Synonyms, fmt.Sprintf("Alt %d", i))
+		m.StreamingLinks = append(m.StreamingLinks, anilist.LinkRef{Site: fmt.Sprintf("S%d", i), URL: fmt.Sprintf("https://s%d.example/x", i), Type: "STREAMING"})
+	}
+	m.StreamingLinks = append([]anilist.LinkRef{
+		{Site: "Plain", URL: "http://plain.example/x", Type: "STREAMING"},
+		{Site: " ", URL: "https://nolabel.example/x", Type: "STREAMING"},
+		{Site: "Bad", URL: "javascript:alert(1)", Type: "STREAMING"},
+	}, m.StreamingLinks...)
+	d := ItemData(m)
+	for _, key := range []string{"release_status", "season", "community_score", "popularity"} {
+		if v, ok := d.Fields[key]; ok {
+			t.Errorf("%s kept: %+v", key, v)
+		}
+	}
+	if d.Fields["adult"].Text != "no" || d.Fields["country"].Text != "J PXXXXX" {
+		t.Errorf("adult/country = %+v/%+v", d.Fields["adult"], d.Fields["country"])
+	}
+	if want := []string{"Toei Animation"}; !slices.Equal(d.Fields["studio"].List, want) {
+		t.Errorf("studio without a studio list = %+v", d.Fields["studio"])
+	}
+	alts := 0
+	for _, ti := range d.Titles {
+		if ti.Lang == plugin.AltTitleLang {
+			alts++
+		}
+	}
+	if alts != 20 || len(d.Links) != 20 || d.Links[0].Label != "S0" {
+		t.Errorf("alt titles %d, links %d (%+v)", alts, len(d.Links), d.Links)
+	}
+	if d.BannerURL != "" {
+		t.Errorf("http banner kept: %q", d.BannerURL)
+	}
+	// no adult flag without AniList's answer
+	m.Source = anilist.Manual
+	if v, ok := ItemData(m).Fields["adult"]; ok {
+		t.Errorf("manual adult = %+v", v)
+	}
+}
+
+func TestTrailerSitesAndURLs(t *testing.T) {
+	thumb := "https://i.ytimg.com/vi/x/hqdefault.jpg"
+	for _, c := range []struct {
+		name string
+		in   *anilist.TrailerRef
+		want *plugin.Trailer
+	}{
+		{"youtube", &anilist.TrailerRef{ID: "l_98K4-6UQ0", Site: "youtube", Thumbnail: thumb},
+			&plugin.Trailer{URL: "https://www.youtube.com/watch?v=l_98K4-6UQ0", ThumbnailURL: thumb}},
+		{"dailymotion", &anilist.TrailerRef{ID: "x8abc12", Site: "dailymotion"},
+			&plugin.Trailer{URL: "https://www.dailymotion.com/video/x8abc12"}},
+		{"vimeo", &anilist.TrailerRef{ID: "12345", Site: "vimeo", Thumbnail: thumb}, nil},
+		{"spaced id", &anilist.TrailerRef{ID: "x y", Site: "youtube", Thumbnail: thumb}, nil},
+		{"long id", &anilist.TrailerRef{ID: strings.Repeat("a", 33), Site: "youtube"}, nil},
+		{"empty id", &anilist.TrailerRef{Site: "youtube"}, nil},
+		{"http thumbnail", &anilist.TrailerRef{ID: "abc", Site: "youtube", Thumbnail: "http://i.ytimg.com/vi/abc/hqdefault.jpg"},
+			&plugin.Trailer{URL: "https://www.youtube.com/watch?v=abc"}},
+		{"none", nil, nil},
+	} {
+		m := extrasMedia()
+		m.Trailer = c.in
+		got := ItemData(m).Trailer
+		if (got == nil) != (c.want == nil) || got != nil && *got != *c.want {
+			t.Errorf("%s: trailer = %+v, want %+v", c.name, got, c.want)
+		}
+	}
+}
+
+// TestSummaryStudioIsAList: the search result's main studio is a one-element
+// studio list.
+func TestSummaryStudioIsAList(t *testing.T) {
+	s := toSummary(anilist.SearchResult{ID: "1", Studio: " MADHOUSE "})
+	if want := []string{"MADHOUSE"}; !slices.Equal(s.Fields["studio"].List, want) || s.Fields["studio"].Text != "" {
+		t.Fatalf("studio = %+v", s.Fields["studio"])
 	}
 }
