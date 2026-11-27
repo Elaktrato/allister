@@ -1,7 +1,10 @@
 package manga
 
 import (
+	"slices"
+
 	"github.com/allister/allister/internal/plugin"
+	"github.com/allister/allister/internal/plugins/anilist"
 )
 
 // Plugin, source, importer and exporter ids and the one kind key.
@@ -44,6 +47,7 @@ func manifest() plugin.Manifest {
 			SeriesHint:  &plugin.SeriesHintDef{ReleaseField: "started_on"},
 			Fields: []plugin.FieldDef{
 				{Key: "type", Label: "Type", Type: plugin.FieldEnum, EnumValues: append([]string(nil), typeValues...), Show: true, Editable: true, Filterable: true, Required: true},
+				{Key: "release_status", Label: "Release status", Type: plugin.FieldEnum, EnumValues: slices.Clone(anilist.ReleaseStatusValues), Show: true, Editable: true, Filterable: true},
 				{Key: "chapters", Label: "Chapters", Type: plugin.FieldNumber, Unit: "ch", Min: num(1), Max: num(100000), Show: true, Editable: true},
 				{Key: "volumes", Label: "Volumes", Type: plugin.FieldNumber, Min: num(1), Max: num(10000), Show: true, Editable: true},
 				{Key: "year", Label: "Year", Type: plugin.FieldNumber, Min: num(1900), Max: num(2100), Show: true, Editable: true, Filterable: true, Sortable: true},
@@ -52,11 +56,19 @@ func manifest() plugin.Manifest {
 				{Key: "synopsis", Label: "Synopsis", Type: plugin.FieldText, Editable: true},
 				{Key: "started_on", Label: "Started", Type: plugin.FieldDate, Show: true, Editable: true},
 				{Key: "ended_on", Label: "Ended", Type: plugin.FieldDate, Show: true, Editable: true},
+				{Key: "country", Label: "Country", Type: plugin.FieldText, Show: true, Editable: true, Filterable: true},
+				{Key: "adult", Label: "Adult", Type: plugin.FieldEnum, EnumValues: slices.Clone(anilist.AdultValues), Show: true, Editable: true, Filterable: true},
+				{Key: "community_score", Label: "Community score", Type: plugin.FieldNumber, Unit: "%", Min: num(0), Max: num(100), Show: true, Sortable: true},
+				{Key: "popularity", Label: "Popularity", Type: plugin.FieldNumber, Min: num(0), Max: num(100000000), Show: true, Sortable: true},
 			},
-			Genres:   plugin.TermDef{Enabled: true, Label: "Genres", Editable: true, Filterable: true},
-			Tags:     plugin.TermDef{Enabled: true, Label: "Tags", Editable: true, Filterable: true},
-			Repeat:   &plugin.RepeatDef{Action: "Reread", Marker: "Rereading"},
-			Statuses: statusLabels,
+			AltTitles:  true,
+			Banner:     true,
+			Trailer:    true,
+			AdultField: "adult",
+			Genres:     plugin.TermDef{Enabled: true, Label: "Genres", Editable: true, Filterable: true},
+			Tags:       plugin.TermDef{Enabled: true, Label: "Tags", Editable: true, Filterable: true},
+			Repeat:     &plugin.RepeatDef{Action: "Reread", Marker: "Rereading"},
+			Statuses:   statusLabels,
 			Progress: plugin.ProgressSpec{
 				Eligible: []plugin.ProgressDef{
 					{Key: "chapter", Type: plugin.Count, Label: "Chapter", TotalField: "chapters"},
@@ -98,6 +110,7 @@ func manifest() plugin.Manifest {
 				{Key: "magazine", Hide: "lg"},
 				{Key: "started_on", Hide: "lg"},
 				{Key: "ended_on", Hide: "lg"},
+				{Key: "release_status", Hide: "lg"},
 			},
 			TitleFallback: []string{"ja", "ja-latn", "en"},
 		}},

@@ -10,6 +10,7 @@ import (
 	"os"
 	"reflect"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -244,7 +245,7 @@ func TestManualSavesAllFields(t *testing.T) {
 	v.Set("field.type", "MOVIE")
 	v.Set("field.episodes", "12")
 	v.Set("field.year", "1999")
-	v.Set("field.studio", "Studio X")
+	v.Set("field.studio", "Studio X\nStudio Y")
 	v.Set("field.synopsis", "Para one.\r\n\r\nPara <b>two</b>.")
 	v.Set("field.started_on", "1999-04-01")
 	v.Set("genres", "Drama\nMystery")
@@ -258,7 +259,7 @@ func TestManualSavesAllFields(t *testing.T) {
 	id := e.createManual(t, v, nil)
 	it, en := e.manualAnime(t, id)
 	f := it.Fields
-	if f["type"].Text != "MOVIE" || *f["episodes"].Num != 12 || *f["year"].Num != 1999 || f["studio"].Text != "Studio X" ||
+	if f["type"].Text != "MOVIE" || *f["episodes"].Num != 12 || *f["year"].Num != 1999 || !slices.Equal(f["studio"].List, []string{"Studio X", "Studio Y"}) ||
 		f["synopsis"].Text != "Para one.\r\n\r\nPara <b>two</b>." || it.Titles[0].Lang != "ja-latn" || fmtDay(f["started_on"].Date) != "1999-04-01" {
 		t.Fatalf("%+v", it)
 	}
@@ -290,29 +291,28 @@ func TestManualRatingBlankIsNil(t *testing.T) {
 func TestManualInvalidFieldsRejected(t *testing.T) {
 	long := func(n int) string { return strings.Repeat("あ", n) }
 	cases := map[string]func(url.Values){
-		"title_lang":     func(v url.Values) { v.Set("title_lang", "xx") },
-		"type":           func(v url.Values) { v.Set("field.type", "BOGUS") },
-		"episodes nan":   func(v url.Values) { v.Set("field.episodes", "abc") },
-		"episodes zero":  func(v url.Values) { v.Set("field.episodes", "0") },
-		"episodes big":   func(v url.Values) { v.Set("field.episodes", "10001") },
-		"episodes hex":   func(v url.Values) { v.Set("field.episodes", "0x10") },
-		"episodes inf":   func(v url.Values) { v.Set("field.episodes", "Inf") },
-		"year low":       func(v url.Values) { v.Set("field.year", "1899") },
-		"year high":      func(v url.Values) { v.Set("field.year", "2101") },
-		"date":           func(v url.Values) { v.Set("field.started_on", "1999-13-01") },
-		"title long":     func(v url.Values) { v.Set("title", long(301)) },
-		"title control":  func(v url.Values) { v.Set("title", "a\x07b") },
-		"studio long":    func(v url.Values) { v.Set("field.studio", long(1001)) },
-		"studio newline": func(v url.Values) { v.Set("field.studio", "a\nb") },
-		"synopsis long":  func(v url.Values) { v.Set("field.synopsis", long(20001)) },
-		"synopsis ctrl":  func(v url.Values) { v.Set("field.synopsis", "a\x00b") },
-		"unknown field":  func(v url.Values) { v.Set("field.nope", "x") },
-		"genre control":  func(v url.Values) { v.Set("genres", "a\x07") },
-		"tag rank":       func(v url.Values) { v.Set("tags", "x:101") },
-		"status":         func(v url.Values) { v.Set("status", "nope") },
-		"rating":         func(v url.Values) { v.Set("rating", "11") },
-		"entry date":     func(v url.Values) { v.Set("started_on", "yesterday") },
-		"progress>eps":   func(v url.Values) { v.Set("field.episodes", "12"); v.Set("progress", "13") },
+		"title_lang":    func(v url.Values) { v.Set("title_lang", "xx") },
+		"type":          func(v url.Values) { v.Set("field.type", "BOGUS") },
+		"episodes nan":  func(v url.Values) { v.Set("field.episodes", "abc") },
+		"episodes zero": func(v url.Values) { v.Set("field.episodes", "0") },
+		"episodes big":  func(v url.Values) { v.Set("field.episodes", "10001") },
+		"episodes hex":  func(v url.Values) { v.Set("field.episodes", "0x10") },
+		"episodes inf":  func(v url.Values) { v.Set("field.episodes", "Inf") },
+		"year low":      func(v url.Values) { v.Set("field.year", "1899") },
+		"year high":     func(v url.Values) { v.Set("field.year", "2101") },
+		"date":          func(v url.Values) { v.Set("field.started_on", "1999-13-01") },
+		"title long":    func(v url.Values) { v.Set("title", long(301)) },
+		"title control": func(v url.Values) { v.Set("title", "a\x07b") },
+		"studio long":   func(v url.Values) { v.Set("field.studio", long(1001)) },
+		"synopsis long": func(v url.Values) { v.Set("field.synopsis", long(20001)) },
+		"synopsis ctrl": func(v url.Values) { v.Set("field.synopsis", "a\x00b") },
+		"unknown field": func(v url.Values) { v.Set("field.nope", "x") },
+		"genre control": func(v url.Values) { v.Set("genres", "a\x07") },
+		"tag rank":      func(v url.Values) { v.Set("tags", "x:101") },
+		"status":        func(v url.Values) { v.Set("status", "nope") },
+		"rating":        func(v url.Values) { v.Set("rating", "11") },
+		"entry date":    func(v url.Values) { v.Set("started_on", "yesterday") },
+		"progress>eps":  func(v url.Values) { v.Set("field.episodes", "12"); v.Set("progress", "13") },
 	}
 	for name, mod := range cases {
 		t.Run(name, func(t *testing.T) {

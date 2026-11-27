@@ -108,7 +108,32 @@ type Media struct {
 	Recommendations             []Recommendation
 	Genres                      []string
 	Tags                        []Tag
+	// Season is the airing season (WINTER, SPRING, SUMMER, FALL), Country
+	// the country of origin as AniList gives it (an ISO code such as JP).
+	Season, Country string
+	Adult           bool
+	// AverageScore is AniList's community average (0 to 100), Popularity
+	// the number of users with the media on a list; nil when unknown.
+	AverageScore, Popularity *int
+	Synonyms                 []string
+	// Studios are the media's animation studios (producers and licensors
+	// left out), main studios first.
+	Studios []string
+	// StreamingLinks are the media's external links as given, each with
+	// its AniList type (STREAMING, INFO, SOCIAL); the plugins keep the
+	// STREAMING ones.
+	StreamingLinks []LinkRef
+	BannerURL      string
+	Trailer        *TrailerRef
 }
+
+// LinkRef is one external link of a media: the site's name, the URL and
+// AniList's link type.
+type LinkRef struct{ Site, URL, Type string }
+
+// TrailerRef is a media's trailer as AniList gives it: the video id at a
+// site (youtube, dailymotion) and a thumbnail URL.
+type TrailerRef struct{ ID, Site, Thumbnail string }
 
 // StaffMember is one staff credit of a media item.
 type StaffMember struct {

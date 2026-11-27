@@ -1,6 +1,11 @@
 package book
 
-import "github.com/allister/allister/internal/plugin"
+import (
+	"slices"
+
+	"github.com/allister/allister/internal/plugin"
+	"github.com/allister/allister/internal/plugins/anilist"
+)
 
 // Plugin, kind, source, importer and exporter ids.
 const (
@@ -200,11 +205,21 @@ func seriesKind() plugin.KindDef {
 			{Key: "synopsis", Label: "Synopsis", Type: plugin.FieldText, Editable: true},
 			{Key: "published_on", Label: "Published", Type: plugin.FieldDate, Show: true, Editable: true},
 			{Key: "ended_on", Label: "Ended", Type: plugin.FieldDate, Show: true, Editable: true},
+			// the AniList extras (light novels from other sources leave them empty)
+			{Key: "release_status", Label: "Release status", Type: plugin.FieldEnum, EnumValues: slices.Clone(anilist.ReleaseStatusValues), Show: true, Editable: true, Filterable: true},
+			{Key: "country", Label: "Country", Type: plugin.FieldText, Show: true, Editable: true, Filterable: true},
+			{Key: "adult", Label: "Adult", Type: plugin.FieldEnum, EnumValues: slices.Clone(anilist.AdultValues), Show: true, Editable: true, Filterable: true},
+			{Key: "community_score", Label: "Community score", Type: plugin.FieldNumber, Unit: "%", Min: num(0), Max: num(100), Show: true, Sortable: true},
+			{Key: "popularity", Label: "Popularity", Type: plugin.FieldNumber, Min: num(0), Max: num(100000000), Show: true, Sortable: true},
 		},
-		Genres:   plugin.TermDef{Enabled: true, Label: "Genres", Editable: true, Filterable: true},
-		Tags:     plugin.TermDef{Enabled: true, Label: "Tags", Editable: true, Filterable: true},
-		Repeat:   &plugin.RepeatDef{Action: "Reread", Marker: "Rereading"},
-		Statuses: seriesStatuses,
+		AltTitles:  true,
+		Banner:     true,
+		Trailer:    true,
+		AdultField: "adult",
+		Genres:     plugin.TermDef{Enabled: true, Label: "Genres", Editable: true, Filterable: true},
+		Tags:       plugin.TermDef{Enabled: true, Label: "Tags", Editable: true, Filterable: true},
+		Repeat:     &plugin.RepeatDef{Action: "Reread", Marker: "Rereading"},
+		Statuses:   seriesStatuses,
 		Progress: plugin.ProgressSpec{
 			Eligible: []plugin.ProgressDef{
 				{Key: "volume", Type: plugin.Count, Label: "Volume", TotalField: "volumes"},
@@ -235,6 +250,7 @@ func seriesKind() plugin.KindDef {
 			{Key: "volumes", Hide: "md"},
 			{Key: "chapters", Hide: "md"},
 			{Key: "published_on", Hide: "lg"},
+			{Key: "release_status", Hide: "lg"},
 		},
 	}
 }

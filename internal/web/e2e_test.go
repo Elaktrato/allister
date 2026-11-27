@@ -489,8 +489,8 @@ func TestListSearchEndToEnd(t *testing.T) {
 	// free text matches a title in any language (de "Todesnotiz")
 	body, _ := search(url.Values{"q": {"todesnotiz"}})
 	mustRows(t, body, "デスノート")
-	// schema filters (studio contains, year range) together
-	body, _ = search(url.Values{"f.studio": {"madhouse"}, "f.year.from": {"1990"}, "f.year.to": {"2000"}})
+	// schema filters (a studio of the list, year range) together
+	body, _ = search(url.Values{"f.studio": {"Madhouse"}, "f.year.from": {"1990"}, "f.year.to": {"2000"}})
 	mustRows(t, body, "Perfect Blue")
 	// type enum + sort by title ascending
 	body, v := search(url.Values{"f.type": {"TV"}, "sort": {"title"}, "dir": {"asc"}})

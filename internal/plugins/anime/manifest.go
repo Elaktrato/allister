@@ -1,6 +1,11 @@
 package anime
 
-import "github.com/allister/allister/internal/plugin"
+import (
+	"slices"
+
+	"github.com/allister/allister/internal/plugin"
+	"github.com/allister/allister/internal/plugins/anilist"
+)
 
 // Plugin, source, importer and exporter ids and the one kind key of the anime
 // plugin.
@@ -37,18 +42,30 @@ func manifest() plugin.Manifest {
 			SeriesHint:  &plugin.SeriesHintDef{ReleaseField: "started_on"},
 			Fields: []plugin.FieldDef{
 				{Key: "type", Label: "Type", Type: plugin.FieldEnum, EnumValues: append([]string(nil), typeValues...), Show: true, Editable: true, Filterable: true, Required: true},
+				{Key: "release_status", Label: "Release status", Type: plugin.FieldEnum, EnumValues: slices.Clone(anilist.ReleaseStatusValues), Show: true, Editable: true, Filterable: true},
 				{Key: "episodes", Label: "Episodes", Type: plugin.FieldNumber, Unit: "eps", Min: num(1), Max: num(10000), Show: true, Editable: true},
 				{Key: "duration", Label: "Episode duration", Type: plugin.FieldNumber, Unit: "min", Min: num(1), Max: num(10000), Show: true, Editable: true},
 				{Key: "year", Label: "Year", Type: plugin.FieldNumber, Min: num(1900), Max: num(2100), Show: true, Editable: true, Filterable: true, Sortable: true},
-				{Key: "studio", Label: "Studio", Type: plugin.FieldText, Show: true, Editable: true, Filterable: true},
+				{Key: "season", Label: "Season", Type: plugin.FieldEnum, EnumValues: slices.Clone(anilist.SeasonValues), Show: true, Editable: true, Filterable: true},
+				// a list of the animation studios since the source extras;
+				// a stored single value reads as a one-element list
+				{Key: "studio", Label: "Studio", Type: plugin.FieldList, Show: true, Editable: true, Filterable: true},
 				{Key: "synopsis", Label: "Synopsis", Type: plugin.FieldText, Editable: true},
 				{Key: "source_material", Label: "Source", Type: plugin.FieldText, Show: true, Editable: true},
 				{Key: "started_on", Label: "Started", Type: plugin.FieldDate, Show: true, Editable: true},
 				{Key: "ended_on", Label: "Ended", Type: plugin.FieldDate, Show: true, Editable: true},
+				{Key: "country", Label: "Country", Type: plugin.FieldText, Show: true, Editable: true, Filterable: true},
+				{Key: "adult", Label: "Adult", Type: plugin.FieldEnum, EnumValues: slices.Clone(anilist.AdultValues), Show: true, Editable: true, Filterable: true},
+				{Key: "community_score", Label: "Community score", Type: plugin.FieldNumber, Unit: "%", Min: num(0), Max: num(100), Show: true, Sortable: true},
+				{Key: "popularity", Label: "Popularity", Type: plugin.FieldNumber, Min: num(0), Max: num(100000000), Show: true, Sortable: true},
 			},
-			Genres: plugin.TermDef{Enabled: true, Label: "Genres", Editable: true, Filterable: true},
-			Tags:   plugin.TermDef{Enabled: true, Label: "Tags", Editable: true, Filterable: true},
-			Repeat: &plugin.RepeatDef{Action: "Rewatch", Marker: "Rewatching"},
+			AltTitles:  true,
+			Banner:     true,
+			Trailer:    true,
+			AdultField: "adult",
+			Genres:     plugin.TermDef{Enabled: true, Label: "Genres", Editable: true, Filterable: true},
+			Tags:       plugin.TermDef{Enabled: true, Label: "Tags", Editable: true, Filterable: true},
+			Repeat:     &plugin.RepeatDef{Action: "Rewatch", Marker: "Rewatching"},
 			Length: []plugin.LengthDef{
 				{Key: "total", Label: "Total time", UnitsField: "episodes", PerUnitField: "duration"},
 				{Key: "episodes", Label: "Episodes", UnitsField: "episodes"},
@@ -92,6 +109,7 @@ func manifest() plugin.Manifest {
 				{Key: "source_material", Hide: "lg"},
 				{Key: "started_on", Hide: "lg"},
 				{Key: "ended_on", Hide: "lg"},
+				{Key: "release_status", Hide: "lg"},
 			},
 			// native, romaji, English: the order the core used to hard-code
 			TitleFallback: []string{"ja", "ja-latn", "en"},

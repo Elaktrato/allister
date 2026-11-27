@@ -111,7 +111,7 @@ func animeData(id, title, typ string, year float64, studio string) plugin.ItemDa
 		f["year"] = plugin.FieldValue{Num: num(year)}
 	}
 	if studio != "" {
-		f["studio"] = plugin.FieldValue{Text: studio}
+		f["studio"] = plugin.FieldValue{List: []string{studio}}
 	}
 	return plugin.ItemData{
 		ItemSummary: plugin.ItemSummary{Source: "anilist", ID: id, Kind: "anime", Titles: ttl(title), Fields: f},
@@ -133,23 +133,26 @@ func TestFilterByTypeYearRangeStudio(t *testing.T) {
 	e.addFixture(t, "anime", "anime", animeData("3", "Gamma", "TV", 2015, "MADHOUSE Tokyo"), active)
 	e.addFixture(t, "anime", "anime", animeData("4", "Delta", "OVA", 0, ""), active)
 	for q, want := range map[string][]string{
-		"":                                 {"Alpha", "Beta", "Gamma", "Delta"},
-		"f.type=TV":                        {"Alpha", "Gamma"},
-		"f.type=OVA":                       {"Delta"},
-		"f.year=2000..2010":                {"Alpha", "Beta"},
-		"f.year=2010..":                    {"Gamma"},
-		"f.year=..2001":                    {"Alpha"},
-		"f.year=2005":                      {"Beta"},
-		"f.year.from=2000&f.year.to=2010":  {"Alpha", "Beta"},
-		"f.year.from=2002&f.year.to=":      {"Beta", "Gamma"},
-		"f.studio=madhouse":                {"Alpha", "Gamma"},
-		"f.studio=Bones":                   {"Beta"},
-		"f.type=TV&f.year=2000..2010":      {"Alpha"},
-		"f.type=TV&f.studio=madhouse+tok":  {"Gamma"},
-		"f.type=&f.year=&f.studio=&q=":     {"Alpha", "Beta", "Gamma", "Delta"}, // an empty form
-		"f.type=TV&f.type=MOVIE":           {"Alpha", "Beta", "Gamma"},
-		"f.type=TV&f.year=1990..1995":      {},
-		"f.year.from=2000&f.year.to=2010&": {"Alpha", "Beta"},
+		"":                                {"Alpha", "Beta", "Gamma", "Delta"},
+		"f.type=TV":                       {"Alpha", "Gamma"},
+		"f.type=OVA":                      {"Delta"},
+		"f.year=2000..2010":               {"Alpha", "Beta"},
+		"f.year=2010..":                   {"Gamma"},
+		"f.year=..2001":                   {"Alpha"},
+		"f.year=2005":                     {"Beta"},
+		"f.year.from=2000&f.year.to=2010": {"Alpha", "Beta"},
+		"f.year.from=2002&f.year.to=":     {"Beta", "Gamma"},
+		// the studio is a list: its filter matches whole values
+		"f.studio=Madhouse":                         {"Alpha"},
+		"f.studio=madhouse":                         {},
+		"f.studio=Madhouse&f.studio=MADHOUSE+Tokyo": {"Alpha", "Gamma"},
+		"f.studio=Bones":                            {"Beta"},
+		"f.type=TV&f.year=2000..2010":               {"Alpha"},
+		"f.type=TV&f.studio=MADHOUSE+Tokyo":         {"Gamma"},
+		"f.type=&f.year=&f.studio=&q=":              {"Alpha", "Beta", "Gamma", "Delta"}, // an empty form
+		"f.type=TV&f.type=MOVIE":                    {"Alpha", "Beta", "Gamma"},
+		"f.type=TV&f.year=1990..1995":               {},
+		"f.year.from=2000&f.year.to=2010&":          {"Alpha", "Beta"},
 	} {
 		b := e.listGet(t, "/anime?view=table&"+q)
 		wantRows(t, q, b, want...)
@@ -172,7 +175,7 @@ func TestFilterByTypeYearRangeStudio(t *testing.T) {
 		b := e.listGet(t, "/anime?view=table&"+q)
 		want := []string{"Alpha", "Beta", "Gamma", "Delta"}
 		if strings.Contains(q, "studio") {
-			want = []string{"Alpha", "Gamma"}
+			want = []string{"Alpha"}
 		}
 		wantRows(t, q, b, want...)
 		if got := noticeKeysOf(b); !slices.Equal(got, []string{key}) {

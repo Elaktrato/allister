@@ -163,3 +163,55 @@ func TestNovelDetailsWithoutEndDate(t *testing.T) {
 		t.Fatalf("ended_on set without an end date: %+v", d.Fields["ended_on"])
 	}
 }
+
+// TestNovelDetailsExtras: a light novel gets the AniList extras except
+// season and studios.
+func TestNovelDetailsExtras(t *testing.T) {
+	m := novelMedia()
+	m.Status, m.Season, m.Country, m.Adult = "NOT_YET_RELEASED", "SPRING", "JP", true
+	m.AverageScore, m.Popularity = ip(71), ip(9000)
+	m.Synonyms = []string{"SAO", "Sword Art Online", "SAO"}
+	m.Studios = []string{"Ignored"}
+	m.StreamingLinks = []anilist.LinkRef{
+		{Site: "BOOK WALKER", URL: "https://bookwalker.jp/sao", Type: "STREAMING"},
+		{Site: "Official Site", URL: "https://sao.example", Type: "INFO"},
+	}
+	m.BannerURL = "https://s4.anilist.co/banner/51479.jpg"
+	m.Trailer = &anilist.TrailerRef{ID: "abc_DEF-1", Site: "youtube", Thumbnail: "https://i.ytimg.com/vi/abc_DEF-1/hqdefault.jpg"}
+	d := novelData(m)
+	f := d.Fields
+	for key, want := range map[string]string{"release_status": "upcoming", "country": "JP", "adult": "yes"} {
+		if f[key].Text != want {
+			t.Errorf("%s = %q, want %q", key, f[key].Text, want)
+		}
+	}
+	if v := f["community_score"].Num; v == nil || *v != 71 {
+		t.Errorf("community score = %v", v)
+	}
+	if v := f["popularity"].Num; v == nil || *v != 9000 {
+		t.Errorf("popularity = %v", v)
+	}
+	for _, key := range []string{"season", "studio"} {
+		if v, ok := f[key]; ok {
+			t.Errorf("%s set on a light novel: %+v", key, v)
+		}
+	}
+	alts := []plugin.Title{}
+	for _, ti := range d.Titles {
+		if ti.Lang == plugin.AltTitleLang {
+			alts = append(alts, ti)
+		}
+	}
+	if len(alts) != 1 || alts[0].Text != "SAO" || len(d.Titles) != 4 {
+		t.Errorf("titles = %+v", d.Titles)
+	}
+	if len(d.Links) != 1 || d.Links[0] != (plugin.Link{Label: "BOOK WALKER", URL: "https://bookwalker.jp/sao"}) {
+		t.Errorf("links = %+v", d.Links)
+	}
+	if d.BannerURL != "https://s4.anilist.co/banner/51479.jpg" {
+		t.Errorf("banner = %q", d.BannerURL)
+	}
+	if want := (plugin.Trailer{URL: "https://www.youtube.com/watch?v=abc_DEF-1", ThumbnailURL: "https://i.ytimg.com/vi/abc_DEF-1/hqdefault.jpg"}); d.Trailer == nil || *d.Trailer != want {
+		t.Errorf("trailer = %+v", d.Trailer)
+	}
+}

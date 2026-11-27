@@ -27,6 +27,7 @@ const (
 	maxRelations   = 200
 	maxRecs        = 200
 	maxCredits     = 500
+	maxStudios     = 20
 )
 
 // Credit roles of the anime plugin.
@@ -92,7 +93,7 @@ func (c cleaner) summaryFields(r anilist.SearchResult) map[string]plugin.FieldVa
 		f["year"] = v
 	}
 	if s := c.single(r.Studio, maxNameRunes); s != "" {
-		f["studio"] = plugin.FieldValue{Text: s}
+		f["studio"] = plugin.FieldValue{List: []string{s}}
 	}
 	if s := c.multi(r.Synopsis, maxTextRunes); s != "" {
 		f["synopsis"] = plugin.FieldValue{Text: s}
@@ -115,7 +116,8 @@ func (c cleaner) summary(r anilist.SearchResult) plugin.ItemSummary {
 }
 
 // ItemData maps the full detail of an anime: summary fields, source material,
-// dates, the MAL id (external id "mal"), genres, tags and relations (a
+// dates, the animation studios, the season and the shared AniList extras
+// (anilist.AddExtras), the MAL id (external id "mal"), genres, tags and relations (a
 // "source" relation points at a manga, every other one at an anime;
 // relations without an id or a kind are dropped). Recommendations are not
 // part of it (see Recommendations).
@@ -157,6 +159,13 @@ func (c cleaner) itemData(a anilist.Media) plugin.ItemData {
 		}
 		d.Tags = append(d.Tags, tag)
 	}
+	if studios := c.studios(a.Studios); len(studios) > 0 {
+		d.Fields["studio"] = plugin.FieldValue{List: studios}
+	}
+	if s := anilist.SeasonValue(a.Season); s != "" {
+		d.Fields["season"] = plugin.FieldValue{Text: s}
+	}
+	anilist.AddExtras(&d, a)
 	for _, r := range a.Relations {
 		id := c.single(r.ID, maxIDRunes)
 		kind := c.single(r.Kind, maxNameRunes)
@@ -175,6 +184,18 @@ func (c cleaner) itemData(a anilist.Media) plugin.ItemData {
 		d.Relations = append(d.Relations, plugin.Relation{Kind: kind, Item: item})
 	}
 	return d
+}
+
+// studios cleans the studio names, dropping empty and repeated ones, at
+// most maxStudios.
+func (c cleaner) studios(names []string) []string {
+	var out []string
+	for _, n := range names {
+		if n = c.single(n, maxNameRunes); n != "" && !slices.Contains(out, n) && len(out) < maxStudios {
+			out = append(out, n)
+		}
+	}
+	return out
 }
 
 // relationURL is the AniList page of a related item ("" for another source or

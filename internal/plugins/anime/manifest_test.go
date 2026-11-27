@@ -38,7 +38,7 @@ func TestManifestMatchesBaseline(t *testing.T) {
 			defaults = append(defaults, c.Key)
 		}
 	}
-	if want := []string{"type", "year", "progress", "rating", "status", "updated", "episodes", "studio", "source_material", "started_on", "ended_on"}; !reflect.DeepEqual(cols, want) {
+	if want := []string{"type", "year", "progress", "rating", "status", "updated", "episodes", "studio", "source_material", "started_on", "ended_on", "release_status"}; !reflect.DeepEqual(cols, want) {
 		t.Errorf("columns = %v", cols)
 	}
 	if want := []string{"type", "year", "progress", "rating", "status", "updated"}; !reflect.DeepEqual(defaults, want) {
@@ -63,7 +63,8 @@ func TestManifestMatchesBaseline(t *testing.T) {
 		f[d.Key] = d
 		keys = append(keys, d.Key)
 	}
-	if want := []string{"type", "episodes", "duration", "year", "studio", "synopsis", "source_material", "started_on", "ended_on"}; !reflect.DeepEqual(keys, want) {
+	if want := []string{"type", "release_status", "episodes", "duration", "year", "season", "studio", "synopsis", "source_material", "started_on", "ended_on",
+		"country", "adult", "community_score", "popularity"}; !reflect.DeepEqual(keys, want) {
 		t.Errorf("fields = %v", keys)
 	}
 	if ty := f["type"]; ty.Type != plugin.FieldEnum || ty.Label != "Type" ||
@@ -92,16 +93,46 @@ func TestManifestMatchesBaseline(t *testing.T) {
 		{"episodes", plugin.FieldNumber, true, true, false, false, "eps", false},
 		{"duration", plugin.FieldNumber, true, true, false, false, "min", false},
 		{"year", plugin.FieldNumber, true, true, true, true, "", false},
-		{"studio", plugin.FieldText, true, true, true, false, "", false},
+		{"studio", plugin.FieldList, true, true, true, false, "", false},
 		{"synopsis", plugin.FieldText, false, true, false, false, "", false},
 		{"source_material", plugin.FieldText, true, true, false, false, "", false},
 		{"started_on", plugin.FieldDate, true, true, false, false, "", false},
 		{"ended_on", plugin.FieldDate, true, true, false, false, "", false},
+		{"release_status", plugin.FieldEnum, true, true, true, false, "", false},
+		{"season", plugin.FieldEnum, true, true, true, false, "", false},
+		{"country", plugin.FieldText, true, true, true, false, "", false},
+		{"adult", plugin.FieldEnum, true, true, true, false, "", false},
+		{"community_score", plugin.FieldNumber, true, false, false, true, "%", false},
+		{"popularity", plugin.FieldNumber, true, false, false, true, "", false},
 	} {
 		g := f[d.key]
 		if g.Type != d.typ || g.Show != d.show || g.Editable != d.editable || g.Filterable != d.filterable || g.Sortable != d.sortable || g.Required != d.required || g.Unit != d.unit {
 			t.Errorf("%s flags = %+v, want %+v", d.key, g, d)
 		}
+	}
+	for key, want := range map[string]string{"release_status": "Release status", "season": "Season", "country": "Country",
+		"adult": "Adult", "community_score": "Community score", "popularity": "Popularity", "studio": "Studio"} {
+		if f[key].Label != want {
+			t.Errorf("%s label = %q, want %q", key, f[key].Label, want)
+		}
+	}
+	for key, want := range map[string][]string{
+		"release_status": {"finished", "releasing", "upcoming", "hiatus", "cancelled"},
+		"season":         {"winter", "spring", "summer", "fall"},
+		"adult":          {"yes", "no"},
+	} {
+		if !reflect.DeepEqual(f[key].EnumValues, want) {
+			t.Errorf("%s values = %q", key, f[key].EnumValues)
+		}
+	}
+	if cs := f["community_score"]; cs.Min == nil || *cs.Min != 0 || cs.Max == nil || *cs.Max != 100 {
+		t.Errorf("community score = %+v", cs)
+	}
+	if p := f["popularity"]; p.Min == nil || *p.Min != 0 || p.Max == nil || *p.Max != 100000000 {
+		t.Errorf("popularity = %+v", p)
+	}
+	if !k.AltTitles || !k.Banner || !k.Trailer || k.AdultField != "adult" {
+		t.Errorf("alt titles/banner/trailer/adult = %v/%v/%v/%q", k.AltTitles, k.Banner, k.Trailer, k.AdultField)
 	}
 	wantProgress := plugin.ProgressSpec{
 		Eligible:     []plugin.ProgressDef{{Key: "episode", Type: plugin.Count, Label: "Episode", TotalField: "episodes"}},

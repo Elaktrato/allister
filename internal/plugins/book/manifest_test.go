@@ -62,6 +62,45 @@ func TestBooksManifest(t *testing.T) {
 	if i := slices.IndexFunc(series.Fields, func(f plugin.FieldDef) bool { return f.Key == "ended_on" }); i < 0 || !reflect.DeepEqual(series.Fields[i], wantEnded) {
 		t.Errorf("ended_on = %+v", series.Fields)
 	}
+	wantExtras := []plugin.FieldDef{
+		{Key: "release_status", Label: "Release status", Type: plugin.FieldEnum, EnumValues: []string{"finished", "releasing", "upcoming", "hiatus", "cancelled"}, Show: true, Editable: true, Filterable: true},
+		{Key: "country", Label: "Country", Type: plugin.FieldText, Show: true, Editable: true, Filterable: true},
+		{Key: "adult", Label: "Adult", Type: plugin.FieldEnum, EnumValues: []string{"yes", "no"}, Show: true, Editable: true, Filterable: true},
+		{Key: "community_score", Label: "Community score", Type: plugin.FieldNumber, Unit: "%", Min: num(0), Max: num(100), Show: true, Sortable: true},
+		{Key: "popularity", Label: "Popularity", Type: plugin.FieldNumber, Min: num(0), Max: num(100000000), Show: true, Sortable: true},
+	}
+	for _, w := range wantExtras {
+		if i := slices.IndexFunc(series.Fields, func(f plugin.FieldDef) bool { return f.Key == w.Key }); i < 0 || !reflect.DeepEqual(series.Fields[i], w) {
+			t.Errorf("series field %s missing or different, want %+v", w.Key, w)
+		}
+		if hasField(book, w.Key) {
+			t.Errorf("book kind has %s", w.Key)
+		}
+	}
+	for _, key := range []string{"season", "studio"} {
+		if hasField(series, key) {
+			t.Errorf("series kind has %s", key)
+		}
+	}
+	if !series.AltTitles || !series.Banner || !series.Trailer || series.AdultField != "adult" {
+		t.Errorf("series alt titles/banner/trailer/adult = %v/%v/%v/%q", series.AltTitles, series.Banner, series.Trailer, series.AdultField)
+	}
+	if book.AltTitles || book.Banner || book.Trailer || book.AdultField != "" {
+		t.Errorf("book kind declares extras: %+v", book)
+	}
+	var cols, defaults []string
+	for _, c := range series.Columns {
+		cols = append(cols, c.Key)
+		if c.Default {
+			defaults = append(defaults, c.Key)
+		}
+	}
+	if want := []string{"author", "year", "progress", "rating", "status", "updated", "volumes", "chapters", "published_on", "release_status"}; !slices.Equal(cols, want) {
+		t.Errorf("series columns = %v", cols)
+	}
+	if want := []string{"author", "year", "progress", "rating", "status", "updated"}; !slices.Equal(defaults, want) {
+		t.Errorf("series default columns = %v", defaults)
+	}
 	wantSeries := [][]string{{"volume", "chapter"}, {"chapter"}, {"volume"}}
 	if !equalCombos(series.Progress.Combinations, wantSeries) || series.Progress.PrimaryKey != "chapter" ||
 		!slices.Equal(series.Progress.Defaults, []string{"volume", "chapter"}) {

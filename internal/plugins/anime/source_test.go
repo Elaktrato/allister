@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -125,7 +126,7 @@ func TestSourceSearchMapsToSummaries(t *testing.T) {
 	if tm := titles(r.Titles); tm["ja"] != "葬送のフリーレン" || tm["ja-latn"] != "Sousou no Frieren" || tm["en"] != "Frieren: Beyond Journey’s End" {
 		t.Errorf("titles = %v", r.Titles)
 	}
-	if r.Fields["type"].Text != "TV" || r.Fields["studio"].Text != "MADHOUSE" {
+	if r.Fields["type"].Text != "TV" || !slices.Equal(r.Fields["studio"].List, []string{"MADHOUSE"}) {
 		t.Errorf("fields = %+v", r.Fields)
 	}
 	if n := r.Fields["episodes"].Num; n == nil || *n != 28 {
@@ -453,7 +454,7 @@ const hostile = `{"data":{"Media":{"id":7,"idMal":8,
  "startDate":{"year":2020,"month":1,"day":2},"endDate":{"year":null,"month":null,"day":null},
  "source":"MAN\u0000GA","description":"<p>First\r\nline\u0000 \u0001second\u009f</p>",
  "coverImage":{"large":"//cdn.example/x.jpg"},
- "studios":{"nodes":[{"name":"Studio\tName\n"}]},"siteUrl":"javascript:alert(1)",
+ "studios":{"edges":[{"isMain":true,"node":{"name":"Studio\tName\n","isAnimationStudio":true}}]},"siteUrl":"javascript:alert(1)",
  "genres":["Ac\ttion","\u0000"," Drama "],
  "tags":[{"name":"Ma\ngic","rank":5,"isMediaSpoiler":false},{"name":"` + "very long tag name that goes on and on and on and on and on and on and on forever" + `","rank":500}],
  "relations":{"edges":[{"relationType":"SEQUEL","node":{"id":9,"type":"ANIME","format":"TV\n","title":{"romaji":"Next\nOne"}}}]},
@@ -489,7 +490,7 @@ func TestSourceSanitisesHostileData(t *testing.T) {
 	if d.ExternalURL != "" {
 		t.Errorf("javascript: url must be dropped, got %q", d.ExternalURL)
 	}
-	if d.Fields["studio"].Text != "Studio Name" || d.Fields["source_material"].Text != "MAN GA" {
+	if !slices.Equal(d.Fields["studio"].List, []string{"Studio Name"}) || d.Fields["source_material"].Text != "MAN GA" {
 		t.Errorf("fields = %+v", d.Fields)
 	}
 	if _, ok := d.Fields["type"]; ok {
