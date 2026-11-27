@@ -1029,6 +1029,12 @@ func TestValidateKindExtras(t *testing.T) {
 			k.AdultField = "adult"
 		}, ".adult_field"},
 		{"adult enum without yes", func(k *plugin.KindDef) { k.AdultField = "type" }, ".adult_field"},
+		{"source refresh on a read-only field", func(k *plugin.KindDef) {
+			k.Fields = append(k.Fields, plugin.FieldDef{Key: "stat", Label: "Stat", Type: plugin.FieldNumber, Show: true, SourceRefresh: true})
+		}, ""},
+		{"source refresh on an editable field", func(k *plugin.KindDef) {
+			k.Fields = append(k.Fields, plugin.FieldDef{Key: "stat", Label: "Stat", Type: plugin.FieldNumber, Editable: true, SourceRefresh: true})
+		}, ".source_refresh: only fields that are not editable"},
 	} {
 		m := tv()
 		c.mod(&m.Kinds[0])

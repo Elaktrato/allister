@@ -371,3 +371,39 @@ func TestFillKeepsStoredCreditsAndPeople(t *testing.T) {
 		t.Fatalf("credits = %+v", cs)
 	}
 }
+
+// TestFillRefreshesSourceStatistics: a field marked SourceRefresh (a value the
+// source keeps current and the owner cannot edit) is replaced by a differing
+// incoming value even when one is stored; other set fields stay as stored.
+func TestFillRefreshesSourceStatistics(t *testing.T) {
+	p := richBook()
+	p.M.ID = "fillp"
+	p.M.Kinds[0].Fields = append(p.M.Kinds[0].Fields,
+		plugin.FieldDef{Key: "stat", Label: "Stat", Type: plugin.FieldNumber, Min: fp(0), Max: fp(100), Show: true, SourceRefresh: true})
+	e := newEnvWith(t, p)
+	d := fillData("s1")
+	d.Fields["stat"] = plugin.FieldValue{Num: fp(70)}
+	id := fillItem(t, e, d)
+
+	in := fillData("s1")
+	in.Fields = map[string]plugin.FieldValue{"author": {Text: "Theirs"}, "stat": {Num: fp(82)}}
+	applied, err := e.lib.FillFromSource(ctx, id, in, nil, false)
+	if err != nil || len(applied) != 1 || applied[0] != "field.stat" {
+		t.Fatalf("FillFromSource = %v, %v; want [field.stat], nil", applied, err)
+	}
+	it := mustItem(t, e.lib, id)
+	if it.Fields["stat"].Num == nil || *it.Fields["stat"].Num != 82 || it.Fields["author"].Text != "Mine" {
+		t.Fatalf("fields = %+v", it.Fields)
+	}
+
+	// the same value again, or no incoming value, changes nothing
+	if applied, err := e.lib.FillFromSource(ctx, id, in, nil, false); err != nil || len(applied) != 0 {
+		t.Fatalf("same value: FillFromSource = %v, %v", applied, err)
+	}
+	if applied, err := e.lib.FillFromSource(ctx, id, fillData("s1"), nil, false); err != nil || len(applied) != 0 {
+		t.Fatalf("no value: FillFromSource = %v, %v", applied, err)
+	}
+	if it := mustItem(t, e.lib, id); *it.Fields["stat"].Num != 82 {
+		t.Fatalf("stat = %v, want 82 kept", *it.Fields["stat"].Num)
+	}
+}

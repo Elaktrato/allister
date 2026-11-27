@@ -38,7 +38,9 @@ already in the library must get the new data as well, through a bulk
   only what is empty** on the stored item (owner decision, option 1);
   for lists, **add what is missing, never remove or change an element**
   (owner decision after the builder check). Nothing already set changes,
-  owner edits included. It runs in the
+  owner edits included. Exception (owner decision after the build): statistics the
+  source keeps current and the owner cannot edit (community score,
+  popularity) are refreshed by the bulk run (field flag `source_refresh`). It runs in the
   background at the source's pace, survives a restart, shows its progress
   and result on the settings page, and can be run again at any time.
 - The single-item "Update from source" comparison page shows the new data

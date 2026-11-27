@@ -80,6 +80,7 @@ A `KindDef` describes one media kind:
 - `Banner`: optional, JSON `banner`. Items of the kind can carry a banner image (`ItemData.BannerURL`), shown wide at the top of the item page and downloaded into the local image store.
 - `Trailer`: optional, JSON `trailer`. Items can carry a trailer (`ItemData.Trailer`): the item page shows its locally stored thumbnail with a play button that links out; there is no embedded player.
 - `AdultField`: optional, JSON `adult_field`. The key of an enum field of the same kind that offers the value `yes`; an item with that value is adult. It gives the plugin's settings page a "Hide adult items" option (`plugin.<id>.hide_adult`). Validation refuses an unknown field, a field that is not an enum and an enum without `yes`.
+- Field `SourceRefresh`: optional, JSON `source_refresh` on a field. Marks a value the source keeps current (a statistic such as a community score): the bulk update from source replaces it with the source's current value even when one is stored, where every other set value is kept. Only a field that is not `Editable` may set it (validation refuses it otherwise), so it never overwrites an owner's edit.
 - `Progress`: see [Progress](#progress).
 - `Sections`: see [Sections](#sections).
 - `Stats`: optional, how the kind's time and units count on the Statistics page (see [Statistics](#statistics)). JSON `stats`, omitted when unset.
