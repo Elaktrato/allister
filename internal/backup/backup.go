@@ -1237,9 +1237,8 @@ func (rs *restorer) decodeItem(raw json.RawMessage) (library.BackupItem, error) 
 
 func identity(index int, bi library.BackupItem) Row {
 	r := Row{Index: index, PluginID: clip(bi.PluginID, 60), Kind: clip(bi.Kind, 60), Source: clip(bi.Source, 60), SourceID: clip(bi.SourceID, 100)}
-	if len(bi.Titles) > 0 {
-		r.Title = clip(bi.Titles[0].Text, 120)
-	}
+	// the first title that is not an alternative one
+	r.Title = clip(library.ResolveTitle(bi.Titles, "", nil), 120)
 	return r
 }
 

@@ -10,6 +10,7 @@ import (
 	"github.com/allister/allister/internal/jobs"
 	"github.com/allister/allister/internal/library"
 	"github.com/allister/allister/internal/plugin"
+	"github.com/allister/allister/internal/plugin/plugintest"
 )
 
 // mergePair adds the books "Earthsea" (d1, planned, notes "mine") and "A
@@ -255,4 +256,24 @@ func TestMergePickSearchesOnlyThePluginAndKind(t *testing.T) {
 	body := fe.get("/book/merge/pick?keep=" + idStr(a) + "&q=earth").Body.String()
 	mustContain(t, body, "Tales from Earthsea", `other=`+idStr(b))
 	mustNotContain(t, body, "An Earthsea Show")
+}
+
+// TestMergePageShowsBanners: the banner row shows both images from the
+// local store and starts ticked only when the survivor has none.
+func TestMergePageShowsBanners(t *testing.T) {
+	fe := newFixtureEnv(t, func(book, _ *plugintest.Plugin) { book.M.Kinds[0].Banner = true })
+	a, b := fe.mergePair(t)
+	setBanner := func(id int64, from, to string) {
+		t.Helper()
+		if ok, err := fe.lib.SetBannerPath(bg, id, from, to); err != nil || !ok {
+			t.Fatalf("set banner %d: %v %v", id, ok, err)
+		}
+	}
+	setBanner(a, "", "keep-banner.jpg")
+	setBanner(b, "", "other-banner.jpg")
+	body := fe.get("/book/merge?keep=" + idStr(a) + "&other=" + idStr(b)).Body.String()
+	mustContain(t, body, `value="banner"`, `<img src="/covers/keep-banner.jpg"`, `<img src="/covers/other-banner.jpg"`)
+	mustNotContain(t, body, `value="banner" checked`, "local image")
+	setBanner(a, "keep-banner.jpg", "")
+	mustContain(t, fe.get("/book/merge?keep="+idStr(a)+"&other="+idStr(b)).Body.String(), `value="banner" checked`)
 }

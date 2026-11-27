@@ -12,11 +12,12 @@ import (
 	"github.com/allister/allister/internal/version"
 )
 
-// langNames are display names of common title language tags; any other tag
-// is shown as it is.
+// langNames are display names of common title language tags and of the
+// alternative titles; any other tag is shown as it is.
 var langNames = map[string]string{
 	"ja": "Japanese (native)", "ja-latn": "Romaji", "en": "English",
 	"de": "Deutsch", "fr": "Français", "es": "Español",
+	plugin.AltTitleLang: "Alternative titles",
 }
 
 // generalPlugin links one installed plugin's own settings from General.

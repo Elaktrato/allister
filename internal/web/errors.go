@@ -59,8 +59,9 @@ func (s *server) fail(w http.ResponseWriter, r *http.Request, err error, retry s
 // unmatchedHint explains an imported manual item that its importer's
 // external id did not resolve ("" when the item carries no such id): the
 // importer's UnmatchedNote filled by plugin.FillUnmatchedNote ({id} the id,
-// {title} the item's first title, {year} its year field), or a neutral
-// sentence naming the id by its label (its type when there is no label).
+// {title} the item's first title that is not an alternative one, {year} its
+// year field), or a neutral sentence naming the id by its label (its type
+// when there is no label).
 func unmatchedHint(m plugin.Manifest, it *library.Item) string {
 	for _, imp := range m.Importers {
 		v := it.ExternalIDs[imp.ExternalIDType]
@@ -68,10 +69,8 @@ func unmatchedHint(m plugin.Manifest, it *library.Item) string {
 			continue
 		}
 		if imp.UnmatchedNote != "" {
-			title, year := "", 0
-			if len(it.Titles) > 0 {
-				title = it.Titles[0].Text
-			}
+			// the first title that is not an alternative one
+			title, year := library.ResolveTitle(it.Titles, "", nil), 0
 			if y := it.Fields["year"].Num; y != nil {
 				year = int(*y)
 			}

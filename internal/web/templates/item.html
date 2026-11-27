@@ -1,5 +1,6 @@
 {{define "title"}}{{.Title}} - Allister{{end}}
 {{define "content"}}
+{{with .Banner}}<img src="{{.}}" alt="" class="mb-6 max-h-64 w-full rounded object-cover">{{end}}
 <div class="grid gap-6 md:grid-cols-[14rem_1fr]">
   <aside class="space-y-4">
     {{if .Cover}}<img src="{{.Cover}}" alt="{{.Title}}" class="w-48 rounded md:w-full">
@@ -74,6 +75,15 @@
       {{if .UpdateNotice}}<p class="mt-2 rounded border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-300">{{.UpdateNotice}}</p>{{end}}
       {{if .PartialSync}}<span title="Some details are still being downloaded in the background" class="mt-2 inline-block rounded bg-slate-800 px-2 py-0.5 text-xs text-amber-300">partially synced</span>{{end}}
     </div>
+    {{with .Trailer}}
+    <a href="{{.Href}}" target="_blank" rel="noopener noreferrer" class="block w-72 max-w-full overflow-hidden rounded border border-slate-800 bg-slate-900 hover:border-slate-600">
+      <span class="relative block aspect-video w-full bg-slate-800">
+        {{if .Thumb}}<img src="{{.Thumb}}" alt="" loading="lazy" class="h-full w-full object-cover">{{end}}
+        <span class="absolute inset-0 flex items-center justify-center"><span class="flex rounded-full bg-slate-950 p-2 text-slate-100"><span class="icon text-[2rem]" aria-hidden="true">play_arrow</span></span></span>
+      </span>
+      <span class="block px-3 py-1.5 text-sm font-medium text-indigo-300">Trailer</span>
+    </a>
+    {{end}}
     {{range .Sections}}{{template "section" .}}{{end}}
     {{with .Runs}}{{template "run_history" .}}{{end}}
   </div>

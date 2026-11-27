@@ -137,3 +137,36 @@ func TestAppearancesMarkCounterpartRows(t *testing.T) {
 		t.Fatalf("character rows %+v", as)
 	}
 }
+
+// TestAppearancesOrderSkipsAltTitles: appearances order by the first stored
+// title that is not an alternative one.
+func TestAppearancesOrderSkipsAltTitles(t *testing.T) {
+	l := newLib(t)
+	actor := plugin.PersonRef{ID: "a1", Name: "Actor"}
+	save := func(id string, titles ...plugin.Title) int64 {
+		d := tvData(id, nil)
+		d.Titles = titles
+		itemID := mustSave(t, l, "tv", "show", d)
+		if err := l.SaveCredits(bg, itemID, []plugin.Credit{{Role: "actor", Person: actor}}); err != nil {
+			t.Fatal(err)
+		}
+		return itemID
+	}
+	zed := save("z", plugin.Title{Lang: plugin.AltTitleLang, Text: "Aaa"}, plugin.Title{Lang: "en", Text: "Zed"})
+	mmm := save("m", plugin.Title{Lang: "en", Text: "Mmm"})
+	var pid int64
+	if err := l.db.QueryRow(`SELECT id FROM ` + tablePeople + ` WHERE source_id = 'a1'`).Scan(&pid); err != nil {
+		t.Fatal(err)
+	}
+	apps, err := l.Appearances(bg, pid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []int64
+	for _, a := range apps {
+		got = append(got, a.ItemID)
+	}
+	if want := []int64{mmm, zed}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("order = %v, want %v", got, want)
+	}
+}

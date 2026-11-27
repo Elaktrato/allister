@@ -12,10 +12,11 @@ import (
 
 // Change is one part of an item whose incoming data (a source's answer, or
 // another item) differs from the stored data. Key is stable: "field.<key>",
-// "titles", "genres", "tags", "cover", "relations" or "credits". Stored and
-// Incoming are plain display strings; Added and Removed hold the item labels
-// of a list part ("lang: text" titles, "kind: title" relations, "role: name"
-// credits). StoredEmpty reports that the stored side has no value.
+// "titles", "genres", "tags", "cover", "banner", "trailer", "links",
+// "relations" or "credits". Stored and Incoming are plain display strings;
+// Added and Removed hold the item labels of a list part ("lang: text"
+// titles, "kind: title" relations, "role: name" credits, link labels).
+// StoredEmpty reports that the stored side has no value.
 type Change struct {
 	Key, Label       string
 	Stored, Incoming string
@@ -38,9 +39,10 @@ type listItem struct{ key, label string }
 
 // ItemChanges compares the incoming data with the stored item and returns one
 // Change per differing part, ordered titles, fields (manifest order), genres,
-// tags, cover, relations, credits. A missing or empty incoming value is never
-// a difference: a field absent from in.Fields or without a value, empty
-// titles, genres, tags or relations, an empty cover URL, and credits unless
+// tags, cover, banner, trailer, links, relations, credits. A missing or empty
+// incoming value is never a difference: a field absent from in.Fields or
+// without a value, empty titles, genres, tags, links or relations, an empty
+// cover or banner URL, a trailer without link, and credits unless
 // withCredits is set and the list is non-empty. Values are compared after the
 // normalisation SaveItem applies; field keys the kind does not know are
 // dropped. Lists are compared as sets (a different order alone is no
@@ -76,9 +78,10 @@ func (l *Library) itemChanges(ctx context.Context, itemID int64, in plugin.ItemD
 // zero. Every selected value is validated before the first write; an unknown
 // key or an incoming value that cannot be stored is ErrInvalid and nothing is
 // written. It returns the keys written, in Change order. Taking the cover
-// stores the incoming value and never touches the sync state: a caller that
-// wants a remote cover downloaded enqueues a cover-only job when "cover" is
-// among the written keys. ErrNoEntry for an unknown item.
+// (or the banner or trailer) stores the incoming value and never touches the
+// sync state: a caller that wants a remote image downloaded enqueues a
+// cover-only job when "cover", "banner" or "trailer" is among the written
+// keys. ErrNoEntry for an unknown item.
 func (l *Library) ApplyChanges(ctx context.Context, itemID int64, in plugin.ItemData, credits []plugin.Credit, withCredits bool, keys []string) ([]string, error) {
 	tx, err := l.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -102,7 +105,8 @@ func (l *Library) applyChangesTx(ctx context.Context, tx *sql.Tx, itemID int64, 
 	if err != nil {
 		return nil, err
 	}
-	known := map[string]bool{"titles": true, "genres": true, "tags": true, "cover": true, "relations": true, "credits": true}
+	known := map[string]bool{"titles": true, "genres": true, "tags": true, "cover": true,
+		"banner": true, "trailer": true, "links": true, "relations": true, "credits": true}
 	for _, fd := range def.Fields {
 		known["field."+fd.Key] = true
 	}
@@ -183,6 +187,15 @@ func (l *Library) changeParts(ctx context.Context, q queryer, itemID int64, in p
 		return plugin.KindDef{}, nil, fmt.Errorf("item changes: %w", err)
 	}
 	if p, ok := coverPart(it, coverSource, in.CoverURL, mc); ok {
+		parts = append(parts, p)
+	}
+	if p, ok := bannerPart(it, in.BannerURL, mc != nil); ok {
+		parts = append(parts, p)
+	}
+	if p, ok := trailerPart(it, in.Trailer, mc != nil); ok {
+		parts = append(parts, p)
+	}
+	if p, ok := linksPart(it, in.Links); ok {
 		parts = append(parts, p)
 	}
 	if p, ok := relationsPart(it, in.Relations); ok {
@@ -487,6 +500,108 @@ func coverPart(it *Item, origin, in string, mc *mergeCover) (changePart, bool) {
 			return nil
 		},
 	}, true
+}
+
+// imageDiffers is the cover rule for an image without a recorded origin (the
+// banner, the trailer thumbnail): a downloaded local file never differs
+// from a URL; in a merge (byValue) the stored values are compared.
+func imageDiffers(stored, in string, byValue bool) bool {
+	if byValue {
+		return in != stored
+	}
+	return coverDiffers(stored, "", in)
+}
+
+// imageText shows an image reference like coverText, a local file as
+// "local image".
+func imageText(s string) string {
+	if s == "" || isRemoteRef(s) {
+		return s
+	}
+	return "local image"
+}
+
+// bannerPart is the banner part (see imageDiffers); an empty incoming
+// banner is none.
+func bannerPart(it *Item, in string, byValue bool) (changePart, bool) {
+	in = strings.TrimSpace(in)
+	if in == "" {
+		return changePart{}, false
+	}
+	banner, _, err := normalizeBannerTrailer(in, nil)
+	if err != nil {
+		return changePart{change: Change{Key: "banner", Label: "Banner"}, err: err}, true
+	}
+	id := it.ID
+	return changePart{
+		change: Change{Key: "banner", Label: "Banner", Stored: imageText(it.BannerPath), Incoming: imageText(banner),
+			StoredEmpty: it.BannerPath == ""},
+		differs: imageDiffers(it.BannerPath, banner, byValue),
+		write: func(ctx context.Context, tx *sql.Tx) error {
+			if _, err := tx.ExecContext(ctx, `UPDATE items SET banner_path = ? WHERE id = ?`, banner, id); err != nil {
+				return fmt.Errorf("apply changes: %w", err)
+			}
+			return nil
+		},
+	}, true
+}
+
+// trailerPart is the trailer part, shown by its link: it differs when the
+// link does or the thumbnail does (see imageDiffers). An incoming trailer
+// without link and thumbnail is none.
+func trailerPart(it *Item, in *plugin.Trailer, byValue bool) (changePart, bool) {
+	if in == nil || (strings.TrimSpace(in.URL) == "" && strings.TrimSpace(in.ThumbnailURL) == "") {
+		return changePart{}, false
+	}
+	_, tr, err := normalizeBannerTrailer("", in)
+	if err != nil {
+		return changePart{change: Change{Key: "trailer", Label: "Trailer"}, err: err}, true
+	}
+	var stored plugin.Trailer
+	if it.Trailer != nil {
+		stored = *it.Trailer
+	}
+	// outside a merge a missing incoming thumbnail is no difference
+	thumbDiffers := imageDiffers(stored.ThumbnailURL, tr.ThumbnailURL, byValue) && (byValue || tr.ThumbnailURL != "")
+	id := it.ID
+	return changePart{
+		change:  Change{Key: "trailer", Label: "Trailer", Stored: stored.URL, Incoming: tr.URL, StoredEmpty: it.Trailer == nil},
+		differs: stored.URL != tr.URL || thumbDiffers,
+		write: func(ctx context.Context, tx *sql.Tx) error {
+			if _, err := tx.ExecContext(ctx, `UPDATE items SET trailer_url = ?, trailer_thumb = ? WHERE id = ?`, tr.URL, tr.ThumbnailURL, id); err != nil {
+				return fmt.Errorf("apply changes: %w", err)
+			}
+			return nil
+		},
+	}, true
+}
+
+func linkItems(ls []plugin.Link) []listItem {
+	out := make([]listItem, len(ls))
+	for i, l := range ls {
+		out[i] = listItem{key: l.Label + "\x00" + l.URL, label: l.Label}
+	}
+	return out
+}
+
+// linksPart is the links part, compared as a set of (label, URL).
+func linksPart(it *Item, in []plugin.Link) (changePart, bool) {
+	if len(in) == 0 {
+		return changePart{}, false
+	}
+	links, err := normalizeLinks(in)
+	if err != nil {
+		return changePart{change: Change{Key: "links", Label: "Links"}, err: err}, true
+	}
+	p := listPart("links", "Links", linkItems(it.Links), linkItems(links))
+	id := it.ID
+	p.write = func(ctx context.Context, tx *sql.Tx) error {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM item_links WHERE item_id = ?`, id); err != nil {
+			return fmt.Errorf("apply changes: %w", err)
+		}
+		return insertLinks(ctx, tx, id, links)
+	}
+	return p, true
 }
 
 // relationItems keys normalised relation rows by every stored column (an

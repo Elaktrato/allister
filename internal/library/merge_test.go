@@ -758,3 +758,65 @@ func TestMergeKeepsTheOtherItemsDismissedPairs(t *testing.T) {
 		t.Fatalf("dismissed pairs = %v, want %v", got, want)
 	}
 }
+
+// TestMergeBannerTrailerLinks: the survivor keeps its own banner, trailer
+// and links unless their rows are ticked and takes the other's when they
+// are; a survivor without them is offered them as empty (StoredEmpty) rows.
+func TestMergeBannerTrailerLinks(t *testing.T) {
+	e := newEnv(t)
+	extras := func(id string) plugin.ItemData {
+		d := dupBook("books", id, "Dune", nil)
+		d.BannerURL = "banner-" + id + ".jpg" // downloaded files
+		d.Trailer = &plugin.Trailer{URL: "https://v.example/" + id, ThumbnailURL: "thumb-" + id + ".jpg"}
+		d.Links = []plugin.Link{{Label: "Site " + id, URL: "https://s.example/" + id}}
+		return d
+	}
+	n := 0
+	pair := func() (int64, int64) {
+		n++
+		keep, err := e.lib.AddToList(bg, "book", "book", extras(fmt.Sprintf("k%d", n)), Entry{Status: Planned})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return keep, mustSave(t, e.lib, "book", "book", extras(fmt.Sprintf("o%d", n)))
+	}
+	keep, other := pair()
+	cs, err := e.lib.MergeChanges(bg, keep, other)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, k := range []string{"banner", "trailer", "links"} {
+		c := changeByKey(cs, k)
+		if c == nil || c.StoredEmpty {
+			t.Fatalf("%s row = %+v, want a difference with a stored side", k, c)
+		}
+	}
+	want := mustItem(t, e.lib, keep)
+	if err := e.lib.MergeItems(bg, keep, other, nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := mustItem(t, e.lib, keep); got.BannerPath != want.BannerPath || *got.Trailer != *want.Trailer || !reflect.DeepEqual(got.Links, want.Links) {
+		t.Fatalf("unticked: survivor = %q %+v %+v, want its own", got.BannerPath, got.Trailer, got.Links)
+	}
+
+	keep, other = pair()
+	theirs := mustItem(t, e.lib, other)
+	if err := e.lib.MergeItems(bg, keep, other, []string{"banner", "trailer", "links"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := mustItem(t, e.lib, keep); got.BannerPath != theirs.BannerPath || *got.Trailer != *theirs.Trailer || !reflect.DeepEqual(got.Links, theirs.Links) {
+		t.Fatalf("ticked: survivor = %q %+v %+v, want the other's", got.BannerPath, got.Trailer, got.Links)
+	}
+
+	keep, other = pair()
+	mustExec(t, e.db, `UPDATE items SET banner_path = '', trailer_url = '', trailer_thumb = '' WHERE id = ?`, keep)
+	mustExec(t, e.db, `DELETE FROM item_links WHERE item_id = ?`, keep)
+	if cs, err = e.lib.MergeChanges(bg, keep, other); err != nil {
+		t.Fatal(err)
+	}
+	for _, k := range []string{"banner", "trailer", "links"} {
+		if c := changeByKey(cs, k); c == nil || !c.StoredEmpty {
+			t.Fatalf("empty survivor: %s row = %+v, want StoredEmpty", k, c)
+		}
+	}
+}

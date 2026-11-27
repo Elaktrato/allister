@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http/httptest"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -732,4 +733,59 @@ func TestOverviewBadSourceAnswerIs502(t *testing.T) {
 	if rec := e.get("/tv/tvdata/1"); rec.Code != 500 {
 		t.Fatalf("plain error: %d", rec.Code)
 	}
+}
+
+// TestItemPageShowsBannerTrailerLinks: the banner above the header and the
+// trailer thumbnail come from the local store; the trailer is a plain link
+// out (nothing of the video site is loaded), the links sit next to the
+// source link and alternative titles have their own label.
+func TestItemPageShowsBannerTrailerLinks(t *testing.T) {
+	e := newFixtureEnv(t, func(_, tv *plugintest.Plugin) {
+		tv.M.Kinds[0].Banner, tv.M.Kinds[0].Trailer, tv.M.Kinds[0].AltTitles = true, true, true
+	})
+	d := tvShow("1", "Dark")
+	d.Titles = append(d.Titles, plugin.Title{Lang: plugin.AltTitleLang, Text: "Dunkel"})
+	d.BannerURL = "banner.jpg"
+	d.Trailer = &plugin.Trailer{URL: "https://www.youtube.com/watch?v=x", ThumbnailURL: "thumb.jpg"}
+	d.Links = []plugin.Link{{Label: "Stream Site", URL: "https://stream.example/dark"}, {Label: "Other Site", URL: "https://other.example/dark"}}
+	e.saveFixture(t, "tv", "show", d)
+	b := e.get("/tv/tvdata/1").Body.String()
+	mustContain(t, b, `<img src="/covers/banner.jpg"`, `<img src="/covers/thumb.jpg"`,
+		`href="https://www.youtube.com/watch?v=x" target="_blank" rel="noopener noreferrer"`, ">Trailer<",
+		"Alternative titles:</span> Dunkel")
+	if i, j := strings.Index(b, "/covers/banner.jpg"), strings.Index(b, "<h1"); i < 0 || i > j {
+		t.Fatalf("banner at %d, header at %d: want the banner above the header", i, j)
+	}
+	a := strings.Index(b, `href="https://www.youtube.com/watch?v=x"`)
+	if end := strings.Index(b[a:], "</a>"); end < 0 || !strings.Contains(b[a:a+end], "/covers/thumb.jpg") || !strings.Contains(b[a:a+end], "Trailer") {
+		t.Fatalf("trailer link does not wrap the thumbnail and label: %s", b[a:])
+	}
+	links := b[strings.Index(b, ">Links<"):]
+	mustContain(t, links, "View on Fake TV", `href="https://stream.example/dark"`, ">Stream Site<", ">Other Site<")
+	for _, m := range regexp.MustCompile(`src="[^"]*"`).FindAllString(b, -1) {
+		if strings.Contains(m, "youtube.com") {
+			t.Fatalf("video site loaded: %s", m)
+		}
+	}
+	// the header never shows the alternative title
+	mustContain(t, b, "Dark</h1>")
+
+	// a remote thumbnail (not downloaded yet) is not loaded; the link stays
+	e2 := newFixtureEnv(t, func(_, tv *plugintest.Plugin) { tv.M.Kinds[0].Trailer = true })
+	d2 := tvShow("2", "Remote")
+	d2.BannerURL = "banner2.jpg"
+	d2.Trailer = &plugin.Trailer{URL: "https://www.youtube.com/watch?v=y", ThumbnailURL: "https://img.example/thumb.jpg"}
+	e2.saveFixture(t, "tv", "show", d2)
+	b = e2.get("/tv/tvdata/2").Body.String()
+	mustContain(t, b, `href="https://www.youtube.com/watch?v=y"`, ">Trailer<")
+	// the kind declares no banner: none shown, even though one is stored
+	mustNotContain(t, b, "/covers/banner2.jpg", "img.example/thumb.jpg")
+
+	// a live item: the trailer link, no image of the source loaded
+	live := tvShow("3", "Live")
+	live.Trailer = &plugin.Trailer{URL: "https://www.youtube.com/watch?v=z", ThumbnailURL: "https://img.example/live.jpg"}
+	e2.tv.Data = live
+	b = e2.get("/tv/tvdata/3").Body.String()
+	mustContain(t, b, `href="https://www.youtube.com/watch?v=z"`, ">Trailer<")
+	mustNotContain(t, b, "img.example/live.jpg")
 }

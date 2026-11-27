@@ -746,3 +746,15 @@ func TestUnmatchedNoteFillsTitleAndYear(t *testing.T) {
 	mustContain(t, b, "No unique match for &#34;Lost Book&#34; (1995) #9780.")
 	mustNotContain(t, b, "{title}", "{year}")
 }
+
+// TestUnmatchedNoteTitleSkipsAltTitles: {title} is never an alternative title.
+func TestUnmatchedNoteTitleSkipsAltTitles(t *testing.T) {
+	e := newFixtureEnv(t, func(book, _ *plugintest.Plugin) {
+		book.M.Importers[0].UnmatchedNote = `No match for "{title}" #{id}.`
+	})
+	d := bookItem("m1", "Lost Book")
+	d.Titles = append([]plugin.Title{{Lang: plugin.AltTitleLang, Text: "Synonym"}}, d.Titles...)
+	d.Source, d.ExternalURL, d.ExternalIDs = "manual", "", map[string]string{"isbn": "9780"}
+	e.saveFixture(t, "book", "book", d, library.WithSyncState("done"))
+	mustContain(t, e.get("/book/manual/m1").Body.String(), "No match for &#34;Lost Book&#34; #9780.")
+}
