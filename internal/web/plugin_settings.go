@@ -7,7 +7,9 @@ package web
 // (POST /settings/plugins/{id}/columns) and, for a plugin with an IdlePause
 // importer, the idle cutoff in days (POST /settings/plugins/{id}/idle) and,
 // for a plugin whose kinds declare an adult flag, whether its adult items are
-// hidden (POST /settings/plugins/{id}/adult).
+// hidden (POST /settings/plugins/{id}/adult) and, for a plugin with a source,
+// the bulk "Update from source" run (POST /settings/plugins/{id}/refresh,
+// its state polled by GET /settings/plugins/{id}/refresh).
 // Every choice is validated against what the plugin's manifest declares; the
 // page answers for every installed plugin (enabled or not, like its Enable
 // button), unknown ids get the 404 page and are never echoed.
@@ -136,6 +138,7 @@ type pluginSettingsView struct {
 	Error        string
 	Idle         *idleForm
 	Adult        *adultForm
+	Refresh      *refreshForm
 	Columns      []columnsForm
 	// MissingKeys names the plugin's sources that declare a key label and
 	// have no effective key; OtherSources says the plugin also has a source
@@ -340,6 +343,9 @@ func (s *server) pluginSettingsData(r *http.Request, m plugin.Manifest) (pluginS
 		v.Adult = &adultForm{Action: pluginSettingsURL(m.ID) + "/adult", On: s.hideAdult(ctx, m)}
 	}
 	var err error
+	if v.Refresh, err = s.refreshFormFor(ctx, m); err != nil {
+		return v, err
+	}
 	v.MissingKeys, v.OtherSources, err = s.sourceKeyState(ctx, m)
 	return v, err
 }
@@ -782,4 +788,154 @@ func chosenColumns(offered []listColumn, order, show []string, move string) (key
 		keys[i+1], keys[i] = keys[i], keys[i+1]
 	}
 	return keys, ""
+}
+
+// refreshForm is the bulk "Update from source" section of a plugin with a
+// source: the running run's progress, else the last result and the button
+// (or, after the button, the confirmation naming Count).
+type refreshForm struct {
+	Action      string
+	PageURL     string // the settings page (the confirmation's Cancel)
+	Running     bool
+	Disabled    bool // the plugin is disabled: its jobs wait
+	Done, Total int
+	Last        *library.RefreshRun // the newest finished run, nil when none
+	Credential  bool                // Last stopped on a missing credential
+	Confirm     bool
+	Count       int
+	Error       string
+}
+
+// refreshOffered reports whether m's settings offer the bulk update: m
+// declares a source and the server can enqueue its jobs.
+func (s *server) refreshOffered(m plugin.Manifest) bool {
+	return len(m.Sources) > 0 && s.deps.RefreshJobs != nil && s.deps.Jobs != nil && s.deps.Library != nil
+}
+
+// refreshFormFor is m's refresh section (nil when it is not offered).
+func (s *server) refreshFormFor(ctx context.Context, m plugin.Manifest) (*refreshForm, error) {
+	if !s.refreshOffered(m) {
+		return nil, nil
+	}
+	run, err := s.deps.Library.LatestRefreshRun(ctx, m.ID)
+	if err != nil {
+		return nil, err
+	}
+	f := &refreshForm{Action: pluginSettingsURL(m.ID) + "/refresh", PageURL: pluginSettingsURL(m.ID), Disabled: !s.deps.Registry.IsEnabled(m.ID)}
+	switch {
+	case run == nil:
+	case run.FinishedAt == nil:
+		f.Running, f.Done, f.Total = true, min(run.Done(), run.Total), run.Total
+	default:
+		f.Last, f.Credential = run, run.Stopped == library.RefreshStoppedCredential
+	}
+	return f, nil
+}
+
+// getPluginRefresh answers the refresh section alone to htmx (its progress
+// poll); other requests go to the settings page.
+func (s *server) getPluginRefresh(w http.ResponseWriter, r *http.Request) {
+	m, ok := s.settingsPlugin(w, r)
+	if !ok {
+		return
+	}
+	if !s.refreshOffered(m) {
+		s.errorPage(w, r, http.StatusNotFound, "Not found", "This plugin has no source to update from.", "")
+		return
+	}
+	if !isPartialRequest(r) {
+		http.Redirect(w, r, pluginSettingsURL(m.ID)+"#refresh", http.StatusSeeOther)
+		return
+	}
+	f, err := s.refreshFormFor(r.Context(), m)
+	if err != nil {
+		s.internalError(w, r, err)
+		return
+	}
+	w.Header().Set("Vary", "HX-Request, HX-History-Restore-Request")
+	s.renderPartial(w, "settings_plugin", "plugin_refresh", f)
+}
+
+// postPluginRefresh starts the plugin's bulk "Update from source" run. The
+// first post answers the settings page with the confirmation naming the
+// number of items it will ask; the confirmation posts confirm=1, which
+// starts the run (one job per item) and redirects to the page's refresh
+// section. A run that is still going is refused with 409.
+func (s *server) postPluginRefresh(w http.ResponseWriter, r *http.Request) {
+	m, ok := s.settingsPlugin(w, r)
+	if !ok {
+		return
+	}
+	if !s.refreshOffered(m) {
+		s.errorPage(w, r, http.StatusNotFound, "Not found", "This plugin has no source to update from.", "")
+		return
+	}
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+	ctx := r.Context()
+	page := func(status int, mod func(*refreshForm)) {
+		v, err := s.pluginSettingsData(r, m)
+		if err != nil {
+			s.internalError(w, r, err)
+			return
+		}
+		opts, err := s.titleLangOptions(ctx, m)
+		if err != nil {
+			s.internalError(w, r, err)
+			return
+		}
+		v.LangOptions, v.Lang = opts, s.titleLang(ctx, m)
+		mod(v.Refresh)
+		s.renderStatus(w, r, status, "settings_plugin", v)
+	}
+	const running = "An update from source is already running."
+	if r.PostForm.Get("confirm") != "1" {
+		n, err := s.deps.Library.RefreshCandidates(ctx, m.ID)
+		if err != nil {
+			s.internalError(w, r, err)
+			return
+		}
+		status := http.StatusOK
+		latest, err := s.deps.Library.LatestRefreshRun(ctx, m.ID)
+		if err != nil {
+			s.internalError(w, r, err)
+			return
+		}
+		if latest != nil && latest.FinishedAt == nil {
+			status = http.StatusConflict
+		}
+		page(status, func(f *refreshForm) {
+			if f.Running {
+				f.Error = running
+				return
+			}
+			f.Confirm, f.Count = true, n
+		})
+		return
+	}
+	run, ids, err := s.deps.Library.StartRefreshRun(ctx, m.ID)
+	if errors.Is(err, library.ErrRefreshRunning) {
+		page(http.StatusConflict, func(f *refreshForm) { f.Error = running })
+		return
+	}
+	if err != nil {
+		s.internalError(w, r, err)
+		return
+	}
+	job := s.deps.RefreshJobs(m.ID, run.ID)
+	for _, id := range ids {
+		kind, payload := job(id)
+		if err := s.deps.Jobs.Enqueue(ctx, kind, payload); err != nil {
+			// the jobs already queued record their items as failed without
+			// asking the source, and the run finishes once they are done
+			if serr := s.deps.Library.StopRefreshRun(context.WithoutCancel(ctx), run.ID, "enqueue"); serr != nil {
+				log.Printf("settings %s: stop refresh: %v", logSafe(m.ID), serr)
+			}
+			s.internalError(w, r, err)
+			return
+		}
+	}
+	http.Redirect(w, r, pluginSettingsURL(m.ID)+"#refresh", http.StatusSeeOther)
 }

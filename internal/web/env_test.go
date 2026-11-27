@@ -108,7 +108,7 @@ func newEnvWith(t *testing.T, mk func(es plugin.EnabledStore) *plugin.Registry) 
 	imports := importer.New(importer.Deps{DB: d, Library: e.lib, Registry: e.reg, Queue: e.jobs, SyncJobs: testSyncJobs()})
 	e.srv, e.h = newServer(Deps{
 		Imports:  imports,
-		Settings: e.set, Jobs: e.jobs, SyncJobs: testSyncJobs(), CoverJobs: testCoverJobs(), ScheduleJobs: testScheduleJobs(), CoversDir: e.covers, DataDir: filepath.Dir(e.covers),
+		Settings: e.set, Jobs: e.jobs, SyncJobs: testSyncJobs(), CoverJobs: testCoverJobs(), ScheduleJobs: testScheduleJobs(), RefreshJobs: jobs.RefreshJobFor, CoversDir: e.covers, DataDir: filepath.Dir(e.covers),
 		ScheduleImport: func(pluginID, importerID string) (string, any) {
 			return "scheduled_import", map[string]string{"plugin_id": pluginID, "importer_id": importerID}
 		},
