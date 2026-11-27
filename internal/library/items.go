@@ -18,6 +18,7 @@ const (
 	maxTitleRunes = 300
 	maxLangLen    = 35
 	maxRelations  = 200
+	maxLinks      = 20
 )
 
 // SaveOption customises SaveItem.
@@ -55,6 +56,9 @@ type prepared struct {
 	rels     []relRow
 	terms    []termRow
 	progress []string
+	banner   string
+	trailer  *plugin.Trailer // nil: none
+	links    []plugin.Link
 }
 
 func validLang(s string) bool {
@@ -263,7 +267,70 @@ func (l *Library) prepare(pluginID, kind string, d plugin.ItemData, progress []s
 	if p.progress, err = normalizeProgress(def, progress); err != nil {
 		return nil, err
 	}
+	if p.banner, p.trailer, err = normalizeBannerTrailer(d.BannerURL, d.Trailer); err != nil {
+		return nil, err
+	}
+	if p.links, err = normalizeLinks(d.Links); err != nil {
+		return nil, err
+	}
 	return p, nil
+}
+
+// normalizeBannerTrailer checks the banner and the trailer. Each image is
+// empty, an https URL or a local file name (a downloaded image); the
+// trailer link is an https URL, and a trailer without link or thumbnail is
+// none.
+func normalizeBannerTrailer(banner string, tr *plugin.Trailer) (string, *plugin.Trailer, error) {
+	banner = strings.TrimSpace(banner)
+	if err := checkHTTPSImageRef("banner", banner); err != nil {
+		return "", nil, err
+	}
+	if tr == nil {
+		return banner, nil, nil
+	}
+	t := plugin.Trailer{URL: strings.TrimSpace(tr.URL), ThumbnailURL: strings.TrimSpace(tr.ThumbnailURL)}
+	if t.URL == "" && t.ThumbnailURL == "" {
+		return banner, nil, nil
+	}
+	if t.URL == "" {
+		return "", nil, invalid("a trailer needs a link")
+	}
+	if err := checkHTTPSURL("trailer url", t.URL); err != nil {
+		return "", nil, err
+	}
+	if err := checkHTTPSImageRef("trailer thumbnail", t.ThumbnailURL); err != nil {
+		return "", nil, err
+	}
+	return banner, &t, nil
+}
+
+// normalizeLinks checks the item's labelled links: at most maxLinks, each
+// with a one-line label and an https URL. Their order is kept.
+func normalizeLinks(ls []plugin.Link) ([]plugin.Link, error) {
+	if len(ls) > maxLinks {
+		return nil, invalid("more than %d links", maxLinks)
+	}
+	var out []plugin.Link
+	for _, l := range ls {
+		n := plugin.Link{Label: strings.TrimSpace(l.Label), URL: strings.TrimSpace(l.URL)}
+		if n.Label == "" {
+			return nil, invalid("a link needs a label")
+		}
+		if err := cleanText("link label", n.Label, singleLine); err != nil {
+			return nil, err
+		}
+		if utf8.RuneCountInString(n.Label) > maxTitleRunes {
+			return nil, invalid("a link label is longer than %d characters", maxTitleRunes)
+		}
+		if n.URL == "" {
+			return nil, invalid("link %q needs a URL", n.Label)
+		}
+		if err := checkHTTPSURL("link "+n.Label, n.URL); err != nil {
+			return nil, err
+		}
+		out = append(out, n)
+	}
+	return out, nil
 }
 
 // ValidateItem runs every check SaveItem runs and additionally enforces the
@@ -324,10 +391,11 @@ func insertItem(ctx context.Context, tx *sql.Tx, pluginID, kind string, d plugin
 	} else if existing != 0 {
 		return 0, &AlreadySavedError{ExistingID: existing}
 	}
+	trailerURL, trailerThumb := trailerColumns(p.trailer)
 	res, err := tx.ExecContext(ctx, `INSERT INTO items
-		(plugin_id, kind, source, source_id, cover_path, external_url, sync_state, progress_keys)
-		VALUES (?,?,?,?,?,?,?,?)`,
-		pluginID, kind, p.source, p.sourceID, d.CoverURL, d.ExternalURL, syncState, string(pk))
+		(plugin_id, kind, source, source_id, cover_path, external_url, sync_state, progress_keys, banner_path, trailer_url, trailer_thumb)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
+		pluginID, kind, p.source, p.sourceID, d.CoverURL, d.ExternalURL, syncState, string(pk), p.banner, trailerURL, trailerThumb)
 	if err != nil {
 		return 0, fmt.Errorf("save item: %w", err)
 	}
@@ -339,6 +407,23 @@ func insertItem(ctx context.Context, tx *sql.Tx, pluginID, kind string, d plugin
 		return 0, err
 	}
 	return id, nil
+}
+
+// trailerColumns are the stored trailer_url and trailer_thumb of t.
+func trailerColumns(t *plugin.Trailer) (string, string) {
+	if t == nil {
+		return "", ""
+	}
+	return t.URL, t.ThumbnailURL
+}
+
+func insertLinks(ctx context.Context, tx *sql.Tx, id int64, links []plugin.Link) error {
+	for i, l := range links {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO item_links(item_id, seq, label, url) VALUES (?,?,?,?)`, id, i, l.Label, l.URL); err != nil {
+			return fmt.Errorf("save links: %w", err)
+		}
+	}
+	return nil
 }
 
 func insertTitles(ctx context.Context, tx *sql.Tx, id int64, titles []plugin.Title) error {
@@ -375,6 +460,9 @@ func insertParts(ctx context.Context, tx *sql.Tx, id int64, p *prepared) error {
 	if err := insertRelations(ctx, tx, id, p.rels); err != nil {
 		return err
 	}
+	if err := insertLinks(ctx, tx, id, p.links); err != nil {
+		return err
+	}
 	return insertTerms(ctx, tx, id, p.terms)
 }
 
@@ -391,7 +479,7 @@ func insertRelations(ctx context.Context, tx *sql.Tx, id int64, rels []relRow) e
 
 // Item returns the item with all its parts, or nil, nil when absent.
 func (l *Library) Item(ctx context.Context, id int64) (*Item, error) {
-	return loadItem(ctx, l.db, `id = ?`, id)
+	return l.loadItem(ctx, l.db, `id = ?`, id)
 }
 
 // identityWhere selects the id of the item that owns an identity (plugin,
@@ -416,7 +504,7 @@ func identityOwner(ctx context.Context, q queryer, pluginID, kind, source, sourc
 // ItemBySource returns the item with the given identity, or the item it is
 // an alias of, or nil, nil.
 func (l *Library) ItemBySource(ctx context.Context, pluginID, kind, source, sourceID string) (*Item, error) {
-	return loadItem(ctx, l.db, identityWhere, pluginID, kind, source, sourceID, pluginID, kind, source, sourceID)
+	return l.loadItem(ctx, l.db, identityWhere, pluginID, kind, source, sourceID, pluginID, kind, source, sourceID)
 }
 
 // ItemByPluginSource returns the plugin's items of every kind with the given
@@ -457,17 +545,22 @@ func (l *Library) ItemByPluginSource(ctx context.Context, pluginID, source, sour
 // ItemByExternalID returns the (oldest) item of the plugin kind that carries
 // the external id, or nil, nil.
 func (l *Library) ItemByExternalID(ctx context.Context, pluginID, kind, idType, value string) (*Item, error) {
-	return loadItem(ctx, l.db, `id = (SELECT i.id FROM items i JOIN external_ids e ON e.item_id = i.id
+	return l.loadItem(ctx, l.db, `id = (SELECT i.id FROM items i JOIN external_ids e ON e.item_id = i.id
 		WHERE i.plugin_id = ? AND i.kind = ? AND e.type = ? AND e.value = ? ORDER BY i.id LIMIT 1)`,
 		pluginID, kind, idType, value)
 }
 
-func loadItem(ctx context.Context, q queryer, where string, args ...any) (*Item, error) {
+// loadItem reads the item through q. Stored field values are read as the
+// kind's current field type where the two differ compatibly (listCompat).
+func (l *Library) loadItem(ctx context.Context, q queryer, where string, args ...any) (*Item, error) {
 	var it Item
 	var pk string
-	err := q.QueryRowContext(ctx, `SELECT id, plugin_id, kind, source, source_id, cover_path, external_url, sync_state, progress_keys
+	var tr plugin.Trailer
+	err := q.QueryRowContext(ctx, `SELECT id, plugin_id, kind, source, source_id, cover_path, external_url, sync_state, progress_keys,
+		banner_path, trailer_url, trailer_thumb
 		FROM items WHERE `+where+` LIMIT 1`, args...).Scan(
-		&it.ID, &it.PluginID, &it.Kind, &it.Source, &it.SourceID, &it.CoverPath, &it.ExternalURL, &it.SyncState, &pk)
+		&it.ID, &it.PluginID, &it.Kind, &it.Source, &it.SourceID, &it.CoverPath, &it.ExternalURL, &it.SyncState, &pk,
+		&it.BannerPath, &tr.URL, &tr.ThumbnailURL)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -477,9 +570,13 @@ func loadItem(ctx context.Context, q queryer, where string, args ...any) (*Item,
 	if err := json.Unmarshal([]byte(pk), &it.ProgressKeys); err != nil {
 		return nil, fmt.Errorf("load item: progress keys: %w", err)
 	}
+	if tr.URL != "" {
+		it.Trailer = &tr
+	}
 	if err := loadParts(ctx, q, &it); err != nil {
 		return nil, err
 	}
+	l.listCompat(it.PluginID, it.Kind, it.Fields)
 	return &it, nil
 }
 
@@ -586,6 +683,22 @@ func loadParts(ctx context.Context, q queryer, it *Item) error {
 	}
 	if err := closeRows(rows); err != nil {
 		return fmt.Errorf("load relations: %w", err)
+	}
+
+	rows, err = q.QueryContext(ctx, `SELECT label, url FROM item_links WHERE item_id = ? ORDER BY seq`, it.ID)
+	if err != nil {
+		return fmt.Errorf("load links: %w", err)
+	}
+	for rows.Next() {
+		var lk plugin.Link
+		if err := rows.Scan(&lk.Label, &lk.URL); err != nil {
+			rows.Close()
+			return fmt.Errorf("load links: %w", err)
+		}
+		it.Links = append(it.Links, lk)
+	}
+	if err := closeRows(rows); err != nil {
+		return fmt.Errorf("load links: %w", err)
 	}
 
 	rows, err = q.QueryContext(ctx, `SELECT kind, term, rank, spoiler FROM item_terms WHERE item_id = ? ORDER BY kind, seq`, it.ID)

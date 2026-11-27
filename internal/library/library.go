@@ -73,6 +73,15 @@ type Item struct {
 	ProgressKeys                      []string
 	Genres                            []string
 	Tags                              []plugin.Tag
+	// BannerPath is the banner image: its remote URL until it is
+	// downloaded, then the local file name (like CoverPath).
+	BannerPath string
+	// Trailer is the trailer link, nil when there is none. Its
+	// ThumbnailURL is the remote thumbnail URL or, once downloaded, the
+	// local file name.
+	Trailer *plugin.Trailer
+	// Links are the source's labelled links, in stored order.
+	Links []plugin.Link
 }
 
 // Person is a stored person (author, actor, character, ...), scoped to the

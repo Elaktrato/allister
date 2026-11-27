@@ -190,8 +190,10 @@ const (
 
 // ResolveTitle returns the title in the preferred language. If it is missing
 // it tries the languages of fallback in order (the kind's TitleFallback,
-// plugin data), then takes the first stored title. It returns "" only for an
-// empty slice.
+// plugin data), then takes the first stored title. Alternative titles
+// (plugin.AltTitleLang) are never chosen while the item has another title:
+// they are matched by neither language nor the first-title rule. It returns
+// "" only for an empty slice.
 func ResolveTitle(ts []plugin.Title, preferred string, fallback []string) string {
 	if i := ResolveTitleIndex(ts, preferred, fallback); i >= 0 {
 		return ts[i].Text
@@ -203,10 +205,18 @@ func ResolveTitle(ts []plugin.Title, preferred string, fallback []string) string
 // chooses, or -1 for an empty slice.
 func ResolveTitleIndex(ts []plugin.Title, preferred string, fallback []string) int {
 	for _, lang := range append([]string{preferred}, fallback...) {
+		if lang == plugin.AltTitleLang {
+			continue
+		}
 		for i, t := range ts {
 			if t.Lang == lang {
 				return i
 			}
+		}
+	}
+	for i, t := range ts {
+		if t.Lang != plugin.AltTitleLang {
+			return i
 		}
 	}
 	if len(ts) > 0 {
@@ -710,18 +720,24 @@ func (c *compiled) orderBy(s Sort, lang string) (string, []any, error) {
 	case SortTitle:
 		// The same chain ResolveTitle picks for the rows: the chosen
 		// language, the kind's TitleFallback in order, then the first
+		// stored title that is not an alternative one, then the first
 		// stored title — so the rows sort by the titles they display.
 		langs := c.def.TitleFallback
 		if lang != "" {
 			langs = append([]string{lang}, langs...)
 		}
-		picks := make([]string, 0, len(langs)+2)
+		picks := make([]string, 0, len(langs)+3)
 		for _, l := range langs {
+			if l == plugin.AltTitleLang {
+				continue
+			}
 			picks = append(picks, `(SELECT t.text FROM item_titles t WHERE t.item_id = items.id AND t.lang = ? ORDER BY t.rowid LIMIT 1)`)
 			args = append(args, l)
 		}
 		picks = append(picks,
+			`(SELECT t.text FROM item_titles t WHERE t.item_id = items.id AND t.lang <> ? ORDER BY t.rowid LIMIT 1)`,
 			`(SELECT t.text FROM item_titles t WHERE t.item_id = items.id ORDER BY t.rowid LIMIT 1)`, `''`)
+		args = append(args, plugin.AltTitleLang)
 		expr = `lower(COALESCE(` + strings.Join(picks, ", ") + `))`
 	case SortRating:
 		expr, nullsLast = `e.rating`, true
@@ -1003,7 +1019,9 @@ func (l *Library) loadRowParts(ctx context.Context, ids []any, byID map[int64]*R
 		return err
 	}
 	for id, a := range accs {
-		byID[id].Item.Fields = a.vals
+		it := &byID[id].Item
+		it.Fields = a.vals
+		l.listCompat(it.PluginID, it.Kind, it.Fields)
 	}
 	if err := query("terms", `SELECT item_id, kind, term, rank, spoiler FROM item_terms`+in+` ORDER BY item_id, kind, seq`, func(r *sql.Rows) error {
 		var id int64
