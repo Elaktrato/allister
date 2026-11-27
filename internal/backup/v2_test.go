@@ -218,8 +218,8 @@ func TestBackupFormat4KeepsBulkEvents(t *testing.T) {
 		t.Fatal("no bulk event to back up")
 	}
 	data := a.archive()
-	if d, _ := open(t, data); d.FormatVersion != 4 {
-		t.Fatalf("format = %d, want 4", d.FormatVersion)
+	if d, _ := open(t, data); d.FormatVersion != FormatVersion {
+		t.Fatalf("format = %d, want %d", d.FormatVersion, FormatVersion)
 	}
 	b := newEnv(t)
 	if rep := mustRestore(t, b, data); rep.Created != 1 || len(rep.Notes) != 0 {

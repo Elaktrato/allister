@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"math"
 	"regexp"
 	"slices"
@@ -16,7 +17,7 @@ import (
 	"github.com/allister/allister/internal/plugin"
 )
 
-// Backup records (format_version 4 of the universal backup; BackupEntryV1 is
+// Backup records (format_version 5 of the universal backup; BackupEntryV1 is
 // the entry of format 1). The JSON names are part of the backup format:
 // change them only together with the format version. sync_state is
 // deliberately not stored: a restore decides it.
@@ -30,7 +31,7 @@ import (
 // writer when the item referenced a local cover that could not be included
 // (file missing or name not acceptable); Cover is then "". CoverSource is
 // the remote URL a local cover was downloaded from (restored only with the
-// cover file).
+// cover file). Banner, Trailer and Links are format 5.
 type BackupItem struct {
 	PluginID     string                       `json:"plugin_id"`
 	Kind         string                       `json:"kind"`
@@ -48,10 +49,26 @@ type BackupItem struct {
 	CoverURL     string                       `json:"cover_url,omitempty"`
 	CoverMissing bool                         `json:"cover_missing,omitempty"`
 	CoverSource  string                       `json:"cover_source,omitempty"`
-	ProgressKeys []string                     `json:"progress_keys"`
-	CreatedAt    string                       `json:"created_at,omitempty"` // RFC 3339 UTC
-	UpdatedAt    string                       `json:"updated_at,omitempty"` // RFC 3339 UTC
-	Entry        *BackupEntry                 `json:"entry,omitempty"`
+	// Banner is the banner image: a local file name (archived as
+	// covers/<name>, like Cover) or its https URL while it was not
+	// downloaded. BannerMissing works like CoverMissing.
+	Banner        string         `json:"banner,omitempty"`
+	BannerMissing bool           `json:"banner_missing,omitempty"`
+	Trailer       *BackupTrailer `json:"trailer,omitempty"`
+	Links         []plugin.Link  `json:"links,omitempty"`
+	ProgressKeys  []string       `json:"progress_keys"`
+	CreatedAt     string         `json:"created_at,omitempty"` // RFC 3339 UTC
+	UpdatedAt     string         `json:"updated_at,omitempty"` // RFC 3339 UTC
+	Entry         *BackupEntry   `json:"entry,omitempty"`
+}
+
+// BackupTrailer is the trailer of a backed-up item (format 5): its https
+// link and its thumbnail, a local file name (archived as covers/<name>) or
+// an https URL. ThumbnailMissing works like BackupItem.CoverMissing.
+type BackupTrailer struct {
+	URL              string `json:"url"`
+	Thumbnail        string `json:"thumbnail,omitempty"`
+	ThumbnailMissing bool   `json:"thumbnail_missing,omitempty"`
 }
 
 // BackupCredit is a credit of a backed-up item.
@@ -220,7 +237,8 @@ func (l *Library) BackupItems(ctx context.Context, batch int, fn func(BackupItem
 
 // backupBatch reads up to n items with id > after and all their parts.
 func (l *Library) backupBatch(ctx context.Context, after int64, n int) ([]BackupItem, []int64, error) {
-	rows, err := l.db.QueryContext(ctx, `SELECT id, plugin_id, kind, source, source_id, cover_path, cover_source, external_url, progress_keys, created_at, updated_at
+	rows, err := l.db.QueryContext(ctx, `SELECT id, plugin_id, kind, source, source_id, cover_path, cover_source, external_url, progress_keys, created_at, updated_at,
+		banner_path, trailer_url, trailer_thumb
 		FROM items WHERE id > ? ORDER BY id LIMIT ?`, after, n)
 	if err != nil {
 		return nil, nil, fmt.Errorf("backup items: %w", err)
@@ -231,7 +249,9 @@ func (l *Library) backupBatch(ctx context.Context, after int64, n int) ([]Backup
 		var id int64
 		var bi BackupItem
 		var cover, pk string
-		if err := rows.Scan(&id, &bi.PluginID, &bi.Kind, &bi.Source, &bi.SourceID, &cover, &bi.CoverSource, &bi.ExternalURL, &pk, &bi.CreatedAt, &bi.UpdatedAt); err != nil {
+		var tr BackupTrailer
+		if err := rows.Scan(&id, &bi.PluginID, &bi.Kind, &bi.Source, &bi.SourceID, &cover, &bi.CoverSource, &bi.ExternalURL, &pk, &bi.CreatedAt, &bi.UpdatedAt,
+			&bi.Banner, &tr.URL, &tr.Thumbnail); err != nil {
 			rows.Close()
 			return nil, nil, fmt.Errorf("backup items: %w", err)
 		}
@@ -246,6 +266,9 @@ func (l *Library) backupBatch(ctx context.Context, after int64, n int) ([]Backup
 			bi.CoverURL, bi.CoverSource = cover, ""
 		} else {
 			bi.Cover = cover
+		}
+		if tr.URL != "" {
+			bi.Trailer = &tr
 		}
 		items = append(items, bi)
 		ids = append(ids, id)
@@ -344,6 +367,15 @@ func (l *Library) backupParts(ctx context.Context, ids []int64, items []BackupIt
 			items[i].Fields = acc.vals
 			l.listCompat(items[i].PluginID, items[i].Kind, items[i].Fields)
 		}
+	}
+
+	if err := l.eachRow(ctx, `SELECT item_id, label, url FROM item_links WHERE item_id IN (?) ORDER BY item_id, seq`, ids,
+		func(r *sql.Rows) (int64, error) { return id, r.Scan(&id, &a, &b) },
+		func(i int) error {
+			items[i].Links = append(items[i].Links, plugin.Link{Label: a, URL: b})
+			return nil
+		}); err != nil {
+		return err
 	}
 
 	if err := l.eachRow(ctx, `SELECT item_id, type, value FROM external_ids WHERE item_id IN (?) ORDER BY item_id, type`, ids,
@@ -677,7 +709,8 @@ type tagName struct{ name, key string }
 
 // RestoreItem MERGES one backup item into the library: it never overwrites
 // or deletes anything. The item is validated with the same rules as SaveItem
-// (titles, fields, terms, external ids, relations, cover), SaveCredits and
+// (titles, fields, terms, external ids, relations, cover, banner, trailer,
+// links), SaveCredits and
 // entries (notes; per run status, rating, review, dates, progress of every
 // stored key, see restoreRun; run numbers 1..n; unit notes as SetUnitNote
 // but not bounded by the total; own tags as SetEntryTags),
@@ -696,8 +729,13 @@ type tagName struct{ name, key string }
 // and the result is RestoreCreated. Its sync
 // state is "done" for manual items without a remote cover and "pending"
 // otherwise (SyncPending), so the normal sync refetches credits' photos,
-// downloads remote covers and fills gaps. When the item is not written
-// after its cover was stored, ReleaseCover gets the unreferenced file.
+// downloads remote covers and fills gaps; a remote banner or trailer
+// thumbnail also makes a manual item pending. A local banner or trailer
+// thumbnail is stored through ResolveCover like the cover (left empty with
+// a note when it cannot be; the trailer link stays). A text value of a
+// field the kind now declares as a list is restored as a one-element list.
+// When the item is not written after its images were stored, ReleaseCover
+// gets each unreferenced file.
 // The plugin need not be enabled. Progress upgrades of the kind that the
 // backup did not record as applied (RestoreOptions.AppliedUpgrades) switch
 // the item's keys first, as ApplyProgressUpgrades would have.
@@ -727,33 +765,57 @@ func (l *Library) RestoreItem(ctx context.Context, bi BackupItem, opts RestoreOp
 	if !errors.Is(err, sql.ErrNoRows) {
 		return res, fmt.Errorf("restore item: %w", err)
 	}
-	stored := ""
-	if bi.Cover != "" {
-		note := "the cover file is not part of the backup: restored without a cover"
-		if opts.ResolveCover != nil {
-			if stored, note, err = opts.ResolveCover(ctx, bi.Cover); err != nil {
-				return res, err
+	// the local image files (cover, banner, trailer thumbnail) are stored
+	// before the write and handed back when the item is not written
+	var stored []string
+	written := false
+	defer func() {
+		if !written {
+			for _, name := range stored {
+				l.releaseCover(ctx, opts, name)
 			}
 		}
-		if stored != "" && checkImageRef("cover", stored) == nil {
-			// the origin of a downloaded cover, kept only with that file
-			plan.data.CoverURL, plan.coverSource = stored, bi.CoverSource
-		} else {
-			stored = ""
-			if note != "" {
-				res.Notes = append(res.Notes, note)
-			}
-		}
+	}()
+	type image struct {
+		what, name string
+		set        func(string)
 	}
-	// manual items have nothing to sync, except a remote cover to download
+	images := []image{
+		{"cover", bi.Cover, func(s string) {
+			// the origin of a downloaded cover, kept only with that file
+			if s != "" {
+				plan.data.CoverURL, plan.coverSource = s, bi.CoverSource
+			}
+		}},
+		{"banner", localImage(plan.p.banner), func(s string) { plan.p.banner = s }},
+	}
+	if plan.p.trailer != nil {
+		images = append(images, image{"trailer thumbnail", localImage(plan.p.trailer.ThumbnailURL), func(s string) { plan.p.trailer.ThumbnailURL = s }})
+	}
+	for _, img := range images {
+		if img.name == "" {
+			continue
+		}
+		name, note, err := resolveImage(ctx, opts, img.what, img.name)
+		if err != nil {
+			return res, err
+		}
+		if name != "" && !slices.Contains(stored, name) {
+			stored = append(stored, name)
+		}
+		if note != "" {
+			res.Notes = append(res.Notes, note)
+		}
+		img.set(name)
+	}
+	// manual items have nothing to sync, except remote images to download
 	syncState := "pending"
-	if plan.p.source == manualSource && !isRemote(plan.data.CoverURL) {
+	if plan.p.source == manualSource && !isRemote(plan.data.CoverURL) && !isRemote(plan.p.banner) &&
+		(plan.p.trailer == nil || !isRemote(plan.p.trailer.ThumbnailURL)) {
 		syncState = "done"
 	}
 	id, err := l.writeRestore(ctx, bi, plan, syncState)
-	if err != nil && stored != "" {
-		l.releaseCover(ctx, opts, stored)
-	}
+	written = err == nil
 	var dup *AlreadySavedError
 	switch {
 	case errors.As(err, &dup):
@@ -771,6 +833,34 @@ func (l *Library) RestoreItem(ctx context.Context, bi BackupItem, opts RestoreOp
 		res.Notes = append(res.Notes, "the change log of this entry was truncated in the backup (newest 5,000 events restored); older events are not in the archive")
 	}
 	return res, nil
+}
+
+// localImage is name when it is a local file name, "" for a remote URL.
+func localImage(name string) string {
+	if isRemote(name) {
+		return ""
+	}
+	return name
+}
+
+// resolveImage stores the backup's local image file name through
+// opts.ResolveCover and returns the stored name, or "" with a note saying
+// what was restored without it.
+func resolveImage(ctx context.Context, opts RestoreOptions, what, name string) (string, string, error) {
+	if opts.ResolveCover == nil {
+		return "", "the " + what + " file is not part of the backup: restored without a " + what, nil
+	}
+	stored, note, err := opts.ResolveCover(ctx, name)
+	if err != nil {
+		return "", "", err
+	}
+	if stored != "" && checkImageRef(what, stored) == nil {
+		return stored, "", nil
+	}
+	if note != "" {
+		note += ": restored without a " + what
+	}
+	return "", note, nil
 }
 
 // releaseCover hands a stored cover back to the caller when nothing
@@ -817,9 +907,26 @@ func (l *Library) planRestore(bi BackupItem) (*restorePlan, error) {
 	if err := checkHTTPURL("cover source", bi.CoverSource); err != nil {
 		return nil, err
 	}
+	// a local banner or thumbnail is a plain file name; a remote one must
+	// be https (checked with the item)
+	if s := localImage(bi.Banner); s != "" && !ValidFileName(s) {
+		return nil, invalid("banner %q is not a plain file name", truncateRunes(s, 80))
+	}
+	var tr *plugin.Trailer
+	if bi.Trailer != nil {
+		if s := localImage(bi.Trailer.Thumbnail); s != "" && !ValidFileName(s) {
+			return nil, invalid("trailer thumbnail %q is not a plain file name", truncateRunes(s, 80))
+		}
+		tr = &plugin.Trailer{URL: bi.Trailer.URL, ThumbnailURL: bi.Trailer.Thumbnail}
+	}
+	// a text value of a field the kind now declares as a list (an older
+	// backup) restores as a one-element list
+	fields := maps.Clone(bi.Fields)
+	l.listCompat(bi.PluginID, bi.Kind, fields)
 	d := plugin.ItemData{
-		ItemSummary: plugin.ItemSummary{Source: bi.Source, ID: bi.SourceID, Kind: bi.Kind, Titles: bi.Titles, Fields: bi.Fields, CoverURL: bi.CoverURL},
+		ItemSummary: plugin.ItemSummary{Source: bi.Source, ID: bi.SourceID, Kind: bi.Kind, Titles: bi.Titles, Fields: fields, CoverURL: bi.CoverURL},
 		ExternalURL: bi.ExternalURL, ExternalIDs: bi.ExternalIDs, Relations: bi.Relations, Genres: bi.Genres, Tags: bi.Tags,
+		BannerURL: bi.Banner, Trailer: tr, Links: bi.Links,
 	}
 	p, err := l.prepare(bi.PluginID, bi.Kind, d, bi.ProgressKeys)
 	if err != nil {
@@ -1784,6 +1891,8 @@ func restoreSeriesCover(ctx context.Context, opts RestoreOptions, name string) (
 	if stored == "" || checkImageRef("cover", stored) != nil {
 		if note == "" {
 			note = "the cover is not restored"
+		} else {
+			note += ": restored without a cover"
 		}
 		return "", note, nil
 	}

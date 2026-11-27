@@ -125,7 +125,7 @@ func TestBackupDownloadStreamsZipWithHeaders(t *testing.T) {
 		t.Fatalf("headers = %v", h)
 	}
 	head, items, names := backupJSON(t, rec.Body.Bytes())
-	if head["format"] != "allister.backup" || head["format_version"] != float64(4) {
+	if head["format"] != "allister.backup" || head["format_version"] != float64(5) {
 		t.Fatalf("head = %v", head)
 	}
 	plugins, _ := head["plugins"].([]any)
@@ -251,7 +251,7 @@ func TestBackupRestoreRefusals(t *testing.T) {
 	}{
 		{"not a zip", []byte("<html>hello</html>"), "not an Allister backup"},
 		{"no backup.json", zipWith("x.txt", "x"), "not an Allister backup"},
-		{"newer format", zipWith("backup.json", `{"format":"allister.backup","format_version":5,"items":[]}`), "format version 5"},
+		{"newer format", zipWith("backup.json", `{"format":"allister.backup","format_version":6,"items":[]}`), "format version 6"},
 		{"other format", zipWith("backup.json", `{"format":"x","format_version":1,"items":[]}`), "not an Allister backup"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

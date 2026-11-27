@@ -1,11 +1,12 @@
 // Package backup writes and restores the universal backup archive: a zip
 // with backup.json (every item of every plugin, enabled or not, with its
 // parts and list entry, and every series with its data) and covers/<name>
-// for every local item and series cover.
+// for every local item cover, banner and trailer thumbnail and every local
+// series cover.
 //
-// Archive format (format "allister.backup", format_version 4):
+// Archive format (format "allister.backup", format_version 5):
 //
-//	backup.json  {"format": "allister.backup", "format_version": 4,
+//	backup.json  {"format": "allister.backup", "format_version": 5,
 //	              "created_at": "<RFC 3339 UTC>",
 //	              "plugins": [{"id": ..., "version": ...}],   (informational)
 //	              "appearance": {...},                        (optional)
@@ -19,7 +20,8 @@
 //	              "aliases": [library.BackupAlias, ...],      (optional, after items)
 //	              "dismissed_duplicates": [library.BackupDismissedPair, ...]}
 //	                                                          (optional, after items)
-//	covers/<name>  the file of every item or series whose cover is a local file
+//	covers/<name>  every local image file: item covers, banners and trailer
+//	               thumbnails, and series covers (each file once)
 //	fonts/<name>   the file of every uploaded font
 //
 // The progress_upgrades member lists the plugin progress upgrades the
@@ -27,7 +29,7 @@
 // every installed upgrade it does not list to the items it creates, so a
 // backup without the member (written before any upgrade ran, or by an
 // older Allister, which also ignores it) gets them; one after "items" comes
-// too late and is ignored. The format version stays 4.
+// too late and is ignored. The member did not change the format version.
 //
 // The appearance member (see appearance.go) holds the appearance settings
 // and the list of uploaded fonts; it and the fonts/ entries are ignored by
@@ -40,7 +42,8 @@
 // every local item cover is included (not only uploaded ones). Person photos
 // are not included: the sync after a restore fetches credits and photos
 // again. An item whose local cover file is missing at backup time carries
-// "cover": "" and "cover_missing": true.
+// "cover": "" and "cover_missing": true; banners and trailer thumbnails
+// work the same way ("banner_missing", "thumbnail_missing" in "trailer").
 //
 // Format 2 changed the item's entry: notes, runs (each with its progress,
 // unit notes and change log), own tags and orphaned events instead of one
@@ -51,10 +54,18 @@
 // once); an older Allister refuses such an event, so it refuses the format
 // instead of dropping those items. Format 3 also carries the aliases
 // (identities kept by a merge), the dismissed duplicate pairs and the
-// covers' origins; a backup without them restores as before. A restore
+// covers' origins; a backup without them restores as before.
+//
 // Format 4 carries the series' own data, parent series and spin-off parts;
-// an older Allister would ignore them, so it refuses the format. A restore
-// reads formats 1 to 4.
+// an older Allister would ignore them, so it refuses the format.
+//
+// Format 5 carries each item's banner ("banner": a local file name archived
+// under covers/ like a cover, or its https URL), its trailer ("trailer":
+// "url" and "thumbnail", the thumbnail archived the same way) and its
+// labelled links ("links": "label" and "url"). An older Allister would
+// silently drop them, so it refuses the format. A restore reads formats 1
+// to 5; a text value of a field that the kind now declares as a list (an
+// older backup) restores as a one-element list.
 //
 // In backup.json "format" and "format_version" must come before "items",
 // "series", "lists", "aliases" and "dismissed_duplicates" after it, and each
@@ -67,11 +78,13 @@
 // Limits.MaxEntries, or whose directory does not match its end record, is
 // refused without loading it.
 //
-// A restore MERGES (see library.RestoreItem): existing items are skipped,
-// nothing is overwritten or deleted. Only backup.json and covers/<name>
+// A restore MERGES (see library.RestoreItem): existing items are skipped
+// (their cover, banner, trailer and links included), nothing is overwritten
+// or deleted. Only backup.json and covers/<name>
 // entries are read; names must satisfy library.ValidFileName. Nothing is
 // ever extracted by its archive name: cover bytes go through covers.Save,
-// which sniffs the type and stores them under their content hash.
+// which sniffs the type and stores them under their content hash (cover,
+// banner and thumbnail bytes alike).
 package backup
 
 import (
@@ -103,7 +116,7 @@ const (
 	Format = "allister.backup"
 	// FormatVersion is the backup format version this code writes. A
 	// restore reads it and every older version (MinFormatVersion on).
-	FormatVersion = 4
+	FormatVersion = 5
 	// MinFormatVersion is the oldest format version a restore reads.
 	MinFormatVersion = 1
 	// MaxListed caps every row list of a Report.
@@ -214,20 +227,31 @@ func Write(ctx context.Context, w io.Writer, lib *library.Library, plugins []Plu
 	enc := json.NewEncoder(bw)
 	var names []string
 	seen := map[string]bool{}
+	// archive adds a local image file to covers/ once and reports whether
+	// it is there
+	archive := func(name string) bool {
+		if !coverFile(coversDir, name) {
+			return false
+		}
+		if !seen[name] {
+			seen[name] = true
+			names = append(names, name)
+		}
+		return true
+	}
 	first := true
 	err = lib.BackupItems(ctx, batchSize, func(bi library.BackupItem) error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		if bi.Cover != "" {
-			if coverFile(coversDir, bi.Cover) {
-				if !seen[bi.Cover] {
-					seen[bi.Cover] = true
-					names = append(names, bi.Cover)
-				}
-			} else {
-				bi.Cover, bi.CoverSource, bi.CoverMissing = "", "", true
-			}
+		if bi.Cover != "" && !archive(bi.Cover) {
+			bi.Cover, bi.CoverSource, bi.CoverMissing = "", "", true
+		}
+		if bi.Banner != "" && !isRemote(bi.Banner) && !archive(bi.Banner) {
+			bi.Banner, bi.BannerMissing = "", true
+		}
+		if t := bi.Trailer; t != nil && t.Thumbnail != "" && !isRemote(t.Thumbnail) && !archive(t.Thumbnail) {
+			t.Thumbnail, t.ThumbnailMissing = "", true
 		}
 		if !first {
 			if _, err := bw.WriteString(","); err != nil {
@@ -246,15 +270,8 @@ func Write(ctx context.Context, w io.Writer, lib *library.Library, plugins []Plu
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		if bs.Cover != "" {
-			if coverFile(coversDir, bs.Cover) {
-				if !seen[bs.Cover] {
-					seen[bs.Cover] = true
-					names = append(names, bs.Cover)
-				}
-			} else {
-				bs.Cover, bs.CoverMissing = "", true
-			}
+		if bs.Cover != "" && !archive(bs.Cover) {
+			bs.Cover, bs.CoverMissing = "", true
 		}
 		if !first {
 			if _, err := bw.WriteString(","); err != nil {
@@ -337,6 +354,10 @@ func Write(ctx context.Context, w io.Writer, lib *library.Library, plugins []Plu
 		return fmt.Errorf("backup: %w", err)
 	}
 	return nil
+}
+
+func isRemote(s string) bool {
+	return strings.HasPrefix(s, "http://") || strings.HasPrefix(s, "https://")
 }
 
 // coverFile reports whether name is an acceptable cover name with a regular
@@ -1284,14 +1305,15 @@ func (rs *restorer) release(_ context.Context, stored string) {
 }
 
 func (rs *restorer) storeCover(name string) (coverResult, error) {
-	what := "the cover file covers/" + name
+	// the library adds what was restored without the file
+	what := "the file covers/" + name
 	f := rs.covers[name]
 	if f == nil {
-		return coverResult{note: what + " is missing from the backup: restored without a cover"}, nil
+		return coverResult{note: what + " is missing from the backup"}, nil
 	}
 	rc, err := f.Open()
 	if err != nil {
-		return coverResult{note: what + " cannot be read: restored without a cover"}, nil
+		return coverResult{note: what + " cannot be read"}, nil
 	}
 	defer rc.Close()
 	stored, err := covers.SaveRestored(rs.opts.CoversDir, budgetReader{r: rc, b: rs.budget})
@@ -1303,12 +1325,12 @@ func (rs *restorer) storeCover(name string) (coverResult, error) {
 	case errors.Is(err, errTotalTooLarge), errors.As(err, &pathErr), errors.As(err, &linkErr):
 		return coverResult{}, err
 	case errors.Is(err, covers.ErrNotImage):
-		return coverResult{note: what + " is not a supported image (jpeg, png, webp, gif or avif): restored without a cover"}, nil
+		return coverResult{note: what + " is not a supported image (jpeg, png, webp, gif or avif)"}, nil
 	case errors.Is(err, covers.ErrTooLarge):
-		return coverResult{note: fmt.Sprintf("%s is larger than %d MiB: restored without a cover", what, covers.MaxUploadBytes>>20)}, nil
+		return coverResult{note: fmt.Sprintf("%s is larger than %d MiB", what, covers.MaxUploadBytes>>20)}, nil
 	}
 	// damaged entry (checksum, truncated or corrupt data)
-	return coverResult{note: what + " is damaged: restored without a cover"}, nil
+	return coverResult{note: what + " is damaged"}, nil
 }
 
 // limitMessage returns the user message of a size limit error, or "".
