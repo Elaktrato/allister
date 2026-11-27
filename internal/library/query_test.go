@@ -1261,4 +1261,23 @@ func TestListHidesAdultRows(t *testing.T) {
 	if none, err := l.FlaggedItems(bg, "flagged", "book", ""); err != nil || len(none) != 0 {
 		t.Fatalf("no field: %v, %v", none, err)
 	}
+	// FlaggedSources names them by source and source id (for relations)
+	it := mustItem(t, l, func() int64 {
+		for id := range flagged {
+			return id
+		}
+		return 0
+	}())
+	srcs, err := l.FlaggedSources(bg, "flagged", map[string]string{"book": "adult"})
+	if err != nil || !reflect.DeepEqual(srcs, map[SourceKey]bool{{Source: it.Source, ID: it.SourceID}: true}) {
+		t.Fatalf("flagged sources = %v, %v", srcs, err)
+	}
+	for _, fields := range []map[string]string{nil, {"book": ""}, {"other": "adult"}} {
+		if none, err := l.FlaggedSources(bg, "flagged", fields); err != nil || len(none) != 0 {
+			t.Fatalf("fields %v: %v, %v", fields, none, err)
+		}
+	}
+	if none, err := l.FlaggedSources(bg, "book", map[string]string{"book": "adult"}); err != nil || len(none) != 0 {
+		t.Fatalf("other plugin: %v, %v", none, err)
+	}
 }

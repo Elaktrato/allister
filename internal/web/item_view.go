@@ -7,6 +7,7 @@ package web
 import (
 	"context"
 	"fmt"
+	"log"
 	"net/url"
 	"slices"
 	"strconv"
@@ -541,7 +542,10 @@ func (s *server) section(ctx context.Context, li *loadedItem, sec plugin.Section
 		return sv, len(sv.Titles) > 0
 	case plugin.SectionRelated:
 		heading("Related")
-		hidden := s.summaryHider(ctx, m, k)
+		hidden, err := s.relatedHider(ctx, m, k, d.Relations)
+		if err != nil {
+			log.Printf("item %s/%s: related: %v", logSafe(m.ID), logSafe(d.ID), err)
+		}
 		for _, r := range d.Relations {
 			if hidden(r.Item) {
 				continue
