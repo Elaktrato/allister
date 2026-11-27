@@ -678,39 +678,7 @@ func creditsPart(it *Item, stored []SavedCredit, in []plugin.Credit) changePart 
 	if err := checkCredits(in); err != nil {
 		return changePart{change: Change{Key: "credits", Label: "Credits"}, err: err}
 	}
-	byID := map[string]string{} // stored person source id -> name
-	for _, c := range stored {
-		byID[c.Person.SourceID] = c.Person.Name
-		if c.With != nil {
-			byID[c.With.SourceID] = c.With.Name
-		}
-	}
-	// an incoming person without a name shows (and compares) with the stored name
-	nameOf := func(p plugin.PersonRef) string {
-		if n := strings.TrimSpace(p.Name); n != "" {
-			return n
-		}
-		return byID[strings.TrimSpace(p.ID)]
-	}
-	inc := make([]listItem, len(in))
-	for i, c := range in {
-		var withID, withName string
-		if c.With != nil {
-			withID, withName = c.With.ID, nameOf(*c.With)
-		}
-		name := nameOf(c.Person)
-		inc[i] = listItem{key: creditKey(c.Role, c.Detail, c.Person.ID, name, withID, withName, c.WithRole),
-			label: creditLabel(c.Role, name, withName)}
-	}
-	st := make([]listItem, len(stored))
-	for i, c := range stored {
-		var withID, withName string
-		if c.With != nil {
-			withID, withName = c.With.SourceID, c.With.Name
-		}
-		st[i] = listItem{key: creditKey(c.Role, c.Detail, c.Person.SourceID, c.Person.Name, withID, withName, c.WithRole),
-			label: creditLabel(c.Role, c.Person.Name, withName)}
-	}
+	st, inc := creditItems(stored, in)
 	p := listPart("credits", "Credits", st, inc)
 	id, pluginID, source := it.ID, it.PluginID, it.Source
 	p.write = func(ctx context.Context, tx *sql.Tx) error {
@@ -720,4 +688,43 @@ func creditsPart(it *Item, stored []SavedCredit, in []plugin.Credit) changePart 
 		return insertCredits(ctx, tx, id, pluginID, source, in)
 	}
 	return p
+}
+
+// creditItems are the stored and incoming credits as list items keyed by
+// creditKey; an incoming person without a name shows (and compares) with
+// the stored name.
+func creditItems(stored []SavedCredit, in []plugin.Credit) (st, inc []listItem) {
+	byID := map[string]string{} // stored person source id -> name
+	for _, c := range stored {
+		byID[c.Person.SourceID] = c.Person.Name
+		if c.With != nil {
+			byID[c.With.SourceID] = c.With.Name
+		}
+	}
+	nameOf := func(p plugin.PersonRef) string {
+		if n := strings.TrimSpace(p.Name); n != "" {
+			return n
+		}
+		return byID[strings.TrimSpace(p.ID)]
+	}
+	inc = make([]listItem, len(in))
+	for i, c := range in {
+		var withID, withName string
+		if c.With != nil {
+			withID, withName = c.With.ID, nameOf(*c.With)
+		}
+		name := nameOf(c.Person)
+		inc[i] = listItem{key: creditKey(c.Role, c.Detail, c.Person.ID, name, withID, withName, c.WithRole),
+			label: creditLabel(c.Role, name, withName)}
+	}
+	st = make([]listItem, len(stored))
+	for i, c := range stored {
+		var withID, withName string
+		if c.With != nil {
+			withID, withName = c.With.SourceID, c.With.Name
+		}
+		st[i] = listItem{key: creditKey(c.Role, c.Detail, c.Person.SourceID, c.Person.Name, withID, withName, c.WithRole),
+			label: creditLabel(c.Role, c.Person.Name, withName)}
+	}
+	return st, inc
 }
