@@ -14,59 +14,67 @@ import (
 // cover, the banner, the trailer) is written only where the item has none
 // (a stored remote cover URL counts as set); a list gets the incoming
 // elements it lacks appended after its stored ones, and nothing is removed,
-// reordered or changed. Elements are matched by titles' language and text,
-// list field and genre values, tag names (a stored tag keeps its rank),
-// link URLs, relations' kind, source and id, and credits by the comparison
-// key of ItemChanges; credits only when withCredits is set. An append stops
-// at the list's stored maximum without error. It reports whether anything
-// was written; a write bumps the item's updated_at like ApplyChanges, never
+// reordered or changed. A title of a real language is appended only when
+// the item has none in that language, an alternative title
+// (plugin.AltTitleLang) when its text is missing; list field and genre
+// values match by value, tags by name (a stored tag keeps its rank), links
+// by URL, relations by kind, source and id, and credits by role, detail,
+// the people's ids and the counterpart role (never by a person's name);
+// credits only when withCredits is set, and a person already stored keeps
+// its name and URL. An append stops at the list's stored maximum without
+// error. It returns the keys written (Change keys, in Change order, with
+// "credits" last when credits were appended); none means nothing changed.
+// A write bumps the item's updated_at like ApplyChanges, never
 // touches its entry (no entry event) and enqueues no image download (the
 // caller's sync does). Every incoming value is validated first, like
 // ItemChanges: one that cannot be stored is ErrInvalid and nothing is
 // written. ErrNoEntry for an unknown item.
-func (l *Library) FillFromSource(ctx context.Context, itemID int64, in plugin.ItemData, credits []plugin.Credit, withCredits bool) (bool, error) {
+func (l *Library) FillFromSource(ctx context.Context, itemID int64, in plugin.ItemData, credits []plugin.Credit, withCredits bool) (applied []string, err error) {
 	tx, err := l.db.BeginTx(ctx, nil)
 	if err != nil {
-		return false, fmt.Errorf("fill from source: %w", err)
+		return nil, fmt.Errorf("fill from source: %w", err)
 	}
 	defer tx.Rollback()
 	def, parts, err := l.changeParts(ctx, tx, itemID, in, credits, withCredits, nil)
 	if err != nil {
-		return false, err
+		return nil, err
 	}
 	for _, p := range parts {
 		if p.err != nil {
-			return false, p.err
+			return nil, p.err
 		}
 	}
 	it, err := l.loadItem(ctx, tx, `id = ?`, itemID)
 	if err != nil {
-		return false, err
+		return nil, err
 	}
 	merged := fillMerged(def, it, in)
 	keys := []string{"titles", "genres", "tags", "cover", "banner", "trailer", "links", "relations"}
 	for _, fd := range def.Fields {
 		keys = append(keys, "field."+fd.Key)
 	}
-	applied, err := l.applyChangesTx(ctx, tx, itemID, merged, nil, false, keys, nil)
+	applied, err = l.applyChangesTx(ctx, tx, itemID, merged, nil, false, keys, nil)
 	if err != nil {
-		return false, err
+		return nil, err
 	}
-	added := 0
 	if withCredits && len(credits) > 0 {
-		if added, err = fillCredits(ctx, tx, it, credits); err != nil {
-			return false, err
+		added, err := fillCredits(ctx, tx, it, credits)
+		if err != nil {
+			return nil, err
 		}
 		if added > 0 && len(applied) == 0 {
 			if _, err := tx.ExecContext(ctx, `UPDATE items SET updated_at = `+nowSQL+` WHERE id = ?`, itemID); err != nil {
-				return false, fmt.Errorf("fill from source: %w", err)
+				return nil, fmt.Errorf("fill from source: %w", err)
 			}
+		}
+		if added > 0 {
+			applied = append(applied, "credits")
 		}
 	}
 	if err := tx.Commit(); err != nil {
-		return false, fmt.Errorf("fill from source: %w", err)
+		return nil, fmt.Errorf("fill from source: %w", err)
 	}
-	return len(applied) > 0 || added > 0, nil
+	return applied, nil
 }
 
 // fillMerged is the item data a fill writes through the whole-part writes of
@@ -77,7 +85,7 @@ func (l *Library) FillFromSource(ctx context.Context, itemID int64, in plugin.It
 func fillMerged(def plugin.KindDef, it *Item, in plugin.ItemData) plugin.ItemData {
 	var out plugin.ItemData
 	if titles, err := normalizeTitles(in.Titles); err == nil {
-		out.Titles = appendMissing(it.Titles, titles, 0, func(t plugin.Title) string { return t.Lang + "\x00" + t.Text })
+		out.Titles = fillTitles(it.Titles, titles)
 	}
 	for _, fd := range def.Fields {
 		if f, ok := fillField(fd, it.Fields, in.Fields); ok {
@@ -120,6 +128,23 @@ func fillMerged(def plugin.KindDef, it *Item, in plugin.ItemData) plugin.ItemDat
 		})
 	}
 	return out
+}
+
+// fillTitles is the stored titles with the incoming titles of each real
+// language the item has no title in, and the incoming alternative titles
+// whose text it lacks, appended; nil when none is.
+func fillTitles(stored, in []plugin.Title) []plugin.Title {
+	langs := map[string]bool{}
+	for _, t := range stored {
+		langs[t.Lang] = true
+	}
+	var add []plugin.Title
+	for _, t := range in {
+		if t.Lang == plugin.AltTitleLang || !langs[t.Lang] {
+			add = append(add, t)
+		}
+	}
+	return appendMissing(stored, add, 0, func(t plugin.Title) string { return t.Lang + "\x00" + t.Text })
 }
 
 // fillField is the value a fill writes to one field: the incoming value
@@ -178,28 +203,43 @@ func appendMissing[T any](stored, incoming []T, limit int, key func(T) string) [
 	return out
 }
 
-// fillCredits appends the incoming credits the item lacks (by creditKey)
-// after its stored ones, up to maxCredits, and returns how many it wrote.
-// The incoming credits are already validated.
+// fillCreditKey is a credit's identity in a fill: role, detail, the
+// people's ids and the counterpart role, never a person's name.
+func fillCreditKey(role, detail, personID, withID, withRole string) string {
+	return strings.Join([]string{role, detail, strings.TrimSpace(personID), strings.TrimSpace(withID), withRole}, "\x00")
+}
+
+// fillCredits appends the incoming credits the item lacks (by
+// fillCreditKey) after its stored ones, up to maxCredits, and returns how
+// many it wrote. People already stored are left as they are; only new ones
+// are inserted. The incoming credits are already validated.
 func fillCredits(ctx context.Context, tx *sql.Tx, it *Item, in []plugin.Credit) (int, error) {
 	stored, err := loadCredits(ctx, tx, it.ID)
 	if err != nil {
 		return 0, err
 	}
-	st, inc := creditItems(stored, in)
-	have := make(map[string]bool, len(st))
-	for _, s := range st {
-		have[s.key] = true
+	have := make(map[string]bool, len(stored))
+	for _, c := range stored {
+		withID := ""
+		if c.With != nil {
+			withID = c.With.SourceID
+		}
+		have[fillCreditKey(c.Role, c.Detail, c.Person.SourceID, withID, c.WithRole)] = true
 	}
 	var add []plugin.Credit
-	for i, c := range in {
+	for _, c := range in {
 		if len(stored)+len(add) >= maxCredits {
 			break
 		}
-		if have[inc[i].key] {
+		withID := ""
+		if c.With != nil {
+			withID = c.With.ID
+		}
+		k := fillCreditKey(c.Role, c.Detail, c.Person.ID, withID, c.WithRole)
+		if have[k] {
 			continue
 		}
-		have[inc[i].key] = true
+		have[k] = true
 		add = append(add, c)
 	}
 	if len(add) == 0 {
@@ -209,7 +249,7 @@ func fillCredits(ctx context.Context, tx *sql.Tx, it *Item, in []plugin.Credit) 
 	if len(stored) > 0 {
 		next = stored[len(stored)-1].Seq + 1
 	}
-	if err := insertCreditsFrom(ctx, tx, it.ID, it.PluginID, it.Source, add, next); err != nil {
+	if err := insertCreditsFrom(ctx, tx, it.ID, it.PluginID, it.Source, add, next, ensurePerson); err != nil {
 		return 0, err
 	}
 	return len(add), nil

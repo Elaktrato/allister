@@ -84,20 +84,23 @@ func checkCredits(credits []plugin.Credit) error {
 // insertCredits writes checked credits of the item inside tx, upserting their
 // people (see SaveCredits).
 func insertCredits(ctx context.Context, tx *sql.Tx, itemID int64, pluginID, source string, credits []plugin.Credit) error {
-	return insertCreditsFrom(ctx, tx, itemID, pluginID, source, credits, 0)
+	return insertCreditsFrom(ctx, tx, itemID, pluginID, source, credits, 0, upsertPerson)
 }
 
+// personFunc resolves a credit's person to its stored id inside tx.
+type personFunc func(ctx context.Context, tx *sql.Tx, pluginID, source string, p plugin.PersonRef) (int64, error)
+
 // insertCreditsFrom is insertCredits numbering the credits from seq first
-// (an append after the stored credits).
-func insertCreditsFrom(ctx context.Context, tx *sql.Tx, itemID int64, pluginID, source string, credits []plugin.Credit, first int) error {
+// (an append after the stored credits) and resolving people with person.
+func insertCreditsFrom(ctx context.Context, tx *sql.Tx, itemID int64, pluginID, source string, credits []plugin.Credit, first int, person personFunc) error {
 	for i, c := range credits {
-		pid, err := upsertPerson(ctx, tx, pluginID, source, c.Person)
+		pid, err := person(ctx, tx, pluginID, source, c.Person)
 		if err != nil {
 			return err
 		}
 		var with any
 		if c.With != nil {
-			id, err := upsertPerson(ctx, tx, pluginID, source, *c.With)
+			id, err := person(ctx, tx, pluginID, source, *c.With)
 			if err != nil {
 				return err
 			}
@@ -125,6 +128,21 @@ func checkPerson(path string, p plugin.PersonRef) error {
 		return err
 	}
 	return checkImageRef(path+" image", p.ImageURL)
+}
+
+// ensurePerson is the id of the stored person, left as stored, or of the
+// person inserted when none is stored yet (see upsertPerson).
+func ensurePerson(ctx context.Context, tx *sql.Tx, pluginID, source string, p plugin.PersonRef) (int64, error) {
+	var id int64
+	err := tx.QueryRowContext(ctx, `SELECT id FROM `+tablePeople+` WHERE plugin_id = ? AND source = ? AND source_id = ?`,
+		pluginID, source, strings.TrimSpace(p.ID)).Scan(&id)
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+		return upsertPerson(ctx, tx, pluginID, source, p)
+	case err != nil:
+		return 0, fmt.Errorf("save person: %w", err)
+	}
+	return id, nil
 }
 
 func upsertPerson(ctx context.Context, tx *sql.Tx, pluginID, source string, p plugin.PersonRef) (int64, error) {
