@@ -50,6 +50,10 @@ type Deps struct {
 	// ScheduleJobs maps a plugin id to its schedule refresh job, like
 	// SyncJobs: the calendar feed enqueues refreshes without knowing the kind.
 	ScheduleJobs map[string]func(itemID int64) (kind string, payload any)
+	// RefreshJobs returns the job of one item of a plugin's bulk "Update
+	// from source" run (jobs.RefreshJobFor); nil means the plugin settings
+	// offer no bulk update.
+	RefreshJobs func(pluginID string, runID int64) func(itemID int64) (kind string, payload any)
 	// ScheduleImport returns the job that repeats a plugin importer's stored
 	// account import; nil means imports cannot be scheduled (tests).
 	ScheduleImport func(pluginID, importerID string) (kind string, payload any)
@@ -203,6 +207,8 @@ func newServer(deps Deps, now func() time.Time) (*server, http.Handler) {
 	mux.HandleFunc("POST /settings/plugins/{id}/columns", s.postColumns)
 	mux.HandleFunc("POST /settings/plugins/{id}/idle", s.postIdleDays)
 	mux.HandleFunc("POST /settings/plugins/{id}/adult", s.postHideAdult)
+	mux.HandleFunc("GET /settings/plugins/{id}/refresh", s.getPluginRefresh)
+	mux.HandleFunc("POST /settings/plugins/{id}/refresh", s.postPluginRefresh)
 	mux.HandleFunc("GET /settings/tags", s.getTags)
 	mux.HandleFunc("POST /settings/tags/{id}", s.postRenameTag)
 	mux.HandleFunc("POST /settings/tags/{id}/delete", s.postDeleteTag)

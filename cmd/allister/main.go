@@ -114,10 +114,17 @@ func run() error {
 	if n > 0 {
 		log.Printf("startup: %d items track new progress keys", n)
 	}
-	queue.Register(jobs.KindSyncItem, jobs.SyncItem(jobs.SyncDeps{
+	syncDeps := jobs.SyncDeps{
 		Library:   lib,
 		Registry:  registry,
 		CoversDir: coversDir,
+	}
+	queue.Register(jobs.KindSyncItem, jobs.SyncItem(syncDeps))
+	// the bulk "Update from source" run; images it fills in are downloaded
+	// by the plugin's cover-only sync
+	queue.Register(jobs.KindRefreshItem, jobs.RefreshItem(syncDeps, func(ctx context.Context, pluginID string, itemID int64) error {
+		kind, payload := jobs.CoverJobFor(pluginID)(itemID)
+		return queue.Enqueue(ctx, kind, payload)
 	}))
 	queue.Register(jobs.KindSchedule, jobs.Schedule(jobs.ScheduleDeps{Library: lib, Registry: registry}))
 	syncJobsByPlugin := syncJobs(registry)
@@ -156,6 +163,8 @@ func run() error {
 			CoverJobs: coverJobs(registry),
 			// the calendar feed enqueues schedule refreshes through these
 			ScheduleJobs: scheduleJobs(registry),
+			// the plugin settings' bulk "Update from source" enqueues these
+			RefreshJobs: jobs.RefreshJobFor,
 			// saving an import schedule starts its repeat chain
 			ScheduleImport: func(pluginID, importerID string) (string, any) {
 				return jobs.KindScheduledImport, jobs.ScheduledImportPayload{PluginID: pluginID, ImporterID: importerID}
