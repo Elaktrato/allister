@@ -30,8 +30,9 @@ type SyncPayload struct {
 	// the queue pauses the job while the plugin is disabled (WithPluginGate).
 	PluginID string `json:"plugin_id"`
 	// CoverOnly limits the job to downloading the item's remote cover,
-	// banner and trailer thumbnail: it never asks the source, never touches the credits, the schedule or the
-	// sync state (taking a source's cover on "Update from source").
+	// banner and trailer thumbnail: it never asks the source, never touches
+	// the credits, the schedule or the sync state (taking a source's cover
+	// on "Update from source").
 	CoverOnly bool `json:"cover_only,omitempty"`
 }
 
@@ -67,8 +68,10 @@ func isRemote(p string) bool {
 
 // SyncItem returns the handler of sync_item jobs. It downloads a remote
 // cover, a remote banner and a remote trailer thumbnail (each stored only
-// while the item still holds the URL the job started from; a failed
-// download counts like a failed cover), fetches the credits from the item's plugin source (Source.People),
+// while the item still holds the URL the job started from; the banner and
+// the thumbnail are optional decoration: a failed download of either keeps
+// its URL and is only logged, it never makes the sync partial or asks for a
+// retry), fetches the credits from the item's plugin source (Source.People),
 // stores them and downloads the people's images. It ends with sync_state
 // done, or partial plus a wrapped ErrRetryLater when only images failed, or
 // partial plus the source's error when the credits could not be fetched
@@ -201,8 +204,9 @@ func SyncItem(deps SyncDeps) Handler {
 // syncCoverOnly finishes an item without a source to ask (a manual item or a
 // plugin without the item's source): there are no credits to fetch, but the
 // remote image URLs (an imported entry's cover, a banner, a trailer
-// thumbnail) are downloaded. A failed download leaves the URL in place,
-// marks the item partial and asks for a later retry.
+// thumbnail) are downloaded. A failed cover download leaves the URL in
+// place, marks the item partial and asks for a later retry (a failed
+// banner or thumbnail is only logged, see downloadItemImages).
 func syncCoverOnly(ctx context.Context, deps SyncDeps, it *library.Item) error {
 	failures, err := downloadItemImages(ctx, deps, it)
 	if err != nil {
@@ -219,7 +223,8 @@ func syncCoverOnly(ctx context.Context, deps SyncDeps, it *library.Item) error {
 
 // downloadCoverOnly downloads the item's remote cover, banner and trailer
 // thumbnail and stores them; the sync state is left as it is. A failed
-// download keeps the URL and asks for a later retry.
+// cover download keeps the URL and asks for a later retry (a failed banner
+// or thumbnail is only logged).
 func downloadCoverOnly(ctx context.Context, deps SyncDeps, it *library.Item) error {
 	failures, err := downloadItemImages(ctx, deps, it)
 	if err != nil {
@@ -233,21 +238,24 @@ func downloadCoverOnly(ctx context.Context, deps SyncDeps, it *library.Item) err
 
 // downloadItemImages downloads the item's remote cover, banner and trailer
 // thumbnail (each only while it is still a URL) and stores the files
-// (compare-and-set). A failed download is returned as a description and the
-// URL stays; the others are still tried. A cancelled context or a storage
-// error is the returned error.
+// (compare-and-set). A failed cover download is returned as a description
+// and the URL stays; the others are still tried. The banner and the
+// thumbnail are optional decoration: a failed download of either keeps its
+// URL and is logged, never returned, so it does not hold the item partial.
+// A cancelled context or a storage error is the returned error.
 func downloadItemImages(ctx context.Context, deps SyncDeps, it *library.Item) ([]string, error) {
 	type image struct {
-		what string
-		url  string
-		set  func(ctx context.Context, id int64, from, to string) (bool, error)
+		what     string
+		url      string
+		set      func(ctx context.Context, id int64, from, to string) (bool, error)
+		optional bool
 	}
 	images := []image{
-		{"cover", it.CoverPath, deps.Library.SetCoverPathIf},
-		{"banner", it.BannerPath, deps.Library.SetBannerPath},
+		{"cover", it.CoverPath, deps.Library.SetCoverPathIf, false},
+		{"banner", it.BannerPath, deps.Library.SetBannerPath, true},
 	}
 	if it.Trailer != nil {
-		images = append(images, image{"trailer thumbnail", it.Trailer.ThumbnailURL, deps.Library.SetTrailerThumb})
+		images = append(images, image{"trailer thumbnail", it.Trailer.ThumbnailURL, deps.Library.SetTrailerThumb, true})
 	}
 	var failures []string
 	for _, img := range images {
@@ -258,6 +266,10 @@ func downloadItemImages(ctx context.Context, deps SyncDeps, it *library.Item) ([
 		if err != nil {
 			if ctx.Err() != nil {
 				return nil, ctx.Err()
+			}
+			if img.optional {
+				log.Printf("sync item %d: %s: %v (the URL stays)", it.ID, img.what, err)
+				continue
 			}
 			failures = append(failures, fmt.Sprintf("%s: %v", img.what, err))
 			continue

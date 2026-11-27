@@ -637,7 +637,11 @@ func TestSyncItemDownloadsBannerAndThumbnail(t *testing.T) {
 	}
 }
 
-func TestSyncItemBannerFailureIsPartial(t *testing.T) {
+// A banner and a trailer thumbnail are optional decoration: a failed
+// download keeps the URL and is logged, but the sync still finishes done
+// without a retry (a failed cover stays partial, see
+// TestSyncItemCoverFailureIsPartial).
+func TestSyncItemBannerFailureIsNotPartial(t *testing.T) {
 	for _, src := range []string{"tvdata", "manual"} {
 		for _, which := range []string{"banner", "thumb"} {
 			e := newSyncEnv(t)
@@ -648,11 +652,11 @@ func TestSyncItemBannerFailureIsPartial(t *testing.T) {
 				thumb = e.srv.URL + "/missing"
 			}
 			id := e.saveExtras(t, src, banner, thumb)
-			if err := e.run(id); !errors.Is(err, ErrRetryLater) {
+			if err := e.run(id); err != nil {
 				t.Fatalf("%s/%s: err = %v", src, which, err)
 			}
 			s := e.saved(t, id)
-			if s.SyncState != "partial" {
+			if s.SyncState != "done" {
 				t.Fatalf("%s/%s: state %q", src, which, s.SyncState)
 			}
 			if (which == "banner") != (s.BannerPath == banner) || (which == "thumb") != (s.Trailer.ThumbnailURL == thumb) {
@@ -673,14 +677,14 @@ func TestSyncItemCoverOnlyDownloadsBannerAndThumbnail(t *testing.T) {
 	if !isLocal(s.BannerPath) || !isLocal(s.Trailer.ThumbnailURL) || s.SyncState != "pending" {
 		t.Fatalf("%+v banner %q trailer %+v", s, s.BannerPath, s.Trailer)
 	}
-	// a failing banner keeps the state and asks for a retry
+	// a failing banner keeps the state and its URL, and asks for no retry
 	e2 := newSyncEnv(t)
 	id2 := e2.saveExtras(t, "tvdata", e2.srv.URL+"/missing", e2.srv.URL+"/ok/thumb")
 	b2, _ := json.Marshal(SyncPayload{ItemID: id2, PluginID: "tv", CoverOnly: true})
-	if err := SyncItem(e2.deps)(context.Background(), b2); !errors.Is(err, ErrRetryLater) {
+	if err := SyncItem(e2.deps)(context.Background(), b2); err != nil {
 		t.Fatalf("err = %v", err)
 	}
-	if s := e2.saved(t, id2); s.SyncState != "pending" || !isLocal(s.Trailer.ThumbnailURL) {
+	if s := e2.saved(t, id2); s.SyncState != "pending" || !isLocal(s.Trailer.ThumbnailURL) || s.BannerPath != e2.srv.URL+"/missing" {
 		t.Fatalf("%+v", s)
 	}
 }
