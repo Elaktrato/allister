@@ -2,6 +2,8 @@ package backup
 
 import (
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -25,7 +27,12 @@ func newMangaInstall(t *testing.T) *env {
 	}
 	t.Cleanup(func() { d.Close() })
 	reg := plugin.NewRegistry(plugintest.NewMemEnabled())
-	if err := reg.Register(manga.New(manga.Options{})); err != nil {
+	// an AniList stand-in that answers unavailable: never the real service
+	offline := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "offline", http.StatusServiceUnavailable)
+	}))
+	t.Cleanup(offline.Close)
+	if err := reg.Register(manga.New(manga.Options{AniListURL: offline.URL, MALURL: offline.URL})); err != nil {
 		t.Fatal(err)
 	}
 	e := &env{db: d, lib: library.New(d, reg), reg: reg, covers: filepath.Join(root, "covers"), root: root, t: t}
