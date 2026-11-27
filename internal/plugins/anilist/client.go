@@ -39,7 +39,7 @@ const (
 	TypeManga = "MANGA"
 )
 
-const searchFields = `id idMal ` + titleFields + ` format episodes duration chapters volumes seasonYear startDate { year }
+const searchFields = `id idMal ` + titleFields + ` format episodes duration chapters volumes seasonYear startDate { year } isAdult
       description(asHtml: true) coverImage { large }
       studios(isMain: true) { nodes { name } } siteUrl`
 
@@ -69,9 +69,9 @@ const mediaFields = `id idMal ` + titleFields + ` format episodes duration chapt
     studios { edges { isMain node { name isAnimationStudio } } } siteUrl
     staff(perPage: 10) { edges { role node { name { full } image { medium } siteUrl } } }
     genres tags { name rank isMediaSpoiler }
-    relations { edges { relationType node { id type format ` + titleFields + ` } } }
+    relations { edges { relationType node { id type format isAdult ` + titleFields + ` } } }
     recommendations(perPage: $recs, sort: RATING_DESC) {
-      nodes { mediaRecommendation { id ` + titleFields + ` coverImage { large } } }
+      nodes { mediaRecommendation { id isAdult ` + titleFields + ` coverImage { large } } }
     }`
 
 const mediaQuery = `query ($id: Int, $recs: Int, $type: MediaType) {
@@ -338,10 +338,11 @@ type apiMedia struct {
 		Edges []struct {
 			RelationType string `json:"relationType"`
 			Node         struct {
-				ID     int      `json:"id"`
-				Type   string   `json:"type"`
-				Format string   `json:"format"`
-				Title  apiTitle `json:"title"`
+				ID      int      `json:"id"`
+				Type    string   `json:"type"`
+				Format  string   `json:"format"`
+				IsAdult bool     `json:"isAdult"`
+				Title   apiTitle `json:"title"`
 			} `json:"node"`
 		} `json:"edges"`
 	} `json:"relations"`
@@ -349,6 +350,7 @@ type apiMedia struct {
 		Nodes []struct {
 			MediaRecommendation *struct {
 				ID         int      `json:"id"`
+				IsAdult    bool     `json:"isAdult"`
 				Title      apiTitle `json:"title"`
 				CoverImage struct {
 					Large string `json:"large"`
@@ -368,6 +370,7 @@ func (m apiMedia) searchResult() SearchResult {
 		Duration: m.Duration,
 		Chapters: m.Chapters,
 		Volumes:  m.Volumes,
+		Adult:    m.IsAdult,
 		Year:     m.SeasonYear,
 		Synopsis: PlainText(m.Description),
 		CoverURL: m.CoverImage.Large,
@@ -601,7 +604,6 @@ func (m *apiMedia) media() Media {
 		Format:         m.Format,
 		Season:         m.Season,
 		Country:        m.CountryOfOrigin,
-		Adult:          m.IsAdult,
 		AverageScore:   m.AverageScore,
 		Popularity:     m.Popularity,
 		Synonyms:       m.Synonyms,
@@ -650,6 +652,7 @@ func (m *apiMedia) media() Media {
 			Titles:    e.Node.Title.titles(),
 			Type:      e.Node.Format,
 			MediaType: e.Node.Type,
+			Adult:     e.Node.IsAdult,
 		})
 	}
 	for _, r := range m.Recommendations.Nodes {
@@ -661,6 +664,7 @@ func (m *apiMedia) media() Media {
 			ID:       strconv.Itoa(r.MediaRecommendation.ID),
 			Titles:   r.MediaRecommendation.Title.titles(),
 			CoverURL: r.MediaRecommendation.CoverImage.Large,
+			Adult:    r.MediaRecommendation.IsAdult,
 		})
 	}
 	return a

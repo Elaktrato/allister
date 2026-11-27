@@ -227,7 +227,7 @@ func (s *server) itemView(ctx context.Context, li *loadedItem) (itemView, error)
 		v.AddURL = addPath(m, d.Source, d.ID, d.Kind)
 	}
 	for _, sec := range k.Sections {
-		if sv, ok := s.section(li, sec, lang); ok {
+		if sv, ok := s.section(ctx, li, sec, lang); ok {
 			v.Sections = append(v.Sections, sv)
 		}
 	}
@@ -488,7 +488,8 @@ func orID(title, id string) string {
 }
 
 // section builds one building block; ok is false when it has no data.
-func (s *server) section(li *loadedItem, sec plugin.SectionDef, lang string) (sectionView, bool) {
+// Related items the plugin hides (summaryHider) are left out.
+func (s *server) section(ctx context.Context, li *loadedItem, sec plugin.SectionDef, lang string) (sectionView, bool) {
 	m, k, d := li.man, li.kind, li.data
 	sv := sectionView{Type: sec.Type, Heading: sec.Label}
 	heading := func(def string) {
@@ -540,7 +541,11 @@ func (s *server) section(li *loadedItem, sec plugin.SectionDef, lang string) (se
 		return sv, len(sv.Titles) > 0
 	case plugin.SectionRelated:
 		heading("Related")
+		hidden := s.summaryHider(ctx, m, k)
 		for _, r := range d.Relations {
+			if hidden(r.Item) {
+				continue
+			}
 			row := relatedRow{Kind: relationLabel(r.Kind), Title: orID(library.ResolveTitle(r.Item.Titles, lang, titleFallback(m, k, r.Item.Kind)), r.Item.ID),
 				Type: r.Item.Fields["type"].Text}
 			switch {

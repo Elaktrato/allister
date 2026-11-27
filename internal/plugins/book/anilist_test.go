@@ -215,3 +215,14 @@ func TestNovelDetailsExtras(t *testing.T) {
 		t.Errorf("trailer = %+v", d.Trailer)
 	}
 }
+
+// TestNovelSummaryCarriesTheAdultFlag: a light novel search result carries
+// the adult value, so the core can hide it.
+func TestNovelSummaryCarriesTheAdultFlag(t *testing.T) {
+	if got := novelSummary(anilist.SearchResult{Source: anilist.AniList, ID: "1", Adult: true}).Fields["adult"].Text; got != "yes" {
+		t.Errorf("adult = %q", got)
+	}
+	if got := novelSummary(anilist.SearchResult{Source: anilist.AniList, ID: "1"}).Fields["adult"].Text; got != "no" {
+		t.Errorf("not adult = %q", got)
+	}
+}

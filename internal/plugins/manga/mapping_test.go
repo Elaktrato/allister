@@ -16,8 +16,8 @@ func intp(n int) *int { return &n }
 func TestItemDataExtras(t *testing.T) {
 	m := anilist.Media{
 		SearchResult: anilist.SearchResult{Source: anilist.AniList, ID: "30013", Type: "MANGA",
-			Titles: []anilist.Title{{Lang: "ja-latn", Text: "ONE PIECE"}}, Studio: "Ignored"},
-		Status: "HIATUS", Season: "FALL", Country: "JP", Adult: false,
+			Titles: []anilist.Title{{Lang: "ja-latn", Text: "ONE PIECE"}}, Studio: "Ignored", Adult: false},
+		Status: "HIATUS", Season: "FALL", Country: "JP",
 		AverageScore: intp(92), Popularity: intp(250000),
 		Synonyms: []string{"OP", "ONE PIECE"},
 		Studios:  []string{"Ignored"},
@@ -104,5 +104,27 @@ func TestManifestExtras(t *testing.T) {
 	}
 	if !slices.ContainsFunc(k.Sections, func(s plugin.SectionDef) bool { return s.Type == plugin.SectionLinks }) {
 		t.Error("no links section")
+	}
+}
+
+// TestSummariesCarryTheAdultFlag: search results, relations and
+// recommendations from AniList carry the adult value.
+func TestSummariesCarryTheAdultFlag(t *testing.T) {
+	if got := toSummary(anilist.SearchResult{Source: anilist.AniList, ID: "1", Adult: true}).Fields["adult"].Text; got != "yes" {
+		t.Errorf("search adult = %q", got)
+	}
+	if _, ok := toSummary(anilist.SearchResult{Source: anilist.Manual, ID: "1", Adult: true}).Fields["adult"]; ok {
+		t.Error("a manual summary carries the flag")
+	}
+	m := anilist.Media{SearchResult: anilist.SearchResult{Source: anilist.AniList, ID: "5"},
+		Relations: []anilist.Relation{{Kind: "sequel", Source: anilist.AniList, ID: "6", Adult: true},
+			{Kind: "adaptation", Source: anilist.AniList, ID: "7", MediaType: "ANIME"}}}
+	d := ItemData(m)
+	if len(d.Relations) != 2 || d.Relations[0].Item.Fields["adult"].Text != "yes" || d.Relations[1].Item.Fields["adult"].Text != "no" {
+		t.Errorf("relations = %+v", d.Relations)
+	}
+	recs := toRecommendations([]anilist.Recommendation{{Source: anilist.AniList, ID: "8", Adult: true}, {Source: anilist.AniList, ID: "9"}})
+	if len(recs) != 2 || recs[0].Fields["adult"].Text != "yes" || recs[1].Fields["adult"].Text != "no" {
+		t.Errorf("recommendations = %+v", recs)
 	}
 }

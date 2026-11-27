@@ -105,7 +105,7 @@ func (s *server) homeEntries(ctx context.Context, ms []plugin.Manifest, status *
 	for _, m := range ms {
 		lang := s.titleLang(ctx, m)
 		for _, k := range m.Kinds {
-			rows, err := s.deps.Library.Rows(ctx, library.Query{PluginID: m.ID, Kind: k.Key, Status: status}, lang, limit, 0)
+			rows, err := s.deps.Library.Rows(ctx, library.Query{PluginID: m.ID, Kind: k.Key, Status: status, HideField: s.hiddenField(ctx, m, k)}, lang, limit, 0)
 			if err != nil {
 				return nil, err
 			}
@@ -255,10 +255,25 @@ func (s *server) homeComingUp(ctx context.Context, ms []plugin.Manifest, now tim
 			}
 		}
 	}
-	rows, err := s.deps.Library.ScheduleBetween(ctx, now, now.Add(homeWindow), sources, homeComingLimit)
+	hidden, err := s.hiddenItems(ctx, ms)
 	if err != nil {
 		return nil, err
 	}
+	// hidden items' airings take no place: ask again for more while the
+	// bounded answer was full and too few are left
+	var rows []library.ScheduledEntry
+	for limit := homeComingLimit; ; limit *= 2 {
+		got, err := s.deps.Library.ScheduleBetween(ctx, now, now.Add(homeWindow), sources, limit)
+		if err != nil {
+			return nil, err
+		}
+		full := len(got) == limit
+		rows = slices.DeleteFunc(got, func(e library.ScheduledEntry) bool { return hidden[e.ItemID] })
+		if len(rows) >= homeComingLimit || !full || len(hidden) == 0 {
+			break
+		}
+	}
+	rows = rows[:min(len(rows), homeComingLimit)]
 	langs := map[string]string{} // one title language read per plugin
 	var days []homeDay
 	for _, row := range rows {

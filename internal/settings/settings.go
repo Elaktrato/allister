@@ -180,6 +180,29 @@ func (s *Store) SetIdleDays(ctx context.Context, id string, days int) error {
 	return s.Set(ctx, idleDaysKey(id), strconv.Itoa(days))
 }
 
+// hideAdultKey is the settings key of a plugin's "hide adult items" choice.
+func hideAdultKey(id string) string { return "plugin." + id + ".hide_adult" }
+
+// HideAdult reports whether plugin id hides its adult items ("1" stored).
+// Nothing stored or an unreadable setting is off.
+func (s *Store) HideAdult(ctx context.Context, id string) bool {
+	v, ok, err := s.Get(ctx, hideAdultKey(id))
+	if err != nil {
+		log.Printf("settings: read %s: %v (showing every item)", hideAdultKey(id), err)
+		return false
+	}
+	return ok && v == "1"
+}
+
+// SetHideAdult stores plugin id's "hide adult items" choice ("1" or "0").
+func (s *Store) SetHideAdult(ctx context.Context, id string, on bool) error {
+	v := "0"
+	if on {
+		v = "1"
+	}
+	return s.Set(ctx, hideAdultKey(id), v)
+}
+
 // homeViewKey and homeStatusesKey are the settings keys holding a plugin's
 // home list configuration: the view its list opens in and the status it
 // opens with.

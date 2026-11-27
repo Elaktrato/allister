@@ -816,3 +816,36 @@ func TestMediaWithoutExtras(t *testing.T) {
 		t.Fatalf("extras = %+v", m)
 	}
 }
+
+// TestAdultFlagOnSummaries: search results, relations and recommendations
+// carry AniList's isAdult, so the plugins can hide adult summaries.
+func TestAdultFlagOnSummaries(t *testing.T) {
+	var req string
+	res, err := serve(t, 200, []byte(`{"data":{"Page":{"media":[{"id":1,"isAdult":true},{"id":2,"isAdult":false}]}}}`), &req).
+		Search(context.Background(), TypeAnime, "x")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res) != 2 || !res[0].Adult || res[1].Adult {
+		t.Fatalf("search adult = %+v", res)
+	}
+	if !strings.Contains(req, "isAdult") {
+		t.Error("search query lacks isAdult")
+	}
+	body := `{"data":{"Media":{"id":5,"isAdult":true,
+		"relations":{"edges":[{"relationType":"SEQUEL","node":{"id":6,"type":"ANIME","isAdult":true}},{"relationType":"PREQUEL","node":{"id":7,"type":"ANIME"}}]},
+		"recommendations":{"nodes":[{"mediaRecommendation":{"id":8,"isAdult":true}},{"mediaRecommendation":{"id":9}}]}}}}`
+	m, err := serve(t, 200, []byte(body), &req).Media(context.Background(), TypeAnime, "5")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !m.Adult || len(m.Relations) != 2 || !m.Relations[0].Adult || m.Relations[1].Adult ||
+		len(m.Recommendations) != 2 || !m.Recommendations[0].Adult || m.Recommendations[1].Adult {
+		t.Fatalf("media adult flags = %v %+v %+v", m.Adult, m.Relations, m.Recommendations)
+	}
+	for _, want := range []string{"node { id type format isAdult", "mediaRecommendation { id isAdult"} {
+		if !strings.Contains(req, want) {
+			t.Errorf("media query lacks %q", want)
+		}
+	}
+}

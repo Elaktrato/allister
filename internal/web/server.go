@@ -202,6 +202,7 @@ func newServer(deps Deps, now func() time.Time) (*server, http.Handler) {
 	mux.HandleFunc("POST /settings/plugins/{id}/import/{importer}", s.postPluginImport)
 	mux.HandleFunc("POST /settings/plugins/{id}/columns", s.postColumns)
 	mux.HandleFunc("POST /settings/plugins/{id}/idle", s.postIdleDays)
+	mux.HandleFunc("POST /settings/plugins/{id}/adult", s.postHideAdult)
 	mux.HandleFunc("GET /settings/tags", s.getTags)
 	mux.HandleFunc("POST /settings/tags/{id}", s.postRenameTag)
 	mux.HandleFunc("POST /settings/tags/{id}/delete", s.postDeleteTag)

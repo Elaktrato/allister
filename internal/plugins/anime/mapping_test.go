@@ -109,8 +109,8 @@ func extrasMedia() anilist.Media {
 	return anilist.Media{
 		SearchResult: anilist.SearchResult{Source: anilist.AniList, ID: "21", Type: "TV",
 			Titles: []anilist.Title{{Lang: "ja-latn", Text: "One Piece"}, {Lang: "en", Text: "ONE PIECE"}},
-			Studio: "Toei Animation"},
-		Status: "RELEASING", Season: "FALL", Country: "JP", Adult: true,
+			Studio: "Toei Animation", Adult: true},
+		Status: "RELEASING", Season: "FALL", Country: "JP",
 		AverageScore: intp(87), Popularity: intp(612345),
 		Synonyms: []string{" OP ", "One Piece", "", "ワン\tピース", "OP"},
 		Studios:  []string{"Toei Animation", "Second Studio"},
@@ -241,5 +241,32 @@ func TestSummaryStudioIsAList(t *testing.T) {
 	s := toSummary(anilist.SearchResult{ID: "1", Studio: " MADHOUSE "})
 	if want := []string{"MADHOUSE"}; !slices.Equal(s.Fields["studio"].List, want) || s.Fields["studio"].Text != "" {
 		t.Fatalf("studio = %+v", s.Fields["studio"])
+	}
+}
+
+// TestSummariesCarryTheAdultFlag: search results, relations and
+// recommendations from AniList carry the adult value, so the core can hide
+// them; other sources' summaries have none.
+func TestSummariesCarryTheAdultFlag(t *testing.T) {
+	if got := toSummary(anilist.SearchResult{Source: anilist.AniList, ID: "1", Adult: true}).Fields["adult"].Text; got != "yes" {
+		t.Errorf("search adult = %q", got)
+	}
+	if got := toSummary(anilist.SearchResult{Source: anilist.AniList, ID: "1"}).Fields["adult"].Text; got != "no" {
+		t.Errorf("search not adult = %q", got)
+	}
+	if _, ok := toSummary(anilist.SearchResult{Source: anilist.Manual, ID: "1", Adult: true}).Fields["adult"]; ok {
+		t.Error("a manual summary carries the flag")
+	}
+	m := anilist.Media{SearchResult: anilist.SearchResult{Source: anilist.AniList, ID: "5"},
+		Relations: []anilist.Relation{{Kind: "sequel", Source: anilist.AniList, ID: "6", Type: "TV", Adult: true},
+			{Kind: "source", Source: anilist.AniList, ID: "7", MediaType: "MANGA"}}}
+	d := ItemData(m)
+	if len(d.Relations) != 2 || d.Relations[0].Item.Fields["adult"].Text != "yes" || d.Relations[0].Item.Fields["type"].Text != "TV" ||
+		d.Relations[1].Item.Fields["adult"].Text != "no" {
+		t.Errorf("relations = %+v", d.Relations)
+	}
+	recs := toRecommendations([]anilist.Recommendation{{Source: anilist.AniList, ID: "8", Adult: true}, {Source: anilist.AniList, ID: "9"}})
+	if len(recs) != 2 || recs[0].Fields["adult"].Text != "yes" || recs[1].Fields["adult"].Text != "no" {
+		t.Errorf("recommendations = %+v", recs)
 	}
 }

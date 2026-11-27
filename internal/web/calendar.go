@@ -11,9 +11,11 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
+	"github.com/allister/allister/internal/library"
 	"github.com/allister/allister/internal/plugin"
 )
 
@@ -34,6 +36,9 @@ const icsLayout = "20060102T150405Z"
 func (s *server) getCalendar(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	rows, err := s.deps.Library.ScheduleEntries(ctx)
+	if err == nil {
+		rows, err = s.visibleSchedule(ctx, rows)
+	}
 	if err != nil {
 		s.internalError(w, r, err)
 		return
@@ -91,6 +96,16 @@ func (s *server) getCalendar(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/calendar; charset=utf-8")
 	w.Header().Set("Cache-Control", "max-age=300")
 	w.Write([]byte(b.String()))
+}
+
+// visibleSchedule drops the airings of items their plugin hides
+// (hiddenItems).
+func (s *server) visibleSchedule(ctx context.Context, rows []library.ScheduledEntry) ([]library.ScheduledEntry, error) {
+	hidden, err := s.hiddenItems(ctx, s.deps.Registry.Manifests())
+	if err != nil || len(hidden) == 0 {
+		return rows, err
+	}
+	return slices.DeleteFunc(rows, func(e library.ScheduledEntry) bool { return hidden[e.ItemID] }), nil
 }
 
 // sourceSchedules reports whether the manifest's source declares the

@@ -143,6 +143,9 @@ func (s *server) calendarPlugins(selected string) ([]calendarPluginOption, strin
 func (s *server) buildCalendar(ctx context.Context, q url.Values) (calendarView, error) {
 	now := s.now().In(s.location(ctx))
 	rows, err := s.deps.Library.ScheduleEntries(ctx)
+	if err == nil {
+		rows, err = s.visibleSchedule(ctx, rows)
+	}
 	if err != nil {
 		return calendarView{}, err
 	}
