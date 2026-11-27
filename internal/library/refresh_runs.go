@@ -83,12 +83,19 @@ func (l *Library) RefreshCandidates(ctx context.Context, pluginID string) (int, 
 	return n, nil
 }
 
+// RefreshTarget is one item a refresh run asks: its id, kind and source
+// (the caller paces the run's jobs to the source's request rate).
+type RefreshTarget struct {
+	ID           int64
+	Kind, Source string
+}
+
 // StartRefreshRun starts a refresh run of the plugin over its sourced,
-// non-manual items with a list entry and returns the run and their ids (in
-// id order); the caller enqueues one job per id. A run without items is
-// finished at once. ErrRefreshRunning while the plugin has an unfinished
+// non-manual items with a list entry and returns the run and those items
+// (in id order); the caller enqueues one job per item. A run without items
+// is finished at once. ErrRefreshRunning while the plugin has an unfinished
 // run (after reconciling runs whose jobs are gone).
-func (l *Library) StartRefreshRun(ctx context.Context, pluginID string) (RefreshRun, []int64, error) {
+func (l *Library) StartRefreshRun(ctx context.Context, pluginID string) (RefreshRun, []RefreshTarget, error) {
 	tx, err := l.db.BeginTx(ctx, nil)
 	if err != nil {
 		return RefreshRun{}, nil, fmt.Errorf("start refresh: %w", err)
@@ -97,18 +104,18 @@ func (l *Library) StartRefreshRun(ctx context.Context, pluginID string) (Refresh
 	if err := reconcileRefreshRuns(ctx, tx); err != nil {
 		return RefreshRun{}, nil, err
 	}
-	rows, err := tx.QueryContext(ctx, `SELECT i.id `+refreshCandidatesSQL+` ORDER BY i.id`, pluginID)
+	rows, err := tx.QueryContext(ctx, `SELECT i.id, i.kind, i.source `+refreshCandidatesSQL+` ORDER BY i.id`, pluginID)
 	if err != nil {
 		return RefreshRun{}, nil, fmt.Errorf("start refresh: %w", err)
 	}
-	var ids []int64
+	var ids []RefreshTarget
 	for rows.Next() {
-		var id int64
-		if err := rows.Scan(&id); err != nil {
+		var t RefreshTarget
+		if err := rows.Scan(&t.ID, &t.Kind, &t.Source); err != nil {
 			rows.Close()
 			return RefreshRun{}, nil, fmt.Errorf("start refresh: %w", err)
 		}
-		ids = append(ids, id)
+		ids = append(ids, t)
 	}
 	if err := closeRows(rows); err != nil {
 		return RefreshRun{}, nil, fmt.Errorf("start refresh: %w", err)
@@ -144,7 +151,8 @@ func (l *Library) StartRefreshRun(ctx context.Context, pluginID string) (Refresh
 // RefreshUnchanged or RefreshFailed (title is kept for a failed item, up to
 // 50 titles), and finishes the run when every item is counted. The count
 // and the finish check are one transaction of increments, so concurrent
-// workers never lose a count. ErrInvalid for another outcome,
+// workers never lose a count. A finished run (counted out, or stopped by
+// StopRefreshRun) is left as it is. ErrInvalid for another outcome,
 // ErrNoRefreshRun for an unknown run.
 func (l *Library) RecordRefresh(ctx context.Context, runID int64, outcome, title string) error {
 	var (
@@ -153,14 +161,14 @@ func (l *Library) RecordRefresh(ctx context.Context, runID int64, outcome, title
 	)
 	switch outcome {
 	case RefreshUpdated:
-		stmt = `UPDATE source_refresh_runs SET updated = updated + 1 WHERE id = ?`
+		stmt = `UPDATE source_refresh_runs SET updated = updated + 1 WHERE id = ? AND finished_at IS NULL`
 	case RefreshUnchanged:
-		stmt = `UPDATE source_refresh_runs SET unchanged = unchanged + 1 WHERE id = ?`
+		stmt = `UPDATE source_refresh_runs SET unchanged = unchanged + 1 WHERE id = ? AND finished_at IS NULL`
 	case RefreshFailed:
 		stmt = `UPDATE source_refresh_runs SET failed = failed + 1,
 			failed_titles = CASE WHEN ? <> '' AND json_array_length(failed_titles) < ?
 				THEN json_insert(failed_titles, '$[#]', ?) ELSE failed_titles END
-			WHERE id = ?`
+			WHERE id = ? AND finished_at IS NULL`
 		t := plugin.SingleLine(title, maxFailedTitleRunes)
 		args = []any{t, maxFailedTitles, t}
 	default:
@@ -178,7 +186,14 @@ func (l *Library) RecordRefresh(ctx context.Context, runID int64, outcome, title
 	if n, err := res.RowsAffected(); err != nil {
 		return fmt.Errorf("record refresh: %w", err)
 	} else if n == 0 {
-		return ErrNoRefreshRun
+		var exists bool
+		if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM source_refresh_runs WHERE id = ?)`, runID).Scan(&exists); err != nil {
+			return fmt.Errorf("record refresh: %w", err)
+		}
+		if !exists {
+			return ErrNoRefreshRun
+		}
+		return nil // finished already: nothing to count
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE source_refresh_runs SET finished_at = `+nowSQL+`
 		WHERE id = ? AND finished_at IS NULL AND updated + unchanged + failed >= total`, runID); err != nil {
@@ -191,10 +206,15 @@ func (l *Library) RecordRefresh(ctx context.Context, runID int64, outcome, title
 }
 
 // StopRefreshRun records why the run stopped asking the source (the first
-// reason stays). Its remaining jobs still record their items, as failed
-// without asking the source, so the run finishes.
+// reason stays) and finishes it at once: the items not counted yet count
+// as failed. Its remaining jobs find the run finished and return without
+// asking the source or counting (RecordRefresh leaves a finished run
+// alone). A run that is finished already keeps its finish time and counts
+// and only takes the reason.
 func (l *Library) StopRefreshRun(ctx context.Context, runID int64, reason string) error {
-	if _, err := l.db.ExecContext(ctx, `UPDATE source_refresh_runs SET stopped = ? WHERE id = ? AND stopped = ''`,
+	if _, err := l.db.ExecContext(ctx, `UPDATE source_refresh_runs SET stopped = ?,
+		finished_at = COALESCE(finished_at, `+nowSQL+`), failed = MAX(failed, total - updated - unchanged)
+		WHERE id = ? AND stopped = ''`,
 		plugin.SingleLine(reason, 40), runID); err != nil {
 		return fmt.Errorf("stop refresh: %w", err)
 	}

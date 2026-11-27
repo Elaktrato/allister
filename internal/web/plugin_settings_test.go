@@ -1,12 +1,19 @@
 package web
 
 import (
+	"context"
+	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/url"
+	"slices"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/allister/allister/internal/jobs"
 	"github.com/allister/allister/internal/library"
+	"github.com/allister/allister/internal/plugin"
 	"github.com/allister/allister/internal/plugin/plugintest"
 )
 
@@ -106,11 +113,23 @@ func TestPluginSettingsRefresh(t *testing.T) {
 		t.Fatalf("restart: %d", rec.Code)
 	}
 	run2, _ := e.lib.LatestRefreshRun(bg, "tv")
+	// its jobs are still queued: the stop shows at once all the same
+	for _, j := range e.jobs.got[2:] {
+		b, _ := json.Marshal(j.Payload)
+		if _, err := e.d.Exec(`INSERT INTO jobs(kind, payload_json, run_after) VALUES (?, ?, '2000-01-01T00:00:00Z')`, j.Kind, string(b)); err != nil {
+			t.Fatal(err)
+		}
+	}
 	if err := e.lib.StopRefreshRun(bg, run2.ID, library.RefreshStoppedCredential); err != nil {
 		t.Fatal(err)
 	}
 	page = e.get("/settings/plugins/tv").Body.String()
-	mustContain(t, page, "Updated 0, nothing new 0, failed 2", "Stopped: the credential of the source is missing or was refused.")
+	mustContain(t, page, "Updated 0, nothing new 0, failed 2", "Stopped: the credential of the source is missing or was refused.", ">Update from source</button>")
+	mustNotContain(t, page, `hx-get="/settings/plugins/tv/refresh"`)
+	// and a new press is accepted
+	if rec := e.do("POST", "/settings/plugins/tv/refresh", url.Values{"confirm": {"1"}}, false); rec.Code != http.StatusSeeOther {
+		t.Fatalf("start after the stop: %d", rec.Code)
+	}
 }
 
 func TestPluginSettingsRefreshNothingToAsk(t *testing.T) {
@@ -119,4 +138,122 @@ func TestPluginSettingsRefreshNothingToAsk(t *testing.T) {
 	rec := e.do("POST", "/settings/plugins/tv/refresh", url.Values{}, false)
 	mustContain(t, rec.Body.String(), "There are no items from a source to update.")
 	mustNotContain(t, rec.Body.String(), `name="confirm" value="1"`)
+}
+
+// withoutPeople is the tv fixture under id "tvnp" whose kind has no people
+// section: a refresh job asks its source once (Details only).
+func withoutPeople() *plugintest.Plugin {
+	p := plugintest.TVPlugin(plugintest.WithID("tvnp"))
+	k := &p.M.Kinds[0]
+	k.Sections = slices.DeleteFunc(k.Sections, func(s plugin.SectionDef) bool { return s.Type == plugin.SectionPeople })
+	return p
+}
+
+// The run's jobs are staggered to the source's declared request rate: job
+// i may run at start + i * calls per item * 1 min / RequestsPerMinute (the
+// tv source declares 30 per minute; a kind with a people section costs two
+// calls per item, one without costs one).
+func TestPluginSettingsRefreshPacedToSource(t *testing.T) {
+	e := newEnvWith(t, withPlugins(plugintest.TVPlugin(), withoutPeople()))
+	if _, ok := e.reg.Manifest("tvnp"); !ok {
+		t.Fatalf("fixture refused: %v", e.reg.Problems())
+	}
+	for _, pid := range []string{"tv", "tvnp"} {
+		for _, id := range []string{"1", "2", "3"} {
+			e.addFixture(t, pid, "show", tvShow(id, "Show "+id), library.Entry{Status: library.Active})
+		}
+	}
+	start := *e.now
+	for _, c := range []struct {
+		plugin string
+		gap    time.Duration
+	}{{"tv", 4 * time.Second}, {"tvnp", 2 * time.Second}} {
+		e.jobs.got, e.jobs.at = nil, nil
+		if rec := e.do("POST", "/settings/plugins/"+c.plugin+"/refresh", url.Values{"confirm": {"1"}}, false); rec.Code != http.StatusSeeOther {
+			t.Fatalf("%s start: %d", c.plugin, rec.Code)
+		}
+		want := []time.Time{start, start.Add(c.gap), start.Add(2 * c.gap)}
+		if len(e.jobs.at) != 3 {
+			t.Fatalf("%s jobs %v", c.plugin, e.jobs.got)
+		}
+		for i, at := range e.jobs.at {
+			if !at.Equal(want[i]) {
+				t.Fatalf("%s run_after %v, want %v", c.plugin, e.jobs.at, want)
+			}
+		}
+	}
+}
+
+// lockedClock is a clock a running queue may read while the test moves it.
+type lockedClock struct {
+	mu sync.Mutex
+	t  time.Time
+}
+
+func (c *lockedClock) now() time.Time { c.mu.Lock(); defer c.mu.Unlock(); return c.t }
+func (c *lockedClock) add(d time.Duration) {
+	c.mu.Lock()
+	c.t = c.t.Add(d)
+	c.mu.Unlock()
+}
+
+// A job enqueued after a run started (a new item's sync) runs before the
+// run's later jobs instead of waiting behind the whole run.
+func TestPluginSettingsRefreshLetsOtherJobsIn(t *testing.T) {
+	e := newEnvWith(t, withPlugins(plugintest.TVPlugin()))
+	for _, id := range []string{"1", "2", "3"} {
+		e.addFixture(t, "tv", "show", tvShow(id, "Show "+id), library.Entry{Status: library.Active})
+	}
+	clk := &lockedClock{t: *e.now}
+	q := jobs.NewQueue(e.d, jobs.WithClock(clk.now), jobs.WithPollInterval(time.Millisecond))
+	e.srv.deps.Jobs = dbJobs{e.jobs, q}
+	var (
+		mu  sync.Mutex
+		ran []string
+	)
+	note := func(s string) {
+		mu.Lock()
+		ran = append(ran, s)
+		mu.Unlock()
+	}
+	q.Register(jobs.KindRefreshItem, func(_ context.Context, raw json.RawMessage) error {
+		var p jobs.RefreshPayload
+		if err := json.Unmarshal(raw, &p); err != nil {
+			return err
+		}
+		note(fmt.Sprint("refresh ", p.ItemID))
+		return nil
+	})
+	q.Register("other", func(context.Context, json.RawMessage) error { note("other"); return nil })
+
+	if rec := e.do("POST", "/settings/plugins/tv/refresh", url.Values{"confirm": {"1"}}, false); rec.Code != http.StatusSeeOther {
+		t.Fatalf("start: %d", rec.Code)
+	}
+	if err := q.Enqueue(bg, "other", map[string]string{}); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(bg)
+	done := make(chan struct{})
+	go func() { q.Run(ctx); close(done) }()
+	t.Cleanup(func() { cancel(); <-done })
+	wait := func(n int) []string {
+		t.Helper()
+		deadline := time.Now().Add(5 * time.Second)
+		for {
+			mu.Lock()
+			got := slices.Clone(ran)
+			mu.Unlock()
+			if len(got) >= n || time.Now().After(deadline) {
+				return got
+			}
+			time.Sleep(5 * time.Millisecond)
+		}
+	}
+	if got := wait(2); !slices.Equal(got, []string{"refresh 1", "other"}) {
+		t.Fatalf("before the run's later jobs: %v", got)
+	}
+	clk.add(time.Minute)
+	if got := wait(4); !slices.Equal(got, []string{"refresh 1", "other", "refresh 2", "refresh 3"}) {
+		t.Fatalf("order %v", got)
+	}
 }

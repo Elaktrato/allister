@@ -41,9 +41,11 @@ func RefreshJobFor(pluginID string, runID int64) func(itemID int64) (kind string
 // title when the source does not know it (ErrNotFound), answered with
 // unusable data (ErrBadResponse, or values the library refuses) or the item
 // has no source to ask. Rate limits and unavailability retry later
-// (ErrRetryLater). ErrNotConfigured stops the run (reason
-// library.RefreshStoppedCredential): this and every later job of the run
-// record the item as failed without asking the source. A People answer
+// (ErrRetryLater). ErrNotConfigured records the item failed and stops the
+// run (reason library.RefreshStoppedCredential), which finishes it at once
+// with the items not asked counted as failed; every later job of a
+// finished or stopped run returns without asking the source or counting.
+// A People answer
 // other than a rate limit, unavailability or a missing credential fills
 // without credits. When the fill wrote a cover, banner or trailer whose
 // stored image is a remote URL, enqueueSync is asked to download it (the
@@ -59,8 +61,10 @@ func RefreshItem(deps SyncDeps, enqueueSync func(ctx context.Context, pluginID s
 		if err != nil {
 			return fmt.Errorf("refresh item %d: %w", p.ItemID, err)
 		}
-		if run == nil {
-			return nil // the run is gone
+		if run == nil || run.FinishedAt != nil || run.Stopped != "" {
+			// gone, or finished (stopped) before this job: the run counted
+			// its item already, so neither ask the source nor count
+			return nil
 		}
 		record := func(outcome, title string) error {
 			if err := lib.RecordRefresh(ctx, run.ID, outcome, title); err != nil {
@@ -84,7 +88,7 @@ func RefreshItem(deps SyncDeps, enqueueSync func(ctx context.Context, pluginID s
 		if title == "" && len(it.Titles) > 0 {
 			title = it.Titles[0].Text
 		}
-		if run.Stopped != "" || it.PluginID != p.PluginID {
+		if it.PluginID != p.PluginID {
 			return record(library.RefreshFailed, title)
 		}
 		var src plugin.Source
@@ -104,10 +108,14 @@ func RefreshItem(deps SyncDeps, enqueueSync func(ctx context.Context, pluginID s
 			case errors.Is(err, plugin.ErrRateLimited), errors.Is(err, plugin.ErrUnavailable):
 				return true, fmt.Errorf("refresh item %d: %s: %w: %w", it.ID, op, err, ErrRetryLater)
 			case errors.Is(err, plugin.ErrNotConfigured):
+				// counted first, so the stop keeps its title
+				if rerr := record(library.RefreshFailed, title); rerr != nil {
+					return true, rerr
+				}
 				if serr := lib.StopRefreshRun(ctx, run.ID, library.RefreshStoppedCredential); serr != nil {
 					return true, fmt.Errorf("refresh item %d: %w", it.ID, serr)
 				}
-				return true, record(library.RefreshFailed, title)
+				return true, nil
 			}
 			return false, nil
 		}

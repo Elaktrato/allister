@@ -63,8 +63,8 @@ func (e *refreshEnv) start(t *testing.T) library.RefreshRun {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, id := range ids {
-		kind, p := RefreshJobFor("tv", run.ID)(id)
+	for _, it := range ids {
+		kind, p := RefreshJobFor("tv", run.ID)(it.ID)
 		if err := e.q.Enqueue(context.Background(), kind, p); err != nil {
 			t.Fatal(err)
 		}
@@ -188,12 +188,22 @@ func TestRefreshRunStopsOnNotConfigured(t *testing.T) {
 	e.listed(t, "1", "One", nil)
 	e.listed(t, "2", "Two", nil)
 	e.listed(t, "3", "Three", nil)
-	e.start(t)
+	run := e.start(t)
 	e.src.Errs = map[string]error{plugintest.OpDetails: plugin.ErrNotConfigured}
+	// the first job stops the run, and the run is finished at once: the
+	// items not asked count as failed
+	if !step(t, e.q) {
+		t.Fatal("job did not run")
+	}
+	got, err := e.lib.RefreshRunByID(context.Background(), run.ID)
+	if err != nil || got.FinishedAt == nil || got.Stopped != library.RefreshStoppedCredential ||
+		refreshCounts(*got) != [4]int{3, 0, 0, 3} || !reflect.DeepEqual(got.FailedTitles, []string{"One"}) {
+		t.Fatalf("after the first job %+v %v", got, err)
+	}
+	// the remaining jobs neither ask the source nor count
 	e.drain(t)
-	got := e.latest(t)
-	if got.FinishedAt == nil || got.Stopped != library.RefreshStoppedCredential || refreshCounts(got) != [4]int{3, 0, 0, 3} {
-		t.Fatalf("%+v", got)
+	if after := e.latest(t); refreshCounts(after) != [4]int{3, 0, 0, 3} || after.ID != run.ID {
+		t.Fatalf("after the drain %+v", after)
 	}
 	if n := e.src.Calls(plugintest.OpDetails); n != 1 {
 		t.Fatalf("source asked %d times after the credential stop", n)
@@ -201,6 +211,10 @@ func TestRefreshRunStopsOnNotConfigured(t *testing.T) {
 	var failed int
 	if err := e.d.QueryRow(`SELECT COUNT(*) FROM jobs WHERE kind = ? AND state <> 'done'`, KindRefreshItem).Scan(&failed); err != nil || failed != 0 {
 		t.Fatalf("jobs not done: %d %v", failed, err)
+	}
+	// a new press is accepted
+	if _, _, err := e.lib.StartRefreshRun(context.Background(), "tv"); err != nil {
+		t.Fatalf("new start: %v", err)
 	}
 }
 

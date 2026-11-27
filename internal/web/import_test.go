@@ -57,6 +57,13 @@ func (d dbJobs) Enqueue(ctx context.Context, kind string, payload any) error {
 	return d.q.Enqueue(ctx, kind, payload)
 }
 
+func (d dbJobs) EnqueueAt(ctx context.Context, kind string, payload any, at time.Time) error {
+	if err := d.fakeJobs.EnqueueAt(ctx, kind, payload, at); err != nil {
+		return err
+	}
+	return d.q.EnqueueAt(ctx, kind, payload, at)
+}
+
 type impEnv struct {
 	d    *sql.DB
 	h    http.Handler
