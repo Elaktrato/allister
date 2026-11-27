@@ -736,7 +736,7 @@ func (c *compiled) orderBy(s Sort, lang string) (string, []any, error) {
 		if lang != "" {
 			langs = append([]string{lang}, langs...)
 		}
-		picks := make([]string, 0, len(langs)+3)
+		var picks []string
 		for _, l := range langs {
 			if l == plugin.AltTitleLang {
 				continue
