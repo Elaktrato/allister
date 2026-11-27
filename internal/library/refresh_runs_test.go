@@ -41,7 +41,7 @@ func TestStartRefreshRunCountsSourcedEntries(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(ids, []int64{a, b}) || run.Total != 2 || run.PluginID != "tv" || run.FinishedAt != nil || run.ID == 0 {
+	if !reflect.DeepEqual(ids, []RefreshTarget{{a, "show", "tvdata"}, {b, "show", "tvdata"}}) || run.Total != 2 || run.PluginID != "tv" || run.FinishedAt != nil || run.ID == 0 {
 		t.Fatalf("run %+v ids %v", run, ids)
 	}
 	if _, _, err := e.lib.StartRefreshRun(ctx, "tv"); !errors.Is(err, ErrRefreshRunning) {
@@ -52,9 +52,9 @@ func TestStartRefreshRunCountsSourcedEntries(t *testing.T) {
 		t.Fatalf("other plugin: %+v %v %v", r2, ids2, err)
 	}
 	// enqueued jobs keep the run open (the reconcile sees them)
-	for _, id := range ids {
+	for _, it := range ids {
 		if _, err := e.db.Exec(`INSERT INTO jobs(kind, payload_json, run_after) VALUES (?, ?, '2000-01-01T00:00:00Z')`,
-			RefreshJobKind, fmt.Sprintf(`{"run_id":%d,"item_id":%d,"plugin_id":"tv"}`, run.ID, id)); err != nil {
+			RefreshJobKind, fmt.Sprintf(`{"run_id":%d,"item_id":%d,"plugin_id":"tv"}`, run.ID, it.ID)); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -116,9 +116,9 @@ func TestRefreshRunReconcilesWhenJobsAreGone(t *testing.T) {
 		t.Fatalf("finished early: %+v", got)
 	}
 	// both jobs exist but the queue gave up on them: nothing is live
-	for _, id := range ids {
+	for _, it := range ids {
 		if _, err := e.db.Exec(`INSERT INTO jobs(kind, payload_json, run_after, state) VALUES (?, ?, '2000-01-01T00:00:00Z', 'failed')`,
-			RefreshJobKind, fmt.Sprintf(`{"run_id":%d,"item_id":%d,"plugin_id":"tv"}`, run.ID, id)); err != nil {
+			RefreshJobKind, fmt.Sprintf(`{"run_id":%d,"item_id":%d,"plugin_id":"tv"}`, run.ID, it.ID)); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -160,7 +160,7 @@ func TestRefreshRunStrandedByInterruptedStartFinishes(t *testing.T) {
 	}
 	// only the first job made it into the queue, and it ran
 	if _, err := e.db.Exec(`INSERT INTO jobs(kind, payload_json, run_after, state) VALUES (?, ?, '2000-01-01T00:00:00Z', 'done')`,
-		RefreshJobKind, fmt.Sprintf(`{"run_id":%d,"item_id":%d,"plugin_id":"tv"}`, run.ID, ids[0])); err != nil {
+		RefreshJobKind, fmt.Sprintf(`{"run_id":%d,"item_id":%d,"plugin_id":"tv"}`, run.ID, ids[0].ID)); err != nil {
 		t.Fatal(err)
 	}
 	if err := e.lib.RecordRefresh(ctx, run.ID, RefreshUpdated, ""); err != nil {
@@ -195,7 +195,7 @@ func TestRefreshRunStrandedByInterruptedStartFinishes(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := e2.db.Exec(`INSERT INTO jobs(kind, payload_json, run_after) VALUES (?, ?, '2000-01-01T00:00:00Z')`,
-		RefreshJobKind, fmt.Sprintf(`{"run_id":%d,"item_id":%d,"plugin_id":"tv"}`, run2.ID, ids2[0])); err != nil {
+		RefreshJobKind, fmt.Sprintf(`{"run_id":%d,"item_id":%d,"plugin_id":"tv"}`, run2.ID, ids2[0].ID)); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := e2.db.Exec(`UPDATE source_refresh_runs SET started_at = ? WHERE id = ?`, old, run2.ID); err != nil {
@@ -205,3 +205,61 @@ func TestRefreshRunStrandedByInterruptedStartFinishes(t *testing.T) {
 		t.Fatalf("finished with a live job: %+v %v", got, err)
 	}
 }
+
+// A stop finishes the run at once, even while its jobs are still queued:
+// the items not counted yet count as failed, and later records of the
+// finished run change nothing.
+func TestStopRefreshRunFinishesAtOnce(t *testing.T) {
+	e := newEnv(t)
+	ctx := context.Background()
+	for _, id := range []string{"1", "2", "3"} {
+		addRefreshShow(t, e, "tvdata", id)
+	}
+	run, ids, err := e.lib.StartRefreshRun(ctx, "tv")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, it := range ids {
+		if _, err := e.db.Exec(`INSERT INTO jobs(kind, payload_json, run_after) VALUES (?, ?, '2000-01-01T00:00:00Z')`,
+			RefreshJobKind, fmt.Sprintf(`{"run_id":%d,"item_id":%d,"plugin_id":"tv"}`, run.ID, it.ID)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := e.lib.RecordRefresh(ctx, run.ID, RefreshFailed, "Show 1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.lib.StopRefreshRun(ctx, run.ID, RefreshStoppedCredential); err != nil {
+		t.Fatal(err)
+	}
+	got, err := e.lib.RefreshRunByID(ctx, run.ID)
+	if err != nil || got.FinishedAt == nil || got.Failed != 3 || got.Stopped != RefreshStoppedCredential ||
+		!reflect.DeepEqual(got.FailedTitles, []string{"Show 1"}) {
+		t.Fatalf("stopped run %+v %v", got, err)
+	}
+	// the queued jobs' records do not count again
+	for _, o := range []string{RefreshUpdated, RefreshUnchanged, RefreshFailed} {
+		if err := e.lib.RecordRefresh(ctx, run.ID, o, "late"); err != nil {
+			t.Fatalf("record %s after the stop: %v", o, err)
+		}
+	}
+	after, err := e.lib.RefreshRunByID(ctx, run.ID)
+	if err != nil || refreshCountsOf(*after) != [4]int{3, 0, 0, 3} || !after.FinishedAt.Equal(*got.FinishedAt) ||
+		!reflect.DeepEqual(after.FailedTitles, []string{"Show 1"}) {
+		t.Fatalf("after the stop %+v %v", after, err)
+	}
+	// a second stop keeps the first reason; a new run may start at once
+	if err := e.lib.StopRefreshRun(ctx, run.ID, "enqueue"); err != nil {
+		t.Fatal(err)
+	}
+	if r, _ := e.lib.RefreshRunByID(ctx, run.ID); r.Stopped != RefreshStoppedCredential {
+		t.Fatalf("reason %q", r.Stopped)
+	}
+	if _, _, err := e.lib.StartRefreshRun(ctx, "tv"); err != nil {
+		t.Fatalf("new start: %v", err)
+	}
+	if err := e.lib.RecordRefresh(ctx, run.ID+100, RefreshUpdated, ""); !errors.Is(err, ErrNoRefreshRun) {
+		t.Fatalf("unknown run: %v", err)
+	}
+}
+
+func refreshCountsOf(r RefreshRun) [4]int { return [4]int{r.Total, r.Updated, r.Unchanged, r.Failed} }

@@ -91,6 +91,8 @@ type Deps struct {
 // JobQueue is the part of jobs.Queue the web layer needs.
 type JobQueue interface {
 	Enqueue(ctx context.Context, kind string, payload any) error
+	// EnqueueAt stores a job that may run no earlier than at.
+	EnqueueAt(ctx context.Context, kind string, payload any, at time.Time) error
 }
 
 type server struct {

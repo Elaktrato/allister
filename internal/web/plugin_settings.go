@@ -23,6 +23,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/allister/allister/internal/importer"
 	"github.com/allister/allister/internal/library"
@@ -800,7 +801,7 @@ type refreshForm struct {
 	Disabled    bool // the plugin is disabled: its jobs wait
 	Done, Total int
 	Last        *library.RefreshRun // the newest finished run, nil when none
-	Credential  bool                // Last stopped on a missing credential
+	Credential  bool                // Last stopped on a missing credential (shown whenever it did)
 	Confirm     bool
 	Count       int
 	Error       string
@@ -824,9 +825,9 @@ func (s *server) refreshFormFor(ctx context.Context, m plugin.Manifest) (*refres
 	f := &refreshForm{Action: pluginSettingsURL(m.ID) + "/refresh", PageURL: pluginSettingsURL(m.ID), Disabled: !s.deps.Registry.IsEnabled(m.ID)}
 	switch {
 	case run == nil:
-	case run.FinishedAt == nil:
+	case run.FinishedAt == nil && run.Stopped == "":
 		f.Running, f.Done, f.Total = true, min(run.Done(), run.Total), run.Total
-	default:
+	default: // finished, or stopped (which finishes it)
 		f.Last, f.Credential = run, run.Stopped == library.RefreshStoppedCredential
 	}
 	return f, nil
@@ -854,6 +855,36 @@ func (s *server) getPluginRefresh(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Vary", "HX-Request, HX-History-Restore-Request")
 	s.renderPartial(w, "settings_plugin", "plugin_refresh", f)
+}
+
+// refreshPace returns when each item of a refresh run of m starting at
+// start may be asked: one source's items are spread to its declared
+// RequestsPerMinute, an item costing one request (Details) plus one when
+// its kind has a people section (People). The first item of each source
+// is due at start; a source without a declared rate is not spread (the
+// queue's own gap applies). Spreading the run leaves room in the queue for
+// other jobs, such as a new item's sync, between its jobs.
+func refreshPace(m plugin.Manifest, start time.Time) func(library.RefreshTarget) time.Time {
+	next := map[string]time.Time{}
+	return func(it library.RefreshTarget) time.Time {
+		at, ok := next[it.Source]
+		if !ok {
+			at = start
+		}
+		rpm := 0
+		if i := slices.IndexFunc(m.Sources, func(si plugin.SourceInfo) bool { return si.ID == it.Source }); i >= 0 {
+			rpm = m.Sources[i].RequestsPerMinute
+		}
+		if rpm > 0 {
+			calls := 1
+			if i := slices.IndexFunc(m.Kinds, func(k plugin.KindDef) bool { return k.Key == it.Kind }); i >= 0 &&
+				slices.ContainsFunc(m.Kinds[i].Sections, func(sec plugin.SectionDef) bool { return sec.Type == plugin.SectionPeople }) {
+				calls = 2
+			}
+			next[it.Source] = at.Add(time.Duration(calls) * time.Minute / time.Duration(rpm))
+		}
+		return at
+	}
 }
 
 // postPluginRefresh starts the plugin's bulk "Update from source" run. The
@@ -925,11 +956,12 @@ func (s *server) postPluginRefresh(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	job := s.deps.RefreshJobs(m.ID, run.ID)
-	for _, id := range ids {
-		kind, payload := job(id)
-		if err := s.deps.Jobs.Enqueue(ctx, kind, payload); err != nil {
-			// the jobs already queued record their items as failed without
-			// asking the source, and the run finishes once they are done
+	pace := refreshPace(m, s.now())
+	for _, it := range ids {
+		kind, payload := job(it.ID)
+		if err := s.deps.Jobs.EnqueueAt(ctx, kind, payload, pace(it)); err != nil {
+			// the stop finishes the run at once (the items not asked count
+			// as failed); the jobs already queued return without asking
 			if serr := s.deps.Library.StopRefreshRun(context.WithoutCancel(ctx), run.ID, "enqueue"); serr != nil {
 				log.Printf("settings %s: stop refresh: %v", logSafe(m.ID), serr)
 			}

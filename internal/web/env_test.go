@@ -53,15 +53,23 @@ type enqueued struct {
 }
 
 type fakeJobs struct {
-	mu   sync.Mutex
-	got  []enqueued
+	mu  sync.Mutex
+	got []enqueued
+	// at is each job's run_after as given to EnqueueAt (zero for Enqueue),
+	// in the order of got.
+	at   []time.Time
 	fail error
 }
 
 func (f *fakeJobs) Enqueue(ctx context.Context, kind string, payload any) error {
+	return f.EnqueueAt(ctx, kind, payload, time.Time{})
+}
+
+func (f *fakeJobs) EnqueueAt(ctx context.Context, kind string, payload any, at time.Time) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.got = append(f.got, enqueued{kind, payload})
+	f.at = append(f.at, at)
 	return f.fail
 }
 
