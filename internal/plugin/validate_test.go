@@ -1004,3 +1004,40 @@ func TestValidateProgressUpgrades(t *testing.T) {
 		}
 	}
 }
+
+// TestValidateKindExtras: the alternative-title language is reserved, and
+// the adult field must be an enum field that offers "yes".
+func TestValidateKindExtras(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		mod  func(k *plugin.KindDef)
+		want string // empty: valid
+	}{
+		{"all four valid", func(k *plugin.KindDef) {
+			k.Fields = append(k.Fields, plugin.FieldDef{Key: "adult", Label: "Adult", Type: plugin.FieldEnum, EnumValues: []string{"no", "yes"}, Show: true, Editable: true})
+			k.AltTitles, k.Banner, k.Trailer, k.AdultField = true, true, true, "adult"
+		}, ""},
+		{"alt in title languages", func(k *plugin.KindDef) {
+			k.TitleLanguages = append(k.TitleLanguages, plugin.AltTitleLang)
+		}, ".title_languages[2]: \"alt\" is reserved"},
+		{"alt in fallback", func(k *plugin.KindDef) {
+			k.TitleFallback = []string{plugin.AltTitleLang}
+		}, ".title_fallback[0]"},
+		{"unknown adult field", func(k *plugin.KindDef) { k.AdultField = "nope" }, ".adult_field: unknown field"},
+		{"adult field not enum", func(k *plugin.KindDef) {
+			k.Fields = append(k.Fields, plugin.FieldDef{Key: "adult", Label: "Adult", Type: plugin.FieldText, Editable: true})
+			k.AdultField = "adult"
+		}, ".adult_field"},
+		{"adult enum without yes", func(k *plugin.KindDef) { k.AdultField = "type" }, ".adult_field"},
+	} {
+		m := tv()
+		c.mod(&m.Kinds[0])
+		err := plugin.Validate(m)
+		switch {
+		case c.want == "" && err != nil:
+			t.Errorf("%s: unexpected %v", c.name, err)
+		case c.want != "" && (err == nil || !strings.Contains(err.Error(), c.want)):
+			t.Errorf("%s: err = %v, want %s", c.name, err, c.want)
+		}
+	}
+}

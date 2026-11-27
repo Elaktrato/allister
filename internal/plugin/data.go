@@ -89,6 +89,24 @@ type ItemData struct {
 	Relations   []Relation        `json:"relations,omitempty"`
 	Genres      []string          `json:"genres,omitempty"`
 	Tags        []Tag             `json:"tags,omitempty"`
+	// BannerURL is the HTTPS URL of a banner image, when the kind declares one.
+	BannerURL string `json:"banner_url,omitempty"`
+	// Trailer is the item's trailer, when the kind declares one.
+	Trailer *Trailer `json:"trailer,omitempty"`
+	// Links are further external links of the item (label and HTTPS URL).
+	Links []Link `json:"links,omitempty"`
+}
+
+// Trailer is a link to an item's trailer with an optional thumbnail.
+type Trailer struct {
+	URL          string `json:"url"`
+	ThumbnailURL string `json:"thumbnail_url,omitempty"`
+}
+
+// Link is a labelled external link of an item.
+type Link struct {
+	Label string `json:"label"`
+	URL   string `json:"url"`
 }
 
 // ParsedEntry is one normalised row produced by an importer.

@@ -306,7 +306,22 @@ type KindDef struct {
 	// Length lists the measures of how long an entry is (in minutes or in
 	// units). Optional; a kind without it has no length filter.
 	Length []LengthDef `json:"length,omitempty"`
+	// AltTitles says the kind stores alternative titles (synonyms) under the
+	// reserved language AltTitleLang; they are searchable but never shown as
+	// the title.
+	AltTitles bool `json:"alt_titles,omitempty"`
+	// Banner says the kind's items can carry a banner image (ItemData.BannerURL).
+	Banner bool `json:"banner,omitempty"`
+	// Trailer says the kind's items can carry a trailer link (ItemData.Trailer).
+	Trailer bool `json:"trailer,omitempty"`
+	// AdultField names an enum field of the kind whose value "yes" marks an
+	// adult item.
+	AdultField string `json:"adult_field,omitempty"`
 }
+
+// AltTitleLang is the reserved title language of alternative titles. It must
+// not appear in a kind's TitleLanguages or TitleFallback.
+const AltTitleLang = "alt"
 
 // LengthDef is one length measure of a kind. Exactly one shape is valid:
 // Field (minutes), UnitsField with PerUnitField (units times minutes per
