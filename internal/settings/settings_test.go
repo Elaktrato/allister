@@ -512,3 +512,24 @@ func TestListPagingDefaultsToScroll(t *testing.T) {
 		t.Fatalf("bogus = %q", got)
 	}
 }
+
+// TestHideAdult: off by default, stored per plugin as plugin.<id>.hide_adult.
+func TestHideAdult(t *testing.T) {
+	s, _ := newStore(t)
+	ctx := context.Background()
+	if s.HideAdult(ctx, "a") {
+		t.Fatal("on by default")
+	}
+	if err := s.SetHideAdult(ctx, "a", true); err != nil {
+		t.Fatal(err)
+	}
+	if v, _, _ := s.Get(ctx, "plugin.a.hide_adult"); v != "1" || !s.HideAdult(ctx, "a") || s.HideAdult(ctx, "b") {
+		t.Fatalf("stored %q", v)
+	}
+	if err := s.SetHideAdult(ctx, "a", false); err != nil || s.HideAdult(ctx, "a") {
+		t.Fatalf("off: %v", err)
+	}
+	if err := s.Set(ctx, "plugin.a.hide_adult", "yes"); err != nil || s.HideAdult(ctx, "a") {
+		t.Fatalf("a stored value other than 1 is off: %v", err)
+	}
+}

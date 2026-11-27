@@ -443,9 +443,10 @@ func unmatchedRowHint(m plugin.Manifest) string {
 // listLibraryQuery is the library query of a parsed list request: the
 // plugin and kind, the status tab, the filters and sort, and the page. The
 // list page and a bulk change of everything a filter matches both use it,
-// so a filter selection is exactly what the list shows.
-func listLibraryQuery(m plugin.Manifest, k plugin.KindDef, lq listQuery) library.Query {
-	q := library.Query{PluginID: m.ID, Kind: k.Key, Page: lq.Page, PageSize: listPageSize}
+// so a filter selection is exactly what the list shows (the random pick too).
+// Items the plugin hides (hiddenField) are left out.
+func (s *server) listLibraryQuery(ctx context.Context, m plugin.Manifest, k plugin.KindDef, lq listQuery) library.Query {
+	q := library.Query{PluginID: m.ID, Kind: k.Key, Page: lq.Page, PageSize: listPageSize, HideField: s.hiddenField(ctx, m, k)}
 	lq.Filters.apply(k, &q)
 	if lq.Status != "" && lq.Status != "all" {
 		st := library.Status(lq.Status)
@@ -469,7 +470,7 @@ func (s *server) buildList(r *http.Request, m plugin.Manifest, lq listQuery) (li
 		lq.Tab = "" // no series: the normal list
 	}
 	f := lq.Filters
-	q := listLibraryQuery(m, k, lq)
+	q := s.listLibraryQuery(ctx, m, k, lq)
 	counts, err := s.deps.Library.Counts(ctx, q)
 	if errors.Is(err, library.ErrInvalid) && f.active() {
 		// parseFilters checks every part against the schema, so this is a
@@ -487,7 +488,7 @@ func (s *server) buildList(r *http.Request, m plugin.Manifest, lq listQuery) (li
 	}
 	anyEntries := all > 0
 	if !anyEntries && f.narrows() {
-		plain, err := s.deps.Library.Counts(ctx, library.Query{PluginID: m.ID, Kind: k.Key})
+		plain, err := s.deps.Library.Counts(ctx, library.Query{PluginID: m.ID, Kind: k.Key, HideField: q.HideField})
 		if err != nil {
 			return listView{}, err
 		}

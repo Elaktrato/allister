@@ -121,8 +121,12 @@ type Query struct {
 	Unmatched          bool
 	PartialSync        bool
 	Progress           ProgressState
-	Sort               Sort
-	Page, PageSize     int
+	// HideField names an enum field of the kind: rows whose value of it is
+	// "yes" are left out (rows without a value stay). The web layer sets
+	// it to the kind's AdultField while its plugin hides those items.
+	HideField      string
+	Sort           Sort
+	Page, PageSize int
 }
 
 // FilterError is the typed error for a rejected filter, term filter or sort:
@@ -358,6 +362,12 @@ func (l *Library) compile(q Query) (*compiled, error) {
 	}
 	if q.PartialSync {
 		add("partial", `items.sync_state <> 'done'`)
+	}
+	if q.HideField != "" {
+		if i := slices.IndexFunc(def.Fields, func(f plugin.FieldDef) bool { return f.Key == q.HideField }); i < 0 || def.Fields[i].Type != plugin.FieldEnum {
+			return nil, filterErr(q.HideField, "no enum field of this name in kind %q", def.Key)
+		}
+		add("hide", `NOT EXISTS (SELECT 1 FROM item_fields f WHERE f.item_id = items.id AND f.key = ? AND f.text = 'yes')`, q.HideField)
 	}
 	if err := c.compileProgress(q.Progress); err != nil {
 		return nil, err
@@ -1165,6 +1175,33 @@ func (l *Library) Terms(ctx context.Context, q Query, kind string) ([]TermCount,
 	}
 	if err := closeRows(rows); err != nil {
 		return nil, fmt.Errorf("terms: %w", err)
+	}
+	return out, nil
+}
+
+// FlaggedItems returns the ids of the items of pluginID and kind whose field
+// key has the value "yes" (the rows Query.HideField leaves out), for views
+// that do not read through a Query. An empty key names none.
+func (l *Library) FlaggedItems(ctx context.Context, pluginID, kind, key string) (map[int64]bool, error) {
+	out := map[int64]bool{}
+	if key == "" {
+		return out, nil
+	}
+	rows, err := l.db.QueryContext(ctx, `SELECT DISTINCT items.id FROM items JOIN item_fields f ON f.item_id = items.id
+		WHERE items.plugin_id = ? AND items.kind = ? AND f.key = ? AND f.text = 'yes'`, pluginID, kind, key)
+	if err != nil {
+		return nil, fmt.Errorf("flagged items: %w", err)
+	}
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return nil, fmt.Errorf("flagged items: %w", err)
+		}
+		out[id] = true
+	}
+	if err := closeRows(rows); err != nil {
+		return nil, fmt.Errorf("flagged items: %w", err)
 	}
 	return out, nil
 }

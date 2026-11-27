@@ -1208,3 +1208,57 @@ func TestTextSearchFindsAltTitles(t *testing.T) {
 		t.Fatalf("found %q", got)
 	}
 }
+
+func TestListHidesAdultRows(t *testing.T) {
+	p := richBook(plugintest.WithID("flagged"))
+	k := &p.M.Kinds[0]
+	k.Fields = append(k.Fields, plugin.FieldDef{Key: "adult", Label: "Adult", Type: plugin.FieldEnum, EnumValues: []string{"yes", "no"}, Editable: true, Filterable: true})
+	k.AdultField = "adult"
+	l := newEnvWith(t, p).lib
+	save := func(id, title string, f map[string]plugin.FieldValue) {
+		d := bookData(id)
+		d.Titles = []plugin.Title{{Lang: "en", Text: title}}
+		for key, v := range f {
+			d.Fields[key] = v
+		}
+		if _, err := l.AddToList(bg, "flagged", "book", d, Entry{Status: Planned}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	save("1", "Plain", map[string]plugin.FieldValue{"adult": {Text: "no"}})
+	save("2", "Flagged", map[string]plugin.FieldValue{"adult": {Text: "yes"}})
+	save("3", "Unknown", nil) // no value: never hidden
+	q := Query{PluginID: "flagged", Kind: "book"}
+	sameSet(t, "plain query", titlesOf(mustList(t, l, q)), "Plain", "Flagged", "Unknown")
+	q.HideField = "adult"
+	pg := mustList(t, l, q)
+	sameSet(t, "hiding", titlesOf(pg), "Plain", "Unknown")
+	if pg.Total != 2 {
+		t.Fatalf("total = %d, want 2", pg.Total)
+	}
+	counts, err := l.Counts(bg, q)
+	if err != nil || counts[Planned] != 2 {
+		t.Fatalf("counts = %v, %v, want 2 planned", counts, err)
+	}
+	ids, err := l.MatchingIDs(bg, q, "en")
+	if err != nil || len(ids) != 2 {
+		t.Fatalf("matching ids = %v, %v, want 2", ids, err)
+	}
+	// a field the kind does not declare is refused
+	if _, err := l.List(bg, Query{PluginID: "flagged", Kind: "book", HideField: "nope"}, "en"); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("unknown hide field: err = %v, want ErrInvalid", err)
+	}
+	// FlaggedItems names the same items (for the calendar's airings)
+	flagged, err := l.FlaggedItems(bg, "flagged", "book", "adult")
+	if err != nil || len(flagged) != 1 {
+		t.Fatalf("flagged = %v, %v, want one item", flagged, err)
+	}
+	for id := range flagged {
+		if it := mustItem(t, l, id); it.Fields["adult"].Text != "yes" {
+			t.Fatalf("flagged item %d has %v", id, it.Fields)
+		}
+	}
+	if none, err := l.FlaggedItems(bg, "flagged", "book", ""); err != nil || len(none) != 0 {
+		t.Fatalf("no field: %v, %v", none, err)
+	}
+}

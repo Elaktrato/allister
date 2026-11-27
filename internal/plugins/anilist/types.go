@@ -45,6 +45,7 @@ type Relation struct {
 	Titles    []Title
 	Type      string // the related item's format (TV, MANGA, ...)
 	MediaType string // ANIME or MANGA
+	Adult     bool   // AniList's isAdult
 }
 
 // Recommendation references another anime recommended for this one.
@@ -53,6 +54,7 @@ type Recommendation struct {
 	ID       string
 	Titles   []Title
 	CoverURL string
+	Adult    bool // AniList's isAdult
 }
 
 // SearchResult is the summary of an anime as returned by a search.
@@ -66,6 +68,8 @@ type SearchResult struct {
 	Chapters, Volumes          *int
 	Year                       *int
 	Studio, Synopsis, CoverURL string
+	// Adult is AniList's isAdult (see AdultValue).
+	Adult bool
 }
 
 // Tag is a named tag with an optional relevance rank (0 to 100) and a spoiler flag.
@@ -111,7 +115,6 @@ type Media struct {
 	// Season is the airing season (WINTER, SPRING, SUMMER, FALL), Country
 	// the country of origin as AniList gives it (an ISO code such as JP).
 	Season, Country string
-	Adult           bool
 	// AverageScore is AniList's community average (0 to 100), Popularity
 	// the number of users with the media on a list; nil when unknown.
 	AverageScore, Popularity *int

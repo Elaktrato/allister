@@ -307,7 +307,7 @@ func boundsText[T int | float64](lo, hi *T, f func(T) string) string {
 func (s *server) buildPick(r *http.Request, m plugin.Manifest, lq listQuery) (*pickView, error) {
 	ctx := r.Context()
 	k, _ := kindDef(m, lq.Kind)
-	q := listLibraryQuery(m, k, lq)
+	q := s.listLibraryQuery(ctx, m, k, lq)
 	q.Sort = library.Sort{Kind: library.SortTitle} // a stable order for the draw
 	rows, err := s.deps.Library.Rows(ctx, q, s.titleLang(ctx, m), s.pickCap+1, 0)
 	if errors.Is(err, library.ErrInvalid) && lq.Filters.active() {

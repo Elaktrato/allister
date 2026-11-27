@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"slices"
 	"sync"
 	"time"
 
@@ -192,6 +193,7 @@ func (s *server) getRecommendations(w http.ResponseWriter, r *http.Request, plug
 		}
 	}
 	if !v.Failed {
+		recs = slices.DeleteFunc(slices.Clone(recs), s.summaryHider(r.Context(), m, k))
 		v.Cards = recommendationCards(m, k, recs, s.titleLang(r.Context(), m))
 	}
 	if isPartialRequest(r) {

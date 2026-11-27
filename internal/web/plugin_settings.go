@@ -5,7 +5,9 @@ package web
 // what its list opens with — the view and the status (POST
 // /settings/plugins/{id}/home), per kind, the columns of its list table
 // (POST /settings/plugins/{id}/columns) and, for a plugin with an IdlePause
-// importer, the idle cutoff in days (POST /settings/plugins/{id}/idle).
+// importer, the idle cutoff in days (POST /settings/plugins/{id}/idle) and,
+// for a plugin whose kinds declare an adult flag, whether its adult items are
+// hidden (POST /settings/plugins/{id}/adult).
 // Every choice is validated against what the plugin's manifest declares; the
 // page answers for every installed plugin (enabled or not, like its Enable
 // button), unknown ids get the 404 page and are never echoed.
@@ -133,6 +135,7 @@ type pluginSettingsView struct {
 	Imports      []importForm
 	Error        string
 	Idle         *idleForm
+	Adult        *adultForm
 	Columns      []columnsForm
 	// MissingKeys names the plugin's sources that declare a key label and
 	// have no effective key; OtherSources says the plugin also has a source
@@ -151,6 +154,72 @@ type idleForm struct {
 	Active, Paused, Kept string
 	Error                string
 	On                   bool // the stored cutoff is above 0
+}
+
+// adultForm is the "Hide adult items" choice of a plugin whose kinds declare
+// an adult flag.
+type adultForm struct {
+	Action string
+	On     bool
+}
+
+// hasAdultField reports whether a kind of m declares an AdultField.
+func hasAdultField(m plugin.Manifest) bool {
+	return slices.ContainsFunc(m.Kinds, func(k plugin.KindDef) bool { return k.AdultField != "" })
+}
+
+// hideAdult reports whether plugin m hides its adult items: the setting is
+// on and a kind of m declares an AdultField.
+func (s *server) hideAdult(ctx context.Context, m plugin.Manifest) bool {
+	return s.deps.Settings != nil && hasAdultField(m) && s.deps.Settings.HideAdult(ctx, m.ID)
+}
+
+// hiddenField is the field whose value "yes" hides an item of kind k of m
+// (k's AdultField while m hides adult items), "" when nothing is hidden.
+func (s *server) hiddenField(ctx context.Context, m plugin.Manifest, k plugin.KindDef) string {
+	if k.AdultField == "" || !s.hideAdult(ctx, m) {
+		return ""
+	}
+	return k.AdultField
+}
+
+// summaryHider reports for the summaries shown on a page of kind k of m
+// (related items, recommendations, search results) whether each is hidden:
+// its kind's (default k's) AdultField has the value "yes" while m hides
+// adult items. The setting is read once.
+func (s *server) summaryHider(ctx context.Context, m plugin.Manifest, k plugin.KindDef) func(plugin.ItemSummary) bool {
+	if !s.hideAdult(ctx, m) {
+		return func(plugin.ItemSummary) bool { return false }
+	}
+	return func(sum plugin.ItemSummary) bool {
+		kd := k
+		if sk, ok := kindDef(m, sum.Kind); ok && sum.Kind != "" {
+			kd = sk
+		}
+		return kd.AdultField != "" && sum.Fields[kd.AdultField].Text == "yes"
+	}
+}
+
+// hiddenItems returns the ids of the items of ms that are hidden (their
+// kind's hidden field has the value "yes"), for views that read no Query.
+func (s *server) hiddenItems(ctx context.Context, ms []plugin.Manifest) (map[int64]bool, error) {
+	out := map[int64]bool{}
+	for _, m := range ms {
+		for _, k := range m.Kinds {
+			f := s.hiddenField(ctx, m, k)
+			if f == "" {
+				continue
+			}
+			ids, err := s.deps.Library.FlaggedItems(ctx, m.ID, k.Key, f)
+			if err != nil {
+				return nil, err
+			}
+			for id := range ids {
+				out[id] = true
+			}
+		}
+	}
+	return out, nil
 }
 
 // idleImporters names m's IdlePause importers ("" when it has none).
@@ -267,9 +336,44 @@ func (s *server) pluginSettingsData(r *http.Request, m plugin.Manifest) (pluginS
 	if v.Idle = idleFormFor(m, strconv.Itoa(days), ""); v.Idle != nil {
 		v.Idle.On = days > 0
 	}
+	if hasAdultField(m) {
+		v.Adult = &adultForm{Action: pluginSettingsURL(m.ID) + "/adult", On: s.hideAdult(ctx, m)}
+	}
 	var err error
 	v.MissingKeys, v.OtherSources, err = s.sourceKeyState(ctx, m)
 	return v, err
+}
+
+// postHideAdult stores whether the plugin hides its adult items (field
+// hide_adult, "1" for on; absent is off) for a plugin whose kinds declare an
+// adult flag; other plugins get the 404 page.
+func (s *server) postHideAdult(w http.ResponseWriter, r *http.Request) {
+	m, ok := s.settingsPlugin(w, r)
+	if !ok {
+		return
+	}
+	if !hasAdultField(m) {
+		s.errorPage(w, r, http.StatusNotFound, "Not found", "This plugin has no such setting.", "")
+		return
+	}
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+	var on bool
+	switch r.PostForm.Get("hide_adult") {
+	case "1":
+		on = true
+	case "":
+	default:
+		http.Error(w, "bad value", http.StatusBadRequest)
+		return
+	}
+	if err := s.deps.Settings.SetHideAdult(r.Context(), m.ID, on); err != nil {
+		s.internalError(w, r, err)
+		return
+	}
+	http.Redirect(w, r, pluginSettingsURL(m.ID)+"#adult", http.StatusSeeOther)
 }
 
 // postIdleDays stores the idle cutoff (field idle_days, a whole number of

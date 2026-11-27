@@ -137,7 +137,7 @@ func novelSummary(r anilist.SearchResult) plugin.ItemSummary {
 	return plugin.ItemSummary{
 		Source: SourceAniList, ID: r.ID, Kind: KindSeries,
 		Titles:   novelTitles(r.Titles),
-		Fields:   fields,
+		Fields:   anilist.AdultFields(fields, r.Source, r.Adult),
 		CoverURL: plugin.HTTPSURL(r.CoverURL),
 		URL:      "https://anilist.co/manga/" + url.PathEscape(r.ID),
 	}

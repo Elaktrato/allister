@@ -46,6 +46,33 @@ func ReleaseStatusValue(s string) string { return releaseStatuses[strings.TrimSp
 // SeasonValue maps AniList's season to a season value ("" for an unknown one).
 func SeasonValue(s string) string { return seasons[strings.TrimSpace(s)] }
 
+// AdultValue is the adult field's value of data from src: "yes" or "no"
+// for AniList data, whose answer always states it, "" for any other source.
+func AdultValue(src Source, adult bool) string {
+	switch {
+	case src != AniList:
+		return ""
+	case adult:
+		return "yes"
+	}
+	return "no"
+}
+
+// AdultFields is fields with the adult value of src added (fields itself,
+// or a new map when it is nil); fields is returned unchanged for another
+// source.
+func AdultFields(fields map[string]plugin.FieldValue, src Source, adult bool) map[string]plugin.FieldValue {
+	v := AdultValue(src, adult)
+	if v == "" {
+		return fields
+	}
+	if fields == nil {
+		fields = map[string]plugin.FieldValue{}
+	}
+	fields["adult"] = plugin.FieldValue{Text: v}
+	return fields
+}
+
 // ExtraFields returns the manifest fields of the extras the three kinds
 // share (release_status, country, adult, community_score, popularity). The
 // adult flag is only set for data that came from AniList, whose answer
@@ -58,13 +85,7 @@ func ExtraFields(m Media) map[string]plugin.FieldValue {
 	if c := plugin.SingleLine(m.Country, maxCountryRunes); c != "" {
 		f["country"] = plugin.FieldValue{Text: c}
 	}
-	if m.Source == AniList {
-		adult := "no"
-		if m.Adult {
-			adult = "yes"
-		}
-		f["adult"] = plugin.FieldValue{Text: adult}
-	}
+	f = AdultFields(f, m.Source, m.Adult)
 	if v, ok := numValue(m.AverageScore, 0, 100); ok {
 		f["community_score"] = v
 	}

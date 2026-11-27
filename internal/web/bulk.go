@@ -289,7 +289,7 @@ func upperFirst(s string) string {
 func (s *server) bulkSelection(w http.ResponseWriter, r *http.Request, m plugin.Manifest, k plugin.KindDef, lq listQuery) ([]int64, bool) {
 	ctx := r.Context()
 	if r.PostForm.Get("scope") == "filter" {
-		ids, err := s.deps.Library.MatchingIDs(ctx, listLibraryQuery(m, k, lq), s.titleLang(ctx, m))
+		ids, err := s.deps.Library.MatchingIDs(ctx, s.listLibraryQuery(ctx, m, k, lq), s.titleLang(ctx, m))
 		if err != nil {
 			s.internalError(w, r, err)
 			return nil, false

@@ -324,11 +324,12 @@ func (s *server) runSearch(r *http.Request, m plugin.Manifest, si plugin.SourceI
 	}
 	lang := s.titleLang(r.Context(), m)
 	text := textField(k)
+	hidden := s.summaryHider(r.Context(), m, k)
 	for _, it := range res {
 		if len(v.Results) == maxSearchResults {
 			break
 		}
-		if !validPathID(it.ID) {
+		if !validPathID(it.ID) || hidden(it) {
 			continue
 		}
 		c := searchCard{

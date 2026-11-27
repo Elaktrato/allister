@@ -55,7 +55,7 @@ func summaryFields(r anilist.SearchResult) map[string]plugin.FieldValue {
 	if s := plugin.MultiLine(r.Synopsis, maxTextRunes); s != "" {
 		f["synopsis"] = plugin.FieldValue{Text: s}
 	}
-	return f
+	return anilist.AdultFields(f, r.Source, r.Adult)
 }
 
 func toSummary(r anilist.SearchResult) plugin.ItemSummary {
@@ -124,6 +124,7 @@ func ItemData(m anilist.Media) plugin.ItemData {
 		if ty := plugin.SingleLine(r.Type, maxNameRunes); ty != "" {
 			item.Fields = map[string]plugin.FieldValue{"type": {Text: ty}}
 		}
+		item.Fields = anilist.AdultFields(item.Fields, r.Source, r.Adult)
 		d.Relations = append(d.Relations, plugin.Relation{Kind: kind, Item: item})
 	}
 	return d
@@ -187,6 +188,7 @@ func toRecommendations(rs []anilist.Recommendation) []plugin.ItemSummary {
 		out = append(out, plugin.ItemSummary{
 			Source: sourceOf(r.Source), ID: sid, Kind: KindManga,
 			Titles: titles(r.Titles), CoverURL: plugin.HTTPSURL(r.CoverURL),
+			Fields: anilist.AdultFields(nil, r.Source, r.Adult),
 		})
 	}
 	return out
