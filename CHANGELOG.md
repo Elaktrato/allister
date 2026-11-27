@@ -6,6 +6,20 @@ How a release is cut: move the entries under "Unreleased" to a new `## vX.Y.Z - 
 
 ## Unreleased
 
+### Added
+
+- **Release status filter.** Anime, manga, light novels (AniList) and games (IGDB) store the title's own release status (finished, releasing, upcoming, hiatus, cancelled for AniList; released, early access, upcoming, cancelled, delisted for IGDB) and filter by it (`f.release_status`).
+- **More AniList data for anime, manga and light novels.** Season (anime), country of origin and adult flag as filters; the community score and popularity shown on the item page and sortable (the community score never mixes with your own score); alternative titles, which the list search finds but which never become the displayed title; streaming links in the Links section; and all animation studios of an anime.
+- **Banner and trailer.** The item page shows AniList's banner as a wide image and the trailer as a thumbnail with a play button that opens the video site (YouTube or Dailymotion) in a new tab. Both images are downloaded into the local image store like covers: nothing is loaded from a third-party host.
+- **Hide adult items.** A per-plugin setting (Settings > Plugins > the plugin, `plugin.<id>.hide_adult`, off by default) leaves adult items out of the lists, the home page, the random pick, the calendar, Related and Recommendations and the search results. Their pages still open, and statistics still count them.
+- **Update from source for a whole plugin.** The plugin's settings page asks the source about every sourced item in the background and fills only empty values and missing list entries; nothing you set is changed. It shows its progress and result, stops when the source's credential is missing, and can be run again at any time. The single item's comparison page lists the new data as well.
+- **Plugin authors:** `KindDef.alt_titles`, `banner`, `trailer` and `adult_field`, the reserved title language `alt`, and `ItemData.banner_url`, `trailer` and `links` (migration 00023); see [docs/plugins.md](docs/plugins.md).
+
+### Changed
+
+- **Studio is a list of animation studios.** An anime's studio field is now a list of all its animation studios (producers and licensors are left out) and its filter matches a whole studio name, like genres, instead of "contains". A stored single studio becomes a one-element list.
+- **Backups are format 5** (banners, trailer thumbnails, trailers and links). Allister v0.6.0 and older refuse such a backup instead of silently dropping that data; formats 1 to 5 still restore, and a text value an older backup holds in a field that is now a list restores as a one-element list. (Breaking for downgrades.)
+
 ## v0.6.0 - 2026-11-25
 
 ### Added
