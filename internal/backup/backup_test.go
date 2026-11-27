@@ -984,7 +984,13 @@ func (e *env) seriesOf(title string, ids ...int64) library.Series {
 			e.t.Fatal(err)
 		}
 	}
-	return s
+	// adding parts touches the series, so return it as stored now (a part
+	// added in the next second would otherwise leave UpdatedAt stale)
+	got, err := e.lib.SeriesByID(bg, s.ID)
+	if err != nil || got == nil {
+		e.t.Fatalf("SeriesByID = %v, %v", got, err)
+	}
+	return *got
 }
 
 func (e *env) seriesTitles() []string {
