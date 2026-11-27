@@ -32,7 +32,7 @@ const (
 	// igdbSteamSource is the external_game_source value of Steam.
 	igdbSteamSource = 1
 	// igdbGameFields is the details query without its where clause.
-	igdbGameFields = "fields name,slug,summary,first_release_date,platforms.name,genres.name,themes.name,keywords.name,involved_companies.company.name,involved_companies.developer,involved_companies.publisher,cover.url,similar_games.id,similar_games.name,similar_games.first_release_date,similar_games.cover.url,external_games.uid,external_games.external_game_source;"
+	igdbGameFields = "fields name,slug,summary,first_release_date,game_status.status,platforms.name,genres.name,themes.name,keywords.name,involved_companies.company.name,involved_companies.developer,involved_companies.publisher,cover.url,similar_games.id,similar_games.name,similar_games.first_release_date,similar_games.cover.url,external_games.uid,external_games.external_game_source;"
 	// defaultIGDBTokenTTL is used when Twitch omits expires_in.
 	defaultIGDBTokenTTL = time.Hour
 )
@@ -451,7 +451,7 @@ func (s *igdbSource) details(ctx context.Context, where string) (plugin.ItemData
 	if err := ctx.Err(); err != nil {
 		return plugin.ItemData{}, err
 	}
-	return gameData(igdbGameRecord(g, tb)), nil
+	return gameData(igdbGameRecord(g, tb, s.c.clock())), nil
 }
 
 func (s *igdbSource) game(ctx context.Context, where string) (igdbGame, error) {
@@ -482,6 +482,7 @@ type igdbGame struct {
 	Slug              string                `json:"slug"`
 	Summary           string                `json:"summary"`
 	FirstReleaseDate  int64                 `json:"first_release_date"`
+	GameStatus        igdbGameStatus        `json:"game_status"`
 	Platforms         []igdbNamed           `json:"platforms"`
 	Genres            []igdbNamed           `json:"genres"`
 	Themes            []igdbNamed           `json:"themes"`
@@ -490,6 +491,11 @@ type igdbGame struct {
 	Cover             igdbCoverImage        `json:"cover"`
 	SimilarGames      []igdbSimilarGame     `json:"similar_games"`
 	ExternalGames     []igdbExternalGame    `json:"external_games"`
+}
+
+// igdbGameStatus is the game_status reference; status holds its name.
+type igdbGameStatus struct {
+	Status string `json:"status"`
 }
 
 type igdbNamed struct {
@@ -555,7 +561,9 @@ func (u *igdbUID) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-func igdbGameRecord(g igdbGame, tb igdbTimeToBeat) gameRecord {
+// igdbGameRecord maps an IGDB game; today (a calendar day in UTC) decides the
+// release status of a game that has no IGDB status.
+func igdbGameRecord(g igdbGame, tb igdbTimeToBeat, today time.Time) gameRecord {
 	rec := gameRecord{
 		Source:      SourceIGDB,
 		ID:          strconv.Itoa(g.ID),
@@ -574,6 +582,9 @@ func igdbGameRecord(g igdbGame, tb igdbTimeToBeat) gameRecord {
 		fields["released_on"] = plugin.FieldValue{Date: &day}
 		year := float64(released.Year())
 		fields["year"] = plugin.FieldValue{Num: &year}
+	}
+	if status := igdbReleaseStatus(g.GameStatus.Status, g.FirstReleaseDate, today); status != "" {
+		fields["release_status"] = plugin.FieldValue{Text: status}
 	}
 	platforms := make([]string, 0, len(g.Platforms))
 	for _, p := range g.Platforms {
@@ -626,6 +637,33 @@ func igdbGameRecord(g igdbGame, tb igdbTimeToBeat) gameRecord {
 		break
 	}
 	return rec
+}
+
+// igdbReleaseStatus maps the IGDB status name to the release_status enum. Without
+// a status the first release date decides: after today is upcoming, otherwise
+// released; with neither it returns "".
+func igdbReleaseStatus(name string, firstRelease int64, today time.Time) string {
+	switch strings.ToLower(strings.TrimSpace(name)) {
+	case "released":
+		return "released"
+	case "alpha", "beta", "early access":
+		return "early_access"
+	case "cancelled":
+		return "cancelled"
+	case "offline", "delisted":
+		return "delisted"
+	case "":
+	default:
+		return "other"
+	}
+	if firstRelease <= 0 {
+		return ""
+	}
+	day := time.Unix(firstRelease, 0).UTC().Format(time.DateOnly)
+	if day > today.UTC().Format(time.DateOnly) {
+		return "upcoming"
+	}
+	return "released"
 }
 
 func igdbSummary(id int, name, cover string, released int64) plugin.ItemSummary {

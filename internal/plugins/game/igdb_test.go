@@ -614,7 +614,7 @@ func TestIGDBSearch(t *testing.T) {
 	})
 }
 
-const igdbTestGameFields = "fields name,slug,summary,first_release_date,platforms.name,genres.name,themes.name,keywords.name,involved_companies.company.name,involved_companies.developer,involved_companies.publisher,cover.url,similar_games.id,similar_games.name,similar_games.first_release_date,similar_games.cover.url,external_games.uid,external_games.external_game_source;"
+const igdbTestGameFields = "fields name,slug,summary,first_release_date,game_status.status,platforms.name,genres.name,themes.name,keywords.name,involved_companies.company.name,involved_companies.developer,involved_companies.publisher,cover.url,similar_games.id,similar_games.name,similar_games.first_release_date,similar_games.cover.url,external_games.uid,external_games.external_game_source;"
 
 const igdbSkyrimJSON = `[{
 	"id": 9606,
@@ -1084,5 +1084,46 @@ func TestIGDBOverlongSlugIsNotFound(t *testing.T) {
 	}
 	if n := len(rec.requests()); n != 0 {
 		t.Fatalf("%d requests, want none", n)
+	}
+}
+
+func TestGameReleaseStatus(t *testing.T) {
+	today := time.Date(2026, 11, 27, 15, 0, 0, 0, time.UTC)
+	future := time.Date(2027, 3, 1, 0, 0, 0, 0, time.UTC).Unix()
+	past := time.Date(2020, 3, 1, 0, 0, 0, 0, time.UTC).Unix()
+	sameDay := time.Date(2026, 11, 27, 0, 0, 0, 0, time.UTC).Unix()
+	cases := []struct {
+		name   string
+		status string
+		date   int64
+		want   string
+	}{
+		{"released", "Released", past, "released"},
+		{"alpha", "Alpha", past, "early_access"},
+		{"beta", "Beta", 0, "early_access"},
+		{"early access", "Early Access", future, "early_access"},
+		{"cancelled", "Cancelled", 0, "cancelled"},
+		{"offline", "Offline", past, "delisted"},
+		{"delisted", "Delisted", past, "delisted"},
+		{"rumored", "Rumored", 0, "other"},
+		{"no status future", "", future, "upcoming"},
+		{"no status past", "", past, "released"},
+		{"no status today", "", sameDay, "released"},
+		{"no status no date", "", 0, ""},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			g := igdbGame{ID: 1, Name: "X", FirstReleaseDate: c.date, GameStatus: igdbGameStatus{Status: c.status}}
+			got, ok := igdbGameRecord(g, igdbTimeToBeat{}, today).Fields["release_status"]
+			if c.want == "" {
+				if ok {
+					t.Fatalf("release_status = %+v, want absent", got)
+				}
+				return
+			}
+			if got.Text != c.want {
+				t.Fatalf("release_status = %+v, want %q", got, c.want)
+			}
+		})
 	}
 }

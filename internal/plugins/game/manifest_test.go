@@ -54,6 +54,7 @@ func TestGameKindFields(t *testing.T) {
 	want := []plugin.FieldDef{
 		{Key: "year", Label: "Year", Type: plugin.FieldNumber, Min: num(1950), Max: num(2100), Show: true, Editable: true, Filterable: true, Sortable: true},
 		{Key: "released_on", Label: "Released", Type: plugin.FieldDate, Show: true, Editable: true},
+		{Key: "release_status", Label: "Release status", Type: plugin.FieldEnum, EnumValues: []string{"released", "early_access", "upcoming", "cancelled", "delisted", "other"}, Show: true, Editable: true, Filterable: true},
 		{Key: "platforms", Label: "Platforms", Type: plugin.FieldText, Show: true, Editable: true, Filterable: true},
 		{Key: "developer", Label: "Developer", Type: plugin.FieldText, Show: true, Editable: true, Filterable: true},
 		{Key: "publisher", Label: "Publisher", Type: plugin.FieldText, Show: true, Editable: true, Filterable: true},
@@ -138,7 +139,7 @@ func TestGameKindColumns(t *testing.T) {
 	if !slices.Equal(defaults, []string{"year", plugin.ColumnProgress, plugin.ColumnRating, plugin.ColumnStatus, plugin.ColumnUpdated}) {
 		t.Fatalf("default columns = %+v", defaults)
 	}
-	if !slices.Equal(optional, []string{"platforms", "developer", "publisher", "released_on", "time_main", "time_extra", "time_complete"}) {
+	if !slices.Equal(optional, []string{"platforms", "developer", "publisher", "released_on", "release_status", "time_main", "time_extra", "time_complete"}) {
 		t.Fatalf("optional columns = %+v", optional)
 	}
 	for _, c := range k.Columns {
