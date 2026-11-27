@@ -264,7 +264,7 @@ func TestFillNothingNew(t *testing.T) {
 		t.Fatalf("entry events = %d, want %d", n, events)
 	}
 	if n := count(t, e.db, `SELECT COUNT(*) FROM entries WHERE item_id = ? AND updated_at = '2000-01-02T00:00:00Z'`, id); n != 1 {
-		t.Fatal("entry updated_at applied")
+		t.Fatal("entry updated_at changed")
 	}
 }
 
