@@ -6,6 +6,8 @@ How a release is cut: move the entries under "Unreleased" to a new `## vX.Y.Z - 
 
 ## Unreleased
 
+## v0.7.0 - 2026-11-27
+
 ### Added
 
 - **Release status filter.** Anime, manga, light novels (AniList) and games (IGDB) store the title's own release status (finished, releasing, upcoming, hiatus, cancelled for AniList; released, early access, upcoming, cancelled, delisted, other for IGDB) and filter by it (`f.release_status`).
