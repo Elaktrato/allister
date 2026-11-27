@@ -259,3 +259,39 @@ func TestParentCandidates(t *testing.T) {
 		t.Fatalf("other plugin: %v", got)
 	}
 }
+
+// TestSetBannerPathAndTrailerThumbCompareAndSet: the setters write only
+// while the stored value is still the expected one, and the files they store
+// count as referenced images.
+func TestSetBannerPathAndTrailerThumbCompareAndSet(t *testing.T) {
+	e := newEnv(t)
+	d := bookData("1")
+	d.BannerURL = "https://img.example/b.jpg"
+	d.Trailer = &plugin.Trailer{URL: "https://video.example/t", ThumbnailURL: "https://img.example/t.jpg"}
+	id := mustSave(t, e.lib, "book", "book", d)
+
+	if ok, err := e.lib.SetBannerPath(bg, id, "https://img.example/other.jpg", "b.png"); ok || err != nil {
+		t.Fatalf("stale banner: %v, %v", ok, err)
+	}
+	if ok, err := e.lib.SetTrailerThumb(bg, id, "https://img.example/other.jpg", "t.png"); ok || err != nil {
+		t.Fatalf("stale thumb: %v, %v", ok, err)
+	}
+	if _, err := e.lib.SetBannerPath(bg, id, d.BannerURL, "dir/b.png"); err == nil {
+		t.Fatal("a path was accepted")
+	}
+	if ok, err := e.lib.SetBannerPath(bg, id, d.BannerURL, "b.png"); !ok || err != nil {
+		t.Fatalf("banner: %v, %v", ok, err)
+	}
+	if ok, err := e.lib.SetTrailerThumb(bg, id, d.Trailer.ThumbnailURL, "t.png"); !ok || err != nil {
+		t.Fatalf("thumb: %v, %v", ok, err)
+	}
+	it, _ := e.lib.Item(bg, id)
+	if it.BannerPath != "b.png" || it.Trailer == nil || it.Trailer.ThumbnailURL != "t.png" || it.Trailer.URL != d.Trailer.URL {
+		t.Fatalf("item %q %+v", it.BannerPath, it.Trailer)
+	}
+	for name, want := range map[string]bool{"b.png": true, "t.png": true, "x.png": false} {
+		if got, err := e.lib.ImageReferenced(bg, name); err != nil || got != want {
+			t.Errorf("ImageReferenced(%q) = %v, %v", name, got, err)
+		}
+	}
+}

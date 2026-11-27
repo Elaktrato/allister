@@ -598,3 +598,113 @@ func TestCoverJobFor(t *testing.T) {
 		t.Fatalf("payload json %s", b)
 	}
 }
+
+// saveExtras stores a pending item with a banner and a trailer thumbnail;
+// both URLs are pointed at the test server afterwards (the library accepts
+// only https for them and the test server is plain http).
+func (e *syncEnv) saveExtras(t *testing.T, src, banner, thumb string) int64 {
+	t.Helper()
+	d := plugin.ItemData{ItemSummary: plugin.ItemSummary{
+		Source: src, ID: "42", Kind: "show", Titles: []plugin.Title{{Lang: "en", Text: "T"}},
+	}, BannerURL: "https://img.example/b.jpg", Trailer: &plugin.Trailer{URL: "https://video.example/t", ThumbnailURL: "https://img.example/t.jpg"}}
+	id, err := e.lib.SaveItem(context.Background(), "tv", "show", d, library.WithSyncState("pending"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.d.Exec(`UPDATE items SET banner_path = ?, trailer_thumb = ? WHERE id = ?`, banner, thumb, id); err != nil {
+		t.Fatal(err)
+	}
+	return id
+}
+
+func TestSyncItemDownloadsBannerAndThumbnail(t *testing.T) {
+	for _, src := range []string{"tvdata", "manual"} {
+		e := newSyncEnv(t)
+		id := e.saveExtras(t, src, e.srv.URL+"/ok/banner", e.srv.URL+"/ok/thumb")
+		if err := e.run(id); err != nil {
+			t.Fatalf("%s: %v", src, err)
+		}
+		s := e.saved(t, id)
+		if !isLocal(s.BannerPath) || s.Trailer == nil || !isLocal(s.Trailer.ThumbnailURL) || s.SyncState != "done" {
+			t.Fatalf("%s: %+v banner %q trailer %+v", src, s, s.BannerPath, s.Trailer)
+		}
+		if s.Trailer.URL != "https://video.example/t" {
+			t.Fatalf("%s: trailer link changed: %+v", src, s.Trailer)
+		}
+		if files := coverDirFiles(t, e.deps.CoversDir); len(files) != 2 {
+			t.Fatalf("%s: files %v", src, files)
+		}
+	}
+}
+
+func TestSyncItemBannerFailureIsPartial(t *testing.T) {
+	for _, src := range []string{"tvdata", "manual"} {
+		for _, which := range []string{"banner", "thumb"} {
+			e := newSyncEnv(t)
+			banner, thumb := e.srv.URL+"/ok/banner", e.srv.URL+"/ok/thumb"
+			if which == "banner" {
+				banner = e.srv.URL + "/missing"
+			} else {
+				thumb = e.srv.URL + "/missing"
+			}
+			id := e.saveExtras(t, src, banner, thumb)
+			if err := e.run(id); !errors.Is(err, ErrRetryLater) {
+				t.Fatalf("%s/%s: err = %v", src, which, err)
+			}
+			s := e.saved(t, id)
+			if s.SyncState != "partial" {
+				t.Fatalf("%s/%s: state %q", src, which, s.SyncState)
+			}
+			if (which == "banner") != (s.BannerPath == banner) || (which == "thumb") != (s.Trailer.ThumbnailURL == thumb) {
+				t.Fatalf("%s/%s: banner %q thumb %q", src, which, s.BannerPath, s.Trailer.ThumbnailURL)
+			}
+		}
+	}
+}
+
+func TestSyncItemCoverOnlyDownloadsBannerAndThumbnail(t *testing.T) {
+	e := newSyncEnv(t)
+	id := e.saveExtras(t, "tvdata", e.srv.URL+"/ok/banner", e.srv.URL+"/ok/thumb")
+	b, _ := json.Marshal(SyncPayload{ItemID: id, PluginID: "tv", CoverOnly: true})
+	if err := SyncItem(e.deps)(context.Background(), b); err != nil {
+		t.Fatal(err)
+	}
+	s := e.saved(t, id)
+	if !isLocal(s.BannerPath) || !isLocal(s.Trailer.ThumbnailURL) || s.SyncState != "pending" {
+		t.Fatalf("%+v banner %q trailer %+v", s, s.BannerPath, s.Trailer)
+	}
+	// a failing banner keeps the state and asks for a retry
+	e2 := newSyncEnv(t)
+	id2 := e2.saveExtras(t, "tvdata", e2.srv.URL+"/missing", e2.srv.URL+"/ok/thumb")
+	b2, _ := json.Marshal(SyncPayload{ItemID: id2, PluginID: "tv", CoverOnly: true})
+	if err := SyncItem(e2.deps)(context.Background(), b2); !errors.Is(err, ErrRetryLater) {
+		t.Fatalf("err = %v", err)
+	}
+	if s := e2.saved(t, id2); s.SyncState != "pending" || !isLocal(s.Trailer.ThumbnailURL) {
+		t.Fatalf("%+v", s)
+	}
+}
+
+func TestSyncItemKeepsBannerReplacedDuringDownload(t *testing.T) {
+	e := newSyncEnv(t)
+	var id int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if _, err := e.d.Exec(`UPDATE items SET banner_path = 'mine.png' WHERE id = ?`, id); err != nil {
+			t.Error(err)
+		}
+		w.Header().Set("Content-Type", "image/jpeg")
+		w.Write([]byte("img:late"))
+	}))
+	t.Cleanup(srv.Close)
+	e.deps.HTTP = srv.Client()
+	id = e.saveExtras(t, "manual", srv.URL+"/banner", "thumb.png")
+	if err := e.run(id); err != nil {
+		t.Fatal(err)
+	}
+	if s := e.saved(t, id); s.BannerPath != "mine.png" {
+		t.Fatalf("banner = %q", s.BannerPath)
+	}
+	if files := coverDirFiles(t, e.deps.CoversDir); len(files) != 0 {
+		t.Fatalf("stale download kept: %v", files)
+	}
+}
